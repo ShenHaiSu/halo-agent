@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "HaloAgent: Debug (Production Scheme app://local)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "host:build-debug",
+      "program": "${workspaceFolder}/src/Host.Desktop/bin/x64/Debug/net6.0-windows/Host.Desktop.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Host.Desktop",
+      "stopAtEntry": false,
+      "env": {
+        "HALO_ENV": "Production"
+      }
+    },
+    {
+      "name": "HaloAgent: Debug with Vite DevServer (http://localhost:5173)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "host:build-debug",
+      "program": "${workspaceFolder}/src/Host.Desktop/bin/x64/Debug/net6.0-windows/Host.Desktop.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Host.Desktop",
+      "stopAtEntry": false,
+      "env": {
+        "HALO_ENV": "Development",
+        "HALO_DEV_SERVER_URL": "http://localhost:5173"
+      }
+    }
+  ]
+}

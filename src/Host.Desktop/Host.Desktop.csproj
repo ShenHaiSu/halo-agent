@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 铁律：锁死 net6.0-windows，禁止升级 net7.0/net8.0 -->
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- 明确指定平台架构与 RuntimeIdentifier，确保 CefSharp 109 非托管与混合模式运行时 DLL 自动平铺到输出目录 -->
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64;x86</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 铁律：锁死 CefSharp 109.1.110，Chromium 109 为支持 Win7 最终版 -->
+    <PackageReference Include="CefSharp.Common.NETCore" Version="109.1.110" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" Version="109.1.110" />
+    <!-- Win7 DPAPI 加密支持（用于 Stage 02 API Key 加密存储） -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('wwwroot')" />
+  </ItemGroup>
+</Project>
