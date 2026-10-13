@@ -84,3 +84,30 @@ if (Test-Path $IsccPath) {
 | **FINAL-06** | **需求 #5：C盘固定位置存储 + 允许手动修改** | 检查默认 `C:\HaloAgentData` 下的历史与日志，随后在 UI 中手动修改路径至新位置 | 默认固定写入 C 盘，手动修改路径后历史会话与日志平滑迁移并在新路径持续写入 |
 | **FINAL-07** | **需求 #6：提供标准基础 Tools (`read`/`write`/`edit`/`exec`)** | 下达综合编程任务：“阅读现有文件 -> 用 `edit_file` 修改 -> 用 `write_file` 新建脚本 -> 用 `exec_command` 运行验证” | Agent 自主连续调用 `list_dir`、`grep_search`、`read_file`、`edit_file`、`write_file`、`exec_command` 完成闭环，前端正确展示 Diff 与终端输出 |
 | **FINAL-08** | **需求 #7 & #8：多 Provider/Model 配额 + 自定义 Header `${session-hash}`** | 配置多个 Provider 及不同上下文/输出 Token 限制的模型，开启自定义 Header `X-Session-Hash: ${session-hash}` | 上下文裁剪严格遵守模型 `maxContextTokens`/`maxOutputTokens`；请求报文携带固定 16 位会话哈希，多轮对话显著提升上游缓存命中率 |
+
+---
+
+## 四、 Stage 06 终验记录（FINAL-01 ~ FINAL-08）
+
+> 终验日期：2026-10-13（UTC+8）｜ 终验环境：Windows 10/11 开发机（目标兼容 Win7 SP1 / Win10 / Win11）
+> 测试命令：`dotnet test tests/HaloAgent.Tests -c Release`（48/48 通过，含存量 43 + Stage06 新增 5）
+> 前端命令：`pnpm build`（`vue-tsc -b && vite build`，`target: chrome109` 未改动，构建成功）
+
+| 终验编号 | 结论 | 映射实现与证据 |
+| :--- | :--- | :--- |
+| **FINAL-01** | 通过 | `Host.Desktop.csproj` 锁定 `net6.0-windows` + `CefSharp 109.1.110`；`vite.config.ts` 保持 `target/cssTarget: chrome109`；`publish.ps1` 自包含多文件（`PublishSingleFile=false`）；前端图标全部使用 Lucide SVG，无 Emoji。 |
+| **FINAL-02** | 通过（存量） | Stage02 代理中枢未动；`HaloHttpClientFactory` 统一入口，`System`/`Custom`/`None` 三模式 + Provider 继承/覆盖保持 43 存量测试全绿。 |
+| **FINAL-03** | 通过 | `AgentOrchestrator` 经 `LlmGatewayClient.StreamAsync` 按 `Model.Protocol` 自动分发 chat/resp；`TurnCompleted` 回执携带 `protocol` 字段，前端遥测栏展示 `CHAT (/v1/chat/completions)` / `RESP (/v1/responses)`。 |
+| **FINAL-04** | 通过 | `SystemPromptBuilder` 第二章强制 `FIRST CHOICE runner cmd` / `SECOND CHOICE runner python` / `AVOID PowerShell`（见 `Stage06AgentOrchestratorTests.SystemPrompt_Contains_CmdFirst_And_PowerShellBan`）；`ToolCallCard` 终端徽标区分 `CMD.EXE`（深蓝）/`PYTHON`（青绿）。 |
+| **FINAL-05** | 通过（存量） | Stage04 多工作区/多会话 JSONL 持久化未动；`AgentOrchestrator` 每轮经 `WorkspaceSessionService` 读写隔离的 `messages.jsonl`，会话哈希复用 `SessionMetadata.SessionHash`。 |
+| **FINAL-06** | 通过（存量） | 两级引导存储（默认 `C:\\HaloAgentData`）未动；工具落盘经 `ToolContext.DataRoot`，编排器透传 `StoragePathManager.CurrentDataRoot`。 |
+| **FINAL-07** | 通过 | 自愈链路实测：`React_ToolSelfHealing_EditMiss_Then_Read_Then_Edit_Succeeds`（edit 未命中→自愈提示→read→edit 成功，文件落盘一致）；前端 `ToolCallCard` 四类卡片（edit/write Diff 红绿行、exec 黑底终端、read/list/grep 32px 折叠条）。 |
+| **FINAL-08** | 通过 | 每轮构造 `HeaderResolutionContext`（会话固定 `session-hash` + 新 `request-id`），经网关注入自定义 Header；`TokenBudgetService.TruncateToBudget` 按 `MaxContextTokens/MaxOutputTokens` 裁剪；用量回写 `InputTokens/OutputTokens/CachedTokens` 并展示缓存命中率。 |
+
+### 补充验收项（Stage 06 专属）
+
+- **MAX-25 截断**：`React_MaxIterations_Truncates`（`maxIterations: 3` 注入版）验证到达上限暂停并提示“继续”；生产默认 `MaxIterations = 25`。
+- **取消时效**：`React_Cancel_BeforeStart_Under100ms` 验证已取消 Token 下 `<100ms` 返回 `WasCancelled`；运行中取消经 `CancellationToken` 联动 `ExecCommandTool` 的 JobObject 杀子进程，前端 `停止生成 (Esc)` 经 `CancelAgentTurn` 触发。
+- **无工具直答**：`React_NoTools_DirectAnswer_Completes` 验证单轮文本回复即 `TurnCompleted`，用量（In/Cache）正确持久化。
+- **安装包编译**：`ISCC.exe build/installer.iss` 在 win-x64 / win-x86 双架构下均 `Successful compile`（桩目录验证）；含 `MinVersion=6.1sp1`、`AddDllDirectory`（KB2533623）预检阻断、`VC_redist` 静默兜底（随包附带时）、桌面+开始菜单快捷方式及一键写入 `disable-gpu.flag` 的兼容渲染快捷方式。
+- **回退确认**：Stage01~05 测试 43 项全部通过，无任何回退修改（仅新增文件 + `HostBridgeFacade` 新增 `StartAgentTurn/CancelAgentTurn` 方法与可选构造参数）。
