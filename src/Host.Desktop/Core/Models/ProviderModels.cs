@@ -210,6 +210,24 @@ public sealed class ProviderConfig
             Models = Models.Select(m => m.Clone()).ToList()
         };
     }
+
+    /// <summary>
+    /// 获取解密后的明文 API Key（优先读取内存中的 ApiKey，若为空则通过 DPAPI 解密 ApiKeyEncrypted）
+    /// </summary>
+    public string GetEffectiveApiKey()
+    {
+        if (!string.IsNullOrWhiteSpace(ApiKey))
+        {
+            return ApiKey;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ApiKeyEncrypted))
+        {
+            return Infrastructure.Storage.SecretProtector.Unprotect(ApiKeyEncrypted);
+        }
+
+        return string.Empty;
+    }
 }
 
 /// <summary>
