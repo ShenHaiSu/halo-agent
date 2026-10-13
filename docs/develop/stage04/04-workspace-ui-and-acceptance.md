@@ -96,3 +96,29 @@
 | **S04-AC02** | **多会话 JSONL 持久化与恢复** | 在多个会话中发送消息后完全关闭程序，重新启动 | 1. 上次激活的工作区与会话自动恢复<br>2. 所有会话的历史消息、Token 统计、以及固定 `SessionHash` 与关闭前 100% 一致 |
 | **S04-AC03** | **上下文预算与工具链成对裁剪** | 将某模型的 `MaxContextTokens` 临时调小为 `4000`、`MaxOutputTokens` 设为 `1000`，连续进行多轮包含 Tool Call 的对话使其超过 `3000` Tokens | 1. 顶部水位仪准确反映占用比例；`TokenBudgetService` 自动按原子组裁剪早期历史，不触发上游 `400 context_length_exceeded`<br>2. 裁剪后的消息序列中绝不出现孤立的 `tool` 消息或缺失结果的 `tool_calls` |
 | **S04-AC04** | **存储路径动态迁移联动验证** | 在存在多个工作区与多条会话历史后，通过设置中心将 C 盘存储路径修改并迁移至新目录 | 所有工作区索引、所有会话的 `meta.json` 与 `messages.jsonl` 在新目录下完整可读，历史记录零丢失 |
+
+---
+
+## 四、 Stage 04 自动化验收测试与签收记录
+
+自动化验收测试套件位于 `tests/HaloAgent.Tests/Stage04WorkspaceAndBudgetTests.cs`，并通过前端构建验证：
+
+1. **测试套件执行结果 (`dotnet test`)**：
+   - `S04-AC01: 多工作路径隔离、规范化与会话自动初始化` -> **PASS**
+   - `S04-AC02: 会话元数据持久化、并发 Append 与 SessionHash 确定性校验` -> **PASS**
+   - `S04-AC03: 离线 Token 估算器与成对原子截断（Pair-Preserving Truncation）` -> **PASS**
+   - `S04-AC04: 跨路径数据迁移与会话完整性校验` -> **PASS**
+   - 整体测试结果：**28 / 28 Tests Passed (100% Pass Rate)**。
+
+2. **前端构建与类型校验 (`pnpm --prefix src/Web.Client build`)**：
+   - TypeScript 类型推导 (`vue-tsc -b`)：**0 错误**
+   - Vite 生产构建 (`chrome109` 兼容)：**0 错误，打包成功** (`../Host.Desktop/wwwroot/`)。
+
+3. **核心组件落地状态**：
+   - 后端模型与序列化：`WorkspaceInfo`, `SessionMetadata`, `UnifiedChatMessage`, `ContextBudgetStatusDto` (`WorkspaceModels.cs`)
+   - 存储层：`SessionRepository.cs`（细粒度会话锁、流式 `.jsonl` 追加与读取）
+   - 领域服务：`WorkspaceSessionService.cs`（工作路径标准化、确定性 SessionHash 计算、会话自动命名）
+   - 预算算法：`TokenBudgetService.cs`（离线启发式估算、原子轮次分组、成对工具调用裁剪）
+   - IPC Bridge：`HostBridgeFacade.cs`（工作区/会话/预算相关完整接口与 Native 目录选择对话框）
+   - 前端集成：`workspaceStore.ts`, `WorkspaceSessionSidebar.vue`, `WorkbenchTopBar.vue`, `App.vue`。
+
