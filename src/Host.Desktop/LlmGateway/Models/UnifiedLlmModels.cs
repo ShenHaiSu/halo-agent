@@ -21,43 +21,7 @@ public sealed class UnifiedLlmRequest
     public IReadOnlyList<UnifiedToolDefinition> Tools { get; init; } = Array.Empty<UnifiedToolDefinition>();
 }
 
-/// <summary>
-/// 统一消息体（支持 user / assistant / tool / system）
-/// </summary>
-public sealed class UnifiedChatMessage
-{
-    public string Role { get; init; } = "user"; // "system" | "user" | "assistant" | "tool"
-    public string? Content { get; init; }
-    public string? ReasoningContent { get; init; }
-    public IReadOnlyList<UnifiedToolCall>? ToolCalls { get; init; }
-    public string? ToolCallId { get; init; } // 仅当 Role == "tool" 时有效，记录所响应的 call_id
 
-    public static UnifiedChatMessage System(string content) =>
-        new() { Role = "system", Content = content };
-
-    public static UnifiedChatMessage User(string content) =>
-        new() { Role = "user", Content = content };
-
-    public static UnifiedChatMessage Assistant(
-        string? content,
-        IReadOnlyList<UnifiedToolCall>? toolCalls = null,
-        string? reasoningContent = null) =>
-        new()
-        {
-            Role = "assistant",
-            Content = content,
-            ToolCalls = toolCalls,
-            ReasoningContent = reasoningContent
-        };
-
-    public static UnifiedChatMessage Tool(string toolCallId, string output) =>
-        new()
-        {
-            Role = "tool",
-            ToolCallId = toolCallId,
-            Content = output
-        };
-}
 
 /// <summary>
 /// 统一工具描述符

@@ -1,0 +1,361 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Infrastructure.Network;
+using Host.Desktop.Infrastructure.Storage;
+
+namespace Host.Desktop.Services;
+
+public interface IWorkspaceSessionService
+{
+    Task<List<WorkspaceInfo>> GetAllWorkspacesAsync(CancellationToken ct = default);
+    Task<WorkspaceInfo?> GetWorkspaceAsync(string workspaceId, CancellationToken ct = default);
+    Task<WorkspaceInfo> AddOrUpdateWorkspaceAsync(string rootPath, string? customName = null, CancellationToken ct = default);
+    Task<bool> RemoveWorkspaceAsync(string workspaceId, bool deletePhysicalSessionFolder = true, CancellationToken ct = default);
+    Task<bool> SetWorkspacePreferenceAsync(string workspaceId, string? providerId, string? modelId, CancellationToken ct = default);
+    Task<bool> TouchWorkspaceAsync(string workspaceId, CancellationToken ct = default);
+
+    Task<List<SessionMetadata>> GetSessionsByWorkspaceAsync(string workspaceId, CancellationToken ct = default);
+    Task<SessionMetadata> CreateSessionAsync(string workspaceId, string? title = null, string? providerId = null, string? modelId = null, CancellationToken ct = default);
+    Task<SessionMetadata?> GetSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+    Task<List<UnifiedChatMessage>> GetSessionMessagesAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+    Task<bool> AppendSessionMessageAsync(string workspaceId, string sessionId, UnifiedChatMessage message, CancellationToken ct = default);
+    Task<bool> UpdateSessionTitleAsync(string workspaceId, string sessionId, string newTitle, CancellationToken ct = default);
+    Task<bool> SetSessionPinnedAsync(string workspaceId, string sessionId, bool isPinned, CancellationToken ct = default);
+    Task<bool> DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+    Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// 工作区与会话领域服务实现
+/// </summary>
+public sealed class WorkspaceSessionService : IWorkspaceSessionService
+{
+    private readonly ISessionRepository _sessionRepository;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionAppendLocks = new();
+
+    public WorkspaceSessionService(ISessionRepository sessionRepository)
+    {
+        _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+    }
+
+    public static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        string fullPath = Path.GetFullPath(path.Trim());
+        string normalized = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrEmpty(normalized) || normalized.EndsWith(':'))
+        {
+            normalized += Path.DirectorySeparatorChar;
+        }
+        return normalized;
+    }
+
+    public async Task<List<WorkspaceInfo>> GetAllWorkspacesAsync(CancellationToken ct = default)
+    {
+        var list = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+        return list.OrderByDescending(w => w.IsPinned)
+                   .ThenByDescending(w => w.LastOpenedAtUtc)
+                   .ToList();
+    }
+
+    public async Task<WorkspaceInfo?> GetWorkspaceAsync(string workspaceId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId)) return null;
+        var list = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+        return list.FirstOrDefault(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<WorkspaceInfo> AddOrUpdateWorkspaceAsync(string rootPath, string? customName = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            throw new ArgumentException("Workspace root path cannot be empty.", nameof(rootPath));
+        }
+
+        string normalizedPath = NormalizePath(rootPath);
+        var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+
+        // 按不区分大小写检查是否已存在
+        var existing = workspaces.FirstOrDefault(w =>
+            string.Equals(NormalizePath(w.RootPath), normalizedPath, StringComparison.OrdinalIgnoreCase));
+
+        if (existing != null)
+        {
+            existing.LastOpenedAtUtc = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(customName))
+            {
+                existing.Name = customName.Trim();
+            }
+            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+            return existing;
+        }
+
+        // 新建工作区
+        string name = !string.IsNullOrWhiteSpace(customName)
+            ? customName.Trim()
+            : Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = normalizedPath;
+        }
+
+        string workspaceHash = HeaderVariableResolver.ComputeDeterministicHash16(normalizedPath);
+
+        var newWorkspace = new WorkspaceInfo
+        {
+            Name = name,
+            RootPath = normalizedPath,
+            WorkspaceHash = workspaceHash,
+            CreatedAtUtc = DateTime.UtcNow,
+            LastOpenedAtUtc = DateTime.UtcNow
+        };
+
+        workspaces.Add(newWorkspace);
+        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+
+        // 若该工作区下尚无会话，自动初始化首个会话
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(newWorkspace.Id, ct).ConfigureAwait(false);
+        if (sessions.Count == 0)
+        {
+            await CreateSessionAsync(newWorkspace.Id, "新建会话", ct: ct).ConfigureAwait(false);
+        }
+
+        return newWorkspace;
+    }
+
+    public async Task<bool> RemoveWorkspaceAsync(string workspaceId, bool deletePhysicalSessionFolder = true, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId)) return false;
+        var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+        int removed = workspaces.RemoveAll(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+            if (deletePhysicalSessionFolder)
+            {
+                await _sessionRepository.DeleteWorkspaceDirectoryAsync(workspaceId, ct).ConfigureAwait(false);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    public async Task<bool> SetWorkspacePreferenceAsync(string workspaceId, string? providerId, string? modelId, CancellationToken ct = default)
+    {
+        var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+        var ws = workspaces.FirstOrDefault(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
+        if (ws == null) return false;
+
+        ws.DefaultProviderId = providerId;
+        ws.DefaultModelId = modelId;
+        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> TouchWorkspaceAsync(string workspaceId, CancellationToken ct = default)
+    {
+        var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+        var ws = workspaces.FirstOrDefault(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
+        if (ws == null) return false;
+
+        ws.LastOpenedAtUtc = DateTime.UtcNow;
+        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<List<SessionMetadata>> GetSessionsByWorkspaceAsync(string workspaceId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId)) return new List<SessionMetadata>();
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        return sessions.OrderByDescending(s => s.IsPinned)
+                       .ThenByDescending(s => s.UpdatedAtUtc)
+                       .ToList();
+    }
+
+    public async Task<SessionMetadata> CreateSessionAsync(
+        string workspaceId,
+        string? title = null,
+        string? providerId = null,
+        string? modelId = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+        {
+            throw new ArgumentException("Workspace ID cannot be empty.", nameof(workspaceId));
+        }
+
+        string sessionId = $"sess_{DateTime.UtcNow:yyyyMMdd}_{Guid.NewGuid():N}"[..22];
+        string sessionHash = HeaderVariableResolver.ComputeDeterministicHash16($"{workspaceId}:{sessionId}");
+
+        var meta = new SessionMetadata
+        {
+            Id = sessionId,
+            WorkspaceId = workspaceId,
+            SessionHash = sessionHash,
+            Title = string.IsNullOrWhiteSpace(title) ? "新建会话" : title.Trim(),
+            ProviderId = providerId,
+            ModelId = modelId,
+            MessageCount = 0,
+            TotalInputTokens = 0,
+            TotalOutputTokens = 0,
+            TotalCachedTokens = 0,
+            IsPinned = false,
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        // 1. 保存 meta.json
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        // 2. 更新 sessions-index.json
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        sessions.Insert(0, meta);
+        await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+
+        return meta;
+    }
+
+    public Task<SessionMetadata?> GetSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        return _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct);
+    }
+
+    public Task<List<UnifiedChatMessage>> GetSessionMessagesAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        return _sessionRepository.GetMessagesAsync(workspaceId, sessionId, ct);
+    }
+
+    public async Task<bool> AppendSessionMessageAsync(
+        string workspaceId,
+        string sessionId,
+        UnifiedChatMessage message,
+        CancellationToken ct = default)
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+
+        var appendLock = _sessionAppendLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
+        await appendLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // 1. 追加写至 messages.jsonl
+            await _sessionRepository.AppendMessageAsync(workspaceId, sessionId, message, ct).ConfigureAwait(false);
+
+            // 2. 更新会话元数据
+            var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+            if (meta == null)
+            {
+                meta = new SessionMetadata
+                {
+                    Id = sessionId,
+                    WorkspaceId = workspaceId,
+                    SessionHash = HeaderVariableResolver.ComputeDeterministicHash16($"{workspaceId}:{sessionId}"),
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+            }
+
+            meta.MessageCount++;
+            if (message.InputTokens.HasValue) meta.TotalInputTokens += message.InputTokens.Value;
+            if (message.OutputTokens.HasValue) meta.TotalOutputTokens += message.OutputTokens.Value;
+            if (message.CachedTokens.HasValue) meta.TotalCachedTokens += message.CachedTokens.Value;
+            meta.UpdatedAtUtc = DateTime.UtcNow;
+
+            // 若标题依然为默认值，自动提取首条 user 消息作为标题（最多 24 个字符）
+            if (string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(meta.Title) || meta.Title == "新建会话" || meta.Title == "初始会话"))
+            {
+                if (!string.IsNullOrWhiteSpace(message.Content))
+                {
+                    var trimmed = message.Content.Trim();
+                    var firstLine = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? trimmed;
+                    var candidate = firstLine.Trim();
+                    if (candidate.Length > 24)
+                    {
+                        candidate = candidate[..24] + "...";
+                    }
+                    meta.Title = candidate;
+                }
+            }
+
+            await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+            // 3. 同步更新 sessions-index.json
+            var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+            int idx = sessions.FindIndex(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+            {
+                sessions[idx] = meta;
+            }
+            else
+            {
+                sessions.Insert(0, meta);
+            }
+            await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+
+            return true;
+        }
+        finally
+        {
+            appendLock.Release();
+        }
+    }
+
+    public async Task<bool> UpdateSessionTitleAsync(string workspaceId, string sessionId, string newTitle, CancellationToken ct = default)
+    {
+        var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        if (meta == null) return false;
+
+        meta.Title = string.IsNullOrWhiteSpace(newTitle) ? "未命名会话" : newTitle.Trim();
+        meta.UpdatedAtUtc = DateTime.UtcNow;
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        int idx = sessions.FindIndex(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            sessions[idx].Title = meta.Title;
+            sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+            await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    public async Task<bool> SetSessionPinnedAsync(string workspaceId, string sessionId, bool isPinned, CancellationToken ct = default)
+    {
+        var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        if (meta == null) return false;
+
+        meta.IsPinned = isPinned;
+        meta.UpdatedAtUtc = DateTime.UtcNow;
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        int idx = sessions.FindIndex(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            sessions[idx].IsPinned = isPinned;
+            sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+            await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    public Task<bool> DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        return _sessionRepository.DeleteSessionAsync(workspaceId, sessionId, ct);
+    }
+
+    public Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        return _sessionRepository.ExportSessionMarkdownAsync(workspaceId, sessionId, ct);
+    }
+}
