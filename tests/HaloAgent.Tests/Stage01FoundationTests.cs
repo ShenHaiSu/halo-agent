@@ -6,6 +6,8 @@ using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Storage;
 using Xunit;
 
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace HaloAgent.Tests;
 
 public sealed class Stage01FoundationTests : IDisposable
