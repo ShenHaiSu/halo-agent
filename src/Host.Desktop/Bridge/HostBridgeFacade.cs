@@ -12,6 +12,7 @@ using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.LlmGateway;
 using Host.Desktop.LlmGateway.Models;
 using Host.Desktop.Services;
+using Host.Desktop.Tools;
 
 namespace Host.Desktop.Bridge;
 
@@ -33,6 +34,7 @@ public sealed class HostBridgeFacade
     private readonly IWorkspaceSessionService _workspaceSessionService;
     private readonly ITokenBudgetService _tokenBudgetService;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
+    private ToolRegistry? _toolRegistry;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
@@ -906,6 +908,75 @@ public sealed class HostBridgeFacade
             return BridgeResponse<ContextBudgetStatusDto>.Fail(ex.Message, "BUDGET_ERROR");
         }
     }
+    #region Stage 05: Standard Toolchain Debug Methods
+
+    public ToolRegistry ToolRegistry => _toolRegistry ??= new ToolRegistry();
+
+    /// <summary>
+    /// Stage 05 前端调试：导出工具定义 Schema（protocol: chat | resp）。
+    /// </summary>
+    public Task<BridgeResponse<string>> GetToolDefinitions(string protocol = "chat")
+    {
+        try
+        {
+            string normalized = (protocol ?? "chat").Trim().ToLowerInvariant();
+            string json = normalized == "resp"
+                ? ToolRegistry.GetResponsesToolsJson()
+                : ToolRegistry.GetChatToolsJson();
+            return Task.FromResult(BridgeResponse<string>.Success(json));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("GetToolDefinitions failed", ex);
+            return Task.FromResult(BridgeResponse<string>.Fail("TOOLS_SCHEMA_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Stage 05 前端调试：执行单个工具（复用 ToolRegistry，不经过 LLM）。
+    /// </summary>
+    public async Task<BridgeResponse<ToolResult>> ExecuteTool(
+        string workspaceId,
+        string sessionId,
+        string toolName,
+        string argumentsJson,
+        string? toolCallId = null)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                return BridgeResponse<ToolResult>.Fail("INVALID_TOOL", "工具名不能为空");
+            }
+
+            var ws = await _workspaceSessionService.GetWorkspaceAsync(workspaceId).ConfigureAwait(false);
+            if (ws == null)
+            {
+                return BridgeResponse<ToolResult>.Fail("WORKSPACE_NOT_FOUND", $"工作区不存在：'{workspaceId}'");
+            }
+
+            var context = new ToolContext
+            {
+                WorkspaceRoot = ws.RootPath,
+                WorkspaceId = workspaceId,
+                SessionId = sessionId ?? string.Empty,
+                DataRoot = _storageManager.CurrentDataRoot,
+            };
+            var call = new ToolCallDto(
+                string.IsNullOrWhiteSpace(toolCallId) ? $"call_{Guid.NewGuid():N}"[..12] : toolCallId.Trim(),
+                toolName.Trim(),
+                argumentsJson);
+            ToolResult result = await ToolRegistry.DispatchAsync(call, context).ConfigureAwait(false);
+            return BridgeResponse<ToolResult>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"ExecuteTool failed for '{toolName}'", ex);
+            return BridgeResponse<ToolResult>.Fail("TOOL_EXEC_ERROR", ex.Message);
+        }
+    }
+
+    #endregion
 
     #endregion
 }
