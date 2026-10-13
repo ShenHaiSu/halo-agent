@@ -356,6 +356,16 @@ export interface HostBridgeApi {
   startSessionRun: (request: UnifiedLlmRequestDto | string) => Promise<BridgeResponse<string>>;
   cancelSessionRun: (sessionId: string) => Promise<BridgeResponse<boolean>>;
 
+  // Stage 06: Agent ReAct 编排
+  startAgentTurn: (
+    workspaceId: string,
+    sessionId: string,
+    userText: string,
+    providerId?: string,
+    modelId?: string
+  ) => Promise<BridgeResponse<string>>;
+  cancelAgentTurn: (sessionId: string) => Promise<BridgeResponse<boolean>>;
+
   // Stage 04: Workspace, Session & Budget
   getWorkspaces: () => Promise<BridgeResponse<WorkspaceInfo[]>>;
   addWorkspace: (rootPath: string, name?: string) => Promise<BridgeResponse<WorkspaceInfo>>;
@@ -989,6 +999,56 @@ function createBrowserMockBridge(): HostBridgeApi {
         data: true,
       };
     },
+    async startAgentTurn(workspaceId: string, sessionId: string, userText: string) {
+      void workspaceId;
+      void userText;
+      // 模拟一轮 ReAct：思考增量 -> 文本增量 -> 工具卡片事件 -> 完成
+      setTimeout(() => {
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'IterationStarted',
+          payload: { iteration: 1, maxIterations: 25 },
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'ReasoningDelta',
+          textDelta: '正在分析任务，准备调用工具...',
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'TextDelta',
+          textDelta: '收到任务（Mock 演示模式），正在编排工具调用。',
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'ToolCallStarted',
+          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir' },
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'ToolExecutionCompleted',
+          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir', success: true, exitCode: 0, durationMs: 8 },
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'TurnCompleted',
+          payload: { iterations: 1, toolExecutions: 1, protocol: 'chat', inputTokens: 120, outputTokens: 25, cachedTokens: 80 },
+        });
+      }, 60);
+
+      return {
+        ok: true,
+        message: 'Agent 推理已启动 (Mock)',
+        data: sessionId,
+      };
+    },
+    async cancelAgentTurn(_sessionId: string) {
+      return {
+        ok: true,
+        message: '已发送取消指令 (Mock)',
+        data: true,
+      };
+    },
 
     // Stage 04 Mock Implementations
     async getWorkspaces() {
@@ -1290,6 +1350,14 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     },
     async cancelSessionRun(sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelSessionRun(sessionId));
+    },
+    async startAgentTurn(workspaceId: string, sessionId: string, userText: string, providerId?: string, modelId?: string) {
+      return normalizeBridgePayload<BridgeResponse<string>>(
+        await rawBridge.startAgentTurn(workspaceId, sessionId, userText, providerId ?? '', modelId ?? '')
+      );
+    },
+    async cancelAgentTurn(sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelAgentTurn(sessionId));
     },
 
     // Stage 04 Native Wrappers
