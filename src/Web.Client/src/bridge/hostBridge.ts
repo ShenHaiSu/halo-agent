@@ -256,6 +256,68 @@ export interface HostEventEnvelope<T = unknown> {
   timestamp: number;
 }
 
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  rootPath: string;
+  workspaceHash: string;
+  defaultProviderId?: string | null;
+  defaultModelId?: string | null;
+  isPinned: boolean;
+  createdAtUtc: string;
+  lastOpenedAtUtc: string;
+  directoryExists: boolean;
+}
+
+export interface SessionMetadata {
+  id: string;
+  workspaceId: string;
+  sessionHash: string;
+  title: string;
+  providerId?: string | null;
+  modelId?: string | null;
+  messageCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedTokens: number;
+  isPinned: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface UnifiedChatMessage {
+  id: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string | null;
+  reasoningContent?: string | null;
+  toolCalls?: Array<{
+    id: string;
+    type: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }> | null;
+  toolCallId?: string | null;
+  name?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cachedTokens?: number | null;
+  createdAtUtc: string;
+}
+
+export interface ContextBudgetStatusDto {
+  totalContextTokens: number;
+  maxOutputTokens: number;
+  safetyBuffer: number;
+  usedInputTokens: number;
+  availableInputTokens: number;
+  usagePercentage: number;
+  isNearLimit: boolean;
+  sessionHash: string;
+  protocol: string;
+}
+
 export interface HostBridgeApi {
   // Stage 01
   getSystemInfo: () => Promise<BridgeResponse<SystemRuntimeInfo>>;
@@ -293,6 +355,21 @@ export interface HostBridgeApi {
   // Stage 03
   startSessionRun: (request: UnifiedLlmRequestDto | string) => Promise<BridgeResponse<string>>;
   cancelSessionRun: (sessionId: string) => Promise<BridgeResponse<boolean>>;
+
+  // Stage 04: Workspace, Session & Budget
+  getWorkspaces: () => Promise<BridgeResponse<WorkspaceInfo[]>>;
+  addWorkspace: (rootPath: string, name?: string) => Promise<BridgeResponse<WorkspaceInfo>>;
+  removeWorkspace: (workspaceId: string) => Promise<BridgeResponse<boolean>>;
+  browseWorkspaceFolder: (initialPath?: string) => Promise<BridgeResponse<string | null>>;
+  getSessions: (workspaceId: string) => Promise<BridgeResponse<SessionMetadata[]>>;
+  createSession: (workspaceId: string, title?: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<SessionMetadata>>;
+  getSessionMessages: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
+  appendSessionMessage: (workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) => Promise<BridgeResponse<boolean>>;
+  updateSessionTitle: (workspaceId: string, sessionId: string, title: string) => Promise<BridgeResponse<boolean>>;
+  setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
+  deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
+  exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
+  getContextBudget: (providerId: string, modelId: string, workspaceId: string, sessionId: string) => Promise<BridgeResponse<ContextBudgetStatusDto>>;
 }
 
 declare global {
@@ -438,6 +515,45 @@ function normalizeVersionedBaseUrlClient(baseUrl: string): string {
 function createBrowserMockBridge(): HostBridgeApi {
   let mockDataRoot = 'C:\\HaloAgentData';
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+  let mockWorkspaces: WorkspaceInfo[] = [
+    {
+      id: 'ws_demo_default',
+      name: 'halo-agent',
+      rootPath: 'F:\\MyProgram\\CSharp\\halo-agent',
+      workspaceHash: 'a1b2c3d4e5f60718',
+      defaultProviderId: 'provider-openai',
+      defaultModelId: 'gpt-4o',
+      isPinned: false,
+      createdAtUtc: new Date().toISOString(),
+      lastOpenedAtUtc: new Date().toISOString(),
+      directoryExists: true,
+    },
+  ];
+
+  let mockSessions: Record<string, SessionMetadata[]> = {
+    ws_demo_default: [
+      {
+        id: `sess_${today}_init01`,
+        workspaceId: 'ws_demo_default',
+        sessionHash: 'f0e1d2c3b4a59687',
+        title: '新建会话',
+        providerId: 'provider-openai',
+        modelId: 'gpt-4o',
+        messageCount: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCachedTokens: 0,
+        isPinned: false,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+      },
+    ],
+  };
+
+  let mockMessages: Record<string, UnifiedChatMessage[]> = {
+    [`sess_${today}_init01`]: [],
+  };
 
   let mockNetworkSettings: GlobalNetworkSettings = {
     mode: 'System',
@@ -873,6 +989,172 @@ function createBrowserMockBridge(): HostBridgeApi {
         data: true,
       };
     },
+
+    // Stage 04 Mock Implementations
+    async getWorkspaces() {
+      return {
+        ok: true,
+        data: [...mockWorkspaces],
+      };
+    },
+    async addWorkspace(rootPath: string, name?: string) {
+      const cleanPath = (rootPath || '').trim();
+      const existing = mockWorkspaces.find((w) => w.rootPath.toLowerCase() === cleanPath.toLowerCase());
+      if (existing) {
+        if (name && name.trim()) existing.name = name.trim();
+        return { ok: true, data: existing };
+      }
+      const dirName = cleanPath.split(/[\\/]/).filter(Boolean).pop() || 'Workspace';
+      const ws: WorkspaceInfo = {
+        id: `ws_${Math.random().toString(36).substring(2, 10)}`,
+        name: name && name.trim() ? name.trim() : dirName,
+        rootPath: cleanPath,
+        workspaceHash: 'a1b2c3d4e5f60718',
+        defaultProviderId: mockProvidersDoc.activeProviderId,
+        defaultModelId: mockProvidersDoc.activeModelId,
+        isPinned: false,
+        createdAtUtc: new Date().toISOString(),
+        lastOpenedAtUtc: new Date().toISOString(),
+        directoryExists: true,
+      };
+      mockWorkspaces.push(ws);
+      const defaultSess: SessionMetadata = {
+        id: `sess_${today}_${Math.random().toString(36).substring(2, 8)}`,
+        workspaceId: ws.id,
+        sessionHash: 'f0e1d2c3b4a59687',
+        title: '新建会话',
+        providerId: ws.defaultProviderId,
+        modelId: ws.defaultModelId,
+        messageCount: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCachedTokens: 0,
+        isPinned: false,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+      };
+      mockSessions[ws.id] = [defaultSess];
+      mockMessages[defaultSess.id] = [];
+      return { ok: true, data: ws };
+    },
+    async removeWorkspace(workspaceId: string) {
+      mockWorkspaces = mockWorkspaces.filter((w) => w.id !== workspaceId);
+      delete mockSessions[workspaceId];
+      return { ok: true, data: true };
+    },
+    async browseWorkspaceFolder(_initialPath?: string) {
+      return {
+        ok: true,
+        data: 'F:\\MyProgram\\CSharp\\halo-agent',
+      };
+    },
+    async getSessions(workspaceId: string) {
+      const list = mockSessions[workspaceId] || [];
+      return {
+        ok: true,
+        data: [...list],
+      };
+    },
+    async createSession(workspaceId: string, title?: string, providerId?: string, modelId?: string) {
+      const sess: SessionMetadata = {
+        id: `sess_${today}_${Math.random().toString(36).substring(2, 8)}`,
+        workspaceId,
+        sessionHash: Math.random().toString(16).substring(2, 18).padEnd(16, '0'),
+        title: title && title.trim() ? title.trim() : '新建会话',
+        providerId: providerId || mockProvidersDoc.activeProviderId,
+        modelId: modelId || mockProvidersDoc.activeModelId,
+        messageCount: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCachedTokens: 0,
+        isPinned: false,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+      };
+      if (!mockSessions[workspaceId]) {
+        mockSessions[workspaceId] = [];
+      }
+      mockSessions[workspaceId].unshift(sess);
+      mockMessages[sess.id] = [];
+      return { ok: true, data: sess };
+    },
+    async getSessionMessages(_workspaceId: string, sessionId: string) {
+      const msgs = mockMessages[sessionId] || [];
+      return {
+        ok: true,
+        data: [...msgs],
+      };
+    },
+    async appendSessionMessage(workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) {
+      const msg: UnifiedChatMessage = typeof message === 'string' ? JSON.parse(message) : message;
+      if (!mockMessages[sessionId]) {
+        mockMessages[sessionId] = [];
+      }
+      mockMessages[sessionId].push(msg);
+      const list = mockSessions[workspaceId] || [];
+      const sess = list.find((s) => s.id === sessionId);
+      if (sess) {
+        sess.messageCount = mockMessages[sessionId].length;
+        sess.updatedAtUtc = new Date().toISOString();
+        if (msg.role === 'user' && sess.title === '新建会话' && msg.content) {
+          sess.title = msg.content.trim().slice(0, 24);
+        }
+      }
+      return { ok: true, data: true };
+    },
+    async updateSessionTitle(workspaceId: string, sessionId: string, title: string) {
+      const list = mockSessions[workspaceId] || [];
+      const sess = list.find((s) => s.id === sessionId);
+      if (sess) {
+        sess.title = title.trim();
+        sess.updatedAtUtc = new Date().toISOString();
+        return { ok: true, data: true };
+      }
+      return { ok: false, message: '会话不存在', data: false };
+    },
+    async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
+      const list = mockSessions[workspaceId] || [];
+      const sess = list.find((s) => s.id === sessionId);
+      if (sess) {
+        sess.isPinned = isPinned;
+        sess.updatedAtUtc = new Date().toISOString();
+        return { ok: true, data: true };
+      }
+      return { ok: false, message: '会话不存在', data: false };
+    },
+    async deleteSession(workspaceId: string, sessionId: string) {
+      if (mockSessions[workspaceId]) {
+        mockSessions[workspaceId] = mockSessions[workspaceId].filter((s) => s.id !== sessionId);
+      }
+      delete mockMessages[sessionId];
+      return { ok: true, data: true };
+    },
+    async exportSessionMarkdown(_workspaceId: string, sessionId: string) {
+      const msgs = mockMessages[sessionId] || [];
+      let md = `# 会话记录 (${sessionId})\n\n`;
+      for (const m of msgs) {
+        md += `### ${m.role}\n${m.content || ''}\n\n`;
+      }
+      return { ok: true, data: md };
+    },
+    async getContextBudget(_providerId: string, _modelId: string, _workspaceId: string, sessionId: string) {
+      const msgs = mockMessages[sessionId] || [];
+      const used = msgs.reduce((acc, m) => acc + (m.content?.length || 0) * 0.5, 120);
+      return {
+        ok: true,
+        data: {
+          totalContextTokens: 128000,
+          maxOutputTokens: 4096,
+          safetyBuffer: 1024,
+          usedInputTokens: Math.round(used),
+          availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - Math.round(used)),
+          usagePercentage: Math.round(((Math.round(used) + 4096 + 1024) / 128000) * 100),
+          isNearLimit: false,
+          sessionHash: 'f0e1d2c3b4a59687',
+          protocol: 'chat',
+        },
+      };
+    },
   };
 }
 
@@ -1008,6 +1290,64 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     },
     async cancelSessionRun(sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelSessionRun(sessionId));
+    },
+
+    // Stage 04 Native Wrappers
+    async getWorkspaces() {
+      return normalizeBridgePayload<BridgeResponse<WorkspaceInfo[]>>(await rawBridge.getWorkspaces());
+    },
+    async addWorkspace(rootPath: string, name?: string) {
+      return normalizeBridgePayload<BridgeResponse<WorkspaceInfo>>(await rawBridge.addWorkspace(rootPath, name ?? ''));
+    },
+    async removeWorkspace(workspaceId: string) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.removeWorkspace(workspaceId));
+    },
+    async browseWorkspaceFolder(initialPath?: string) {
+      return normalizeBridgePayload<BridgeResponse<string | null>>(await rawBridge.browseWorkspaceFolder(initialPath ?? ''));
+    },
+    async getSessions(workspaceId: string) {
+      return normalizeBridgePayload<BridgeResponse<SessionMetadata[]>>(await rawBridge.getSessions(workspaceId));
+    },
+    async createSession(workspaceId: string, title?: string, providerId?: string, modelId?: string) {
+      return normalizeBridgePayload<BridgeResponse<SessionMetadata>>(
+        await rawBridge.createSession(workspaceId, title ?? '', providerId ?? '', modelId ?? '')
+      );
+    },
+    async getSessionMessages(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<UnifiedChatMessage[]>>(
+        await rawBridge.getSessionMessages(workspaceId, sessionId)
+      );
+    },
+    async appendSessionMessage(workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) {
+      const payload = typeof message === 'string' ? message : JSON.stringify(message);
+      return normalizeBridgePayload<BridgeResponse<boolean>>(
+        await rawBridge.appendSessionMessage(workspaceId, sessionId, payload)
+      );
+    },
+    async updateSessionTitle(workspaceId: string, sessionId: string, title: string) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(
+        await rawBridge.updateSessionTitle(workspaceId, sessionId, title)
+      );
+    },
+    async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(
+        await rawBridge.setSessionPinned(workspaceId, sessionId, isPinned)
+      );
+    },
+    async deleteSession(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(
+        await rawBridge.deleteSession(workspaceId, sessionId)
+      );
+    },
+    async exportSessionMarkdown(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<string>>(
+        await rawBridge.exportSessionMarkdown(workspaceId, sessionId)
+      );
+    },
+    async getContextBudget(providerId: string, modelId: string, workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<ContextBudgetStatusDto>>(
+        await rawBridge.getContextBudget(providerId, modelId, workspaceId, sessionId)
+      );
     },
   };
 }
