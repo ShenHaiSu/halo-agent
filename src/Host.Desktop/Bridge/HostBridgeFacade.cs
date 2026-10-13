@@ -35,6 +35,7 @@ public sealed class HostBridgeFacade
     private readonly ITokenBudgetService _tokenBudgetService;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
     private ToolRegistry? _toolRegistry;
+    private IAgentOrchestrator? _agentOrchestrator;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
@@ -43,6 +44,7 @@ public sealed class HostBridgeFacade
     public ISessionRepository SessionRepository => _sessionRepository;
     public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
     public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
+    public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService);
 
     public HostBridgeFacade(
         Form? mainForm,
@@ -53,7 +55,8 @@ public sealed class HostBridgeFacade
         ILlmGatewayClient? llmGatewayClient = null,
         ISessionRepository? sessionRepository = null,
         IWorkspaceSessionService? workspaceSessionService = null,
-        ITokenBudgetService? tokenBudgetService = null)
+        ITokenBudgetService? tokenBudgetService = null,
+        IAgentOrchestrator? agentOrchestrator = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
@@ -64,6 +67,7 @@ public sealed class HostBridgeFacade
         _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
         _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
         _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
+        _agentOrchestrator = agentOrchestrator;
     }
 
     /// <summary>
@@ -702,6 +706,104 @@ public sealed class HostBridgeFacade
             return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
+    /// <summary>
+    /// Stage 06 Agent ReAct 编排入口：后台 Task 运行 AgentOrchestrator，不阻塞 CEF 线程；
+    /// 每 session 一个 CancellationTokenSource（复用 _activeSessionTokens，key 为 sessionId）。
+    /// </summary>
+    public Task<BridgeResponse<string>> StartAgentTurn(
+        string workspaceId,
+        string sessionId,
+        string userText,
+        string? providerId = null,
+        string? modelId = null)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Task.FromResult(BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
+            }
+
+            if (string.IsNullOrWhiteSpace(userText))
+            {
+                return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
+            }
+
+            string turnKey = "agent:" + sessionId.Trim();
+            if (_activeSessionTokens.TryRemove(turnKey, out var oldCts))
+            {
+                try { oldCts.Cancel(); oldCts.Dispose(); } catch { /* ignore */ }
+            }
+
+            var cts = new CancellationTokenSource();
+            _activeSessionTokens[turnKey] = cts;
+            string wsId = workspaceId.Trim();
+            string sessId = sessionId.Trim();
+            string prompt = userText;
+            string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
+            string? modId = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await AgentOrchestrator.RunAgentTurnAsync(wsId, sessId, prompt, provId, modId, cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    JsEventDispatcher.Publish("agent:turn-event", new { sessionId = sessId, kind = "TurnCancelled" });
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Error($"[HostBridge] Agent turn failed for session '{sessId}'", ex);
+                    JsEventDispatcher.Publish("agent:turn-event", new { sessionId = sessId, kind = "TurnError", payload = new { errorMessage = ex.Message } });
+                }
+                finally
+                {
+                    _activeSessionTokens.TryRemove(turnKey, out _);
+                    cts.Dispose();
+                }
+            }, CancellationToken.None);
+
+            return Task.FromResult(BridgeResponse<string>.Success(sessId, "Agent 推理已启动"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("StartAgentTurn failed", ex);
+            return Task.FromResult(BridgeResponse<string>.Fail("AGENT_START_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// 取消正在运行的 Agent ReAct 循环：触发 CancellationTokenSource.Cancel() 并杀子进程（经 ToolContext 传递）。
+    /// </summary>
+    public Task<BridgeResponse<bool>> CancelAgentTurn(string sessionId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+            }
+
+            string turnKey = "agent:" + sessionId.Trim();
+            if (_activeSessionTokens.TryRemove(turnKey, out var cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+                HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {sessionId} 的 Agent 推理");
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送取消指令"));
+            }
+
+            return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在运行的 Agent 任务"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"CancelAgentTurn failed for '{sessionId}'", ex);
+            return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
+        }
+    }
+
 
     #region Stage 04: Workspace, Session & Token Budget Methods
 
