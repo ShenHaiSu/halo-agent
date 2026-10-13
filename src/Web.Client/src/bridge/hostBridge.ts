@@ -164,6 +164,92 @@ export interface ProviderEndpointPreviewDto {
   resolvedHeaders: Record<string, string>;
 }
 
+// =========================================================================
+// Stage 03: LLM 网关统一请求模型与流式事件 DTO
+// =========================================================================
+
+export type UnifiedStreamEventKind =
+  | 'StreamStarted'
+  | 'ReasoningDelta'
+  | 'TextDelta'
+  | 'ToolCallStarted'
+  | 'ToolCallArgsDelta'
+  | 'ToolCallCompleted'
+  | 'UsageUpdated'
+  | 'StreamCompleted'
+  | 'StreamCancelled'
+  | 'StreamError';
+
+export interface UnifiedToolCallDto {
+  callId: string;
+  itemId?: string | null;
+  functionName: string;
+  argumentsJson: string;
+}
+
+export interface UnifiedTokenUsageDto {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
+  cacheHitRate?: number;
+}
+
+export interface SessionStreamEventDto {
+  sessionId: string;
+  kind: UnifiedStreamEventKind | string;
+  textDelta?: string | null;
+  toolCall?: UnifiedToolCallDto | null;
+  usage?: UnifiedTokenUsageDto | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface UnifiedChatMessageDto {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string | null;
+  name?: string | null;
+  toolCallId?: string | null;
+  toolCalls?: Array<{
+    id: string;
+    type: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+}
+
+export interface UnifiedToolDefinitionDto {
+  name: string;
+  description: string;
+  parametersJson: string;
+}
+
+export interface HeaderResolutionContextDto {
+  sessionId: string;
+  sessionHash: string;
+  workspaceName: string;
+  workspacePath: string;
+  workspaceHash: string;
+  modelId: string;
+  providerName: string;
+  providerId: string;
+  userCustomEnv: string;
+}
+
+export interface UnifiedLlmRequestDto {
+  requestId: string;
+  provider: ProviderConfig;
+  model: ModelConfig;
+  messages: UnifiedChatMessageDto[];
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  tools?: UnifiedToolDefinitionDto[];
+  headerContext?: HeaderResolutionContextDto;
+}
+
 export interface HostEventEnvelope<T = unknown> {
   type: string;
   payload: T;
@@ -203,6 +289,10 @@ export interface HostBridgeApi {
     sessionId?: string,
     workspacePath?: string
   ) => Promise<BridgeResponse<ProviderEndpointPreviewDto>>;
+
+  // Stage 03
+  startSessionRun: (request: UnifiedLlmRequestDto | string) => Promise<BridgeResponse<string>>;
+  cancelSessionRun: (sessionId: string) => Promise<BridgeResponse<boolean>>;
 }
 
 declare global {
@@ -739,6 +829,50 @@ function createBrowserMockBridge(): HostBridgeApi {
         },
       };
     },
+    async startSessionRun(request: UnifiedLlmRequestDto | string) {
+      const parsed: UnifiedLlmRequestDto = typeof request === 'string' ? JSON.parse(request) : request;
+      const sessionId = parsed.headerContext?.sessionId || parsed.requestId || `mock_sess_${Date.now()}`;
+
+      // 模拟异步流式输出，验证 Mock 模式下 UI 渲染
+      setTimeout(() => {
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'StreamStarted',
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'TextDelta',
+          textDelta: '你好！我是 Halo Agent（测试 Mock 流式模式）。',
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'UsageUpdated',
+          usage: {
+            inputTokens: 120,
+            outputTokens: 25,
+            cachedInputTokens: 80,
+            totalTokens: 145,
+          },
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'StreamCompleted',
+        });
+      }, 50);
+
+      return {
+        ok: true,
+        message: '流式请求已启动 (Mock)',
+        data: sessionId,
+      };
+    },
+    async cancelSessionRun(_sessionId: string) {
+      return {
+        ok: true,
+        message: '已发送取消指令 (Mock)',
+        data: true,
+      };
+    },
   };
 }
 
@@ -867,6 +1001,13 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
       return normalizeBridgePayload<BridgeResponse<ProviderEndpointPreviewDto>>(
         await rawBridge.previewProviderResolution(payload, modelId ?? '', sessionId ?? '', workspacePath ?? '')
       );
+    },
+    async startSessionRun(request: UnifiedLlmRequestDto | string) {
+      const payload = typeof request === 'string' ? request : JSON.stringify(request);
+      return normalizeBridgePayload<BridgeResponse<string>>(await rawBridge.startSessionRun(payload));
+    },
+    async cancelSessionRun(sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelSessionRun(sessionId));
     },
   };
 }

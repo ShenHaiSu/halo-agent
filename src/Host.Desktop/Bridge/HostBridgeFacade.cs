@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -8,6 +9,8 @@ using Host.Desktop.Infrastructure.Config;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Infrastructure.Storage;
+using Host.Desktop.LlmGateway;
+using Host.Desktop.LlmGateway.Models;
 
 namespace Host.Desktop.Bridge;
 
@@ -24,23 +27,28 @@ public sealed class HostBridgeFacade
     private readonly StoragePathManager _storageManager;
     private readonly HaloHttpClientFactory _httpClientFactory;
     private readonly ProviderConfigService _providerConfigService;
+    private readonly ILlmGatewayClient _llmGatewayClient;
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
     public ProviderConfigService ProviderConfigService => _providerConfigService;
+    public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
 
     public HostBridgeFacade(
         Form? mainForm,
         StoragePathManager storageManager,
         bool gpuDisabled = false,
         HaloHttpClientFactory? httpClientFactory = null,
-        ProviderConfigService? providerConfigService = null)
+        ProviderConfigService? providerConfigService = null,
+        ILlmGatewayClient? llmGatewayClient = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
         _gpuDisabled = gpuDisabled;
         _httpClientFactory = httpClientFactory ?? new HaloHttpClientFactory();
         _providerConfigService = providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
+        _llmGatewayClient = llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
     }
 
     /// <summary>
@@ -558,6 +566,125 @@ public sealed class HostBridgeFacade
         {
             HaloLogger.App.Error("PreviewProviderResolution failed", ex);
             return Task.FromResult(BridgeResponse<ProviderEndpointPreviewDto>.Fail("PREVIEW_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// 前端发起会话流式请求：
+    /// 后台启动 IAsyncEnumerable 管道消费并将事件转换为 SessionStreamEventDto 通过 JsEventDispatcher 推送至前端。
+    /// </summary>
+    public Task<BridgeResponse<string>> StartSessionRun(string requestJson)
+    {
+        try
+        {
+            var req = JsonSerializer.Deserialize<UnifiedLlmRequest>(requestJson, HaloJsonOptions.IndentedCamelCase);
+            if (req == null)
+            {
+                return Task.FromResult(BridgeResponse<string>.Fail("INVALID_REQUEST", "请求 JSON 无法反序列化"));
+            }
+
+            string sessionId = !string.IsNullOrWhiteSpace(req.HeaderContext?.SessionId)
+                ? req.HeaderContext.SessionId
+                : req.RequestId;
+
+            // 取消可能已经存在的旧会话生成任务
+            if (_activeSessionTokens.TryRemove(sessionId, out var oldCts))
+            {
+                try
+                {
+                    oldCts.Cancel();
+                    oldCts.Dispose();
+                }
+                catch
+                {
+                    // 忽略旧任务清理异常
+                }
+            }
+
+            var cts = new CancellationTokenSource();
+            _activeSessionTokens[sessionId] = cts;
+
+            // 在独立后台线程运行流式消费，不阻塞 Bridge 响应
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var evt in _llmGatewayClient.StreamAsync(req, cts.Token).ConfigureAwait(false))
+                    {
+                        var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
+                        JsEventDispatcher.Publish("llm:stream-event", dto);
+
+                        if (evt.Kind == UnifiedStreamEventKind.StreamCompleted ||
+                            evt.Kind == UnifiedStreamEventKind.StreamCancelled ||
+                            evt.Kind == UnifiedStreamEventKind.StreamError)
+                        {
+                            break;
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    var cancelDto = new SessionStreamEventDto
+                    {
+                        SessionId = sessionId,
+                        Kind = nameof(UnifiedStreamEventKind.StreamCancelled)
+                    };
+                    JsEventDispatcher.Publish("llm:stream-event", cancelDto);
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Error($"[HostBridge] Session {sessionId} 流式推送异常", ex);
+                    var errDto = new SessionStreamEventDto
+                    {
+                        SessionId = sessionId,
+                        Kind = nameof(UnifiedStreamEventKind.StreamError),
+                        ErrorCode = "STREAM_EXECUTION_EXCEPTION",
+                        ErrorMessage = ex.Message
+                    };
+                    JsEventDispatcher.Publish("llm:stream-event", errDto);
+                }
+                finally
+                {
+                    _activeSessionTokens.TryRemove(sessionId, out _);
+                    cts.Dispose();
+                }
+            }, CancellationToken.None);
+
+            return Task.FromResult(BridgeResponse<string>.Success(sessionId, "流式请求已启动"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("StartSessionRun failed", ex);
+            return Task.FromResult(BridgeResponse<string>.Fail("SESSION_START_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// 取消正在运行的会话流式请求：立即触发关联的 CancellationTokenSource.Cancel()，并在 100ms 内切断网络连接。
+    /// </summary>
+    public Task<BridgeResponse<bool>> CancelSessionRun(string sessionId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+            }
+
+            if (_activeSessionTokens.TryRemove(sessionId, out var cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+                HaloLogger.App.Info($"[HostBridge] 已成功请求取消 Session {sessionId} 的生成");
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送取消指令"));
+            }
+
+            return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在运行的会话任务"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"CancelSessionRun failed for '{sessionId}'", ex);
+            return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
 }
