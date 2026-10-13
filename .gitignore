@@ -55,6 +55,9 @@ dist-ssr/
 .vite/
 .npmrc
 
+# Local manual-test output from build-dist.cmd (project root)
+/dist/
+
 # Frontend compiled static assets output to Host.Desktop
 src/Host.Desktop/wwwroot/
 
