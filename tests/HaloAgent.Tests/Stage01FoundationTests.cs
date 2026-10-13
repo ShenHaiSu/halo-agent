@@ -201,6 +201,25 @@ public sealed class Stage01FoundationTests : IDisposable
         Assert.Equal(3, storageRes.Data!.LogChannels.Count);
     }
 
+     /// <summary>
+     /// 冒烟回归：当首选与默认数据目录均不可写时，初始化必须降级到 fallback
+     /// （或最后的 TEMP 兜底），绝不允许抛出未处理异常导致启动闪退。
+     /// 用“已存在文件之下的子路径”确定性模拟不可写目录。
+     /// </summary>
+     [Fact]
+     public void S01_Smoke_Initialize_FallsBack_WhenPreferredAndDefaultUnwritable()
+     {
+         var blockerFile = Path.Combine(_tempRoot, "blocker");
+         File.WriteAllText(blockerFile, "block");
+         var unwritablePreferred = Path.Combine(blockerFile, "Preferred");
+ 
+         var manager = StoragePathManager.Initialize(_bootstrapFilePath, unwritablePreferred, _fallbackDataRoot);
+ 
+         Assert.Equal(Path.GetFullPath(_fallbackDataRoot), manager.CurrentDataRoot);
+         Assert.True(manager.IsUsingFallback);
+         Assert.True(Directory.Exists(manager.LogsDirectory));
+     }
+ 
     public void Dispose()
     {
         try

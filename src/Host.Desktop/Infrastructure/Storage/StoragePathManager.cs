@@ -86,6 +86,11 @@ public sealed class StoragePathManager
         _isUsingFallback = isUsingFallback;
     }
 
+     /// <summary>
+     /// 最近一次 Initialize 调用的候选目录决策链（成功/失败均记录，供启动追踪与冒烟诊断使用）。
+     /// </summary>
+     public static string LastInitReport { get; private set; } = string.Empty;
+ 
     /// <summary>
     /// 启动时初始化两级引导存储结构，确保 bootstrap.json 与标准子目录树落盘。
     /// </summary>
@@ -122,25 +127,77 @@ public sealed class StoragePathManager
             ? existingBootstrap!.DataRootPath
             : defaultRoot;
 
-        string activePath;
-        var usingFallback = false;
-
-        if (TryEnsureDirectoryWritable(preferredPath, ".write_test"))
-        {
-            activePath = Path.GetFullPath(preferredPath);
-        }
-        else if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase) &&
-                 TryEnsureDirectoryWritable(defaultRoot, ".write_test"))
-        {
-            activePath = defaultRoot;
-        }
-        else
-        {
-            Directory.CreateDirectory(fallbackRoot);
-            TryEnsureDirectoryWritable(fallbackRoot, ".write_test");
-            activePath = fallbackRoot;
-            usingFallback = true;
-        }
+         string activePath;
+         var usingFallback = false;
+         var attempts = new List<string>
+         {
+             $"bootstrap={bootstrapPath}",
+             $"preferred={preferredPath}",
+             $"default={defaultRoot}",
+             $"fallback={fallbackRoot}",
+         };
+ 
+         if (TryEnsureDirectoryWritable(preferredPath, ".write_test", out var preferredError))
+         {
+             activePath = Path.GetFullPath(preferredPath);
+             attempts.Add("preferred: OK");
+         }
+         else
+         {
+             attempts.Add($"preferred: FAIL {preferredError}");
+             string? defaultError = null;
+             if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase) &&
+                 TryEnsureDirectoryWritable(defaultRoot, ".write_test", out defaultError))
+             {
+                 activePath = defaultRoot;
+                 attempts.Add("default: OK");
+             }
+             else
+             {
+                 if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase))
+                 {
+                     attempts.Add($"default: FAIL {defaultError}");
+                 }
+                 // 多级兜底：首选 fallbackRoot；若其亦不可写（如 LocalAppData 被 ACL/杀软锁定），
+                 // 最后退守 %TEMP%\HaloAgent\Data。所有候选均失败时才抛出带明细的异常，
+                 // 绝不允许裸 Directory.CreateDirectory 直接崩掉启动流程。
+                 var candidates = new[]
+                 {
+                     fallbackRoot,
+                     Path.Combine(Path.GetTempPath(), "HaloAgent", "Data")
+                 };
+                 string? resolvedPath = null;
+                 foreach (var candidate in candidates)
+                 {
+                     try
+                     {
+                         Directory.CreateDirectory(candidate);
+                         if (TryEnsureDirectoryWritable(candidate, ".write_test", out var probeError))
+                         {
+                             resolvedPath = candidate;
+                             attempts.Add($"fallback {candidate}: OK");
+                             break;
+                         }
+                         attempts.Add($"fallback {candidate}: FAIL {probeError}");
+                     }
+                     catch (Exception ex)
+                     {
+                         attempts.Add($"fallback {candidate}: EX {ex.Message}");
+                     }
+                 }
+                 if (resolvedPath == null)
+                 {
+                     LastInitReport = string.Join(" | ", attempts);
+                     throw new IOException(
+                         "无法初始化任何可写数据目录（已尝试 fallback 与 TEMP 兜底）。"
+                         + "请检查杀毒软件/权限后重试，或设置环境变量 HALO_BOOTSTRAP_PATH 指向可写位置。"
+                         + "明细: " + LastInitReport);
+                 }
+                 activePath = resolvedPath;
+                 usingFallback = true;
+             }
+         }
+         LastInitReport = string.Join(" | ", attempts) + $" => active={activePath}";
 
         EnsureStandardSubdirectories(activePath);
 
@@ -639,31 +696,29 @@ public sealed class StoragePathManager
         }
     }
 
-    private static readonly byte[] ProbeBytes = System.Text.Encoding.ASCII.GetBytes("HALO_PROBE");
 
     public static bool TryEnsureDirectoryWritable(string directoryPath, string probeFileName = ".halo_write_probe") =>
         TryEnsureDirectoryWritable(directoryPath, probeFileName, out _);
 
-    public static bool TryEnsureDirectoryWritable(string directoryPath, string probeFileName, out string? errorMessage)
-    {
-        errorMessage = null;
-        try
-        {
-            Directory.CreateDirectory(directoryPath);
-            var probePath = Path.Combine(directoryPath, $"{probeFileName}_{Guid.NewGuid():N}");
-            using (var fs = new FileStream(probePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64, FileOptions.WriteThrough))
-            {
-                fs.Write(ProbeBytes, 0, ProbeBytes.Length);
-                fs.Flush(flushToDisk: true);
-            }
-
-            File.Delete(probePath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            return false;
-        }
-    }
+     public static bool TryEnsureDirectoryWritable(string directoryPath, string probeFileName, out string? errorMessage)
+     {
+         errorMessage = null;
+         try
+         {
+             Directory.CreateDirectory(directoryPath);
+             var probePath = Path.Combine(directoryPath, $"{probeFileName}_{Guid.NewGuid():N}");
+             // 注意：此处故意使用最普通的创建+写入+删除组合进行探测。
+             // 严禁使用 FileShare.None / FileOptions.WriteThrough 等排他式直写标志——
+             // 该组合极易被杀软行为监控误判为勒索软件特征，导致新构建的未签名程序被拦截写入、
+             // 明明有权限却报 Access Denied（冒烟测试 2026-10-14 实证）。
+             File.WriteAllText(probePath, "HALO_PROBE");
+             File.Delete(probePath);
+             return true;
+         }
+         catch (Exception ex)
+         {
+             errorMessage = ex.Message;
+             return false;
+         }
+     }
 }

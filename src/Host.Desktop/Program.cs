@@ -26,27 +26,50 @@ internal static class Program
         }
     }
 
-    [STAThread]
-    static void Main()
-    {
-        // 0. 强制开启 TLS 1.2 (兼容 Win7 SP1)
-        ConfigureWin7CompatibleTls();
-
-        // 1. 高 DPI 自适应（兼顾 Win10/11 高分屏与 Win7 传统缩放）
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-
-        // 2. 初始化 C 盘可配置存储引导与滚动日志引擎
-        var storageManager = StoragePathManager.Initialize();
-        HaloLogger.Initialize(storageManager);
-        HaloLogger.App.Info(
-            $"HaloAgent starting. OS={Environment.OSVersion}, TLS={ServicePointManager.SecurityProtocol}, DataRoot={storageManager.CurrentDataRoot}, Bootstrap={storageManager.BootstrapFilePath}");
-
-        // 3. 全局未捕获异常兜底，写入 C 盘日志防止静默闪退
-        Application.ThreadException += (_, e) => HaloLogger.App.Error("UI Thread Exception", e.Exception);
-        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-            HaloLogger.App.Error("AppDomain Unhandled Exception", e.ExceptionObject as Exception);
+     [STAThread]
+     static void Main()
+     {
+         TraceStartup("stage=main-enter");
+         // 0. 强制开启 TLS 1.2 (兼容 Win7 SP1)
+         ConfigureWin7CompatibleTls();
+ 
+         // 1. 高 DPI 自适应（兼顾 Win10/11 高分屏与 Win7 传统缩放）
+         Application.SetHighDpiMode(HighDpiMode.SystemAware);
+         Application.EnableVisualStyles();
+         Application.SetCompatibleTextRenderingDefault(false);
+ 
+         // 2. 全局未捕获异常兜底【必须先于存储/日志初始化注册】，避免启动期异常导致无日志闪退
+         Application.ThreadException += (_, e) =>
+         {
+             WriteStartupErrorFile("UI Thread Exception", e.Exception);
+             TryLogFatal("UI Thread Exception", e.Exception);
+         };
+         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+         {
+             WriteStartupErrorFile("AppDomain Unhandled Exception", e.ExceptionObject as Exception);
+             TryLogFatal("AppDomain Unhandled Exception", e.ExceptionObject as Exception);
+         };
+         TraceStartup("stage=handlers-registered");
+ 
+         // 3. 初始化 C 盘可配置存储引导与滚动日志引擎（失败时弹窗明示而非静默闪退）
+         StoragePathManager storageManager;
+         TraceStartup("stage=before-storage-init");
+         try
+         {
+             storageManager = StoragePathManager.Initialize();
+             TraceStartup("stage=storage-init-ok root=" + storageManager.CurrentDataRoot);
+             HaloLogger.Initialize(storageManager);
+             TraceStartup("stage=logger-init-ok");
+         }
+         catch (Exception ex)
+         {
+             TraceStartup("stage=storage-init-FAILED: " + ex.GetType().Name + ": " + ex.Message);
+             TraceStartup("stage=init-report: " + StoragePathManager.LastInitReport);
+             ShowFatalStartupError("存储初始化失败", ex);
+             return;
+         }
+         HaloLogger.App.Info(
+             $"HaloAgent starting. OS={Environment.OSVersion}, TLS={ServicePointManager.SecurityProtocol}, DataRoot={storageManager.CurrentDataRoot}, Bootstrap={storageManager.BootstrapFilePath}");
 
         // 4. 配置 CefSettings（CachePath 指向用户配置的 DataRoot\cef-cache）
         var settings = new CefSettings
@@ -91,22 +114,118 @@ internal static class Program
             IsCorsEnabled = true
         });
 
-        CefSharpSettings.ConcurrentTaskExecution = true;
-        Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null);
-
+         CefSharpSettings.ConcurrentTaskExecution = true;
+         TraceStartup("stage=before-cef-init");
+         try
+         {
+             Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null);
+             TraceStartup("stage=cef-init-ok");
+         }
+         catch (Exception ex)
+         {
+             TraceStartup("stage=cef-init-FAILED: " + ex.GetType().Name + ": " + ex.Message);
+             ShowFatalStartupError("浏览器内核初始化失败（常见于缺失 VC++ 运行库或 KB2533623 补丁）", ex);
+             return;
+         }
+ 
         try
         {
+            TraceStartup("stage=before-app-run");
             Application.Run(new MainForm(storageManager, gpuDisabled));
         }
         finally
-        {
-            // 8. 退出时优雅释放日志队列与 CEF 句柄，防止残留 CefSharp.BrowserSubprocess.exe 僵尸进程
+         {
+             // 8. 退出时优雅释放日志队列与 CEF 句柄，防止残留 CefSharp.BrowserSubprocess.exe 僵尸进程
             HaloLogger.App.Info("HaloAgent shutting down gracefully.");
             HaloLogger.Shutdown();
             Cef.Shutdown();
         }
     }
 
+     private static string StartupTracePath()
+     {
+         try
+         {
+             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "startup-trace.txt");
+         }
+         catch
+         {
+             return Path.Combine(Path.GetTempPath(), "HaloAgent-startup-trace.txt");
+         }
+     }
+ 
+     private static void TraceStartup(string line)
+     {
+         try
+         {
+             File.AppendAllText(
+                 StartupTracePath(),
+                 DateTime.Now.ToString("HH:mm:ss.fff") + " " + line + Environment.NewLine);
+         }
+         catch
+         {
+         }
+     }
+ 
+     private static void WriteStartupErrorFile(string context, Exception? ex)
+     {
+         try
+         {
+             var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "startup-error.txt");
+             var body =
+                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + context + Environment.NewLine
+                 + (ex == null ? "(no exception)" : ex.ToString()) + Environment.NewLine;
+             File.WriteAllText(path, body);
+         }
+         catch
+         {
+         }
+     }
+ 
+     private static void TryLogFatal(string context, Exception? ex)
+     {
+         try
+         {
+             if (ex != null)
+             {
+                 HaloLogger.App.Error(context, ex);
+             }
+             else
+             {
+                 HaloLogger.App.Error(context);
+             }
+         }
+         catch
+         {
+         }
+     }
+ 
+     private static void ShowFatalStartupError(string title, Exception ex)
+     {
+         WriteStartupErrorFile(title, ex);
+         TryLogFatal(title, ex);
+         try
+         {
+             HaloLogger.Shutdown();
+         }
+         catch
+         {
+         }
+         var message =
+             title + "，程序无法启动。\n\n原因: " + ex.Message + "\n\n"
+             + "排查建议:\n"
+             + "1. 以管理员身份运行一次（自动修复 C盘数据目录权限）；\n"
+             + "2. 检查杀毒软件是否拦截了本程序的文件写入；\n"
+             + "3. 缺失 VC++ 2015-2022 运行库或 Win7 KB2533623 补丁也会导致内核初始化失败；\n"
+             + "4. 可设置环境变量 HALO_BOOTSTRAP_PATH 指向可写位置后重试。\n\n"
+             + "详细日志请查看: C盘 HaloAgentData 目录下 logs 文件夹。";
+         System.Windows.Forms.MessageBox.Show(
+             message,
+             "Halo-Agent 启动失败 - " + title,
+             System.Windows.Forms.MessageBoxButtons.OK,
+             System.Windows.Forms.MessageBoxIcon.Error);
+     }
+ 
     private static string ResolveWwwrootDirectory()
     {
         var baseWwwroot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot");
