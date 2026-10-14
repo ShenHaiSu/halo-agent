@@ -73,8 +73,8 @@
               </div>
             </footer>
 
-            <!-- 设置中心模态框 -->
-            <SettingsCenterModal
+            <!-- 设置中心抽屉 -->
+            <SettingsCenterDrawer
               v-model:show="showSettingsModal"
               :default-tab="settingsModalTab"
             />
@@ -101,7 +101,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import WorkspaceSessionSidebar from '@/components/sidebar/WorkspaceSessionSidebar.vue';
 import WorkbenchTopBar from '@/components/workbench/WorkbenchTopBar.vue';
 import WorkbenchView from '@/views/WorkbenchView.vue';
-import SettingsCenterModal from '@/components/settings/SettingsCenterModal.vue';
+import SettingsCenterDrawer from '@/components/settings/SettingsCenterDrawer.vue';
 
 const systemStore = useSystemStore();
 const configStore = useConfigStore();

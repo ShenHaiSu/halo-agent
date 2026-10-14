@@ -14,17 +14,7 @@
         :disabled="agentStore.isGenerating"
         @keydown="handleKeydown"
       />
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2 text-[11px] text-secondary min-w-0">
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-elevated font-mono truncate" :title="workspacePath">
-            <FolderGit2 class="w-3 h-3 text-accent shrink-0" />
-            <span class="truncate">{{ workspaceName }}</span>
-          </span>
-          <span class="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-elevated font-mono shrink-0">
-            <Terminal class="w-3 h-3 text-emerald-400" />
-            默认Runner: CMD优先/PY次之
-          </span>
-        </div>
+      <div class="flex items-center justify-end gap-2">
 
         <n-button
           v-if="!agentStore.isGenerating"
@@ -51,20 +41,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { storeToRefs } from 'pinia';
-import { FolderGit2, SendHorizontal, Square, Terminal } from 'lucide-vue-next';
+import { SendHorizontal, Square } from 'lucide-vue-next';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentStore } from '@/stores/agentStore';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
-const { activeWorkspace } = storeToRefs(workspaceStore);
 
 const draft = ref<string>('');
 const inputRef = ref<unknown>(null);
 
-const workspaceName = computed(() => activeWorkspace.value?.name || '未绑定工作区');
-const workspacePath = computed(() => activeWorkspace.value?.rootPath || '');
 const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id));
 
 function handleSend(): void {

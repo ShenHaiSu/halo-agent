@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4 min-w-0 max-w-full overflow-x-hidden">
     <!-- 1. 存储路径管理卡片 -->
     <n-card title="数据与日志根目录配置" size="small">
       <div class="space-y-3">
@@ -9,7 +9,7 @@
           </template>
           <div class="text-xs leading-relaxed">
             <div>
-              固定引导指针文件位置：<code class="px-1.5 py-0.5 rounded bg-black/20 font-mono">%LocalAppData%\HaloAgent\bootstrap.json</code>
+              固定引导指针文件位置：<code class="setting-inset px-1.5 py-0.5 font-mono break-all">%LocalAppData%\HaloAgent\bootstrap.json</code>
             </div>
             <div class="text-secondary mt-0.5 font-mono break-all">
               实际路径：{{ storageConfig?.bootstrapFilePath || '加载中...' }}
@@ -102,7 +102,7 @@
     <!-- 2. 三通道分级日志监控区 -->
     <n-card title="三通道分级滚动日志监控" size="small">
       <template #header-extra>
-        <n-space :size="8">
+        <n-space :size="8" class="flex flex-wrap">
           <n-button size="small" secondary @click="handleWriteDiagnosticLogs">
             <template #icon>
               <FilePlus2 class="w-3.5 h-3.5" />
@@ -129,7 +129,7 @@
         </n-space>
       </template>
 
-      <n-descriptions bordered :column="3" size="small" label-placement="top">
+      <n-descriptions bordered :column="1" size="small" label-placement="top">
         <n-descriptions-item
           v-for="ch in displayedLogChannels"
           :key="ch.channel"
@@ -142,7 +142,7 @@
                 {{ formatBytes(ch.sizeBytes) }}
               </n-tag>
             </div>
-            <div class="text-[11px] text-secondary truncate font-mono" :title="ch.filePath">
+            <div class="text-[11px] text-secondary truncate max-w-full font-mono" :title="ch.filePath">
               {{ ch.filePath }}
             </div>
           </div>
@@ -157,7 +157,7 @@
       title="确认切换数据与日志存储目录"
       :mask-closable="!systemStore.migrating"
       :closable="!systemStore.migrating"
-      style="width: 540px"
+      style="width: min(540px, 90vw)"
     >
       <div class="space-y-4 pt-2">
         <div class="space-y-1.5">
@@ -181,7 +181,7 @@
           >
             <div class="space-y-2.5">
               <div
-                class="p-2.5 rounded border border-subtle bg-black/10 cursor-pointer"
+                class="setting-inset p-2.5 cursor-pointer min-w-0"
                 @click="!systemStore.migrating && (migrateExistingData = true)"
               >
                 <n-radio :value="true">
@@ -191,7 +191,7 @@
                 </n-radio>
               </div>
               <div
-                class="p-2.5 rounded border border-subtle bg-black/10 cursor-pointer"
+                class="setting-inset p-2.5 cursor-pointer min-w-0"
                 @click="!systemStore.migrating && (migrateExistingData = false)"
               >
                 <n-radio :value="false">
@@ -356,12 +356,12 @@ async function handleOpenInExplorer(path?: string) {
 }
 
 async function handleWriteDiagnosticLogs() {
-  await systemStore.writeTestLogEntry('app', 'Stage 01 diagnostic check: App channel write test.');
+  await systemStore.writeTestLogEntry('app', 'diagnostic check: App channel write test.');
   await systemStore.writeTestLogEntry(
     'llm',
-    'Stage 01 diagnostic check: Authorization: Bearer sk-1234567890abcdef9876 masking test.'
+    'diagnostic check: Authorization: Bearer sk-1234567890abcdef9876 masking test.'
   );
-  await systemStore.writeTestLogEntry('tool', 'Stage 01 diagnostic check: cmd.exe tool channel write test.');
+  await systemStore.writeTestLogEntry('tool', 'diagnostic check: tool channel write test.');
   message.success('已向 App / LLM / Tool 三通道写入诊断日志并自动脱敏');
 }
 

@@ -43,9 +43,11 @@
               :percentage="usagePercentage"
               :stroke-width="12"
               :color="statusColor"
-              style="width: 16px; height: 16px"
+              :show-indicator="false"
+              :title="`${usagePercentage}% 已用`"
+              style="width: 16px; height: 16px; flex-shrink: 0"
             />
-            <span class="font-mono text-[11px] font-medium" :class="statusTextColor">
+            <span class="font-mono text-[11px] font-medium tabular-nums" :class="statusTextColor">
               {{ formatTokens(usedTokens) }} / {{ formatTokens(totalTokens) }}
               <span class="opacity-80">({{ usagePercentage }}%)</span>
             </span>

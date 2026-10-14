@@ -58,3 +58,33 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 148, 158, 0.45);
 }
+/* 设置中心可选中卡片：主题自适应，模板里只写这两个类 */
+.setting-option {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+/* 暗黑（默认 :root）：未选中 = 更深，选中 = 提亮 */
+.setting-option { background-color: rgba(0, 0, 0, 0.15); }
+.setting-option:hover { background-color: rgba(255, 255, 255, 0.03); }
+.setting-option-active {
+  border-color: rgba(59, 130, 246, 0.6);
+  background-color: rgba(59, 130, 246, 0.10);
+}
+/* 亮色（html.light）：逻辑反转——未选中 = 最浅，选中 = 加深蓝底 */
+html.light .setting-option { background-color: #f8fafc; }
+html.light .setting-option:hover { background-color: #f1f5f9; }
+html.light .setting-option-active {
+  border-color: #93c5fd;
+  background-color: #eff6ff;
+}
+/* 预览/信息条同理：深底用黑叠加，浅底用灰底 */
+.setting-inset { border: 1px solid var(--border-subtle); border-radius: 6px; }
+.setting-inset { background-color: rgba(0, 0, 0, 0.20); }
+html.light .setting-inset { background-color: #f1f5f9; }
+/* Drawer 内容永不横溢：grid/flex 子项默认 min-width:auto 是元凶 */
+.settings-drawer-body, .settings-drawer-body * { min-width: 0; }
+.settings-drawer-body { overflow-x: hidden; }
+.settings-drawer-body code, .settings-drawer-body .font-mono {
+  overflow-wrap: anywhere; word-break: break-all;
+}

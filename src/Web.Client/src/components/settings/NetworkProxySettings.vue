@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4" data-testid="network-proxy-settings-panel">
+  <div class="space-y-4 min-w-0 max-w-full overflow-x-hidden" data-testid="network-proxy-settings-panel">
     <!-- 1. 全局代理路由模式选择卡片 -->
     <n-card title="全局网络代理中枢 (ProxyHub)" size="small">
       <template #header-extra>
@@ -19,15 +19,11 @@
           name="global-proxy-mode"
           data-testid="global-proxy-mode-group"
         >
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-3 min-w-0">
             <!-- 模式 A: 系统代理 -->
             <div
-              class="p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                draft.mode === 'System'
-                  ? 'border-blue-500/60 bg-blue-500/10'
-                  : 'border-subtle bg-black/10 hover:bg-white/[0.02]'
-              "
+              class="setting-option p-3 cursor-pointer min-w-0"
+              :class="{ 'setting-option-active': draft.mode === 'System' }"
               data-testid="proxy-mode-system"
               @click="draft.mode = 'System'"
             >
@@ -44,12 +40,8 @@
 
             <!-- 模式 B: 手动代理 -->
             <div
-              class="p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                draft.mode === 'Custom'
-                  ? 'border-blue-500/60 bg-blue-500/10'
-                  : 'border-subtle bg-black/10 hover:bg-white/[0.02]'
-              "
+              class="setting-option p-3 cursor-pointer min-w-0"
+              :class="{ 'setting-option-active': draft.mode === 'Custom' }"
               data-testid="proxy-mode-custom"
               @click="draft.mode = 'Custom'"
             >
@@ -66,12 +58,8 @@
 
             <!-- 模式 C: 强制直连 -->
             <div
-              class="p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                draft.mode === 'None'
-                  ? 'border-blue-500/60 bg-blue-500/10'
-                  : 'border-subtle bg-black/10 hover:bg-white/[0.02]'
-              "
+              class="setting-option p-3 cursor-pointer min-w-0"
+              :class="{ 'setting-option-active': draft.mode === 'None' }"
               data-testid="proxy-mode-none"
               @click="draft.mode = 'None'"
             >
@@ -91,7 +79,7 @@
         <!-- 系统代理实时快照面板 (Mode === System) -->
         <div
           v-if="draft.mode === 'System'"
-          class="p-3 rounded-lg border border-subtle bg-black/15 space-y-2.5"
+          class="setting-inset p-3 space-y-2.5 min-w-0"
         >
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
@@ -118,24 +106,24 @@
             </n-button>
           </div>
 
-          <n-descriptions bordered :column="2" size="small" label-placement="left">
+          <n-descriptions bordered :column="1" size="small" label-placement="left">
             <n-descriptions-item label="生效代理 URI">
-              <span class="font-mono text-xs text-emerald-400">
+              <span class="font-mono text-xs text-emerald-400 min-w-0 break-all">
                 {{ sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)' }}
               </span>
             </n-descriptions-item>
             <n-descriptions-item label="注册表 ProxyServer">
-              <span class="font-mono text-xs">
+              <span class="font-mono text-xs min-w-0 break-all">
                 {{ sysProxy?.proxyServerRaw || '(未配置)' }}
               </span>
             </n-descriptions-item>
             <n-descriptions-item label="PAC 自动脚本地址">
-              <span class="font-mono text-xs">
+              <span class="font-mono text-xs min-w-0 break-all">
                 {{ sysProxy?.autoConfigUrl || '(无)' }}
               </span>
             </n-descriptions-item>
             <n-descriptions-item label="绕过列表 (ProxyOverride)">
-              <span class="font-mono text-xs truncate">
+              <span class="font-mono text-xs truncate max-w-full min-w-0 break-all">
                 {{ sysProxy?.bypassOverride || '(默认)' }}
               </span>
             </n-descriptions-item>
@@ -145,10 +133,10 @@
         <!-- 手动代理详细表单 (Mode === Custom) -->
         <div
           v-if="draft.mode === 'Custom'"
-          class="p-3.5 rounded-lg border border-subtle bg-black/15 space-y-3"
+          class="setting-inset p-3.5 space-y-3 min-w-0"
         >
-          <div class="grid grid-cols-12 gap-3">
-            <div class="col-span-3 space-y-1">
+          <div class="grid grid-cols-12 gap-3 min-w-0">
+            <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-xs text-secondary">代理协议 (Scheme)</label>
               <n-select
                 v-model:value="draft.customProxy.scheme"
@@ -157,7 +145,7 @@
                 data-testid="custom-proxy-scheme"
               />
             </div>
-            <div class="col-span-6 space-y-1">
+            <div class="col-span-6 space-y-1 min-w-0">
               <label class="text-xs text-secondary">代理主机地址 (Host)</label>
               <n-input
                 v-model:value="draft.customProxy.host"
@@ -167,30 +155,30 @@
                 data-testid="custom-proxy-host"
               />
             </div>
-            <div class="col-span-3 space-y-1">
+            <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-xs text-secondary">端口 (Port)</label>
               <n-input-number
                 v-model:value="draft.customProxy.port"
                 :min="1"
                 :max="65535"
                 size="small"
-                class="font-mono text-xs w-full"
+                class="font-mono text-xs w-full max-w-full"
                 data-testid="custom-proxy-port"
               />
             </div>
           </div>
 
-          <div class="grid grid-cols-12 gap-3 items-center pt-1">
-            <div class="col-span-8 space-y-1">
+          <div class="grid grid-cols-12 gap-3 items-center pt-1 min-w-0">
+            <div class="col-span-8 space-y-1 min-w-0">
               <label class="text-xs text-secondary">绕过代理地址列表 (分号或逗号分隔，支持 * 通配符)</label>
               <n-input
                 v-model:value="draft.customProxy.bypassList"
                 placeholder="localhost;127.*;10.*;192.168.*"
                 size="small"
-                class="font-mono text-xs"
+                class="font-mono text-xs w-full"
               />
             </div>
-            <div class="col-span-4 flex items-center justify-between pt-4 px-2">
+            <div class="col-span-4 flex items-center justify-between pt-4 px-2 min-w-0">
               <span class="text-xs text-secondary">本地地址自动绕过</span>
               <n-switch v-model:value="draft.customProxy.bypassOnLocal" size="small" />
             </div>
@@ -240,7 +228,7 @@
           </template>
           <div class="text-xs leading-relaxed">
             已选择<strong>不使用任何代理 (强制直连)</strong>。C# 宿主底层
-            <code class="px-1 py-0.5 rounded bg-black/20 font-mono">SocketsHttpHandler.UseProxy = false</code>
+            <code class="setting-inset px-1 py-0.5 font-mono break-all">SocketsHttpHandler.UseProxy = false</code>
             已激活，所有继承全局代理的 Provider 请求均直接连接目标服务器，不受系统代理影响。
           </div>
         </n-alert>

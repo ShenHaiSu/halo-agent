@@ -1,7 +1,7 @@
 <template>
-  <div class="grid grid-cols-12 gap-4" data-testid="provider-manager-panel">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 min-w-0 max-w-full overflow-x-hidden" data-testid="provider-manager-panel">
     <!-- 左侧：服务商列表栏 (4 列) -->
-    <div class="col-span-4 flex flex-col space-y-2.5">
+    <div class="lg:col-span-4 flex flex-col space-y-2.5 min-w-0">
       <div class="flex items-center justify-between px-1">
         <span class="text-xs font-semibold text-secondary uppercase tracking-wider">
           已配置服务商 ({{ configStore.providersDoc.providers.length }})
@@ -20,16 +20,12 @@
         </n-button>
       </div>
 
-      <div class="space-y-2 max-h-[540px] overflow-y-auto pr-1">
+      <div class="space-y-2 min-w-0">
         <div
           v-for="item in configStore.providersDoc.providers"
           :key="item.id"
-          class="p-3 rounded-lg border cursor-pointer transition-colors"
-          :class="
-            selectedProviderId === item.id
-              ? 'border-blue-500/60 bg-blue-500/10'
-              : 'border-subtle bg-black/15 hover:bg-white/[0.03]'
-          "
+          class="setting-option p-3 cursor-pointer min-w-0"
+          :class="{ 'setting-option-active': selectedProviderId === item.id }"
           :data-testid="`provider-list-item-${item.id}`"
           @click="selectProvider(item.id)"
         >
@@ -57,7 +53,7 @@
             </div>
           </div>
 
-          <div class="mt-1.5 text-[11px] font-mono text-secondary truncate">
+          <div class="mt-1.5 text-[11px] font-mono text-secondary truncate min-w-0">
             {{ item.baseUrl }}
           </div>
 
@@ -79,7 +75,7 @@
     </div>
 
     <!-- 右侧：当前选中服务商详细配置面板 (8 列) -->
-    <div v-if="editingProvider" class="col-span-8 space-y-3.5 max-h-[580px] overflow-y-auto pr-1">
+    <div v-if="editingProvider" class="lg:col-span-8 space-y-3.5 min-w-0 max-w-full">
       <!-- 1. 基础连接、DPAPI 密钥与代理策略卡片 -->
       <n-card size="small" title="服务商网关、密钥与代理策略">
         <template #header-extra>
@@ -119,16 +115,16 @@
           </div>
 
           <!-- 实时端点归一化预览条 -->
-          <div class="p-2 rounded bg-black/20 border border-subtle text-[11px] font-mono space-y-1">
-            <div class="flex items-center justify-between text-secondary">
-              <span>Chat 端点 (<code class="text-emerald-400">chat</code>):</span>
-              <span class="text-primary select-all" data-testid="preview-chat-endpoint">
+          <div class="setting-inset p-2 text-[11px] font-mono space-y-1 overflow-hidden">
+            <div class="flex items-center justify-between gap-2 text-secondary min-w-0">
+              <span class="shrink-0 mr-2">Chat 端点 (<code class="text-emerald-400">chat</code>):</span>
+              <span class="text-primary select-all min-w-0 flex-1 text-right truncate" data-testid="preview-chat-endpoint">
                 {{ endpointPreview?.chatEndpointUrl || computedChatEndpoint }}
               </span>
             </div>
-            <div class="flex items-center justify-between text-secondary">
-              <span>Responses 端点 (<code class="text-blue-400">resp</code>):</span>
-              <span class="text-primary select-all" data-testid="preview-resp-endpoint">
+            <div class="flex items-center justify-between gap-2 text-secondary min-w-0">
+              <span class="shrink-0 mr-2">Responses 端点 (<code class="text-blue-400">resp</code>):</span>
+              <span class="text-primary select-all min-w-0 flex-1 text-right truncate" data-testid="preview-resp-endpoint">
                 {{ endpointPreview?.respEndpointUrl || computedRespEndpoint }}
               </span>
             </div>
@@ -182,9 +178,9 @@
           <!-- 当服务商选择独立代理 (Custom) 时展开 -->
           <div
             v-if="editingProvider.proxyMode === 'Custom' && editingProvider.customProxy"
-            class="p-2.5 rounded border border-subtle bg-black/15 grid grid-cols-12 gap-2.5"
+            class="setting-inset p-2.5 grid grid-cols-12 gap-2.5 min-w-0"
           >
-            <div class="col-span-3 space-y-1">
+            <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">协议</label>
               <n-select
                 v-model:value="editingProvider.customProxy.scheme"
@@ -192,7 +188,7 @@
                 size="tiny"
               />
             </div>
-            <div class="col-span-6 space-y-1">
+            <div class="col-span-6 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">独立代理主机</label>
               <n-input
                 v-model:value="editingProvider.customProxy.host"
@@ -201,14 +197,15 @@
                 class="font-mono text-xs"
               />
             </div>
-            <div class="col-span-3 space-y-1">
+            <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">端口</label>
               <n-input-number
                 v-model:value="editingProvider.customProxy.port"
                 :min="1"
                 :max="65535"
                 size="tiny"
-                class="font-mono text-xs w-full"
+                :show-button="false"
+                class="font-mono text-xs w-full max-w-full"
               />
             </div>
           </div>
@@ -252,7 +249,7 @@
             <div
               v-for="(hdr, idx) in editingProvider.customHeaders"
               :key="idx"
-              class="grid grid-cols-12 gap-2 items-center"
+              class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center min-w-0"
             >
               <div class="col-span-1 flex justify-center">
                 <n-switch
@@ -261,25 +258,25 @@
                   @update:value="refreshEndpointPreview"
                 />
               </div>
-              <div class="col-span-4">
+              <div class="col-span-4 min-w-0">
                 <n-input
                   v-model:value="hdr.key"
                   placeholder="Header 名称，如 X-Session-Hash"
                   size="small"
-                  class="font-mono text-xs"
+                  class="font-mono text-xs w-full"
                   @blur="refreshEndpointPreview"
                 />
               </div>
-              <div class="col-span-5">
+              <div class="col-span-5 min-w-0">
                 <n-input
                   v-model:value="hdr.valueTemplate"
                   placeholder="值或模板，如 ${session-hash}"
                   size="small"
-                  class="font-mono text-xs"
+                  class="font-mono text-xs w-full"
                   @blur="refreshEndpointPreview"
                 />
               </div>
-              <div class="col-span-2 flex items-center justify-end gap-1.5">
+              <div class="col-span-2 flex items-center justify-end gap-1 min-w-[86px]">
                 <n-checkbox v-model:checked="hdr.isSecret" size="small" title="日志脱敏">
                   <span class="text-[11px] text-secondary">敏感</span>
                 </n-checkbox>
@@ -330,17 +327,17 @@
               endpointPreview &&
               Object.keys(endpointPreview.resolvedHeaders).length > 0
             "
-            class="p-2 rounded bg-black/20 border border-subtle text-[11px] font-mono space-y-1"
+            class="setting-inset p-2 text-[11px] font-mono space-y-1 min-w-0"
             data-testid="resolved-headers-preview-box"
           >
             <div class="text-secondary">实际发包 Header 注入预览：</div>
             <div
               v-for="(val, key) in endpointPreview.resolvedHeaders"
               :key="key"
-              class="flex items-center justify-between"
+              class="flex items-center justify-between gap-2 min-w-0"
             >
-              <span class="text-blue-400">{{ key }}:</span>
-              <span class="text-emerald-400">{{ val }}</span>
+              <span class="text-blue-400 shrink-0">{{ key }}:</span>
+              <span class="text-emerald-400 min-w-0 break-all text-right">{{ val }}</span>
             </div>
           </div>
         </div>
@@ -367,11 +364,11 @@
           <div
             v-for="(mdl, mIdx) in editingProvider.models"
             :key="mIdx"
-            class="p-2.5 rounded-lg border border-subtle bg-black/15 space-y-2"
+            class="setting-inset p-2.5 space-y-2 min-w-0"
             :data-testid="`model-row-${mIdx}`"
           >
-            <div class="grid grid-cols-12 gap-2 items-center">
-              <div class="col-span-3 space-y-1">
+            <div class="grid grid-cols-12 gap-2 items-center min-w-0">
+              <div class="col-span-3 space-y-1 min-w-0">
                 <label class="text-[11px] text-secondary">模型 ID (必填)</label>
                 <n-input
                   v-model:value="mdl.id"
@@ -381,7 +378,7 @@
                 />
               </div>
 
-              <div class="col-span-3 space-y-1">
+              <div class="col-span-3 space-y-1 min-w-0">
                 <label class="text-[11px] text-secondary">显示名称</label>
                 <n-input
                   v-model:value="mdl.displayName"
@@ -391,7 +388,7 @@
                 />
               </div>
 
-              <div class="col-span-2 space-y-1">
+              <div class="col-span-2 space-y-1 min-w-0">
                 <label class="text-[11px] text-secondary">通信协议</label>
                 <n-select
                   v-model:value="mdl.protocol"
@@ -401,7 +398,7 @@
                 />
               </div>
 
-              <div class="col-span-2 space-y-1">
+              <div class="col-span-2 space-y-1 min-w-0">
                 <label class="text-[11px] text-secondary">最大上下文 Token</label>
                 <n-input-number
                   v-model:value="mdl.maxContextTokens"
@@ -409,11 +406,11 @@
                   :max="2000000"
                   :step="4096"
                   size="small"
-                  class="font-mono text-xs w-full"
+                  class="font-mono text-xs w-full max-w-full"
                 />
               </div>
 
-              <div class="col-span-2 space-y-1">
+              <div class="col-span-2 space-y-1 min-w-0">
                 <label class="text-[11px] text-secondary">最大输出 Token</label>
                 <n-input-number
                   v-model:value="mdl.maxOutputTokens"
@@ -421,13 +418,13 @@
                   :max="256000"
                   :step="1024"
                   size="small"
-                  class="font-mono text-xs w-full"
+                  class="font-mono text-xs w-full max-w-full"
                 />
               </div>
             </div>
 
-            <div class="flex items-center justify-between pt-1 border-t border-subtle/60 text-xs">
-              <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-subtle/60 text-xs min-w-0">
+              <div class="flex flex-wrap items-center gap-3 min-w-0">
                 <n-tag
                   :type="mdl.protocol === 'resp' ? 'info' : 'success'"
                   size="small"
@@ -436,13 +433,13 @@
                 >
                   {{ mdl.protocol === 'resp' ? 'resp (/v1/responses)' : 'chat (/v1/chat/completions)' }}
                 </n-tag>
-                <span class="text-[11px] font-mono text-secondary">
+                <span class="text-[11px] font-mono text-secondary min-w-0 break-all">
                   Context: {{ mdl.maxContextTokens.toLocaleString() }} · MaxOutput:
                   {{ mdl.maxOutputTokens.toLocaleString() }}
                 </span>
               </div>
 
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <n-button
                   size="tiny"
                   :type="isModelActive(editingProvider.id, mdl.id) ? 'primary' : 'default'"
