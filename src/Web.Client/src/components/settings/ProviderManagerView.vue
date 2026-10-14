@@ -130,9 +130,9 @@
             </div>
           </div>
 
-          <!-- API Key (DPAPI 加密保护) 与代理策略 -->
-          <div class="grid grid-cols-12 gap-3">
-            <div class="col-span-7 space-y-1">
+          <!-- API Key (DPAPI 加密保护)：独占一行 -->
+          <div class="space-y-3">
+            <div class="space-y-1" data-testid="provider-apikey-block">
               <div class="flex items-center justify-between">
                 <label class="text-xs text-secondary">API Key 密钥 (Windows DPAPI 加密存储)</label>
                 <n-tag
@@ -163,7 +163,7 @@
               />
             </div>
 
-            <div class="col-span-5 space-y-1">
+            <div class="space-y-1" data-testid="provider-proxy-block">
               <label class="text-xs text-secondary">服务商代理策略 (默认继承全局)</label>
               <n-select
                 v-model:value="editingProvider.proxyMode"
@@ -172,6 +172,7 @@
                 data-testid="provider-proxy-mode-select"
                 @update:value="handleProviderProxyModeChange"
               />
+              <div class="text-[11px] text-secondary font-mono">当前继承指向：{{ configStore.globalProxySummaryText }}</div>
             </div>
           </div>
 
@@ -294,21 +295,26 @@
             </div>
           </div>
           <div v-else class="text-xs text-secondary py-1">
-            暂无自定义请求头，可点击下方按钮添加（例如注入 <code class="font-mono">${session-hash}</code> 实现网关亲和路由）。
+            暂无自定义请求头，可点击下方按钮添加（例如注入 <code class="font-mono">${session-hash}</code> 实现网关亲和路由；推荐同时保留 <code class="font-mono">x-opencode-session</code> 以兼容 opencode 网关）。
           </div>
 
           <div class="flex items-center justify-between pt-1">
-            <n-button
-              size="tiny"
-              secondary
-              data-testid="add-custom-header-btn"
-              @click="addCustomHeader"
-            >
-              <template #icon>
-                <Plus class="w-3.5 h-3.5" />
-              </template>
-              添加自定义 Header
-            </n-button>
+            <div class="flex flex-wrap items-center gap-2">
+              <n-button
+                size="tiny"
+                secondary
+                data-testid="add-custom-header-btn"
+                @click="addCustomHeader"
+              >
+                <template #icon>
+                  <Plus class="w-3.5 h-3.5" />
+                </template>
+                添加自定义 Header
+              </n-button>
+              <n-button size="tiny" secondary data-testid="add-opencode-session-header-btn" @click="addOpencodeSessionHeader">
+                + x-opencode-session（会话亲和）
+              </n-button>
+            </div>
 
             <span
               v-if="endpointPreview?.sessionHash"
@@ -363,108 +369,129 @@
         <div class="space-y-2.5">
           <div
             v-for="(mdl, mIdx) in editingProvider.models"
-            :key="mIdx"
-            class="setting-inset p-2.5 space-y-2 min-w-0"
+            :key="mdl.id + '-' + mIdx"
+            class="setting-option p-2.5 cursor-pointer min-w-0"
+            :class="{ 'setting-option-active': expandedModelIndex === mIdx }"
             :data-testid="`model-row-${mIdx}`"
+            @click="toggleModelExpand(mIdx)"
           >
-            <div class="grid grid-cols-12 gap-2 items-center min-w-0">
-              <div class="col-span-3 space-y-1 min-w-0">
-                <label class="text-[11px] text-secondary">模型 ID (必填)</label>
-                <n-input
-                  v-model:value="mdl.id"
-                  placeholder="如 gpt-4o / o3-mini"
-                  size="small"
-                  class="font-mono text-xs"
-                />
+            <div class="flex items-center justify-between gap-2 min-w-0">
+              <div class="flex items-center gap-2 min-w-0">
+                <ChevronDown class="w-3.5 h-3.5 transition-transform shrink-0" :class="{ 'rotate-180': expandedModelIndex === mIdx }" />
+                <span class="text-xs font-semibold font-mono truncate">{{ mdl.id || '(未命名模型)' }}</span>
+                <span v-if="mdl.displayName" class="text-[11px] text-secondary truncate">({{ mdl.displayName }})</span>
+                <n-tag :type="mdl.protocol === 'resp' ? 'info' : 'success'" size="small" :bordered="false" class="font-mono shrink-0">{{ mdl.protocol === 'resp' ? 'resp' : 'chat' }}</n-tag>
               </div>
-
-              <div class="col-span-3 space-y-1 min-w-0">
-                <label class="text-[11px] text-secondary">显示名称</label>
-                <n-input
-                  v-model:value="mdl.displayName"
-                  placeholder="显示别名（可选）"
-                  size="small"
-                  class="text-xs"
-                />
-              </div>
-
-              <div class="col-span-2 space-y-1 min-w-0">
-                <label class="text-[11px] text-secondary">通信协议</label>
-                <n-select
-                  v-model:value="mdl.protocol"
-                  :options="protocolOptions"
-                  size="small"
-                  class="font-mono text-xs"
-                />
-              </div>
-
-              <div class="col-span-2 space-y-1 min-w-0">
-                <label class="text-[11px] text-secondary">最大上下文 Token</label>
-                <n-input-number
-                  v-model:value="mdl.maxContextTokens"
-                  :min="1024"
-                  :max="2000000"
-                  :step="4096"
-                  size="small"
-                  class="font-mono text-xs w-full max-w-full"
-                />
-              </div>
-
-              <div class="col-span-2 space-y-1 min-w-0">
-                <label class="text-[11px] text-secondary">最大输出 Token</label>
-                <n-input-number
-                  v-model:value="mdl.maxOutputTokens"
-                  :min="256"
-                  :max="256000"
-                  :step="1024"
-                  size="small"
-                  class="font-mono text-xs w-full max-w-full"
-                />
+              <div class="flex items-center gap-2 shrink-0" @click.stop>
+                <span class="text-[11px] font-mono text-secondary hidden sm:inline">{{ formatK(mdl.maxContextTokens) }} / Out {{ formatK(mdl.maxOutputTokens) }}</span>
+                <n-tag v-if="isModelActive(editingProvider.id, mdl.id)" type="primary" size="small" :bordered="false">默认</n-tag>
+                <n-button size="tiny" secondary @click="handleSetActiveModel(editingProvider.id, mdl.id)">设为默认</n-button>
               </div>
             </div>
-
-            <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-subtle/60 text-xs min-w-0">
-              <div class="flex flex-wrap items-center gap-3 min-w-0">
-                <n-tag
-                  :type="mdl.protocol === 'resp' ? 'info' : 'success'"
-                  size="small"
-                  :bordered="false"
-                  class="font-mono"
-                >
-                  {{ mdl.protocol === 'resp' ? 'resp (/v1/responses)' : 'chat (/v1/chat/completions)' }}
-                </n-tag>
-                <span class="text-[11px] font-mono text-secondary min-w-0 break-all">
-                  Context: {{ mdl.maxContextTokens.toLocaleString() }} · MaxOutput:
-                  {{ mdl.maxOutputTokens.toLocaleString() }}
-                </span>
+            <n-collapse-transition :show="expandedModelIndex === mIdx">
+              <div class="pt-2.5 mt-2 border-t border-subtle/60 space-y-2.5" @click.stop>
+                <div class="grid grid-cols-12 gap-2 min-w-0">
+                  <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">模型 ID (必填)</label>
+                    <n-input v-model:value="mdl.id" placeholder="如 gpt-4o / o3-mini" size="small" class="font-mono text-xs" />
+                  </div>
+                  <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">显示名称</label>
+                    <n-input v-model:value="mdl.displayName" placeholder="显示别名（可选）" size="small" class="text-xs" />
+                  </div>
+                  <div class="col-span-8 sm:col-span-4 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">通信协议</label>
+                    <n-select v-model:value="mdl.protocol" :options="protocolOptions" size="small" class="font-mono text-xs" />
+                  </div>
+                  <div class="col-span-4 sm:col-span-2 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">启用</label>
+                    <div class="flex items-center gap-1.5 h-[34px]">
+                      <n-switch v-model:value="mdl.enabled" size="small" />
+                      <span class="text-[11px] text-secondary">{{ mdl.enabled ? '启用' : '停用' }}</span>
+                    </div>
+                  </div>
+                  <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">温度 (部分推理模型需留空)</label>
+                    <div class="flex items-center gap-2">
+                      <n-input-number
+                        v-model:value="mdl.temperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        size="small"
+                        class="font-mono text-xs w-full max-w-full"
+                        placeholder="留空则不下发"
+                      />
+                      <n-button size="tiny" quaternary @click="mdl.temperature = null">清空（留空）</n-button>
+                    </div>
+                  </div>
+                  <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">最大上下文 Token</label>
+                    <n-input-number
+                      v-model:value="mdl.maxContextTokens"
+                      :min="1024"
+                      :max="2000000"
+                      :step="4096"
+                      size="small"
+                      class="font-mono text-xs w-full max-w-full"
+                    />
+                    <div class="flex flex-wrap items-center gap-1.5 pt-1">
+                      <n-button
+                        v-for="p in CONTEXT_PRESETS"
+                        :key="p.value"
+                        size="tiny"
+                        secondary
+                        :type="mdl.maxContextTokens === p.value ? 'primary' : 'default'"
+                        @click="setPreset(mdl, 'maxContextTokens', p.value)"
+                      >{{ p.label }}</n-button>
+                    </div>
+                  </div>
+                  <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
+                    <label class="text-[11px] text-secondary">最大输出 Token</label>
+                    <n-input-number
+                      v-model:value="mdl.maxOutputTokens"
+                      :min="256"
+                      :max="256000"
+                      :step="1024"
+                      size="small"
+                      class="font-mono text-xs w-full max-w-full"
+                    />
+                    <div class="flex flex-wrap items-center gap-1.5 pt-1">
+                      <n-button
+                        v-for="p in OUTPUT_PRESETS"
+                        :key="p.value"
+                        size="tiny"
+                        secondary
+                        :type="mdl.maxOutputTokens === p.value ? 'primary' : 'default'"
+                        @click="setPreset(mdl, 'maxOutputTokens', p.value)"
+                      >{{ p.label }}</n-button>
+                    </div>
+                  </div>
+                </div>
+                <div class="text-[11px] font-mono text-secondary break-all min-w-0">
+                  {{ mdl.protocol === 'resp' ? 'resp → ' : 'chat → ' }}{{ mdl.protocol === 'resp' ? computedRespEndpoint : computedChatEndpoint }}
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <n-button
+                    size="tiny"
+                    :type="isModelActive(editingProvider.id, mdl.id) ? 'primary' : 'default'"
+                    secondary
+                    @click="handleSetActiveModel(editingProvider.id, mdl.id)"
+                  >
+                    <template #icon>
+                      <CheckCircle2 class="w-3.5 h-3.5" />
+                    </template>
+                    {{ isModelActive(editingProvider.id, mdl.id) ? '当前默认模型' : '设为默认模型' }}
+                  </n-button>
+                  <n-button quaternary size="tiny" type="error" :disabled="editingProvider.models.length <= 1" @click="removeModelRow(mIdx)">
+                    <template #icon>
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </template>
+                    删除模型
+                  </n-button>
+                </div>
               </div>
-
-              <div class="flex flex-wrap items-center gap-2">
-                <n-button
-                  size="tiny"
-                  :type="isModelActive(editingProvider.id, mdl.id) ? 'primary' : 'default'"
-                  secondary
-                  @click="handleSetActiveModel(editingProvider.id, mdl.id)"
-                >
-                  <template #icon>
-                    <CheckCircle2 class="w-3.5 h-3.5" />
-                  </template>
-                  {{ isModelActive(editingProvider.id, mdl.id) ? '当前默认模型' : '设为默认模型' }}
-                </n-button>
-
-                <n-button
-                  quaternary
-                  size="tiny"
-                  type="error"
-                  :disabled="editingProvider.models.length <= 1"
-                  @click="removeModelRow(mIdx)"
-                >
-                  <template #icon>
-                    <Trash2 class="w-3.5 h-3.5" />
-                  </template>
-                </n-button>
-              </div>
-            </div>
+            </n-collapse-transition>
           </div>
         </div>
       </n-card>
@@ -550,9 +577,11 @@ import {
   CheckCircle2,
   Activity,
   Save,
+  ChevronDown,
 } from 'lucide-vue-next';
 import { useConfigStore } from '@/stores/configStore';
 import type {
+  ModelConfig,
   ProviderConfig,
   ProviderEndpointPreviewDto,
   ProxyConnectivityTestResult,
@@ -597,6 +626,41 @@ const presetVariables = [
   { token: '${timestamp}', desc: '当前 UTC Unix 秒级时间戳' },
 ];
 
+const expandedModelIndex = ref<number | null>(null);
+
+const CONTEXT_PRESETS = [
+  { label: '128k', value: 128000 },
+  { label: '256k', value: 256000 },
+  { label: '512k', value: 512000 },
+  { label: '1M', value: 1000000 },
+];
+
+const OUTPUT_PRESETS = [
+  { label: '4k', value: 4096 },
+  { label: '8k', value: 8192 },
+  { label: '16k', value: 16384 },
+  { label: '50k', value: 51200 },
+  { label: '64k', value: 65536 },
+  { label: '128k', value: 131072 },
+];
+
+function toggleModelExpand(idx: number) {
+  expandedModelIndex.value = expandedModelIndex.value === idx ? null : idx;
+}
+
+function formatK(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '-';
+  if (v >= 1048576) {
+    const m = v / 1048576;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  return `${Math.round(v / 1024)}K`;
+}
+
+function setPreset(mdl: ModelConfig, field: 'maxContextTokens' | 'maxOutputTokens', value: number) {
+  mdl[field] = value;
+}
+
 const computedVersionPrefix = computed(() => {
   const raw = (editingProvider.value?.baseUrl || 'https://api.openai.com/v1').trim();
   const withScheme = raw.includes('://') ? raw : `https://${raw}`;
@@ -620,6 +684,7 @@ function selectProvider(providerId: string) {
     editingProvider.value = JSON.parse(JSON.stringify(target));
     apiKeyInput.value = '';
     providerTestResult.value = null;
+    expandedModelIndex.value = null;
     refreshEndpointPreview();
   }
 }
@@ -641,6 +706,13 @@ watch(
     }
   },
   { immediate: true, deep: true }
+);
+
+watch(
+  () => editingProvider.value?.id,
+  () => {
+    expandedModelIndex.value = null;
+  }
 );
 
 onMounted(() => {
@@ -685,6 +757,21 @@ function addCustomHeader() {
   refreshEndpointPreview();
 }
 
+function addOpencodeSessionHeader() {
+  if (!editingProvider.value) return;
+  editingProvider.value.enableCustomHeaders = true;
+  const exists = editingProvider.value.customHeaders.some((h) => h.key.toLowerCase() === 'x-opencode-session');
+  if (!exists) {
+    editingProvider.value.customHeaders.push({
+      key: 'x-opencode-session',
+      valueTemplate: '${session-hash}',
+      enabled: true,
+      isSecret: false,
+    });
+  }
+  refreshEndpointPreview();
+}
+
 function removeCustomHeader(index: number) {
   if (!editingProvider.value) return;
   editingProvider.value.customHeaders.splice(index, 1);
@@ -720,11 +807,13 @@ function addModelRow() {
     temperature: 0.2,
     enabled: true,
   });
+  expandedModelIndex.value = editingProvider.value.models.length - 1;
 }
 
 function removeModelRow(index: number) {
   if (!editingProvider.value || editingProvider.value.models.length <= 1) return;
   editingProvider.value.models.splice(index, 1);
+  expandedModelIndex.value = null;
 }
 
 function isModelActive(providerId: string, modelId: string): boolean {
@@ -766,6 +855,12 @@ function handleAddNewProvider() {
         enabled: true,
         isSecret: false,
       },
+      {
+        key: 'x-opencode-session',
+        valueTemplate: '${session-hash}',
+        enabled: true,
+        isSecret: false,
+      },
     ],
     models: [
       {
@@ -803,6 +898,7 @@ async function handleSaveCurrentProvider(showToast = true) {
   const res = await configStore.upsertProvider(payload);
   if (res.ok) {
     apiKeyInput.value = '';
+    expandedModelIndex.value = null;
     await refreshEndpointPreview();
     if (showToast) {
       message.success(res.message || '服务商配置已通过 DPAPI 加密落盘');

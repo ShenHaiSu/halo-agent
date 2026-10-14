@@ -438,6 +438,13 @@ public sealed class ProviderConfigService
                 },
                 new()
                 {
+                    Key = "x-opencode-session",
+                    ValueTemplate = "${session-hash}",
+                    Enabled = true,
+                    IsSecret = false
+                },
+                new()
+                {
                     Key = "X-Client-Workspace",
                     ValueTemplate = "${workspace-name}",
                     Enabled = true,

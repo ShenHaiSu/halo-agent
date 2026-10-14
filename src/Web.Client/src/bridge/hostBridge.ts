@@ -605,6 +605,12 @@ function createBrowserMockBridge(): HostBridgeApi {
             isSecret: false,
           },
           {
+            key: 'x-opencode-session',
+            valueTemplate: '${session-hash}',
+            enabled: true,
+            isSecret: false,
+          },
+          {
             key: 'X-Client-Workspace',
             valueTemplate: '${workspace-name}',
             enabled: true,
