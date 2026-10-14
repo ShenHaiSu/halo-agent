@@ -186,9 +186,11 @@
               :key="sess.id"
               class="group relative flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer text-xs transition-colors border"
               :class="
-                sess.id === activeSessionId
-                  ? 'bg-elevated border-accent/40 text-primary font-medium'
-                  : 'border-transparent text-secondary hover:bg-surface hover:text-primary'
+                isArmed(sess.id)
+                  ? 'border-red-500/60 bg-red-500/10 text-primary font-medium'
+                  : sess.id === activeSessionId
+                    ? 'bg-elevated border-accent/40 text-primary font-medium'
+                    : 'border-transparent text-secondary hover:bg-surface hover:text-primary'
               "
               :data-testid="`session-item-${sess.id}`"
               @click="handleSelectSession(sess.id)"
@@ -220,22 +222,38 @@
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-2 text-[10px] text-secondary font-mono mt-0.5">
-                    <span>{{ formatTokens(sess.totalInputTokens + sess.totalOutputTokens) }} Tokens</span>
-                    <span>·</span>
-                    <span :title="`完整会话 Hash: ${sess.sessionHash}`">Hash: {{ sess.sessionHash.substring(0, 6) }}</span>
+                  <div class="flex items-center gap-1.5 text-[10px] text-secondary font-mono mt-0.5 truncate" :title="sessionTimeTitle(sess)">
+                    <span>{{ formatSessionTime(sess.createdAtUtc) }}</span>
+                    <span class="opacity-50">·</span>
+                    <span>活跃 {{ formatRelativeTime(sess.updatedAtUtc) }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- 悬停更多操作按钮 -->
-              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0" @click.stop>
+              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
+                <n-button
+                  v-if="isArmed(sess.id)"
+                  size="tiny"
+                  type="error"
+                  secondary
+                  :loading="deletingSessionId === sess.id"
+                  data-testid="confirm-delete-btn"
+                  @click="confirmDeleteInline(sess.id)"
+                  @mouseleave="cancelDeleteConfirm"
+                >
+                  <template #icon>
+                    <AlertTriangle class="w-3.5 h-3.5" />
+                  </template>
+                  确定删除？
+                </n-button>
                 <n-dropdown
+                  v-else
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny">
+                  <n-button quaternary circle size="tiny" data-testid="session-more-btn">
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -260,9 +278,11 @@
               :key="sess.id"
               class="group relative flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer text-xs transition-colors border"
               :class="
-                sess.id === activeSessionId
-                  ? 'bg-elevated border-accent/40 text-primary font-medium'
-                  : 'border-transparent text-secondary hover:bg-surface hover:text-primary'
+                isArmed(sess.id)
+                  ? 'border-red-500/60 bg-red-500/10 text-primary font-medium'
+                  : sess.id === activeSessionId
+                    ? 'bg-elevated border-accent/40 text-primary font-medium'
+                    : 'border-transparent text-secondary hover:bg-surface hover:text-primary'
               "
               :data-testid="`session-item-${sess.id}`"
               @click="handleSelectSession(sess.id)"
@@ -294,22 +314,38 @@
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-2 text-[10px] text-secondary font-mono mt-0.5">
-                    <span>{{ formatTokens(sess.totalInputTokens + sess.totalOutputTokens) }} Tokens</span>
-                    <span>·</span>
-                    <span :title="`完整会话 Hash: ${sess.sessionHash}`">Hash: {{ sess.sessionHash.substring(0, 6) }}</span>
+                  <div class="flex items-center gap-1.5 text-[10px] text-secondary font-mono mt-0.5 truncate" :title="sessionTimeTitle(sess)">
+                    <span>{{ formatSessionTime(sess.createdAtUtc) }}</span>
+                    <span class="opacity-50">·</span>
+                    <span>活跃 {{ formatRelativeTime(sess.updatedAtUtc) }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- 悬停更多操作按钮 -->
-              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0" @click.stop>
+              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
+                <n-button
+                  v-if="isArmed(sess.id)"
+                  size="tiny"
+                  type="error"
+                  secondary
+                  :loading="deletingSessionId === sess.id"
+                  data-testid="confirm-delete-btn"
+                  @click="confirmDeleteInline(sess.id)"
+                  @mouseleave="cancelDeleteConfirm"
+                >
+                  <template #icon>
+                    <AlertTriangle class="w-3.5 h-3.5" />
+                  </template>
+                  确定删除？
+                </n-button>
                 <n-dropdown
+                  v-else
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny">
+                  <n-button quaternary circle size="tiny" data-testid="session-more-btn">
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -341,17 +377,6 @@
       </span>
     </div>
 
-    <!-- 删除确认弹窗 -->
-    <n-modal
-      v-model:show="showDeleteConfirm"
-      preset="dialog"
-      type="warning"
-      title="确认删除会话"
-      content="删除后该会话历史记录（meta.json 及 messages.jsonl）将被永久移除，确定继续吗？"
-      positive-text="确认删除"
-      negative-text="取消"
-      @positive-click="confirmDeleteSession"
-    />
   </aside>
 </template>
 
@@ -378,6 +403,7 @@ import {
 } from 'lucide-vue-next';
 import { getHostBridge, type SessionMetadata } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { formatSessionTime, formatRelativeTime, sessionTimeTitle } from '@/utils/timeFormat';
 
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
@@ -396,14 +422,46 @@ const {
 const showWorkspacePopover = ref(false);
 const editingSessionId = ref<string | null>(null);
 const editingTitleDraft = ref('');
-const showDeleteConfirm = ref(false);
-const sessionToDelete = ref<SessionMetadata | null>(null);
+const pendingDeleteSessionId = ref<string | null>(null);
+const deletingSessionId = ref<string | null>(null);
+let pendingDeleteTimer: number | null = null;
 
-function formatTokens(count: number): string {
-  if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K`;
+function armDeleteConfirm(sessId: string): void {
+  if (editingSessionId.value) return;
+  pendingDeleteSessionId.value = sessId;
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
   }
-  return `${count}`;
+  pendingDeleteTimer = window.setTimeout(() => {
+    pendingDeleteSessionId.value = null;
+    pendingDeleteTimer = null;
+  }, 3000);
+}
+
+function cancelDeleteConfirm(): void {
+  pendingDeleteSessionId.value = null;
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
+    pendingDeleteTimer = null;
+  }
+}
+
+function isArmed(sessId: string): boolean {
+  return pendingDeleteSessionId.value === sessId;
+}
+
+async function confirmDeleteInline(sessId: string): Promise<void> {
+  if (deletingSessionId.value !== null) return;
+  deletingSessionId.value = sessId;
+  try {
+    cancelDeleteConfirm();
+    const ok = await workspaceStore.deleteSession(sessId);
+    if (ok) {
+      message.success('会话已删除');
+    }
+  } finally {
+    deletingSessionId.value = null;
+  }
 }
 
 async function handleSelectWorkspace(workspaceId: string): Promise<void> {
@@ -445,6 +503,7 @@ async function handleCreateNewSession(): Promise<void> {
 }
 
 async function handleSelectSession(sessionId: string): Promise<void> {
+  cancelDeleteConfirm();
   await workspaceStore.selectSession(sessionId);
 }
 
@@ -528,23 +587,16 @@ async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Prom
       break;
     }
     case 'delete':
-      sessionToDelete.value = sess;
-      showDeleteConfirm.value = true;
+      armDeleteConfirm(sess.id);
       break;
   }
 }
 
-async function confirmDeleteSession(): Promise<void> {
-  if (sessionToDelete.value) {
-    const ok = await workspaceStore.deleteSession(sessionToDelete.value.id);
-    if (ok) {
-      message.success('会话已删除');
-    }
-    sessionToDelete.value = null;
-  }
-}
-
 function handleGlobalKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    cancelDeleteConfirm();
+    return;
+  }
   if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault();
     handleCreateNewSession();
@@ -557,5 +609,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
+    pendingDeleteTimer = null;
+  }
 });
 </script>
