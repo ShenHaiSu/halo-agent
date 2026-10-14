@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "local.smart-commit",
+  "name": "Smart Commit",
+  "version": "0.1.0",
+  "description": "智能提交：按diff分组拆分commit、禁他人署名、审计敏感物后push（Global通用）",
+  "main": "main.js",
+  "contributes": {
+    "skills": [
+      "skills/git-smart-commit.md"
+    ]
+  },
+  "permissions": [
+    "agent.prompt.inject"
+  ],
+  "engines": {
+    "piDesktop": ">=0.1.0"
+  },
+  "activationEvents": [
+    "onStartup"
+  ]
+}
