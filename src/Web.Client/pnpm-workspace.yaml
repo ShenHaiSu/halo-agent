@@ -1,8 +1,11 @@
 packages:
   - '.'
-storeDir: F:/MyProgram/CSharp/halo-agent/.pnpm-store
+storeDir: ../../.pnpm-store
 packageImportMethod: copy
 verifyDepsBeforeRun: false
 onlyBuiltDependencies:
   - esbuild
   - vue-demi
+allowBuilds:
+  esbuild: true
+  vue-demi: true
