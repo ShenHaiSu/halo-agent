@@ -327,12 +327,15 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                         JsonElement usageElem = default;
                         bool hasUsage = false;
                         if (root.TryGetProperty("response", out var respElem) &&
-                            respElem.TryGetProperty("usage", out var u1))
+                            respElem.ValueKind == JsonValueKind.Object &&
+                            respElem.TryGetProperty("usage", out var u1) &&
+                            u1.ValueKind == JsonValueKind.Object)
                         {
                             usageElem = u1;
                             hasUsage = true;
                         }
-                        else if (root.TryGetProperty("usage", out var u2))
+                        else if (root.TryGetProperty("usage", out var u2) &&
+                            u2.ValueKind == JsonValueKind.Object)
                         {
                             usageElem = u2;
                             hasUsage = true;
@@ -340,16 +343,17 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
 
                         if (hasUsage)
                         {
-                            int inTokens = usageElem.TryGetProperty("input_tokens", out var it) ? it.GetInt32() : 0;
-                            int outTokens = usageElem.TryGetProperty("output_tokens", out var ot) ? ot.GetInt32() : 0;
-                            int totalTokens = usageElem.TryGetProperty("total_tokens", out var tt) ? tt.GetInt32() : (inTokens + outTokens);
+                            int inTokens = TryGetInt32(usageElem, "input_tokens");
+                            int outTokens = TryGetInt32(usageElem, "output_tokens");
+                            int totalTokens = TryGetInt32(usageElem, "total_tokens", inTokens + outTokens);
 
                             int cachedTokens = 0;
                             if ((usageElem.TryGetProperty("input_tokens_details", out var itd) ||
                                  usageElem.TryGetProperty("input_token_details", out itd)) &&
+                                itd.ValueKind == JsonValueKind.Object &&
                                 itd.TryGetProperty("cached_tokens", out var ctVal))
                             {
-                                cachedTokens = ctVal.GetInt32();
+                                cachedTokens = GetInt32Value(ctVal);
                             }
 
                             yield return UnifiedStreamEvent.Tokens(inTokens, outTokens, cachedTokens, totalTokens);
@@ -365,7 +369,8 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                             string code = "RESPONSES_API_ERROR";
                             string message = "Responses API 执行失败";
 
-                            if (root.TryGetProperty("error", out var errElem))
+                            if (root.TryGetProperty("error", out var errElem) &&
+                                errElem.ValueKind == JsonValueKind.Object)
                             {
                                 code = errElem.TryGetProperty("code", out var c) ? c.GetString() ?? code : code;
                                 message = errElem.TryGetProperty("message", out var m) ? m.GetString() ?? message : message;
@@ -409,7 +414,9 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
         try
         {
             using var doc = JsonDocument.Parse(raw);
-            if (doc.RootElement.TryGetProperty("error", out var errorElem))
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("error", out var errorElem) &&
+                errorElem.ValueKind == JsonValueKind.Object)
             {
                 string msg = errorElem.TryGetProperty("message", out var m) ? m.GetString() ?? raw : raw;
                 string type = errorElem.TryGetProperty("type", out var t) ? t.GetString() ?? string.Empty : string.Empty;
@@ -424,6 +431,28 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
         }
 
         return $"[OpenAI Responses] 上游接口返回 HTTP {statusCode}: {raw}{hint}";
+    }
+
+    private static int TryGetInt32(JsonElement parent, string propertyName, int defaultValue = 0)
+    {
+        if (parent.ValueKind != JsonValueKind.Object ||
+            !parent.TryGetProperty(propertyName, out var elem))
+        {
+            return defaultValue;
+        }
+
+        return GetInt32Value(elem, defaultValue);
+    }
+
+    private static int GetInt32Value(JsonElement elem, int defaultValue = 0)
+    {
+        return elem.ValueKind switch
+        {
+            JsonValueKind.Number when elem.TryGetInt32(out int v) => v,
+            JsonValueKind.Number => (int)elem.GetDouble(),
+            JsonValueKind.String when int.TryParse(elem.GetString(), out int sv) => sv,
+            _ => defaultValue,
+        };
     }
 
     private sealed class RespFunctionCallState

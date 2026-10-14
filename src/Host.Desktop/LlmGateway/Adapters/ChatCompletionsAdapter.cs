@@ -191,8 +191,9 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
             {
                 var root = doc.RootElement;
 
-                // 1. 检查是否存在上游错误载荷
-                if (root.TryGetProperty("error", out var errorElem))
+                // 1. 检查是否存在上游错误载荷（兼容 "error":null，避免对 Null 调用 TryGetProperty 抛 InvalidOperationException）
+                if (root.TryGetProperty("error", out var errorElem) &&
+                    errorElem.ValueKind == JsonValueKind.Object)
                 {
                     string errMessage = errorElem.TryGetProperty("message", out var msgElem)
                         ? msgElem.GetString() ?? "未知上游错误"
@@ -205,33 +206,41 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                     yield break;
                 }
 
-                // 2. 检查顶层 usage
-                if (root.TryGetProperty("usage", out var usageElem))
+                // 2. 检查顶层 usage（兼容上游返回 "usage":null 的中间 chunk，避免 InvalidOperationException 导致整轮会话失败）
+                if (root.TryGetProperty("usage", out var usageElem) &&
+                    usageElem.ValueKind == JsonValueKind.Object)
                 {
-                    int inTokens = usageElem.TryGetProperty("prompt_tokens", out var pt) ? pt.GetInt32() : 0;
-                    int outTokens = usageElem.TryGetProperty("completion_tokens", out var ctElem) ? ctElem.GetInt32() : 0;
-                    int totalTokens = usageElem.TryGetProperty("total_tokens", out var tt) ? tt.GetInt32() : (inTokens + outTokens);
+                    int inTokens = TryGetInt32(usageElem, "prompt_tokens");
+                    int outTokens = TryGetInt32(usageElem, "completion_tokens");
+                    int totalTokens = TryGetInt32(usageElem, "total_tokens", inTokens + outTokens);
 
                     int cachedTokens = 0;
                     if (usageElem.TryGetProperty("prompt_tokens_details", out var ptd) &&
+                        ptd.ValueKind == JsonValueKind.Object &&
                         ptd.TryGetProperty("cached_tokens", out var ctVal))
                     {
-                        cachedTokens = ctVal.GetInt32();
+                        cachedTokens = GetInt32Value(ctVal);
                     }
                     else if (usageElem.TryGetProperty("prompt_cache_hit_tokens", out var pcht))
                     {
-                        cachedTokens = pcht.GetInt32();
+                        cachedTokens = GetInt32Value(pcht);
                     }
 
                     yield return UnifiedStreamEvent.Tokens(inTokens, outTokens, cachedTokens, totalTokens);
                 }
-
-                // 3. 检查 choices 增量
-                if (root.TryGetProperty("choices", out var choicesElem) && choicesElem.GetArrayLength() > 0)
+                // 3. 检查 choices 增量（兼容 "choices":null / 非数组，避免 GetArrayLength 抛异常）
+                if (root.TryGetProperty("choices", out var choicesElem) &&
+                    choicesElem.ValueKind == JsonValueKind.Array &&
+                    choicesElem.GetArrayLength() > 0)
                 {
                     var choice = choicesElem[0];
+                    if (choice.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
 
-                    if (choice.TryGetProperty("delta", out var deltaElem))
+                    if (choice.TryGetProperty("delta", out var deltaElem) &&
+                        deltaElem.ValueKind == JsonValueKind.Object)
                     {
                         // 3.1 思考链增量（兼容 DeepSeek reasoning_content 与各家 reasoning 字段）
                         string? reasoning = null;
@@ -265,7 +274,12 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                         {
                             foreach (var tcElem in toolCallsElem.EnumerateArray())
                             {
-                                int index = tcElem.TryGetProperty("index", out var idxElem) ? idxElem.GetInt32() : 0;
+                                if (tcElem.ValueKind != JsonValueKind.Object)
+                                {
+                                    continue;
+                                }
+
+                                int index = TryGetInt32(tcElem, "index");
                                 if (!toolCallStates.TryGetValue(index, out var state))
                                 {
                                     state = new PartialToolCallState { Index = index };
@@ -281,7 +295,8 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                                     }
                                 }
 
-                                if (tcElem.TryGetProperty("function", out var funcElem))
+                                if (tcElem.TryGetProperty("function", out var funcElem) &&
+                                    funcElem.ValueKind == JsonValueKind.Object)
                                 {
                                     if (funcElem.TryGetProperty("name", out var nameElem))
                                     {
@@ -359,7 +374,9 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
         try
         {
             using var doc = JsonDocument.Parse(raw);
-            if (doc.RootElement.TryGetProperty("error", out var errorElem))
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("error", out var errorElem) &&
+                errorElem.ValueKind == JsonValueKind.Object)
             {
                 string msg = errorElem.TryGetProperty("message", out var m) ? m.GetString() ?? raw : raw;
                 string type = errorElem.TryGetProperty("type", out var t) ? t.GetString() ?? string.Empty : string.Empty;
@@ -376,6 +393,27 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
         return $"[OpenAI Chat] 上游接口返回 HTTP {statusCode}: {raw}";
     }
 
+    private static int TryGetInt32(JsonElement parent, string propertyName, int defaultValue = 0)
+    {
+        if (parent.ValueKind != JsonValueKind.Object ||
+            !parent.TryGetProperty(propertyName, out var elem))
+        {
+            return defaultValue;
+        }
+
+        return GetInt32Value(elem, defaultValue);
+    }
+
+    private static int GetInt32Value(JsonElement elem, int defaultValue = 0)
+    {
+        return elem.ValueKind switch
+        {
+            JsonValueKind.Number when elem.TryGetInt32(out int v) => v,
+            JsonValueKind.Number => (int)elem.GetDouble(),
+            JsonValueKind.String when int.TryParse(elem.GetString(), out int sv) => sv,
+            _ => defaultValue,
+        };
+    }
     private sealed class PartialToolCallState
     {
         public int Index { get; init; }
