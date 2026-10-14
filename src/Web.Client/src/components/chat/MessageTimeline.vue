@@ -1,6 +1,6 @@
 <template>
   <div class="flex-1 min-h-0 overflow-y-auto" data-testid="message-timeline">
-    <div class="max-w-4xl mx-auto w-full px-4 py-4 space-y-4">
+    <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <!-- 空态 -->
       <div v-if="persistedMessages.length === 0 && !agentStore.hasStreamingContent && agentStore.toolCards.length === 0" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
@@ -138,12 +138,15 @@ import hljs from 'highlight.js';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 import ToolCallCard from '@/components/chat/ToolCallCard.vue';
 import type { UnifiedChatMessage } from '@/bridge/hostBridge';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
+const appearanceStore = useAppearanceStore();
 const { sessionMessages } = storeToRefs(workspaceStore);
+const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
 
 const persistedMessages = computed<UnifiedChatMessage[]>(() => sessionMessages.value || []);
 const collapsedReasoning = reactive<Record<string, boolean>>({});

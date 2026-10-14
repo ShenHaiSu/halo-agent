@@ -88,3 +88,23 @@ html.light .setting-inset { background-color: #f1f5f9; }
 .settings-drawer-body code, .settings-drawer-body .font-mono {
   overflow-wrap: anywhere; word-break: break-all;
 }
+
+/* need02-01 主题和样式：基准字号变量 + 会话宽度模式（Chrome109 安全，仅 var()/max-width） */
+:root {
+  --app-font-size: 13px;
+}
+body {
+  font-size: var(--app-font-size);
+}
+.chat-timeline-centered {
+  max-width: 56rem;
+  margin-inline: auto;
+  width: 100%;
+}
+.chat-timeline-full {
+  max-width: none;
+  width: 100%;
+}
+/* need02-02 全局 table 兜底：Drawer 内描述表格 label 定宽不断竖排、content 自动换行 */
+.settings-drawer-body table { table-layout: fixed; width: 100%; }
+.settings-drawer-body th, .settings-drawer-body td { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }

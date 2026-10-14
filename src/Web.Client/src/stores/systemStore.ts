@@ -8,6 +8,7 @@ import {
   type StorageMigrationResult,
   type BridgeResponse,
 } from '@/bridge/hostBridge';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 
 export const useSystemStore = defineStore('system', () => {
   const systemInfo = ref<SystemRuntimeInfo | null>(null);
@@ -16,7 +17,8 @@ export const useSystemStore = defineStore('system', () => {
   const migrating = ref(false);
   const migrationPercent = ref(0);
   const migrationStatusText = ref('');
-  const themeMode = ref<'dark' | 'light'>('dark');
+  // 主题真相源已收敛至 appearanceStore；此处仅保留只读映射 + 代理转发，保持旧 import 不炸
+  const themeMode = computed<'dark' | 'light'>(() => useAppearanceStore().themeMode);
   const recentHostEvents = ref<Array<{ type: string; summary: string; timestamp: number }>>([]);
 
   const isNativeHost = computed(() => typeof window !== 'undefined' && !!window.CefSharp);
@@ -28,21 +30,11 @@ export const useSystemStore = defineStore('system', () => {
   });
 
   function applyThemeClass(mode: 'dark' | 'light') {
-    themeMode.value = mode;
-    if (typeof document !== 'undefined') {
-      const root = document.documentElement;
-      if (mode === 'light') {
-        root.classList.remove('dark');
-        root.classList.add('light');
-      } else {
-        root.classList.remove('light');
-        root.classList.add('dark');
-      }
-    }
+    useAppearanceStore().setThemeMode(mode);
   }
 
   function toggleTheme() {
-    applyThemeClass(themeMode.value === 'dark' ? 'light' : 'dark');
+    useAppearanceStore().toggleTheme();
   }
 
   async function refreshAll(): Promise<void> {

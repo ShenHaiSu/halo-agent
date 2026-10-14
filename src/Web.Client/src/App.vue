@@ -94,7 +94,8 @@ import {
   Network,
   Hash,
 } from 'lucide-vue-next';
-import { haloDarkThemeOverrides, haloLightThemeOverrides } from '@/theme/naiveTheme';
+import { buildHaloThemeOverrides } from '@/theme/appearance';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 import { useSystemStore } from '@/stores/systemStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -104,23 +105,24 @@ import WorkbenchView from '@/views/WorkbenchView.vue';
 import SettingsCenterDrawer from '@/components/settings/SettingsCenterDrawer.vue';
 
 const systemStore = useSystemStore();
+const appearanceStore = useAppearanceStore();
 const configStore = useConfigStore();
 const workspaceStore = useWorkspaceStore();
 
 const showSettingsModal = ref(false);
-const settingsModalTab = ref<'providers' | 'network' | 'storage' | 'runtime'>('providers');
+const settingsModalTab = ref<'appearance' | 'providers' | 'network' | 'storage' | 'runtime'>('appearance');
 
 const splitSize = ref(0.22);
 const lastExpandedSplitSize = ref(0.22);
 
-function openSettingsModal(tab: 'providers' | 'network' | 'storage' | 'runtime') {
+function openSettingsModal(tab: 'appearance' | 'providers' | 'network' | 'storage' | 'runtime') {
   settingsModalTab.value = tab;
   showSettingsModal.value = true;
 }
 
 const activeTheme = computed(() => (systemStore.themeMode === 'dark' ? darkTheme : null));
 const activeThemeOverrides = computed(() =>
-  systemStore.themeMode === 'dark' ? haloDarkThemeOverrides : haloLightThemeOverrides
+  buildHaloThemeOverrides(appearanceStore.settings, appearanceStore.themeMode)
 );
 
 const activeSessionHash = computed(
@@ -135,7 +137,7 @@ function handleSplitChange(val: number) {
 }
 
 onMounted(async () => {
-  systemStore.applyThemeClass('dark');
+  appearanceStore.loadAndApply();
   systemStore.setupEventListeners();
   await Promise.all([systemStore.refreshAll(), configStore.initialize(), workspaceStore.initialize()]);
 });

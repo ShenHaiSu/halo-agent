@@ -143,10 +143,10 @@
         size="small"
         class="!px-2"
         title="切换暗黑/浅色主题"
-        @click="systemStore.toggleTheme()"
+        @click="appearanceStore.toggleTheme()"
       >
         <template #icon>
-          <Sun v-if="systemStore.themeMode === 'dark'" class="w-4 h-4" />
+          <Sun v-if="appearanceStore.themeMode === 'dark'" class="w-4 h-4" />
           <Moon v-else class="w-4 h-4" />
         </template>
       </n-button>
@@ -178,7 +178,7 @@ import {
   Sun,
   Moon,
 } from 'lucide-vue-next';
-import { useSystemStore } from '@/stores/systemStore';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ModelConfig } from '@/bridge/hostBridge';
@@ -188,7 +188,7 @@ const emit = defineEmits<{
 }>();
 
 const message = useMessage();
-const systemStore = useSystemStore();
+const appearanceStore = useAppearanceStore();
 const configStore = useConfigStore();
 const workspaceStore = useWorkspaceStore();
 

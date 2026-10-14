@@ -18,6 +18,12 @@
           placement="top"
           class="sticky top-0 z-10 bg-[var(--bg-surface)]"
         >
+          <n-tab-pane name="appearance" tab="主题和样式">
+            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+              <AppearanceSettingsPanel />
+            </div>
+          </n-tab-pane>
+
           <n-tab-pane name="providers" tab="模型与服务商">
             <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
               <ProviderManagerView />
@@ -53,24 +59,35 @@ import ProviderManagerView from './ProviderManagerView.vue';
 import NetworkProxySettings from './NetworkProxySettings.vue';
 import StorageSettingsPanel from './StorageSettingsPanel.vue';
 import SystemRuntimePanel from './SystemRuntimePanel.vue';
+import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
+
+export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime';
 
 const props = defineProps<{
   show: boolean;
-  defaultTab?: 'providers' | 'network' | 'storage' | 'runtime';
+  defaultTab?: SettingsCenterTab;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void;
 }>();
 
-const activeTab = ref<'providers' | 'network' | 'storage' | 'runtime'>(
-  props.defaultTab || 'providers'
+const activeTab = ref<SettingsCenterTab>(
+  props.defaultTab || 'appearance'
 );
 
 watch(
   () => props.defaultTab,
   (val) => {
     if (val) activeTab.value = val;
+  }
+);
+
+// 每次打开抽屉都按 defaultTab 落位（无参则首 Tab 外观），保证旧传参仍可定位
+watch(
+  () => props.show,
+  (val) => {
+    if (val) activeTab.value = props.defaultTab || 'appearance';
   }
 );
 
