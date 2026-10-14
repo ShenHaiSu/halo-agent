@@ -106,7 +106,7 @@
             </n-button>
           </div>
 
-          <n-descriptions bordered :column="1" size="small" label-placement="left">
+          <n-descriptions bordered :column="1" size="small" label-placement="left" class="sys-proxy-snapshot">
             <n-descriptions-item label="生效代理 URI">
               <span class="font-mono text-xs text-emerald-400 min-w-0 break-all">
                 {{ sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)' }}
@@ -123,7 +123,7 @@
               </span>
             </n-descriptions-item>
             <n-descriptions-item label="绕过列表 (ProxyOverride)">
-              <span class="font-mono text-xs truncate max-w-full min-w-0 break-all">
+              <span class="font-mono text-xs min-w-0 break-all">
                 {{ sysProxy?.bypassOverride || '(默认)' }}
               </span>
             </n-descriptions-item>
@@ -346,9 +346,9 @@
             </span>
           </div>
 
-          <div class="text-[11px] font-mono text-secondary flex items-center justify-between">
-            <span>实际使用代理路由: {{ probeResult.effectiveProxyUsed }}</span>
-            <span>探测端点: {{ probeResult.targetUrl }}</span>
+          <div class="text-[11px] font-mono text-secondary flex items-center justify-between flex-wrap gap-x-4 gap-y-1 min-w-0">
+            <span class="min-w-0 break-all">实际使用代理路由: {{ probeResult.effectiveProxyUsed }}</span>
+            <span class="min-w-0 break-all">探测端点: {{ probeResult.targetUrl }}</span>
           </div>
 
           <div v-if="probeResult.errorMessage" class="text-[11px] text-rose-300 font-mono pt-0.5">
@@ -470,3 +470,19 @@ async function handleTestConnectivity() {
   }
 }
 </script>
+<style scoped>
+/* 表格固定布局：label 定宽，content 占剩余并强制换行 */
+.sys-proxy-snapshot :deep(.n-descriptions-table) { table-layout: fixed; width: 100%; }
+.sys-proxy-snapshot :deep(.n-descriptions-table th) {
+  width: 168px; min-width: 168px; max-width: 168px;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+  line-height: 1.5; vertical-align: top;
+}
+.sys-proxy-snapshot :deep(.n-descriptions-table td) {
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+  line-height: 1.6; vertical-align: top; min-width: 0;
+}
+.sys-proxy-snapshot :deep(.font-mono) {
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+}
+</style>
