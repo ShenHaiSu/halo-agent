@@ -301,22 +301,30 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         case UnifiedStreamEventKind.ToolCallCompleted:
                             if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
                             {
-                                string cid = evt.ToolCall.CallId;
-                                if (!pendingTools.TryGetValue(cid, out var done))
+                                string cid2 = evt.ToolCall.CallId;
+                                if (!pendingTools.TryGetValue(cid2, out var done2))
                                 {
-                                    done = new PendingToolCall { CallId = cid, ItemId = evt.ToolCall.ItemId };
-                                    pendingTools[cid] = done;
-                                    toolOrder.Add(cid);
+                                    done2 = new PendingToolCall { CallId = cid2, ItemId = evt.ToolCall.ItemId };
+                                    pendingTools[cid2] = done2;
+                                    toolOrder.Add(cid2);
                                 }
                                 if (!string.IsNullOrWhiteSpace(evt.ToolCall.FunctionName))
                                 {
-                                    done.FunctionName = evt.ToolCall.FunctionName;
+                                    done2.FunctionName = evt.ToolCall.FunctionName;
                                 }
                                 if (!string.IsNullOrWhiteSpace(evt.ToolCall.ArgumentsJson))
                                 {
-                                    done.ArgsBuilder.Clear();
-                                    done.ArgsBuilder.Append(evt.ToolCall.ArgumentsJson);
+                                    done2.ArgsBuilder.Clear();
+                                    done2.ArgsBuilder.Append(evt.ToolCall.ArgumentsJson);
                                 }
+                                // P1：把完整参数实时推送给前端，转入对应会话桶，避免卡片参数区永久为空
+                                PublishTurnEvent(sessionId, "ToolCallUpdated", new
+                                {
+                                    iteration,
+                                    callId = cid2,
+                                    functionName = done2.FunctionName,
+                                    argsJson = done2.ArgsBuilder.ToString()
+                                });
                             }
                             break;
                         case UnifiedStreamEventKind.UsageUpdated:
@@ -457,7 +465,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 {
                     iteration,
                     callId = call.CallId,
-                    functionName = call.FunctionName
+                    functionName = call.FunctionName,
+                    argsJson = call.ArgumentsJson
                 });
 
                 ToolResult toolResult;
@@ -505,7 +514,6 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                     return AgentTurnResult.Cancelled(iteration, toolExecutions);
                 }
-
                 PublishTurnEvent(sessionId, "ToolExecutionCompleted", new
                 {
                     iteration,
@@ -513,7 +521,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     functionName = call.FunctionName,
                     success = toolResult.Success,
                     exitCode = toolResult.ExitCode,
-                    durationMs = toolResult.DurationMs
+                    durationMs = toolResult.DurationMs,
+                    argsJson = call.ArgumentsJson,
+                    resultText = TruncateForEvent(toolText, 8000)
                 });
             }
         }
@@ -583,6 +593,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             "grep_search" => " Hint: Check the search pattern and target directory, then retry with a simpler pattern.",
             _ => " Hint: Check tool arguments and retry."
         };
+    }
+    private static string TruncateForEvent(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        return s.Length > max ? s.Substring(0, max) + "\n...（输出过长已截断）" : s;
     }
 
     private static void PublishTurnEvent(string sessionId, string kind, object payload)

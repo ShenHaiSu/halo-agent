@@ -198,7 +198,8 @@
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <div
                   class="w-2 h-2 rounded-full shrink-0"
-                  :class="sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :class="isSessionRunning(sess.id) ? 'bg-emerald-400 shadow-sm animate-pulse' : sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :title="isSessionRunning(sess.id) ? '后台运行中' : ''"
                 />
                 
                 <div class="min-w-0 flex-1">
@@ -290,7 +291,8 @@
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <div
                   class="w-2 h-2 rounded-full shrink-0"
-                  :class="sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :class="isSessionRunning(sess.id) ? 'bg-emerald-400 shadow-sm animate-pulse' : sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :title="isSessionRunning(sess.id) ? '后台运行中' : ''"
                 />
 
                 <div class="min-w-0 flex-1">
@@ -403,10 +405,18 @@ import {
 } from 'lucide-vue-next';
 import { getHostBridge, type SessionMetadata } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { formatSessionTime, formatRelativeTime, sessionTimeTitle } from '@/utils/timeFormat';
 
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
+const agentStore = useAgentStore();
+
+const runningSessionIdSet = computed(() => new Set(agentStore.runningSessionIds));
+function isSessionRunning(sessId: string): boolean {
+  return runningSessionIdSet.value.has(sessId);
+}
+
 
 const {
   workspaces,
