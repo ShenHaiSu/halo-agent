@@ -75,10 +75,10 @@
             :min="12"
             :max="16"
             :step="1"
-            :marks="fontSizeMarks"
             data-testid="appearance-font-size"
             @update:value="onFontSizeChange"
           />
+          <div class="flex justify-between text-[11px] text-secondary font-mono select-none" aria-hidden="true"><span>12 小</span><span>16 大</span></div>
         </div>
 
         <div class="grid grid-cols-1 gap-2.5">
@@ -178,7 +178,7 @@
         重置为默认
       </n-button>
       <span class="text-[11px] text-secondary font-mono break-all" data-testid="appearance-summary">
-        {{ summaryText }}
+        {{ summaryText }} · 即时生效 · 已自动保存
       </span>
     </div>
   </div>
@@ -204,13 +204,7 @@ const appearanceStore = useAppearanceStore();
 
 const settings = computed(() => appearanceStore.settings);
 
-const fontSizeMarks: Record<number, string> = {
-  12: '12',
-  13: '13',
-  14: '14',
-  15: '15',
-  16: '16',
-};
+// 全局字号滑块：不使用 marks（marks 溢出会与下方 label 重叠），改用下方端点文案保留刻度感。
 
 const chineseFontSelectOptions = computed(() =>
   Array.from(new Set([settings.value.chineseFont, ...CHINESE_FONT_OPTIONS])).map((f) => ({

@@ -14,7 +14,7 @@
       <template v-for="msg in persistedMessages" :key="msg.id">
         <!-- User -->
         <div v-if="msg.role === 'user'" class="flex justify-end">
-          <div class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 text-[13px] text-primary whitespace-pre-wrap break-words select-text">
+          <div class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text">
             {{ msg.content }}
           </div>
         </div>
@@ -22,19 +22,19 @@
         <!-- Assistant -->
         <div v-else-if="msg.role === 'assistant'" class="space-y-2">
           <!-- 思考折叠舱 -->
-          <div v-if="msg.reasoningContent" class="rounded-r-md my-2 bg-slate-900/60 border-l-2 border-indigo-500/70 overflow-hidden">
+          <div v-if="msg.reasoningContent" class="rounded-r-md my-2 bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden">
             <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="toggleReasoning(msg.id)">
-              <span class="flex items-center gap-1.5 text-[11px] text-slate-300">
+              <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)]">
                 <BrainCircuit class="w-3.5 h-3.5 text-indigo-400" />
                 <span>深度思考过程</span>
               </span>
-              <span class="flex items-center gap-1 text-[11px] text-slate-400">
+              <span class="flex items-center gap-1 text-[11px] text-[var(--reasoning-text)] opacity-80">
                 <span>{{ collapsedReasoning[msg.id] ? '点击展开' : '点击折叠' }}</span>
                 <ChevronDown class="w-3 h-3 transition-transform" :class="collapsedReasoning[msg.id] ? '' : 'rotate-180'" />
               </span>
             </div>
             <n-collapse-transition :show="!collapsedReasoning[msg.id]">
-              <div class="px-3 pb-2 text-[12px] text-slate-300 whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
+              <div class="px-3 pb-2 app-text-small text-[var(--reasoning-text)] whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
                 {{ msg.reasoningContent }}
               </div>
             </n-collapse-transition>
@@ -43,7 +43,7 @@
           <!-- 正文 -->
           <div
             v-if="msg.content"
-            class="text-[13px] leading-relaxed text-primary break-words select-text markdown-body"
+            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body"
             v-html="renderMarkdown(msg.content)"
           />
 
@@ -63,13 +63,13 @@
         </div>
 
         <!-- Tool result -->
-        <div v-else-if="msg.role === 'tool'" class="rounded-md border border-subtle bg-surface px-3 py-2 text-[12px]">
+        <div v-else-if="msg.role === 'tool'" class="rounded-md border border-subtle bg-[var(--tool-output-bg)] px-3 py-2 text-[12px]">
           <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mb-1">
             <Wrench class="w-3 h-3" />
             <span>{{ msg.name || 'tool' }}</span>
             <span class="opacity-60">{{ msg.toolCallId }}</span>
           </div>
-          <div class="font-mono text-[11px] text-slate-300 whitespace-pre-wrap break-all max-h-48 overflow-y-auto select-text">
+          <div class="font-mono text-[11px] text-[var(--tool-output-text)] whitespace-pre-wrap break-all max-h-48 overflow-y-auto select-text">
             {{ truncateToolText(msg.content || '') }}
           </div>
         </div>
@@ -81,15 +81,15 @@
       </template>
 
       <!-- 流式思考折叠舱 -->
-      <div v-if="agentStore.streamingReasoning" class="rounded-r-md my-2 bg-slate-900/60 border-l-2 border-indigo-500/70 overflow-hidden">
+      <div v-if="agentStore.streamingReasoning" class="rounded-r-md my-2 bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden">
         <div class="flex items-center justify-between px-2.5 h-7 select-none">
-          <span class="flex items-center gap-1.5 text-[11px] text-slate-300">
+          <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)]">
             <BrainCircuit class="w-3.5 h-3.5 text-indigo-400" />
             <span>思考中...</span>
           </span>
           <Loader2 class="w-3.5 h-3.5 text-indigo-400 animate-spin" />
         </div>
-        <div class="px-3 pb-2 text-[12px] text-slate-300 whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
+        <div class="px-3 pb-2 app-text-small text-[var(--reasoning-text)] whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
           {{ agentStore.streamingReasoning }}
         </div>
       </div>
@@ -102,7 +102,7 @@
       <!-- 流式正文 -->
       <div
         v-if="agentStore.streamingText"
-        class="text-[13px] leading-relaxed text-primary break-words select-text markdown-body"
+        class="app-text-body leading-relaxed text-primary break-words select-text markdown-body"
         v-html="renderMarkdown(agentStore.streamingText)"
       />
       <div v-else-if="agentStore.streamingActive && agentStore.isGenerating" class="flex items-center gap-2 text-xs text-secondary">
@@ -213,19 +213,16 @@ const cachePercent = computed(() => {
 });
 </script>
 
-<style scoped>
-.markdown-body :deep(pre) {
-  background: #090d12;
-  border-radius: 6px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.markdown-body :deep(code) {
-  font-family: ui-monospace, Consolas, monospace;
-}
-.markdown-body :deep(p) {
-  margin: 4px 0;
-}
-</style>
+  <style scoped>
+  /* need03-04/06：pre 配色收敛到全局变量（main.css），此处仅保留布局；字体跟随 var(--font-mono) */
+  .markdown-body :deep(pre) {
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .markdown-body :deep(p) {
+    margin: 4px 0;
+  }
+  </style>

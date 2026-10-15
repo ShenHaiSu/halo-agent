@@ -2,7 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+  :root {
+    /* need03-04/06 语义色与字体变量：暗黑默认 */
+  --code-bg: #090d12; --code-text: #e6edf3; --code-border: #283241;
+  --tool-output-bg: #090d12; --tool-output-text: #cbd5e1;
+  --reasoning-bg: rgba(15,23,42,.6); --reasoning-text: #cbd5e1;
+  --diff-add-text: #a7f3d0; --diff-del-text: #fecdd3; --diff-ctx-text: #94a3b8;
+  --stat-add-text: #34d399; --stat-del-text: #fb7185;
   /* Win7 兼容字体栈：优先雅黑 UI/雅黑，等宽优先 Consolas */
   --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", monospace;
@@ -27,6 +33,12 @@ html.light {
   --text-primary: #0f172a;
   --text-secondary: #64748b;
   --accent-primary: #2563eb;
+  /* need03-04 明亮：浅底+深字，保证对比度 */
+  --code-bg: #f1f5f9; --code-text: #0f172a; --code-border: #e2e8f0;
+  --tool-output-bg: #f8fafc; --tool-output-text: #334155;
+  --reasoning-bg: #f1f5f9; --reasoning-text: #334155;
+  --diff-add-text: #047857; --diff-del-text: #be123c; --diff-ctx-text: #64748b;
+  --stat-add-text: #059669; --stat-del-text: #e11d48;
 }
 
 body {
@@ -108,3 +120,25 @@ body {
 /* need02-02 全局 table 兜底：Drawer 内描述表格 label 定宽不断竖排、content 自动换行 */
 .settings-drawer-body table { table-layout: fixed; width: 100%; }
 .settings-drawer-body th, .settings-drawer-body td { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }
+/* need03-06 字体全局遵守：body/sans/mono 跟随设置，一处收敛全站生效 */
+body, .font-sans { font-family: var(--font-sans) !important; }
+code, pre, .font-mono { font-family: var(--font-mono) !important; }
+/* need03-06 字号语义类：正文/小字跟随，装饰字固定 */
+.app-text-body { font-size: var(--app-font-size); }
+.app-text-small { font-size: calc(var(--app-font-size) - 1px); }
+.app-text-mini { font-size: 11px; }
+/* need03-04 markdown 代码块与 hljs 映射（变量驱动，暗亮自动跟随） */
+.markdown-body pre { background: var(--code-bg); border: 1px solid var(--code-border); color: var(--code-text); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.6; }
+.markdown-body code { color: var(--code-text); font-family: var(--font-mono); }
+.markdown-body pre code { background: transparent; border: none; padding: 0; }
+.markdown-body .hljs-keyword, .markdown-body .hljs-selector-tag, .markdown-body .hljs-built_in { color: var(--accent-primary); }
+.markdown-body .hljs-string, .markdown-body .hljs-title, .markdown-body .hljs-section { color: var(--stat-add-text); }
+.markdown-body .hljs-comment, .markdown-body .hljs-quote { color: var(--text-secondary); }
+.markdown-body .hljs-number, .markdown-body .hljs-literal { color: var(--stat-del-text); }
+/* need03-02 菜单内删除 armed 行 */
+.delete-armed-row { background: rgba(239,68,68,.12) !important; }
+html.light .delete-armed-row { background: rgba(220,38,38,.08) !important; }
+/* need03-05 防复发：带 marks 的 slider 必须预留下方空间（当前已去 marks，此为兜底） */
+.settings-drawer-body .n-slider--with-marks { margin-bottom: 18px; }
+.settings-drawer-body .slider-with-marks { padding-bottom: 20px; }
+/* Drawer 内红线：禁止“5 全量 marks + 紧凑 space-y”组合导致重叠 */

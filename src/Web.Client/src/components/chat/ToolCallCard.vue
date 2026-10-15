@@ -23,9 +23,9 @@
 
       <!-- diff stats -->
       <span v-if="isFileEdit" class="font-mono text-[11px] shrink-0">
-        <span class="text-emerald-400">+{{ addedLines }}</span>
-        <span class="text-slate-500"> </span>
-        <span class="text-rose-400">-{{ removedLines }}</span>
+        <span class="text-[var(--stat-add-text)]">+{{ addedLines }}</span>
+        <span> </span>
+        <span class="text-[var(--stat-del-text)]">-{{ removedLines }}</span>
       </span>
 
       <!-- status -->
@@ -40,7 +40,7 @@
       <span v-if="card.durationMs !== null && card.durationMs !== undefined" class="font-mono text-[11px] text-secondary shrink-0">
         {{ card.durationMs }}ms
       </span>
-      <span v-if="isExec && card.exitCode !== null && card.exitCode !== undefined" class="font-mono text-[11px] shrink-0" :class="card.exitCode === 0 ? 'text-emerald-400' : 'text-rose-400'">
+      <span v-if="isExec && card.exitCode !== null && card.exitCode !== undefined" class="font-mono text-[11px] shrink-0" :class="card.exitCode === 0 ? 'text-[var(--stat-add-text)]' : 'text-[var(--stat-del-text)]'">
         Exit: {{ card.exitCode }}
       </span>
 
@@ -54,17 +54,17 @@
     <n-collapse-transition :show="expanded">
       <div class="border-t border-subtle">
         <!-- (1) edit_file / write_file -> Unified Diff -->
-        <div v-if="isFileEdit" class="font-mono text-[11px] leading-relaxed">
+        <div v-if="isFileEdit" class="font-mono app-text-small leading-relaxed">
           <div
             v-for="(line, idx) in visibleDiffLines"
             :key="idx"
             class="flex items-start gap-2 px-2.5 py-px whitespace-pre-wrap break-all border-l-2"
             :class="
               line.kind === 'del'
-                ? 'bg-rose-500/15 text-rose-200 border-rose-500'
+                ? 'bg-rose-500/15 text-[var(--diff-del-text)] border-rose-500'
                 : line.kind === 'add'
-                  ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500'
-                  : 'text-slate-400 border-transparent'
+                  ? 'bg-emerald-500/15 text-[var(--diff-add-text)] border-emerald-500'
+                  : 'text-[var(--diff-ctx-text)] border-transparent'
             "
           >
             <span class="w-4 shrink-0 select-none opacity-70">{{ line.kind === 'del' ? '-' : line.kind === 'add' ? '+' : ' ' }}</span>
@@ -82,13 +82,13 @@
 
         <!-- (2) exec_command -> Terminal -->
         <div v-else-if="isExec" class="p-2 space-y-1.5">
-          <div class="font-mono text-[11px] text-slate-300 truncate" :title="execCommand">
+          <div class="font-mono app-text-small text-primary truncate" :title="execCommand">
             <span class="text-secondary select-none">$ </span>{{ execCommand }}
           </div>
           <div
-            class="max-h-72 overflow-y-auto bg-[#090d12] p-3 font-mono text-xs leading-relaxed text-slate-200 select-text rounded whitespace-pre-wrap break-all"
+            class="max-h-72 overflow-y-auto bg-[var(--tool-output-bg)] p-3 font-mono text-xs leading-relaxed text-[var(--tool-output-text)] select-text rounded whitespace-pre-wrap break-all border border-subtle"
             data-testid="terminal-output"
-          ><span v-if="!displayOutput" class="text-slate-500">等待输出...</span><span v-else>{{ displayOutput }}</span></div>
+          ><span v-if="!displayOutput" class="text-secondary">等待输出...</span><span v-else>{{ displayOutput }}</span></div>
           <div class="flex items-center justify-end gap-2">
             <n-button v-if="card.status === 'running'" size="tiny" type="error" ghost @click="handleKill">
               <template #icon><Square class="w-3 h-3" /></template>
@@ -100,13 +100,11 @@
             </n-button>
           </div>
         </div>
-
-        <!-- (3) read/list/grep -> compact expandable -->
         <div v-else class="p-2.5 space-y-1.5">
-          <div class="font-mono text-[11px] text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
+          <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
           <div
             v-if="displayOutput"
-            class="max-h-64 overflow-y-auto bg-[#090d12] p-2.5 rounded font-mono text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap break-all select-text"
+            class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
           >{{ truncatedOutput }}</div>
         </div>
       </div>

@@ -161,5 +161,10 @@ export function buildHaloThemeOverrides(
       primaryColorPressed: shades.pressed,
       primaryColorSuppl: shades.suppl,
     },
+    Tabs: {
+      ...base.Tabs,
+      tabFontSizeMedium: `${fontSize}px`,
+      tabFontSizeSmall: `${fontSizeSmall}px`,
+    },
   };
 }
