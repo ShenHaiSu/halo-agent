@@ -106,28 +106,26 @@
             </n-button>
           </div>
 
-          <n-descriptions bordered :column="1" size="small" label-placement="left" class="sys-proxy-snapshot">
-            <n-descriptions-item label="生效代理 URI">
-              <span class="font-mono text-xs text-emerald-400 min-w-0 break-all">
-                {{ sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)' }}
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="注册表 ProxyServer">
-              <span class="font-mono text-xs min-w-0 break-all">
-                {{ sysProxy?.proxyServerRaw || '(未配置)' }}
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="PAC 自动脚本地址">
-              <span class="font-mono text-xs min-w-0 break-all">
-                {{ sysProxy?.autoConfigUrl || '(无)' }}
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="绕过列表 (ProxyOverride)">
-              <span class="font-mono text-xs min-w-0 break-all">
-                {{ sysProxy?.bypassOverride || '(默认)' }}
-              </span>
-            </n-descriptions-item>
-          </n-descriptions>
+          <table class="sys-proxy-snapshot-table" data-testid="sys-proxy-snapshot-table">
+            <tbody>
+              <tr>
+                <th scope="row">生效代理 URI</th>
+                <td><span class="font-mono text-xs text-emerald-400 snapshot-value">{{ sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)' }}</span></td>
+              </tr>
+              <tr>
+                <th scope="row">注册表 ProxyServer</th>
+                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.proxyServerRaw || '(未配置)' }}</span></td>
+              </tr>
+              <tr>
+                <th scope="row">PAC 自动脚本地址</th>
+                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.autoConfigUrl || '(无)' }}</span></td>
+              </tr>
+              <tr>
+                <th scope="row">绕过列表 (ProxyOverride)</th>
+                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.bypassOverride || '(默认)' }}</span></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <!-- 手动代理详细表单 (Mode === Custom) -->
@@ -471,18 +469,22 @@ async function handleTestConnectivity() {
 }
 </script>
 <style scoped>
-/* 表格固定布局：label 定宽，content 占剩余并强制换行 */
-.sys-proxy-snapshot :deep(.n-descriptions-table) { table-layout: fixed; width: 100%; }
-.sys-proxy-snapshot :deep(.n-descriptions-table th) {
+/* 原生 table：固定布局，label 定宽，content 占剩余并约束在表内换行 */
+.sys-proxy-snapshot-table { table-layout: fixed; width: 100%; max-width: 100%; box-sizing: border-box; border-collapse: collapse; border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.sys-proxy-snapshot-table th {
   width: 168px; min-width: 168px; max-width: 168px;
-  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+  text-align: left; font-weight: 500; font-size: 12px;
+  padding: 6px 10px; border: 1px solid var(--border-subtle);
+  white-space: normal; overflow-wrap: break-word; word-break: normal;
   line-height: 1.5; vertical-align: top;
 }
-.sys-proxy-snapshot :deep(.n-descriptions-table td) {
-  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
-  line-height: 1.6; vertical-align: top; min-width: 0;
+.sys-proxy-snapshot-table td {
+  padding: 6px 10px; border: 1px solid var(--border-subtle);
+  white-space: normal; overflow-wrap: anywhere; word-break: normal;
+  line-height: 1.6; vertical-align: top; min-width: 0; max-width: 100%;
 }
-.sys-proxy-snapshot :deep(.font-mono) {
-  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+.sys-proxy-snapshot-table .snapshot-value {
+  display: block; max-width: 100%; min-width: 0;
+  white-space: normal; overflow-wrap: anywhere; word-break: normal;
 }
 </style>
