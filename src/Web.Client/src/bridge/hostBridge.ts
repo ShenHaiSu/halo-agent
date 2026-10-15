@@ -1231,7 +1231,7 @@ function createBrowserMockBridge(): HostBridgeApi {
           safetyBuffer: 1024,
           usedInputTokens: Math.round(used),
           availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - Math.round(used)),
-          usagePercentage: Math.round(((Math.round(used) + 4096 + 1024) / 128000) * 100),
+          usagePercentage: Math.round((Math.round(used) / 128000) * 1000) / 10,
           isNearLimit: false,
           sessionHash: 'f0e1d2c3b4a59687',
           protocol: 'chat',

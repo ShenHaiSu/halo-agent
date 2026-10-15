@@ -88,41 +88,64 @@ public sealed class TokenBudgetService : ITokenBudgetService
     }
 
     int ITokenBudgetService.EstimateTokens(string? text) => EstimateTokens(text);
+    int ITokenBudgetService.EstimateMessageTokens(UnifiedChatMessage message) => EstimateMessageTokens(message);
 
-    /// <summary>
-    /// 估算单条消息总 Token 数（含结构开销：基础 +6，每个工具调用 +12）
-    /// </summary>
-    public static int EstimateMessageTokens(UnifiedChatMessage message)
+     /// <summary>
+     /// need04-05：纯启发式估算（不再消费 InputTokens/OutputTokens 快照，避免总量被当增量累加）。
+     /// 需要会话总量请用 <see cref="ResolveUsedInputTokens"/>。
+     /// </summary>
+     public static int EstimateMessageTokens(UnifiedChatMessage message)
     {
-        if (message == null) return 0;
-
-        // 如果消息自身记录了精确的 Token 消耗，优先使用
-        if (message.InputTokens.HasValue || message.OutputTokens.HasValue)
+         if (message == null) return 0;
+         int tokens = 6; // 固定消息结构开销
+         tokens += EstimateTokens(message.Role);
+         tokens += EstimateTokens(message.Content);
+         tokens += EstimateTokens(message.ReasoningContent);
+         tokens += EstimateTokens(message.Name);
+         if (message.ToolCalls != null && message.ToolCalls.Count > 0)
         {
-            return (int)((message.InputTokens ?? 0) + (message.OutputTokens ?? 0));
-        }
-
-        int tokens = 6; // 固定消息结构开销
-        tokens += EstimateTokens(message.Role);
-        tokens += EstimateTokens(message.Content);
-        tokens += EstimateTokens(message.ReasoningContent);
-        tokens += EstimateTokens(message.Name);
-
-        if (message.ToolCalls != null && message.ToolCalls.Count > 0)
-        {
-            foreach (var call in message.ToolCalls)
+             foreach (var call in message.ToolCalls)
             {
-                tokens += 12; // 每个 ToolCall 结构开销
-                tokens += EstimateTokens(call.CallId);
-                tokens += EstimateTokens(call.FunctionName);
-                tokens += EstimateTokens(call.ArgumentsJson);
+                 tokens += 12; // 每个 ToolCall 结构开销
+                 tokens += EstimateTokens(call.CallId);
+                 tokens += EstimateTokens(call.FunctionName);
+                 tokens += EstimateTokens(call.ArgumentsJson);
             }
         }
-
-        return tokens;
+         return tokens;
     }
-
-    int ITokenBudgetService.EstimateMessageTokens(UnifiedChatMessage message) => EstimateMessageTokens(message);
+ 
+     /// <summary>
+     /// need04-05：会话总量 = 末条带精确值的 assistant 快照；无则回退启发式 Sum。
+     /// 网关回的 InputTokens 是“当轮请求总量（含全部历史）”，禁止 Sum 累加。
+     /// </summary>
+     public static int ResolveUsedInputTokens(IReadOnlyList<UnifiedChatMessage>? messages)
+    {
+         if (messages != null)
+        {
+             for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                 var v = messages[i]?.InputTokens;
+                 if (v.HasValue && v.Value > 0) return (int)v.Value;
+            }
+        }
+         if (messages == null || messages.Count == 0) return 0;
+         return messages.Sum(m => EstimateMessageTokens(m));
+    }
+ 
+     /// <summary>need04-05：末条 assistant 的 CachedTokens（钳制 ≤ usedInput），无则 0。</summary>
+     public static int ResolveCachedTokens(IReadOnlyList<UnifiedChatMessage>? messages, int usedInput)
+    {
+         if (messages != null)
+        {
+             for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                 var v = messages[i]?.CachedTokens;
+                 if (v.HasValue && v.Value > 0) return Math.Min((int)v.Value, Math.Max(0, usedInput));
+            }
+        }
+         return 0;
+    }
 
     /// <summary>
     /// 将消息序列分组为原子轮次组（Atomic Turns）：
@@ -284,15 +307,13 @@ public sealed class TokenBudgetService : ITokenBudgetService
         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
         int safetyBuffer = DefaultSafetyBuffer;
-        int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer);
-
-        int usedInput = messages != null ? messages.Sum(m => EstimateMessageTokens(m)) : 0;
+        // need04-05：快照语义：IN=末条精确快照（无则估算）；available 必须减去 used；分母统一 maxContext
+        int usedInput = ResolveUsedInputTokens(messages);
+        int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer - usedInput);
         double percentage = maxContext > 0
             ? Math.Min(100.0, Math.Round((double)usedInput / maxContext * 100.0, 1))
             : 0.0;
-
-        bool isNearLimit = percentage >= 85.0 || (availableInput > 0 && usedInput >= availableInput * 0.9);
-
+        bool isNearLimit = percentage >= 85.0;
         return new ContextBudgetStatusDto
         {
             TotalContextTokens = maxContext,
@@ -306,7 +327,7 @@ public sealed class TokenBudgetService : ITokenBudgetService
             Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat"
         };
     }
-
+ 
     public async Task<ContextBudgetStatusDto> GetBudgetStatusAsync(
         string providerId,
         string modelId,
@@ -315,28 +336,25 @@ public sealed class TokenBudgetService : ITokenBudgetService
         CancellationToken ct = default)
     {
         ModelConfig model = new() { Id = modelId, MaxContextTokens = 128000, MaxOutputTokens = 4096, Protocol = LlmProtocolType.Chat };
-
         if (_providerConfigService != null)
         {
             try
             {
-                var doc = _providerConfigService.GetProvidersConfigInternal();
-                var provider = doc.Providers.FirstOrDefault(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase));
-                var m = provider?.Models.FirstOrDefault(x => string.Equals(x.Id, modelId, StringComparison.OrdinalIgnoreCase));
-                if (m != null)
-                {
-                    model = m;
-                }
+                 var doc = _providerConfigService.GetProvidersConfigInternal();
+                 var provider = doc.Providers.FirstOrDefault(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase));
+                 var m = provider?.Models.FirstOrDefault(x => string.Equals(x.Id, modelId, StringComparison.OrdinalIgnoreCase));
+                 if (m != null)
+                 {
+                     model = m;
+                 }
             }
             catch
             {
                 // 使用默认回退
             }
         }
-
         List<UnifiedChatMessage> messages = new();
         string? sessionHash = null;
-
         if (_workspaceSessionService != null && !string.IsNullOrWhiteSpace(workspaceId) && !string.IsNullOrWhiteSpace(sessionId))
         {
             try
@@ -351,7 +369,6 @@ public sealed class TokenBudgetService : ITokenBudgetService
                 // 使用默认回退
             }
         }
-
         return CalculateBudgetStatus(model, messages, sessionHash);
     }
 }

@@ -8,7 +8,8 @@
     type ContextBudgetStatusDto,
   } from '@/bridge/hostBridge';
   import { useConfigStore } from '@/stores/configStore';
-  import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
+  import { isBadTime } from '@/utils/timeFormat';
+import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();
@@ -149,6 +150,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false;
   }
 
+  /** need04-01：记录必达：内存态秒级刷新时间并按置顶/活跃重排（与后端同序）。 */
+  function touchSessionTime(sessionId: string, iso?: string): void {
+    const sid = (sessionId || '').trim();
+    if (!sid) return;
+    const item = sessions.value.find((s) => s.id === sid);
+    if (!item) return;
+    const nowIso = iso && !isBadTime(iso) ? iso : new Date().toISOString();
+    (item as { updatedAtUtc: string }).updatedAtUtc = nowIso;
+    if (isBadTime((item as unknown as { createdAtUtc: string }).createdAtUtc)) {
+      (item as unknown as { createdAtUtc: string }).createdAtUtc = nowIso;
+    }
+    sessions.value = [...sessions.value].sort((a, b) => {
+      if (!!a.isPinned !== !!b.isPinned) return (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0);
+      return new Date(b.updatedAtUtc).getTime() - new Date(a.updatedAtUtc).getTime();
+    });
+  }
+
+  /** need04-01：轮末轻量对账：只合并时间/条数/标题，不替换数组引用防滚动跳动。每轮至多1次。 */
+  async function reconcileSessionTimes(): Promise<void> {
+    if (!activeWorkspaceId.value) return;
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.getSessions(activeWorkspaceId.value);
+      if (!res.ok || !res.data) return;
+      const incoming = new Map(res.data.map((s) => [s.id, s]));
+      for (const cur of sessions.value) {
+        const nxt = incoming.get(cur.id);
+        if (!nxt) continue;
+        if (nxt.updatedAtUtc && !isBadTime(nxt.updatedAtUtc)) (cur as { updatedAtUtc: string }).updatedAtUtc = nxt.updatedAtUtc;
+        if (nxt.createdAtUtc && !isBadTime(nxt.createdAtUtc)) (cur as unknown as { createdAtUtc: string }).createdAtUtc = nxt.createdAtUtc;
+        if (typeof nxt.messageCount === 'number') cur.messageCount = nxt.messageCount;
+        if (nxt.title && nxt.title.trim()) cur.title = nxt.title;
+      }
+      sessions.value = [...sessions.value].sort((a, b) => {
+        if (!!a.isPinned !== !!b.isPinned) return (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0);
+        return new Date(b.updatedAtUtc).getTime() - new Date(a.updatedAtUtc).getTime();
+      });
+    } catch { /* 对账失败只打日志，不阻断 */ }
+  }
+
   async function loadSessions(workspaceId: string): Promise<void> {
     if (!workspaceId) {
       sessions.value = [];
@@ -163,10 +204,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.getSessions(workspaceId);
       if (res.ok && res.data) {
         const nowIso = new Date().toISOString();
-        // need03-01：旧数据缺时间则内存态回填（不回写磁盘，避免污染排序），保证时间行非空
+        // need04-01：坏时间统一回填（空串/null/0001/Invalid/年<2000），内存态不回写磁盘
         for (const s of res.data) {
-          if (!s.createdAtUtc) (s as { createdAtUtc: string }).createdAtUtc = nowIso;
-          if (!s.updatedAtUtc) (s as { updatedAtUtc: string }).updatedAtUtc = (s.createdAtUtc as string) || nowIso;
+          if (isBadTime((s as unknown as { createdAtUtc: string }).createdAtUtc)) (s as unknown as { createdAtUtc: string }).createdAtUtc = nowIso;
+          if (isBadTime((s as unknown as { updatedAtUtc: string }).updatedAtUtc)) (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s.createdAtUtc as string) || nowIso;
+          const c = new Date((s as unknown as { createdAtUtc: string }).createdAtUtc).getTime();
+          const u = new Date((s as unknown as { updatedAtUtc: string }).updatedAtUtc).getTime();
+          if (!isNaN(c) && !isNaN(u) && u < c) (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s as unknown as { createdAtUtc: string }).createdAtUtc;
         }
         sessions.value = res.data;
         if (
@@ -214,7 +258,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.createSession(activeWorkspaceId.value, title, pId, mId);
       if (res.ok && res.data) {
         const newSess = res.data;
+        if (isBadTime((newSess as unknown as { createdAtUtc: string }).createdAtUtc)) (newSess as unknown as { createdAtUtc: string }).createdAtUtc = new Date().toISOString();
+        if (isBadTime((newSess as unknown as { updatedAtUtc: string }).updatedAtUtc)) (newSess as unknown as { updatedAtUtc: string }).updatedAtUtc = (newSess as unknown as { createdAtUtc: string }).createdAtUtc;
         sessions.value = [newSess, ...sessions.value];
+        touchSessionTime(newSess.id, (newSess as unknown as { createdAtUtc: string }).createdAtUtc);
         activeSessionId.value = newSess.id;
         sessionMessages.value = [];
         await refreshBudget();
@@ -233,7 +280,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.updateSessionTitle(activeWorkspaceId.value, sessionId, newTitle.trim());
       if (res.ok && res.data) {
         const item = sessions.value.find((s) => s.id === sessionId);
-        if (item) item.title = newTitle.trim();
+        if (item) { item.title = newTitle.trim(); touchSessionTime(item.id); }
         // need03-03：显式改名（默认视为手动）即永久冻结自动逻辑；LLM 回写走 manual:false
         if (opts?.manual !== false) {
           titleLocked.value[sessionId] = true;
@@ -254,7 +301,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.setSessionPinned(activeWorkspaceId.value, sessionId, isPinned);
       if (res.ok && res.data) {
         const item = sessions.value.find((s) => s.id === sessionId);
-        if (item) item.isPinned = isPinned;
+        if (item) { item.isPinned = isPinned; touchSessionTime(item.id); }
         return true;
       }
     } catch (err) {
@@ -468,6 +515,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     browseAndAddWorkspace,
     removeWorkspace,
     loadSessions,
+    touchSessionTime,
+    reconcileSessionTimes,
     selectSession,
     createSession,
     renameSession,

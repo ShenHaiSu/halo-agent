@@ -1,8 +1,8 @@
 <template>
-  <div class="flex-1 min-h-0 overflow-y-auto" data-testid="message-timeline">
+  <div class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden" data-testid="message-timeline">
     <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <!-- 空态 -->
-      <div v-if="persistedMessages.length === 0 && !agentStore.hasStreamingContent && agentStore.toolCards.length === 0" class="py-10 text-center space-y-2">
+      <div v-if="persistedMessages.length === 0 && !agentStore.hasActiveTurn" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
           <Bot class="w-8 h-8 text-accent" />
         </div>
@@ -10,104 +10,72 @@
         <p class="text-xs text-secondary font-mono">默认 Runner：CMD 优先 / PYTHON 次之 · 禁用 PowerShell 专属语法</p>
       </div>
 
-      <!-- 持久化消息 -->
-      <template v-for="msg in persistedMessages" :key="msg.id">
+      <!-- 持久化时间线：user/system 顶层 + 轮次归并容器 -->
+      <template v-for="item in timelineItems" :key="item.key">
         <!-- User -->
-        <div v-if="msg.role === 'user'" class="flex justify-end">
-          <div class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text">
-            {{ msg.content }}
+        <div v-if="item.kind === 'user'" class="flex justify-end">
+          <div class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0">
+            {{ item.msg?.content }}
           </div>
         </div>
-
-        <!-- Assistant -->
-        <div v-else-if="msg.role === 'assistant'" class="space-y-2">
-          <!-- 思考折叠舱 -->
-          <div v-if="msg.reasoningContent" class="rounded-r-md my-2 bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden">
-            <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="toggleReasoning(msg.id)">
-              <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)]">
-                <BrainCircuit class="w-3.5 h-3.5 text-indigo-400" />
-                <span>深度思考过程</span>
+        <!-- System -->
+        <div v-else-if="item.kind === 'system'" class="text-[11px] text-secondary text-center font-mono px-4">
+          {{ item.msg?.content }}
+        </div>
+        <!-- 轮次容器：正文常显 + 思考+工具归并舱（默认收缩） -->
+        <div v-else class="space-y-2 min-w-0">
+          <div
+            v-if="item.group?.content"
+            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+            v-html="renderMarkdown(item.group?.content || '')"
+          />
+          <div v-if="item.group?.reasoning || (item.group?.toolMessages?.length || 0) > 0" class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden" data-testid="turn-thinking-tools">
+            <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="toggleTurn(item.group?.key || item.key)">
+              <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] min-w-0">
+                <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span class="truncate">🧠 思考与工具调用 · {{ item.group?.toolMessages.length || 0 }} 个工具{{ turnDuration(item.group!) }}</span>
+                <span v-if="hasFailedTool(item.group!)" class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40">有失败</span>
               </span>
-              <span class="flex items-center gap-1 text-[11px] text-[var(--reasoning-text)] opacity-80">
-                <span>{{ collapsedReasoning[msg.id] ? '点击展开' : '点击折叠' }}</span>
-                <ChevronDown class="w-3 h-3 transition-transform" :class="collapsedReasoning[msg.id] ? '' : 'rotate-180'" />
+              <span class="flex items-center gap-1 text-[11px] text-[var(--reasoning-text)] opacity-80 shrink-0">
+                <span>{{ isTurnExpanded(item.group?.key || item.key) ? '点击折叠' : '点击展开' }}</span>
+                <ChevronDown class="w-3 h-3 transition-transform" :class="isTurnExpanded(item.group?.key || item.key) ? 'rotate-180' : ''" />
               </span>
             </div>
-            <n-collapse-transition :show="!collapsedReasoning[msg.id]">
-              <div class="px-3 pb-2 app-text-small text-[var(--reasoning-text)] whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
-                {{ msg.reasoningContent }}
+            <n-collapse-transition :show="isTurnExpanded(item.group?.key || item.key)">
+              <div class="px-3 pb-2 space-y-2 max-h-72 overflow-y-auto min-w-0">
+                <div v-if="item.group?.reasoning" class="whitespace-pre-wrap break-words select-text app-text-small text-[var(--reasoning-text)]">{{ item.group?.reasoning }}</div>
+                <ToolCallCard v-for="t in (item.group?.toolMessages || [])" :key="toolKeyOf(t)" :card="toCard(t, item.group!)" :default-collapsed="true" />
               </div>
             </n-collapse-transition>
           </div>
-
-          <!-- 正文 -->
-          <div
-            v-if="msg.content"
-            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body"
-            v-html="renderMarkdown(msg.content)"
-          />
-
-          <!-- ToolCall 提示（持久化消息中的工具调用名） -->
-          <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="flex flex-wrap gap-1.5">
-            <n-tag v-for="tc in msg.toolCalls" :key="tc.id" size="tiny" :bordered="false" type="info" class="font-mono">
-              {{ toolNameOf(tc) }}
-            </n-tag>
+          <div v-if="item.group && hasTelemetryGroup(item.group)" class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span>协议: {{ protocolOfGroup(item.group!) }}</span>
+            <span>IN {{ item.group?.telemetry?.inputTokens ?? '-' }} · Cache {{ item.group?.telemetry?.cachedTokens ?? 0 }} · {{ cachePercentOf(item.group?.telemetry?.cachedTokens ?? 0, item.group?.telemetry?.inputTokens ?? 0) }}</span>
+            <span>OUT {{ item.group?.telemetry?.outputTokens ?? '-' }}</span>
           </div>
-
-          <!-- Telemetry footer -->
-          <div v-if="hasTelemetry(msg)" class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5">
-            <span>协议: {{ protocolOf(msg) }}</span>
-            <span>In: {{ msg.inputTokens }} (Cache {{ msg.cachedTokens }})</span>
-            <span>Out: {{ msg.outputTokens }}</span>
-          </div>
-        </div>
-
-        <!-- Tool result -->
-        <div v-else-if="msg.role === 'tool'" class="rounded-md border border-subtle bg-[var(--tool-output-bg)] px-3 py-2 text-[12px]">
-          <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mb-1">
-            <Wrench class="w-3 h-3" />
-            <span>{{ msg.name || 'tool' }}</span>
-            <span class="opacity-60">{{ msg.toolCallId }}</span>
-          </div>
-          <div class="font-mono text-[11px] text-[var(--tool-output-text)] whitespace-pre-wrap break-all max-h-48 overflow-y-auto select-text">
-            {{ truncateToolText(msg.content || '') }}
-          </div>
-        </div>
-
-        <!-- System -->
-        <div v-else class="text-[11px] text-secondary text-center font-mono px-4">
-          {{ msg.content }}
         </div>
       </template>
 
-      <!-- 流式思考折叠舱 -->
-      <div v-if="agentStore.streamingReasoning" class="rounded-r-md my-2 bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden">
-        <div class="flex items-center justify-between px-2.5 h-7 select-none">
-          <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)]">
-            <BrainCircuit class="w-3.5 h-3.5 text-indigo-400" />
-            <span>思考中...</span>
-          </span>
-          <Loader2 class="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+      <!-- need04-03：一轮一容器（流式期间唯一容器，顺序恒为 思考→工具→正文） -->
+      <div v-if="agentStore.hasActiveTurn" data-testid="active-turn-container" class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0">
+        <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
+          <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          <span v-if="agentStore.streamingReasoning">思考中… · 已调用 {{ agentStore.toolCards.length }} 个工具</span>
+          <span v-else>思考中… · 已调用 {{ agentStore.toolCards.length }} 个工具</span>
+          <Loader2 v-if="agentStore.isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
         </div>
-        <div class="px-3 pb-2 app-text-small text-[var(--reasoning-text)] whitespace-pre-wrap break-words select-text max-h-64 overflow-y-auto">
-          {{ agentStore.streamingReasoning }}
+        <div v-if="agentStore.toolCards.length" class="space-y-1.5" data-testid="active-turn-tools">
+          <ToolCallCard v-for="card in agentStore.toolCards" :key="card.callId" :card="card" :default-collapsed="true" />
         </div>
-      </div>
-
-      <!-- 流式工具卡片组 -->
-      <div v-if="agentStore.toolCards.length > 0" class="space-y-2">
-        <ToolCallCard v-for="card in agentStore.toolCards" :key="card.callId" :card="card" />
-      </div>
-
-      <!-- 流式正文 -->
-      <div
-        v-if="agentStore.streamingText"
-        class="app-text-body leading-relaxed text-primary break-words select-text markdown-body"
-        v-html="renderMarkdown(agentStore.streamingText)"
-      />
-      <div v-else-if="agentStore.streamingActive && agentStore.isGenerating" class="flex items-center gap-2 text-xs text-secondary">
-        <Loader2 class="w-3.5 h-3.5 animate-spin" />
-        <span>Agent 推理中...</span>
+        <div
+          v-if="agentStore.streamingText"
+          class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+          v-html="renderMarkdown(agentStore.streamingText)"
+        />
+        <div v-else-if="agentStore.streamingActive && agentStore.isGenerating" class="flex items-center gap-2 text-xs text-secondary">
+          <Loader2 class="w-3.5 h-3.5 animate-spin" />
+          <span>Agent 推理中...</span>
+        </div>
       </div>
 
       <!-- 中断/截断/错误提示 -->
@@ -118,12 +86,12 @@
         {{ agentStore.lastError }}
       </n-alert>
 
-      <!-- Telemetry footer（本轮） -->
+      <!-- Telemetry footer（本轮快照语义：IN=总量快照，OUT=本轮生成） -->
       <div v-if="showLiveTelemetry" class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2">
         <span>协议: {{ agentStore.telemetry.protocol === 'resp' ? 'RESP (/v1/responses)' : 'CHAT (/v1/chat/completions)' }}</span>
         <span v-if="agentStore.telemetry.ttftMs !== null">首字: {{ agentStore.telemetry.ttftMs }}ms</span>
         <span v-if="agentStore.telemetry.totalMs !== null">总耗时: {{ (agentStore.telemetry.totalMs / 1000).toFixed(1) }}s</span>
-        <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ cachePercent }})</span>
+        <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ agentStore.telemetry.cachedTokens }} · {{ cachePercent }})</span>
         <span>Out: {{ agentStore.telemetry.outputTokens }}</span>
       </div>
     </div>
@@ -132,27 +100,121 @@
 
 <script setup lang="ts">
 import { computed, reactive } from 'vue';
-import { Bot, BrainCircuit, ChevronDown, Loader2, Wrench } from 'lucide-vue-next';
+import { Bot, BrainCircuit, ChevronDown, Loader2 } from 'lucide-vue-next';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useAgentStore } from '@/stores/agentStore';
+import { useAgentStore, type AgentToolCard } from '@/stores/agentStore';
 import { useAppearanceStore } from '@/stores/appearanceStore';
 import ToolCallCard from '@/components/chat/ToolCallCard.vue';
 import type { UnifiedChatMessage } from '@/bridge/hostBridge';
+import { buildTurnGroups, type TurnGroup } from '@/utils/turnGroup';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
 const appearanceStore = useAppearanceStore();
-const { sessionMessages } = storeToRefs(workspaceStore);
+const { sessionMessages, budgetStatus } = storeToRefs(workspaceStore);
 const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
 
 const persistedMessages = computed<UnifiedChatMessage[]>(() => sessionMessages.value || []);
-const collapsedReasoning = reactive<Record<string, boolean>>({});
+// need04-04：默认全部收缩（与旧 collapsedReasoning 默认展开相反）；切卡保留在内存
+const expandedTurns = reactive<Record<string, boolean>>({});
 
-function toggleReasoning(id: string): void {
-  collapsedReasoning[id] = !collapsedReasoning[id];
+function isTurnExpanded(key: string): boolean {
+  return expandedTurns[key] === true;
+}
+function toggleTurn(key: string): void {
+  expandedTurns[key] = !isTurnExpanded(key);
+}
+
+// need04-03：持久 tool 灰块与流式卡去重（同 callId 本轮隐藏持久侧）
+const allTurnGroups = computed<TurnGroup[]>(() => buildTurnGroups(persistedMessages.value));
+const visibleTurnGroups = computed<TurnGroup[]>(() => {
+  const hidden = new Set<string>((agentStore.hiddenToolCallIds as unknown as Set<string> | string[]) instanceof Set
+    ? [...(agentStore.hiddenToolCallIds as unknown as Set<string>)]
+    : [...(agentStore.hiddenToolCallIds as unknown as string[])]);
+  if (hidden.size === 0) return allTurnGroups.value;
+  const out: TurnGroup[] = [];
+  for (const g of allTurnGroups.value) {
+    const kept = g.toolMessages.filter((m) => !hidden.has(String((m as unknown as { toolCallId?: string }).toolCallId || '')));
+    if (!g.content && !g.reasoning && kept.length === 0) continue;
+    out.push({ ...g, toolMessages: kept });
+  }
+  return out;
+});
+
+interface TimelineItem {
+  key: string;
+  kind: 'user' | 'system' | 'turn';
+  msg?: UnifiedChatMessage;
+  group?: TurnGroup;
+}
+// 按 jsonl 顺序：user/system 顶层直渲，assistant+tool 聚合为 turn（顺序与落盘一致）
+const timelineItems = computed<TimelineItem[]>(() => {
+  const items: TimelineItem[] = [];
+  const groupsByAssistant = new Map<string, TurnGroup>();
+  for (const g of visibleTurnGroups.value) {
+    if (g.assistantId) groupsByAssistant.set(g.assistantId, g);
+    else if (g.toolMessages.length) {
+      // 孤立 tool 组：直接展开为 turn 项
+      items.push({ key: g.key, kind: 'turn', group: g });
+    }
+  }
+  const emitted = new Set<string>();
+  for (const msg of persistedMessages.value) {
+    const role = String(msg.role || '').toLowerCase();
+    if (role === 'user') items.push({ key: `u-${msg.id}`, kind: 'user', msg });
+    else if (role !== 'assistant' && role !== 'tool') items.push({ key: `s-${msg.id}`, kind: 'system', msg });
+    else if (role === 'assistant') {
+      const g = groupsByAssistant.get(String(msg.id));
+      if (g && !emitted.has(g.key)) { emitted.add(g.key); items.push({ key: g.key, kind: 'turn', group: g }); }
+    }
+    // role==='tool' 跳过（已并入所属 turn 组）
+  }
+  // 兜底：未被顺序命中的组追加末尾
+  for (const g of visibleTurnGroups.value) {
+    if (g.assistantId && !emitted.has(g.key)) items.push({ key: g.key, kind: 'turn', group: g });
+  }
+  return items;
+});
+
+function toolKeyOf(m: UnifiedChatMessage): string {
+  return String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
+}
+
+/** need04-04：持久 tool 消息 → ToolCallCard 富展示（参数从同组 assistant.toolCalls 同 id 取）。 */
+function toCard(m: UnifiedChatMessage, group: TurnGroup): AgentToolCard {
+  const callId = String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
+  const ref = group.toolCalls.find((t) => t.id === callId);
+  // 兼容后端 UnifiedToolCall 形状：function.arguments / argumentsJson
+  let argsJson = '';
+  const rawAssistant = persistedMessages.value.find((x) => String(x.id) === group.assistantId);
+  const rawCalls = (rawAssistant as unknown as { toolCalls?: Array<{ id?: string; callId?: string; argumentsJson?: string; function?: { arguments?: string; name?: string }; functionName?: string }> }).toolCalls;
+  if (Array.isArray(rawCalls)) {
+    const hit = rawCalls.find((c) => String(c.id || c.callId) === callId);
+    if (hit) argsJson = String(hit.argumentsJson || hit.function?.arguments || '');
+  }
+  const content = String(m.content || '');
+  const isErr = content.includes('[Tool Error');
+  return {
+    callId,
+    functionName: ref?.name || (m.name as string) || 'tool',
+    argsJson,
+    status: isErr ? 'error' : 'done',
+    resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
+    exitCode: null,
+    durationMs: null,
+    iteration: 0,
+  };
+}
+
+function hasFailedTool(g: TurnGroup): boolean {
+  return g.toolMessages.some((m) => String(m.content || '').includes('[Tool Error'));
+}
+function turnDuration(_g: TurnGroup): string {
+  void _g;
+  return '';
 }
 
 const md: MarkdownIt = new MarkdownIt({
@@ -183,22 +245,24 @@ function renderMarkdown(content: string): string {
   }
 }
 
-function toolNameOf(tc: { function?: { name?: string } }): string {
-  return (tc.function && tc.function.name) || 'tool';
+function hasTelemetryGroup(g: TurnGroup): boolean {
+  return !!g.telemetry && (g.telemetry.inputTokens != null || g.telemetry.outputTokens != null);
 }
 
-function hasTelemetry(msg: UnifiedChatMessage): boolean {
-  return (msg.inputTokens !== null && msg.inputTokens !== undefined) || (msg.outputTokens !== null && msg.outputTokens !== undefined);
+function protocolOfGroup(_g: TurnGroup): string {
+  void _g;
+  const p = (budgetStatus.value?.protocol || agentStore.telemetry.protocol || 'chat').toLowerCase();
+  return p === 'resp' ? 'RESP' : 'CHAT';
 }
 
-function protocolOf(msg: UnifiedChatMessage): string {
-  void msg;
-  return agentStore.telemetry.protocol === 'resp' ? 'RESP' : 'CHAT';
+function cachePercentOf(cached: number, input: number): string {
+  if (!input || input <= 0) return '0%';
+  return `${Math.round((cached / input) * 100)}%`;
 }
 
 function truncateToolText(s: string): string {
-  if (s.length > 4000) return s.slice(0, 4000) + '\n...（输出过长已截断）';
-  return s;
+  void s;
+  return '';
 }
 
 const showLiveTelemetry = computed(() => {
@@ -211,18 +275,9 @@ const cachePercent = computed(() => {
   if (t.inputTokens <= 0) return '0%';
   return `${Math.round((t.cachedTokens / t.inputTokens) * 100)}%`;
 });
+void truncateToolText;
 </script>
 
-  <style scoped>
-  /* need03-04/06：pre 配色收敛到全局变量（main.css），此处仅保留布局；字体跟随 var(--font-mono) */
-  .markdown-body :deep(pre) {
-    border-radius: 6px;
-    padding: 10px 12px;
-    overflow-x: auto;
-    font-size: 12px;
-    line-height: 1.6;
-  }
-  .markdown-body :deep(p) {
-    margin: 4px 0;
-  }
-  </style>
+<style scoped>
+/* need04-02：排版已收敛到 main.css 全局 .markdown-body，此处不重复定义 p/pre，避免 scoped 与全局打架 */
+</style>

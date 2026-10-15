@@ -376,7 +376,7 @@ import {
 import { getHostBridge, type SessionMetadata } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentStore } from '@/stores/agentStore';
-import { formatSessionTime, formatRelativeTime, sessionTimeTitle } from '@/utils/timeFormat';
+import { formatSessionTime, formatRelativeTime, sessionTimeTitle, isBadTime } from '@/utils/timeFormat';
 
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
@@ -442,8 +442,9 @@ const editingTitleDraft = ref('');
     return pendingDeleteSessionId.value === sessId;
   }
   // need03-01：时间行展示兜底 + tick 依赖（空白行=用户视角“没展示”，非法时显示“时间未知”）
+  // need04-01：坏时间统一判（空串/null/0001/无时区），新会话永不进此分支
   function hasNoTime(sess: SessionMetadata): boolean {
-    return formatSessionTime(sess.createdAtUtc) === '-' && formatRelativeTime(sess.updatedAtUtc) === '-';
+    return isBadTime((sess as unknown as { createdAtUtc: string }).createdAtUtc) && isBadTime((sess as unknown as { updatedAtUtc: string }).updatedAtUtc);
   }
   function relativeLabel(iso: string): string {
     void nowTick.value;

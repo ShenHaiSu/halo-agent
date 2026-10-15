@@ -79,7 +79,7 @@ function emptyTurnState(sessionId: string, fallbackProtocol = 'chat'): AgentTurn
   };
 }
 
-function truncateText(s: string, max = 8000): string {
+function truncateText(s: string, max = 6000): string {
   if (!s) return '';
   return s.length > max ? s.slice(0, max) + '\n...（输出过长已截断）' : s;
 }
@@ -95,6 +95,9 @@ export const useAgentStore = defineStore('agent', () => {
   const configStore = useConfigStore();
 
   const turns = ref<Record<string, AgentTurnState>>({});
+  // need04-03/04：本轮去重与归并快照
+  const dirtyPersisted = ref<Record<string, boolean>>({});
+  const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number }>>({});
 
   let listenersBound = false;
 
@@ -172,6 +175,15 @@ export const useAgentStore = defineStore('agent', () => {
     return t.streamingActive || t.streamingText.length > 0 || t.streamingReasoning.length > 0;
   });
 
+  // need04-03：一轮一容器显隐：流式文本/思考/工具卡任一存在即显示
+  const hasActiveTurn = computed(() => {
+    const t = activeTurn.value;
+    return t.streamingActive || t.streamingText.length > 0 || t.streamingReasoning.length > 0 || t.toolCards.length > 0;
+  });
+
+  // need04-03：本轮已在流式卡中存在的 callId，持久区 tool 灰块隐藏（只藏显示不删数据）
+  const hiddenToolCallIds = computed<Set<string>>(() => new Set(activeTurn.value.toolCards.map((c) => c.callId).filter(Boolean)));
+
   const runningSessionIds = computed<string[]>(() =>
     Object.values(turns.value)
       .filter((t) => t.isGenerating || t.streamingActive)
@@ -179,6 +191,15 @@ export const useAgentStore = defineStore('agent', () => {
   );
 
   const isAnyGenerating = computed(() => runningSessionIds.value.length > 0);
+
+  /** need04-01：任何写消息路径结束时内存态秒级刷新会话卡时间（乐观+事件双通道）。 */
+  function touchSessionClock(sessionId: string, iso?: string): void {
+    try {
+      const ws = useWorkspaceStore();
+      const fn = (ws as unknown as { touchSessionTime?: (sid: string, iso?: string) => void }).touchSessionTime;
+      if (typeof fn === 'function') fn.call(ws, sessionId, iso);
+    } catch { /* 时间刷新永不阻断主链路 */ }
+  }
 
   function touch(t: AgentTurnState): void {
     t.updatedAt = Date.now();
@@ -348,8 +369,11 @@ export const useAgentStore = defineStore('agent', () => {
           const rt = payload['resultText'];
           if (typeof rt === 'string' && rt) card.resultText = truncateText(rt);
         }
+        // need04-03：工具完成只内存更新+标脏，不全量拉取（跳动主因）；等 AssistantMessagePersisted 再对账
+        dirtyPersisted.value[sid] = true;
         touch(t);
-        void refreshAfterTool(sid);
+        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+        void workspaceStore.refreshBudget().catch(() => undefined);
         break;
       }
       case 'AssistantMessagePersisted': {
@@ -357,7 +381,8 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.outputTokens = num(payload['outputTokens']);
         t.telemetry.cachedTokens = num(payload['cachedTokens']);
         touch(t);
-        void refreshAfterTool(sid);
+        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+        void refreshAfterTool(sid, 'persisted');
         break;
       }
       case 'TurnCompleted': {
@@ -369,6 +394,7 @@ export const useAgentStore = defineStore('agent', () => {
         t.isGenerating = false;
         t.streamingActive = false;
         touch(t);
+        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
         void finishTurn(sid);
         void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
         break;
@@ -407,12 +433,17 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  async function refreshAfterTool(targetSessionId?: string): Promise<void> {
+  // need04-03：分流刷新：tool-completed 只内存更新（调用方已标脏）；persisted/finish 才拉全量对账
+  async function refreshAfterTool(targetSessionId?: string, reason?: string): Promise<void> {
     try {
       const sid = (targetSessionId ?? activeSessionId.value).trim();
       if (!sid) return;
-      // 后台会话只落桶、不碰当前视图：避免把 B 的消息列表刷成 A 的
+      // 后台会话只落桶、不碰当前视图：避免把 B 的消息列表刷成 A 的（切卡时 selectSession 天然对账）
       if (sid !== activeSessionId.value) return;
+      if (reason !== 'persisted' && reason !== 'finish') {
+        await workspaceStore.refreshBudget();
+        return;
+      }
       await workspaceStore.loadSessionMessages(sid);
       await workspaceStore.refreshBudget();
     } catch (err) {
@@ -423,9 +454,22 @@ export const useAgentStore = defineStore('agent', () => {
   async function finishTurn(targetSessionId?: string): Promise<void> {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
     if (sid) {
-      await refreshAfterTool(sid);
       const t = ensureTurn(sid);
-      // 只清流式增量，保留 toolCards/notice/error 供切回回看；下一轮 sendPrompt 会清该桶
+      // need04-04：轮末快照（03 管清，04 管快照）：供时间轴无缝占位，随后被持久 turnGroups 替换
+      try {
+        lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
+        haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
+      } catch { /* 快照失败不阻断收尾 */ }
+      if (dirtyPersisted.value[sid]) {
+        await refreshAfterTool(sid, 'finish');
+        dirtyPersisted.value[sid] = false;
+      } else {
+        await refreshAfterTool(sid, 'finish');
+      }
+      // need04-01：轮末轻量对账一次（每轮至多1次 getSessions，KB 级）
+      try { await (workspaceStore as unknown as { reconcileSessionTimes?: () => Promise<void> }).reconcileSessionTimes?.(); } catch { /* 忽略 */ }
+      // 清流式容器（工具卡移交快照后清空，消除轮末双影）
+      t.toolCards = [];
       t.streamingText = '';
       t.streamingReasoning = '';
       t.streamingActive = false;
@@ -444,6 +488,7 @@ export const useAgentStore = defineStore('agent', () => {
 
     ensureListeners();
     resetTurnState(sessionId);
+    touchSessionClock(sessionId);
     const t = ensureTurn(sessionId);
     t.isGenerating = true;
     t.streamingActive = true;
@@ -541,6 +586,13 @@ export const useAgentStore = defineStore('agent', () => {
     lastError,
     activeKey,
     hasStreamingContent,
+    hasActiveTurn,
+    hiddenToolCallIds,
+    dirtyPersisted,
+    lastTurnSnapshot,
+    handleTurnEvent,
+    finishTurn,
+    refreshAfterTool,
     bind,
     resetTurnState,
     sendPrompt,

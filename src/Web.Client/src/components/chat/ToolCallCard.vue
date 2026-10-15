@@ -133,12 +133,13 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 const props = defineProps<{
   card: AgentToolCard;
+  defaultCollapsed?: boolean;
 }>();
 
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
 
-const defaultExpanded = props.card.functionName === 'edit_file' || props.card.functionName === 'write_file' || props.card.functionName === 'exec_command';
+const defaultExpanded = props.defaultCollapsed ? false : (props.card.functionName === 'edit_file' || props.card.functionName === 'write_file' || props.card.functionName === 'exec_command');
 const expanded = ref(defaultExpanded);
 const showAllDiff = ref(false);
 

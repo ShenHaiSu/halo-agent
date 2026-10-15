@@ -212,8 +212,9 @@ const usagePercentage = computed(() => {
   if (budgetStatus.value?.usagePercentage !== undefined) {
     return Math.min(100, Math.max(0, budgetStatus.value.usagePercentage));
   }
-  const ratio = (usedTokens.value + maxOutputTokens.value + safetyBuffer.value) / Math.max(1, totalTokens.value);
-  return Math.min(100, Math.round(ratio * 100));
+  // need04-05：分母统一 maxContext（total），与后端 CalculateBudgetStatus 同公式
+  const ratio = usedTokens.value / Math.max(1, totalTokens.value);
+  return Math.min(100, Math.round(ratio * 1000) / 10);
 });
 
 const statusColor = computed(() => {

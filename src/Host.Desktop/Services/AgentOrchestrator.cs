@@ -424,7 +424,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 toolCallCount = completedCalls.Count,
                 inputTokens = usage?.InputTokens ?? 0,
                 outputTokens = usage?.OutputTokens ?? 0,
-                cachedTokens = usage?.CachedInputTokens ?? 0
+                cachedTokens = usage?.CachedInputTokens ?? 0,
+                updatedAtUtc = DateTime.UtcNow.ToString("o")
             });
 
             // (6) 无 ToolCalls 则 TurnCompleted 结束
@@ -437,7 +438,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
                     inputTokens = usage?.InputTokens ?? 0,
                     outputTokens = usage?.OutputTokens ?? 0,
-                    cachedTokens = usage?.CachedInputTokens ?? 0
+                    cachedTokens = usage?.CachedInputTokens ?? 0,
+                    updatedAtUtc = DateTime.UtcNow.ToString("o")
                 });
                 return AgentTurnResult.Completed(iteration, toolExecutions);
             }
@@ -523,7 +525,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     exitCode = toolResult.ExitCode,
                     durationMs = toolResult.DurationMs,
                     argsJson = call.ArgumentsJson,
-                    resultText = TruncateForEvent(toolText, 8000)
+                    resultText = TruncateForEvent(toolText, 8000),
+                    updatedAtUtc = DateTime.UtcNow.ToString("o")
                 });
             }
         }

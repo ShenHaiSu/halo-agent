@@ -262,9 +262,11 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             }
 
             meta.MessageCount++;
-            if (message.InputTokens.HasValue) meta.TotalInputTokens += message.InputTokens.Value;
+            // need04-05：IN/缓存快照语义（有精确值则覆盖），OUT 为增量可加
+            if (message.InputTokens.HasValue && message.InputTokens.Value > 0) meta.TotalInputTokens = message.InputTokens.Value;
+            else meta.TotalInputTokens += TokenBudgetService.EstimateMessageTokens(message);
             if (message.OutputTokens.HasValue) meta.TotalOutputTokens += message.OutputTokens.Value;
-            if (message.CachedTokens.HasValue) meta.TotalCachedTokens += message.CachedTokens.Value;
+            if (message.CachedTokens.HasValue && message.CachedTokens.Value > 0) meta.TotalCachedTokens = message.CachedTokens.Value;
             meta.UpdatedAtUtc = DateTime.UtcNow;
 
             // need03-03 T1：首条 user 且未冻结时取第一句话前 5 字（与前端 instantTitleFromUserText 同语义，surrogate 安全）

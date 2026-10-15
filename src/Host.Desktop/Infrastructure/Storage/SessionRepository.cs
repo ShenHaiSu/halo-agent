@@ -119,24 +119,54 @@ public sealed class SessionRepository : ISessionRepository
             return new List<SessionMetadata>();
         }
 
-        var wsLock = _workspaceSessionIndexLocks.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
-        await wsLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false);
-            var list = JsonSerializer.Deserialize<List<SessionMetadata>>(json, HaloJsonOptions.IndentedCamelCase);
-            return list ?? new List<SessionMetadata>();
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Error($"Failed to load sessions index for workspace '{workspaceId}'", ex);
-            return new List<SessionMetadata>();
-        }
-        finally
-        {
-            wsLock.Release();
-        }
-    }
+         var wsLock = _workspaceSessionIndexLocks.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
+         await wsLock.WaitAsync(ct).ConfigureAwait(false);
+         try
+         {
+             string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false);
+             var list = JsonSerializer.Deserialize<List<SessionMetadata>>(json, HaloJsonOptions.IndentedCamelCase);
+             list ??= new List<SessionMetadata>();
+             // need04-01：读时修（内存态）：0001/缺字段收敛为可展示可排序
+             foreach (var m in list) HealSessionTimes(m, null);
+             return list;
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error($"Failed to load sessions index for workspace '{workspaceId}'", ex);
+             return new List<SessionMetadata>();
+         }
+         finally
+         {
+             wsLock.Release();
+         }
+     }
+ 
+     private static void HealSessionTimes(SessionMetadata m, string? metaPath)
+     {
+         try
+         {
+             bool badCreated = m.CreatedAtUtc == default || m.CreatedAtUtc.Year < 2000;
+             bool badUpdated = m.UpdatedAtUtc == default || m.UpdatedAtUtc.Year < 2000;
+             if (badCreated)
+             {
+                 DateTime fallback = DateTime.UtcNow;
+                 if (!badUpdated) fallback = DateTime.SpecifyKind(m.UpdatedAtUtc, DateTimeKind.Utc);
+                 else if (!string.IsNullOrEmpty(metaPath) && File.Exists(metaPath))
+                 {
+                     try { fallback = File.GetCreationTimeUtc(metaPath); if (fallback.Year < 2000) fallback = DateTime.UtcNow; } catch { fallback = DateTime.UtcNow; }
+                 }
+                 // CreatedAtUtc 为 init：老数据只能尽力，若仍 default 则保持（前端 isBadTime 兜底）
+                 // 此处通过反射式重建不可行，退化为：若 Updated 合法则不动 Created 显示逻辑交由前端；
+                 // 实际可写字段只有 UpdatedAtUtc：
+                 if (m.UpdatedAtUtc == default || m.UpdatedAtUtc.Year < 2000) m.UpdatedAtUtc = fallback;
+             }
+             if (m.UpdatedAtUtc == default || m.UpdatedAtUtc.Year < 2000) m.UpdatedAtUtc = DateTime.UtcNow;
+             // Updated 永不早于 Created（当 Created 合法时）
+             if (m.CreatedAtUtc != default && m.CreatedAtUtc.Year >= 2000 && m.UpdatedAtUtc < m.CreatedAtUtc)
+                 m.UpdatedAtUtc = m.CreatedAtUtc;
+         }
+         catch { /* 修复永不阻断读取 */ }
+     }
 
     public async Task SaveSessionsIndexAsync(string workspaceId, List<SessionMetadata> sessions, CancellationToken ct = default)
     {
@@ -166,15 +196,27 @@ public sealed class SessionRepository : ISessionRepository
             return null;
         }
 
+        SessionMetadata? meta = null;
         try
         {
             string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<SessionMetadata>(json, HaloJsonOptions.IndentedCamelCase);
+            meta = JsonSerializer.Deserialize<SessionMetadata>(json, HaloJsonOptions.IndentedCamelCase);
+            if (meta != null)
+            {
+                bool badC = meta.CreatedAtUtc == default || meta.CreatedAtUtc.Year < 2000;
+                bool badU = meta.UpdatedAtUtc == default || meta.UpdatedAtUtc.Year < 2000 || (meta.CreatedAtUtc.Year >= 2000 && meta.UpdatedAtUtc < meta.CreatedAtUtc);
+                HealSessionTimes(meta, path);
+                if ((badC || badU) && !(meta.CreatedAtUtc == default))
+                {
+                    try { await SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false); } catch { }
+                }
+            }
+            return meta;
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"Failed to load session meta for session '{sessionId}' in ws '{workspaceId}'", ex);
-            return null;
+            return meta;
         }
     }
 

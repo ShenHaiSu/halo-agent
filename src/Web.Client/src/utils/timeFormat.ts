@@ -46,7 +46,18 @@ export function formatRelativeTime(iso: string): string {
   return formatSessionTime(iso);
 }
 
+/** need04-01：坏时间判定：空串/null/Invalid Date/年<2000（含0001）/无时区解析失败统一收敛。 */
+export function isBadTime(iso: unknown): boolean {
+  if (typeof iso !== 'string' || !iso.trim()) return true;
+  const d = new Date(iso);
+  if (isNaN(+d)) return true;
+  if (d.getFullYear() < 2000) return true;
+  return false;
+}
+
 /** 卡面第二行 tooltip 全量：创建 / 最后消息（本地时间）/ 消息条数。 */
 export function sessionTimeTitle(s: SessionTimeSource): string {
+  const bad = isBadTime(s.createdAtUtc) && isBadTime(s.updatedAtUtc);
+  if (bad) return `创建时间未知（老数据已自动修复） · 共 ${s.messageCount} 条消息`;
   return `创建于 ${toLocale(s.createdAtUtc)} · 最后消息 ${toLocale(s.updatedAtUtc)} · 共 ${s.messageCount} 条消息`;
 }
