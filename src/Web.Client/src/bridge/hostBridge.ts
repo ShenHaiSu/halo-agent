@@ -376,6 +376,7 @@ export interface HostBridgeApi {
   getSessionMessages: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
   appendSessionMessage: (workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) => Promise<BridgeResponse<boolean>>;
   updateSessionTitle: (workspaceId: string, sessionId: string, title: string) => Promise<BridgeResponse<boolean>>;
+  generateSessionTitle: (workspaceId: string, sessionId: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<string>>;
   setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
   exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
@@ -1163,7 +1164,9 @@ function createBrowserMockBridge(): HostBridgeApi {
         sess.messageCount = mockMessages[sessionId].length;
         sess.updatedAtUtc = new Date().toISOString();
         if (msg.role === 'user' && sess.title === '新建会话' && msg.content) {
-          sess.title = msg.content.trim().slice(0, 24);
+          const firstLine = String(msg.content).trim().split(/[\r\n]+/).map((s) => s.trim()).filter(Boolean)[0] || '';
+          const firstSentence = firstLine.split(/[。！？!?;；]+/).map((s) => s.trim()).filter(Boolean)[0] || firstLine;
+          sess.title = [...firstSentence.replace(/\s+/g, '')].slice(0, 5).join('') || '新建会话';
         }
       }
       return { ok: true, data: true };
@@ -1177,6 +1180,20 @@ function createBrowserMockBridge(): HostBridgeApi {
         return { ok: true, data: true };
       }
       return { ok: false, message: '会话不存在', data: false };
+    },
+    // need03-03 T2 Mock：固定精炼标题短路，保证 Web 调试同样走两阶段
+    async generateSessionTitle(workspaceId: string, sessionId: string) {
+      const list = mockSessions[workspaceId] || [];
+      const sess = list.find((s) => s.id === sessionId);
+      if (!sess) return { ok: false, message: '会话不存在', data: '' };
+      const msgs = mockMessages[sessionId] || [];
+      const firstAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+      const src = String(firstAssistant?.content || msgs.find((m) => m.role === 'user')?.content || '');
+      const firstSentence = src.trim().split(/[\r\n]+/).map((s) => s.trim()).filter(Boolean)[0]?.split(/[。！？!?;；]+/).map((s) => s.trim()).filter(Boolean)[0] || 'Mock精炼标题';
+      const title = [...firstSentence.replace(/\s+/g, '')].slice(0, 6).join('') || 'Mock精炼标题';
+      sess.title = title;
+      sess.updatedAtUtc = new Date().toISOString();
+      return { ok: true, data: title };
     },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
       const list = mockSessions[workspaceId] || [];
@@ -1401,6 +1418,11 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     async updateSessionTitle(workspaceId: string, sessionId: string, title: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(
         await rawBridge.updateSessionTitle(workspaceId, sessionId, title)
+      );
+    },
+    async generateSessionTitle(workspaceId: string, sessionId: string, providerId?: string, modelId?: string) {
+      return normalizeBridgePayload<BridgeResponse<string>>(
+        await rawBridge.generateSessionTitle(workspaceId, sessionId, providerId ?? '', modelId ?? '')
       );
     },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {

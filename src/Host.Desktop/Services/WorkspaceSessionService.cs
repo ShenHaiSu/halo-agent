@@ -267,20 +267,24 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             if (message.CachedTokens.HasValue) meta.TotalCachedTokens += message.CachedTokens.Value;
             meta.UpdatedAtUtc = DateTime.UtcNow;
 
-            // 若标题依然为默认值，自动提取首条 user 消息作为标题（最多 24 个字符）
+            // need03-03 T1：首条 user 且未冻结时取第一句话前 5 字（与前端 instantTitleFromUserText 同语义，surrogate 安全）
             if (string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) &&
+                !meta.TitleLocked &&
                 (string.IsNullOrWhiteSpace(meta.Title) || meta.Title == "新建会话" || meta.Title == "初始会话"))
             {
                 if (!string.IsNullOrWhiteSpace(message.Content))
                 {
                     var trimmed = message.Content.Trim();
                     var firstLine = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? trimmed;
-                    var candidate = firstLine.Trim();
-                    if (candidate.Length > 24)
+                    var firstSentence = firstLine.Split(new[] { '。', '！', '？', '!', '?', ';', '；' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? firstLine.Trim();
+                    var compact = new string(firstSentence.Where(c => !char.IsWhiteSpace(c)).ToArray());
+                    var elements = System.Globalization.StringInfo.ParseCombiningCharacters(compact);
+                    int take = Math.Min(5, elements.Length);
+                    var candidate = take <= 0 ? string.Empty : compact.Substring(elements[0], (take == elements.Length ? compact.Length : elements[take]) - elements[0]);
+                    if (!string.IsNullOrEmpty(candidate))
                     {
-                        candidate = candidate[..24] + "...";
+                        meta.Title = candidate;
                     }
-                    meta.Title = candidate;
                 }
             }
 
@@ -311,8 +315,9 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
     {
         var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
         if (meta == null) return false;
-
         meta.Title = string.IsNullOrWhiteSpace(newTitle) ? "未命名会话" : newTitle.Trim();
+        // need03-03：任何显式改名（含前端 LLM 精炼回写）即永久冻结，此后 Append 永不覆盖
+        meta.TitleLocked = true;
         meta.UpdatedAtUtc = DateTime.UtcNow;
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
@@ -321,6 +326,7 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         if (idx >= 0)
         {
             sessions[idx].Title = meta.Title;
+            sessions[idx].TitleLocked = true;
             sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
             await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
         }

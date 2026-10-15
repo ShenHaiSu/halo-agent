@@ -370,6 +370,7 @@ export const useAgentStore = defineStore('agent', () => {
         t.streamingActive = false;
         touch(t);
         void finishTurn(sid);
+        void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
         break;
       }
       case 'TurnTruncated': {
@@ -379,6 +380,7 @@ export const useAgentStore = defineStore('agent', () => {
         t.turnNotice = '已达到单轮最大迭代次数（25），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
         touch(t);
         void finishTurn(sid);
+        void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
         break;
       }
       case 'TurnCancelled': {
@@ -397,6 +399,7 @@ export const useAgentStore = defineStore('agent', () => {
         t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '推理失败';
         touch(t);
         void finishTurn(sid);
+        void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
         break;
       }
       default:

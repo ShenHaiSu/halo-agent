@@ -23,8 +23,8 @@ namespace Host.Desktop.Bridge;
 /// 2. 所有涉及 WinForms 控件/对话框操作强制通过 InvokeOnUiThreadAsync 切回主线程；
 /// 3. DTO 统一小驼峰序列化。
 /// </summary>
-public sealed class HostBridgeFacade
-{
+  public sealed partial class HostBridgeFacade
+  {
     private readonly Form? _mainForm;
     private readonly StoragePathManager _storageManager;
     private readonly HaloHttpClientFactory _httpClientFactory;

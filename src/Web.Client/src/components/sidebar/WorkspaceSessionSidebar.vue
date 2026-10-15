@@ -223,38 +223,23 @@
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-1.5 text-[10px] text-secondary font-mono mt-0.5 truncate" :title="sessionTimeTitle(sess)">
-                    <span>{{ formatSessionTime(sess.createdAtUtc) }}</span>
-                    <span class="opacity-50">·</span>
-                    <span>活跃 {{ formatRelativeTime(sess.updatedAtUtc) }}</span>
+                  <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden" :title="sessionTimeTitle(sess)" data-testid="session-meta-line" :data-tick="nowTick">
+                    <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
+                    <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
                   </div>
                 </div>
               </div>
 
               <!-- 悬停更多操作按钮 -->
               <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
-                <n-button
-                  v-if="isArmed(sess.id)"
-                  size="tiny"
-                  type="error"
-                  secondary
-                  :loading="deletingSessionId === sess.id"
-                  data-testid="confirm-delete-btn"
-                  @click="confirmDeleteInline(sess.id)"
-                  @mouseleave="cancelDeleteConfirm"
-                >
-                  <template #icon>
-                    <AlertTriangle class="w-3.5 h-3.5" />
-                  </template>
-                  确定删除？
-                </n-button>
                 <n-dropdown
-                  v-else
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
+                  :show="openMenuSessionId === sess.id"
+                  @update:show="(v: boolean) => onDropdownShowChange(v, sess.id)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny" data-testid="session-more-btn">
+                  <n-button quaternary circle size="tiny" data-testid="session-more-btn" @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)">
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -316,38 +301,23 @@
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-1.5 text-[10px] text-secondary font-mono mt-0.5 truncate" :title="sessionTimeTitle(sess)">
-                    <span>{{ formatSessionTime(sess.createdAtUtc) }}</span>
-                    <span class="opacity-50">·</span>
-                    <span>活跃 {{ formatRelativeTime(sess.updatedAtUtc) }}</span>
+                  <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden" :title="sessionTimeTitle(sess)" data-testid="session-meta-line" :data-tick="nowTick">
+                    <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
+                    <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
                   </div>
                 </div>
               </div>
 
               <!-- 悬停更多操作按钮 -->
               <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
-                <n-button
-                  v-if="isArmed(sess.id)"
-                  size="tiny"
-                  type="error"
-                  secondary
-                  :loading="deletingSessionId === sess.id"
-                  data-testid="confirm-delete-btn"
-                  @click="confirmDeleteInline(sess.id)"
-                  @mouseleave="cancelDeleteConfirm"
-                >
-                  <template #icon>
-                    <AlertTriangle class="w-3.5 h-3.5" />
-                  </template>
-                  确定删除？
-                </n-button>
                 <n-dropdown
-                  v-else
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
+                  :show="openMenuSessionId === sess.id"
+                  @update:show="(v: boolean) => onDropdownShowChange(v, sess.id)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny" data-testid="session-more-btn">
+                  <n-button quaternary circle size="tiny" data-testid="session-more-btn" @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)">
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -383,7 +353,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, h } from 'vue';
+  import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMessage } from 'naive-ui';
 import {
@@ -432,39 +402,60 @@ const {
 const showWorkspacePopover = ref(false);
 const editingSessionId = ref<string | null>(null);
 const editingTitleDraft = ref('');
-const pendingDeleteSessionId = ref<string | null>(null);
-const deletingSessionId = ref<string | null>(null);
-let pendingDeleteTimer: number | null = null;
+  const pendingDeleteSessionId = ref<string | null>(null);
+  const deletingSessionId = ref<string | null>(null);
+  let pendingDeleteTimer: number | null = null;
+  // need03-02：受控菜单（保持展开的关键），null=关闭
+  const openMenuSessionId = ref<string | null>(null);
+  // need03-01：60s tick 驱动相对时间重算（模板经 relativeLabel 读取 nowTick）
+  const nowTick = ref(Date.now());
+  let tickTimer: number | null = null;
 
-function armDeleteConfirm(sessId: string): void {
-  if (editingSessionId.value) return;
-  pendingDeleteSessionId.value = sessId;
-  if (pendingDeleteTimer !== null) {
-    clearTimeout(pendingDeleteTimer);
+  function armDeleteConfirm(sessId: string): void {
+    if (editingSessionId.value) return;
+    if (deletingSessionId.value !== null) return;
+    pendingDeleteSessionId.value = sessId;
+    openMenuSessionId.value = sessId;
+    if (pendingDeleteTimer !== null) {
+      clearTimeout(pendingDeleteTimer);
+    }
+    pendingDeleteTimer = window.setTimeout(() => {
+      pendingDeleteSessionId.value = null;
+      pendingDeleteTimer = null;
+      openMenuSessionId.value = null;
+    }, 3000);
   }
-  pendingDeleteTimer = window.setTimeout(() => {
+
+  function cancelDeleteConfirm(): void {
     pendingDeleteSessionId.value = null;
-    pendingDeleteTimer = null;
-  }, 3000);
-}
-
-function cancelDeleteConfirm(): void {
-  pendingDeleteSessionId.value = null;
-  if (pendingDeleteTimer !== null) {
-    clearTimeout(pendingDeleteTimer);
-    pendingDeleteTimer = null;
+    if (pendingDeleteTimer !== null) {
+      clearTimeout(pendingDeleteTimer);
+      pendingDeleteTimer = null;
+    }
   }
-}
-
-function isArmed(sessId: string): boolean {
-  return pendingDeleteSessionId.value === sessId;
-}
+  function onDropdownShowChange(v: boolean, id: string): void {
+    if (v) { openMenuSessionId.value = id; return; }
+    if (isArmed(id)) cancelDeleteConfirm();
+    if (openMenuSessionId.value === id) openMenuSessionId.value = null;
+  }
+  function isArmed(sessId: string): boolean {
+    return pendingDeleteSessionId.value === sessId;
+  }
+  // need03-01：时间行展示兜底 + tick 依赖（空白行=用户视角“没展示”，非法时显示“时间未知”）
+  function hasNoTime(sess: SessionMetadata): boolean {
+    return formatSessionTime(sess.createdAtUtc) === '-' && formatRelativeTime(sess.updatedAtUtc) === '-';
+  }
+  function relativeLabel(iso: string): string {
+    void nowTick.value;
+    return formatRelativeTime(iso);
+  }
 
 async function confirmDeleteInline(sessId: string): Promise<void> {
   if (deletingSessionId.value !== null) return;
   deletingSessionId.value = sessId;
   try {
     cancelDeleteConfirm();
+    openMenuSessionId.value = null;
     const ok = await workspaceStore.deleteSession(sessId);
     if (ok) {
       message.success('会话已删除');
@@ -512,10 +503,11 @@ async function handleCreateNewSession(): Promise<void> {
   }
 }
 
-async function handleSelectSession(sessionId: string): Promise<void> {
-  cancelDeleteConfirm();
-  await workspaceStore.selectSession(sessionId);
-}
+  async function handleSelectSession(sessionId: string): Promise<void> {
+    cancelDeleteConfirm();
+    openMenuSessionId.value = null;
+    await workspaceStore.selectSession(sessionId);
+  }
 
 function startInlineRename(sess: SessionMetadata): void {
   editingSessionId.value = sess.id;
@@ -533,95 +525,105 @@ async function handleSaveRename(sessionId: string): Promise<void> {
   }
 }
 
-function getSessionDropdownOptions(sess: SessionMetadata) {
-  return [
-    {
-      label: '重命名会话',
-      key: 'rename',
-      icon: () => h(Edit3, { class: 'w-4 h-4' }),
-    },
-    {
-      label: sess.isPinned ? '取消置顶' : '置顶会话',
-      key: 'pin',
-      icon: () => h(Pin, { class: 'w-4 h-4' }),
-    },
-    {
-      label: '复制会话 Hash',
-      key: 'copy-hash',
-      icon: () => h(Hash, { class: 'w-4 h-4' }),
-    },
-    {
-      label: '导出为 Markdown',
-      key: 'export-md',
-      icon: () => h(Download, { class: 'w-4 h-4' }),
-    },
-    {
-      type: 'divider',
-      key: 'd1',
-    },
-    {
-      label: '删除会话',
-      key: 'delete',
-      icon: () => h(Trash2, { class: 'w-4 h-4 text-error' }),
-    },
-  ];
-}
-
-async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
-  switch (key) {
-    case 'rename':
-      startInlineRename(sess);
-      break;
-    case 'pin':
-      await workspaceStore.togglePinSession(sess.id, !sess.isPinned);
-      message.success(sess.isPinned ? '已取消置顶' : '已置顶会话');
-      break;
-    case 'copy-hash':
-      try {
-        await navigator.clipboard.writeText(sess.sessionHash);
-        message.success(`已复制 Session Hash: ${sess.sessionHash}`);
-      } catch {
-        message.info(`Session Hash: ${sess.sessionHash}`);
-      }
-      break;
-    case 'export-md': {
-      const md = await workspaceStore.exportSessionMarkdown(sess.id);
-      if (md) {
+  function getSessionDropdownOptions(sess: SessionMetadata) {
+    const armed = isArmed(sess.id);
+    return [
+      {
+        label: '重命名会话',
+        key: 'rename',
+        icon: () => h(Edit3, { class: 'w-4 h-4' }),
+      },
+      {
+        label: sess.isPinned ? '取消置顶' : '置顶会话',
+        key: 'pin',
+        icon: () => h(Pin, { class: 'w-4 h-4' }),
+      },
+      {
+        label: '复制会话 Hash',
+        key: 'copy-hash',
+        icon: () => h(Hash, { class: 'w-4 h-4' }),
+      },
+      {
+        label: '导出为 Markdown',
+        key: 'export-md',
+        icon: () => h(Download, { class: 'w-4 h-4' }),
+      },
+      {
+        type: 'divider',
+        key: 'd1',
+      },
+      {
+        label: armed ? '确定删除' : '删除会话',
+        key: 'delete',
+        props: armed ? { class: 'delete-armed-row', style: 'color: var(--error-color, #ef4444); font-weight: 600;' } : undefined,
+        icon: () => h(Trash2, { class: 'w-4 h-4 text-error' }),
+      },
+    ];
+  }
+  async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
+    if (key !== 'delete' && isArmed(sess.id)) cancelDeleteConfirm();
+    switch (key) {
+      case 'rename':
+        openMenuSessionId.value = null;
+        startInlineRename(sess);
+        break;
+      case 'pin':
+        await workspaceStore.togglePinSession(sess.id, !sess.isPinned);
+        message.success(sess.isPinned ? '已取消置顶' : '已置顶会话');
+        break;
+      case 'copy-hash':
         try {
-          await navigator.clipboard.writeText(md);
-          message.success('已导出 Markdown 文本至剪贴板');
+          await navigator.clipboard.writeText(sess.sessionHash);
+          message.success(`已复制 Session Hash: ${sess.sessionHash}`);
         } catch {
-          message.success('Markdown 导出成功');
+          message.info(`Session Hash: ${sess.sessionHash}`);
         }
+        break;
+      case 'export-md': {
+        const md = await workspaceStore.exportSessionMarkdown(sess.id);
+        if (md) {
+          try {
+            await navigator.clipboard.writeText(md);
+            message.success('已导出 Markdown 文本至剪贴板');
+          } catch {
+            message.success('Markdown 导出成功');
+          }
+        }
+        break;
       }
-      break;
+      case 'delete':
+        if (!isArmed(sess.id)) {
+          armDeleteConfirm(sess.id);
+          await nextTick();
+          openMenuSessionId.value = sess.id;
+          break;
+        }
+        await confirmDeleteInline(sess.id);
+        break;
     }
-    case 'delete':
-      armDeleteConfirm(sess.id);
-      break;
   }
-}
-
-function handleGlobalKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') {
-    cancelDeleteConfirm();
-    return;
-  }
+  function handleGlobalKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      cancelDeleteConfirm();
+      openMenuSessionId.value = null;
+      return;
+    }
   if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault();
     handleCreateNewSession();
   }
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleGlobalKeydown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleGlobalKeydown);
-  if (pendingDeleteTimer !== null) {
-    clearTimeout(pendingDeleteTimer);
-    pendingDeleteTimer = null;
-  }
-});
+  onMounted(() => {
+    window.addEventListener('keydown', handleGlobalKeydown);
+    if (tickTimer === null) tickTimer = window.setInterval(() => { nowTick.value = Date.now(); }, 60000);
+  });
+  onUnmounted(() => {
+    window.removeEventListener('keydown', handleGlobalKeydown);
+    if (pendingDeleteTimer !== null) {
+      clearTimeout(pendingDeleteTimer);
+      pendingDeleteTimer = null;
+    }
+    if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null; }
+  });
 </script>

@@ -69,9 +69,11 @@ public sealed class SessionMetadata
     public string SessionHash { get; init; } = string.Empty;
 
     /// <summary>
-    /// 会话标题（首轮用户提问后自动提取前 24 个字符生成，支持手动重命名）
+    /// 会话标题（T1 首条 user 第一句话前 5 字即时生成；T2 首轮结束后精炼一次；手动重命名后 TitleLocked=true 永久冻结）
     /// </summary>
     public string Title { get; set; } = "新建会话";
+    /// <summary>手动改名/自动精炼完成后冻结，Append 永不覆盖（老数据缺省 false 兼容）</summary>
+    public bool TitleLocked { get; set; }
 
     public string? ProviderId { get; set; }
     public string? ModelId { get; set; }
