@@ -231,7 +231,24 @@
               </div>
 
               <!-- 悬停更多操作按钮 -->
-              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
+              <!-- 悬停操作区：行外删除（二次确认） + 更多菜单 -->
+              <div class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1" :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'" @click.stop>
+                <n-button
+                  quaternary
+                  circle
+                  size="tiny"
+                  data-testid="session-delete-btn"
+                  :data-armed="isArmed(sess.id) ? 'true' : 'false'"
+                  :type="isArmed(sess.id) ? 'error' : 'default'"
+                  :loading="deletingSessionId === sess.id"
+                  :title="isArmed(sess.id) ? '再次点击确认删除（3s内有效）' : '删除会话'"
+                  :class="isArmed(sess.id) ? '!bg-red-500/20 font-semibold' : ''"
+                  @click="handleDeleteBtnClick(sess.id)"
+                >
+                  <template #icon>
+                    <Trash2 class="w-3.5 h-3.5" :class="isArmed(sess.id) ? '' : 'text-error'" />
+                  </template>
+                </n-button>
                 <n-dropdown
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
@@ -308,8 +325,24 @@
                 </div>
               </div>
 
-              <!-- 悬停更多操作按钮 -->
-              <div class="opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0 flex items-center" @click.stop>
+              <!-- 悬停操作区：行外删除（二次确认） + 更多菜单 -->
+              <div class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1" :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'" @click.stop>
+                <n-button
+                  quaternary
+                  circle
+                  size="tiny"
+                  data-testid="session-delete-btn"
+                  :data-armed="isArmed(sess.id) ? 'true' : 'false'"
+                  :type="isArmed(sess.id) ? 'error' : 'default'"
+                  :loading="deletingSessionId === sess.id"
+                  :title="isArmed(sess.id) ? '再次点击确认删除（3s内有效）' : '删除会话'"
+                  :class="isArmed(sess.id) ? '!bg-red-500/20 font-semibold' : ''"
+                  @click="handleDeleteBtnClick(sess.id)"
+                >
+                  <template #icon>
+                    <Trash2 class="w-3.5 h-3.5" :class="isArmed(sess.id) ? '' : 'text-error'" />
+                  </template>
+                </n-button>
                 <n-dropdown
                   trigger="click"
                   :options="getSessionDropdownOptions(sess)"
@@ -353,7 +386,7 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue';
+  import { ref, computed, onMounted, onUnmounted, h } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMessage } from 'naive-ui';
 import {
@@ -415,17 +448,14 @@ const editingTitleDraft = ref('');
     if (editingSessionId.value) return;
     if (deletingSessionId.value !== null) return;
     pendingDeleteSessionId.value = sessId;
-    openMenuSessionId.value = sessId;
     if (pendingDeleteTimer !== null) {
       clearTimeout(pendingDeleteTimer);
     }
     pendingDeleteTimer = window.setTimeout(() => {
       pendingDeleteSessionId.value = null;
       pendingDeleteTimer = null;
-      openMenuSessionId.value = null;
     }, 3000);
   }
-
   function cancelDeleteConfirm(): void {
     pendingDeleteSessionId.value = null;
     if (pendingDeleteTimer !== null) {
@@ -435,11 +465,19 @@ const editingTitleDraft = ref('');
   }
   function onDropdownShowChange(v: boolean, id: string): void {
     if (v) { openMenuSessionId.value = id; return; }
-    if (isArmed(id)) cancelDeleteConfirm();
     if (openMenuSessionId.value === id) openMenuSessionId.value = null;
   }
   function isArmed(sessId: string): boolean {
     return pendingDeleteSessionId.value === sessId;
+  }
+  async function handleDeleteBtnClick(sessId: string): Promise<void> {
+    if (deletingSessionId.value !== null) return;
+    if (editingSessionId.value) return;
+    if (!isArmed(sessId)) {
+      armDeleteConfirm(sessId);
+      return;
+    }
+    await confirmDeleteInline(sessId);
   }
   // need03-01：时间行展示兜底 + tick 依赖（空白行=用户视角“没展示”，非法时显示“时间未知”）
   // need04-01：坏时间统一判（空串/null/0001/无时区），新会话永不进此分支
@@ -527,7 +565,6 @@ async function handleSaveRename(sessionId: string): Promise<void> {
 }
 
   function getSessionDropdownOptions(sess: SessionMetadata) {
-    const armed = isArmed(sess.id);
     return [
       {
         label: '重命名会话',
@@ -549,20 +586,10 @@ async function handleSaveRename(sessionId: string): Promise<void> {
         key: 'export-md',
         icon: () => h(Download, { class: 'w-4 h-4' }),
       },
-      {
-        type: 'divider',
-        key: 'd1',
-      },
-      {
-        label: armed ? '确定删除' : '删除会话',
-        key: 'delete',
-        props: armed ? { class: 'delete-armed-row', style: 'color: var(--error-color, #ef4444); font-weight: 600;' } : undefined,
-        icon: () => h(Trash2, { class: 'w-4 h-4 text-error' }),
-      },
     ];
   }
   async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
-    if (key !== 'delete' && isArmed(sess.id)) cancelDeleteConfirm();
+    if (isArmed(sess.id)) cancelDeleteConfirm();
     switch (key) {
       case 'rename':
         openMenuSessionId.value = null;
@@ -592,15 +619,6 @@ async function handleSaveRename(sessionId: string): Promise<void> {
         }
         break;
       }
-      case 'delete':
-        if (!isArmed(sess.id)) {
-          armDeleteConfirm(sess.id);
-          await nextTick();
-          openMenuSessionId.value = sess.id;
-          break;
-        }
-        await confirmDeleteInline(sess.id);
-        break;
     }
   }
   function handleGlobalKeydown(e: KeyboardEvent): void {
