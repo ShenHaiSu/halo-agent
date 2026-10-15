@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden" data-testid="message-timeline">
+  <div ref="scrollContainerRef" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden" data-testid="message-timeline">
     <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <!-- 空态 -->
       <div v-if="persistedMessages.length === 0 && !agentStore.hasActiveTurn" class="py-10 text-center space-y-2">
@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { Bot, BrainCircuit, ChevronDown, Loader2 } from 'lucide-vue-next';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -274,6 +274,60 @@ const cachePercent = computed(() => {
   const t = agentStore.telemetry;
   if (t.inputTokens <= 0) return '0%';
   return `${Math.round((t.cachedTokens / t.inputTokens) * 100)}%`;
+});
+// 进入会话自动滚到底：主界面渲染完毕后检测纵向滚动条位置与可滚动高度，有向下空间即滚到底。
+const scrollContainerRef = ref<HTMLElement | null>(null);
+let scrollBottomRaf = 0;
+let scrollBottomTimer: number | null = null;
+function scrollTimelineToBottomIfNeeded(): boolean {
+  const el = scrollContainerRef.value;
+  if (!el) return false;
+  const maxScroll = el.scrollHeight - el.clientHeight;
+  if (maxScroll <= 0) return false;
+  if (maxScroll - el.scrollTop <= 1.5) return false;
+  el.scrollTop = el.scrollHeight;
+  return true;
+}
+function scheduleScrollTimelineToBottom(): void {
+  if (scrollBottomRaf) cancelAnimationFrame(scrollBottomRaf);
+  scrollBottomRaf = requestAnimationFrame(() => {
+    scrollBottomRaf = requestAnimationFrame(() => {
+      scrollBottomRaf = 0;
+      scrollTimelineToBottomIfNeeded();
+    });
+  });
+  if (scrollBottomTimer !== null) window.clearTimeout(scrollBottomTimer);
+  scrollBottomTimer = window.setTimeout(() => {
+    scrollBottomTimer = null;
+    scrollTimelineToBottomIfNeeded();
+  }, 200);
+}
+watch(
+  () => workspaceStore.activeSessionId,
+  () => {
+    void nextTick(() => scheduleScrollTimelineToBottom());
+  }
+);
+watch(
+  () => timelineItems.value.length,
+  () => {
+    void nextTick(() => scheduleScrollTimelineToBottom());
+  }
+);
+watch(
+  () => workspaceStore.loadingMessages,
+  (loading) => {
+    if (!loading) void nextTick(() => scheduleScrollTimelineToBottom());
+  }
+);
+onMounted(() => {
+  void nextTick(() => scheduleScrollTimelineToBottom());
+});
+onUnmounted(() => {
+  if (scrollBottomRaf) cancelAnimationFrame(scrollBottomRaf);
+  if (scrollBottomTimer !== null) window.clearTimeout(scrollBottomTimer);
+  scrollBottomRaf = 0;
+  scrollBottomTimer = null;
 });
 void truncateToolText;
 </script>
