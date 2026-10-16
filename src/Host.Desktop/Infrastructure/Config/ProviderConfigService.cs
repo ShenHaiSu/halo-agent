@@ -559,19 +559,30 @@ public sealed class ProviderConfigService
 
         clone.Models = (clone.Models ?? new List<ModelConfig>())
             .Where(m => m != null && !string.IsNullOrWhiteSpace(m.Id))
-            .Select(m => new ModelConfig
-            {
-                Id = m.Id.Trim(),
-                DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id.Trim() : m.DisplayName.Trim(),
-                Protocol = m.Protocol,
-                MaxContextTokens = m.MaxContextTokens > 0 ? m.MaxContextTokens : 128000,
-                MaxOutputTokens = m.MaxOutputTokens > 0 ? m.MaxOutputTokens : 4096,
-                Temperature = m.Temperature,
-                Enabled = m.Enabled
-            })
+            .Select(m => NormalizeModelForStorage(m))
             .ToList();
-
         return clone;
+    }
+    /// <summary>need09-03：模型 vision 能力位校验（maxImages 0..16 else PROVIDER_VALIDATION；detail 非法回退 auto；老 json 缺字段即默认值）。</summary>
+    private static ModelConfig NormalizeModelForStorage(ModelConfig m)
+    {
+        if (m.MaxImagesPerTurn < 0 || m.MaxImagesPerTurn > VisionDefaults.MaxAllowedImages)
+        {
+            throw new ProviderConfigValidationException("maxImagesPerTurn", "允许 0 或 1..16（0=默认4）");
+        }
+        return new ModelConfig
+        {
+            Id = m.Id.Trim(),
+            DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id.Trim() : m.DisplayName.Trim(),
+            Protocol = m.Protocol,
+            MaxContextTokens = m.MaxContextTokens > 0 ? m.MaxContextTokens : 128000,
+            MaxOutputTokens = m.MaxOutputTokens > 0 ? m.MaxOutputTokens : 4096,
+            Temperature = m.Temperature,
+            Enabled = m.Enabled,
+            SupportsVision = m.SupportsVision,
+            MaxImagesPerTurn = m.MaxImagesPerTurn,
+            VisionDetail = VisionDefaults.NormalizeDetail(m.VisionDetail)
+        };
     }
 
     private static void NormalizeProxySecretForStorage(ManualProxyConfig target, ManualProxyConfig? existing)

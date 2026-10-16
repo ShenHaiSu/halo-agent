@@ -14,22 +14,26 @@ public sealed class StoragePathManager
     public const string DefaultCDriveDataRoot = @"C:\HaloAgentData";
     public const long MinRequiredFreeSpaceBytes = 200L * 1024L * 1024L; // 200 MB
 
-    private static readonly string[] ManagedSubDirectories =
-    {
-        "config",
-        "workspaces",
-        "sessions",
-        "logs",
-        "cef-cache"
-    };
+     private static readonly string[] ManagedSubDirectories =
+     {
+         "config",
+         "workspaces",
+         "sessions",
+         "logs",
+         "cef-cache",
+         "skills",
+         "memory"
+     };
 
-    private static readonly string[] MigratableSubDirectories =
-    {
-        "config",
-        "workspaces",
-        "sessions",
-        "logs"
-    };
+     private static readonly string[] MigratableSubDirectories =
+     {
+         "config",
+         "workspaces",
+         "sessions",
+         "logs",
+         "skills",
+         "memory"
+     };
 
     private readonly object _stateLock = new();
     private string _currentDataRoot;
@@ -56,17 +60,25 @@ public sealed class StoragePathManager
         get { lock (_stateLock) return _lastModifiedUtc; }
     }
 
-    public bool IsUsingFallback
-    {
-        get { lock (_stateLock) return _isUsingFallback; }
-    }
+     public bool IsUsingFallback
+     {
+         get { lock (_stateLock) return _isUsingFallback; }
+     }
 
-    public string ConfigDirectory => Path.Combine(CurrentDataRoot, "config");
-    public string WorkspacesDirectory => Path.Combine(CurrentDataRoot, "workspaces");
-    public string SessionsDirectory => Path.Combine(CurrentDataRoot, "sessions");
-    public string LogsDirectory => Path.Combine(CurrentDataRoot, "logs");
-    public string CefCacheDirectory => Path.Combine(CurrentDataRoot, "cef-cache");
-    public string AppSettingsFilePath => Path.Combine(ConfigDirectory, "app-settings.json");
+     public string ConfigDirectory => Path.Combine(CurrentDataRoot, "config");
+     public string WorkspacesDirectory => Path.Combine(CurrentDataRoot, "workspaces");
+     public string SessionsDirectory => Path.Combine(CurrentDataRoot, "sessions");
+     public string LogsDirectory => Path.Combine(CurrentDataRoot, "logs");
+     public string CefCacheDirectory => Path.Combine(CurrentDataRoot, "cef-cache");
+     /// <summary>need09-01：Global Skill 域根目录（随数据根迁移）。</summary>
+     public string GlobalSkillsDirectory => Path.Combine(CurrentDataRoot, "skills");
+     /// <summary>need09-01：Global Memory 域根目录（随数据根迁移）。</summary>
+     public string GlobalMemoryDirectory => Path.Combine(CurrentDataRoot, "memory");
+     /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
+     public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;
+     /// <summary>need09-01：标准子目录清单（含 skills/memory）。</summary>
+     public static IReadOnlyList<string> ManagedSubDirectoryNames => ManagedSubDirectories;
+     public string AppSettingsFilePath => Path.Combine(ConfigDirectory, "app-settings.json");
 
     private StoragePathManager(
         string bootstrapFilePath,

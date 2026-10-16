@@ -516,6 +516,10 @@ namespace Host.Desktop.Bridge;
             JsEventDispatcher.Publish("config:providers-changed", saved);
             return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, "大模型服务商与模型配置已安全加密落盘"));
         }
+        catch (ProviderConfigValidationException vex)
+        {
+            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_VALIDATION", $"字段 [{vex.Field}]：{vex.Message}"));
+        }
         catch (Exception ex)
         {
             HaloLogger.App.Error("SaveProvidersConfig failed", ex);
@@ -541,6 +545,10 @@ namespace Host.Desktop.Bridge;
             var saved = _providerConfigService.UpsertProvider(provider);
             JsEventDispatcher.Publish("config:providers-changed", saved);
             return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, $"服务商 [{provider.Name}] 已保存"));
+        }
+        catch (ProviderConfigValidationException vex)
+        {
+            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_VALIDATION", $"字段 [{vex.Field}]：{vex.Message}"));
         }
         catch (Exception ex)
         {
@@ -730,7 +738,8 @@ namespace Host.Desktop.Bridge;
         string sessionId,
         string userText,
         string? providerId = null,
-        string? modelId = null)
+        string? modelId = null,
+        string? attachmentsJson = null)
     {
         try
         {
@@ -738,18 +747,15 @@ namespace Host.Desktop.Bridge;
             {
                 return Task.FromResult(BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
             }
-
             if (string.IsNullOrWhiteSpace(userText))
             {
                 return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
             }
-
             string turnKey = "agent:" + sessionId.Trim();
             if (_activeSessionTokens.TryRemove(turnKey, out var oldCts))
             {
                 try { oldCts.Cancel(); oldCts.Dispose(); } catch { /* ignore */ }
             }
-
             var cts = new CancellationTokenSource();
             _activeSessionTokens[turnKey] = cts;
             string wsId = workspaceId.Trim();
@@ -757,6 +763,15 @@ namespace Host.Desktop.Bridge;
             string prompt = userText;
             string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
             string? modId = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
+            try
+            {
+                var imgRefs = SaveTurnAttachments(wsId, sessId, attachmentsJson, ref prompt);
+                if (imgRefs.Count > 0) PendingSessionImages.Put(sessId, imgRefs);
+            }
+            catch (Exception ex)
+            {
+                HaloLogger.App.Warn("[HostBridge] 附件落盘失败（文字仍发送）：" + ex.Message);
+            }
 
             _ = Task.Run(async () =>
             {

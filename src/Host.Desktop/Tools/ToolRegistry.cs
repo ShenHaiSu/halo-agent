@@ -6,7 +6,7 @@ using Host.Desktop.Tools.Safety;
 namespace Host.Desktop.Tools;
 
 /// <summary>
-/// 统一工具注册调度中心：注册 6 个标准基础工具，
+/// 统一工具注册调度中心：注册 10 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool），
 /// DispatchAsync 捕获异常转自愈提示，输出统一过 ToolOutputGuard，
 /// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
 /// 并发安全（无共享可变状态，处理器均为无状态）。
@@ -27,6 +27,10 @@ public sealed class ToolRegistry
             Register(new EditFileTool());
             Register(new ListDirTool());
             Register(new GrepSearchTool());
+            Register(new ViewImageTool());
+            Register(new AskUserTool());
+            Register(new SkillTool());
+            Register(new MemoryTool());
         }
     }
 
@@ -61,7 +65,7 @@ public sealed class ToolRegistry
     }
 
     /// <summary>
-    /// 导出全部工具定义。
+    /// 导出全部工具定义（按 name 升序稳定排序，need09-07 新工具自动归位）。
     /// </summary>
     public IReadOnlyList<ToolDefinition> GetDefinitions()
     {
@@ -77,7 +81,7 @@ public sealed class ToolRegistry
                 {
                     return new ToolDefinition(h.Name, h.Description, "{\"type\":\"object\",\"properties\":{}}");
                 }
-            }).ToList();
+            }).OrderBy(d => d.Name, StringComparer.Ordinal).ToList();
         }
     }
 

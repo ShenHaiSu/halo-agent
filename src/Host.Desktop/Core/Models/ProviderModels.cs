@@ -81,6 +81,22 @@ public sealed class ModelConfig
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// need09-03：是否支持视觉输入（多模态看图）。默认 false（纯文本模型）。
+    /// </summary>
+    public bool SupportsVision { get; set; } = false;
+
+    /// <summary>
+    /// need09-03：每轮最多发送图片数。0 = 默认 <see cref="VisionDefaults.DefaultMaxImages"/>（注意：与 need08 的 0=无限不同，图片无限会撑爆上下文）。
+    /// 合法值 0..16，超限拒绝 PROVIDER_VALIDATION。
+    /// </summary>
+    public int MaxImagesPerTurn { get; set; } = 4;
+
+    /// <summary>
+    /// need09-03：图片清晰度透传（chat image_url.detail）。仅 auto|low|high，非法值网关回退 auto（不拒绝）。
+    /// </summary>
+    public string? VisionDetail { get; set; } = "auto";
+
     public ModelConfig Clone()
     {
         return new ModelConfig
@@ -91,9 +107,55 @@ public sealed class ModelConfig
             MaxContextTokens = MaxContextTokens,
             MaxOutputTokens = MaxOutputTokens,
             Temperature = Temperature,
-            Enabled = Enabled
+            Enabled = Enabled,
+            SupportsVision = SupportsVision,
+            MaxImagesPerTurn = MaxImagesPerTurn,
+            VisionDetail = VisionDetail
         };
     }
+}
+
+/// <summary>
+/// need09-03：视觉能力位默认值与归一化（前后端同构，见 docs/need09/03 §1.3）。
+/// </summary>
+public static class VisionDefaults
+{
+    /// <summary>默认每轮图片数（MaxImagesPerTurn=0 即此值，非无限）。</summary>
+    public const int DefaultMaxImages = 4;
+    /// <summary>每轮图片数上限（含 0 哨兵在内合法区间为 0..16）。</summary>
+    public const int MaxAllowedImages = 16;
+    public const string DefaultDetail = "auto";
+
+    /// <summary>0/负数 → 默认 4；正数原样返回（上限由校验层拒绝，不在此钳制）。</summary>
+    public static int ResolveMaxImages(int configured) => configured <= 0 ? DefaultMaxImages : configured;
+
+    /// <summary>仅 auto|low|high 通过（大小写不敏感），其余一律回退 auto（不拒绝）。</summary>
+    public static string NormalizeDetail(string? detail)
+    {
+        string d = (detail ?? string.Empty).Trim().ToLowerInvariant();
+        return d switch
+        {
+            "low" => "low",
+            "high" => "high",
+            _ => "auto",
+        };
+    }
+}
+
+/// <summary>
+/// need09-03：服务商/模型校验失败（错误码 PROVIDER_VALIDATION）。
+/// </summary>
+public sealed class ProviderConfigValidationException : Exception
+{
+    public ProviderConfigValidationException(string field, string message)
+        : base(message)
+    {
+        Field = field ?? string.Empty;
+        Code = "PROVIDER_VALIDATION";
+    }
+
+    public string Field { get; }
+    public string Code { get; }
 }
 
 /// <summary>
