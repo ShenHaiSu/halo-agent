@@ -30,6 +30,20 @@ public sealed class MainForm : Form
         _isDevelopment = string.Equals(envMode, "Development", StringComparison.OrdinalIgnoreCase);
 
         Text = "Halo-Agent Desktop";
+        try
+        {
+            // 窗口/任务栏图标与 exe 文件图标保持一致（exe 图标来自 Resources/app.ico）
+            var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            if (exeIcon is not null)
+            {
+                Icon = (Icon)exeIcon.Clone();
+                exeIcon.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("Load window icon failed, fallback to default.", ex);
+        }
         Width = 1320;
         Height = 840;
         MinimumSize = new Size(980, 640);
