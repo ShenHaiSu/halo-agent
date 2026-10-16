@@ -27,10 +27,12 @@ public interface ISessionRepository
     Task<bool> DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
     Task<bool> DeleteWorkspaceDirectoryAsync(string workspaceId, CancellationToken ct = default);
     Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default);
-    /// <summary>need05-03：重写前全量备份 messages.jsonl，返回备份文件名。</summary>
-    Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default);
-    /// <summary>need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件）。</summary>
-    Task RewriteMessagesJsonlAsync(string workspaceId, string sessionId, IReadOnlyList<UnifiedChatMessage> messages, CancellationToken ct = default);
+     /// <summary>need05-03：重写前全量备份 messages.jsonl，返回备份文件名。</summary>
+     Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+     /// <summary>need07：同上，允许调用方指定备份文件前缀（默认 compact-bak，保持老调用零改动）。</summary>
+     Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, string filePrefix, CancellationToken ct = default);
+     /// <summary>need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件）。</summary>
+     Task RewriteMessagesJsonlAsync(string workspaceId, string sessionId, IReadOnlyList<UnifiedChatMessage> messages, CancellationToken ct = default);
     string GetWorkspaceDirectory(string workspaceId);
     string GetSessionDirectory(string workspaceId, string sessionId);
     string GetMessagesJsonlPath(string workspaceId, string sessionId);
@@ -403,35 +405,39 @@ public sealed class SessionRepository : ISessionRepository
     /// need05-03：备份 messages.jsonl → messages.compact-bak-{UTC:yyyyMMddHHmmss}.jsonl，返回备份文件名。
     /// 与 AppendMessageAsync 持同一把 _sessionLocks[sessionId] 锁，天然互斥。
     /// </summary>
-    public async Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default)
-    {
-        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
-        string backupFileName = $"messages.compact-bak-{DateTime.UtcNow:yyyyMMddHHmmss}.jsonl";
-        string backupPath = Path.Combine(GetSessionDirectory(workspaceId, sessionId), backupFileName);
-        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var dir = Path.GetDirectoryName(backupPath);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            if (File.Exists(jsonlPath))
-            {
-                using var src = new FileStream(jsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var dst = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                await src.CopyToAsync(dst, ct).ConfigureAwait(false);
-                await dst.FlushAsync(ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await File.WriteAllTextAsync(backupPath, string.Empty, Encoding.UTF8, ct).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            sessionLock.Release();
-        }
-        return backupFileName;
-    }
+     public Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+         => BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.compact-bak-", ct);
+     /// <summary>need07：前缀可配备份（replay-bak / compact-bak 共用同一原子拷贝路径）。</summary>
+     public async Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, string filePrefix, CancellationToken ct = default)
+     {
+         string prefix = string.IsNullOrWhiteSpace(filePrefix) ? "messages.compact-bak-" : filePrefix.Trim();
+         string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
+         string backupFileName = $"{prefix}{DateTime.UtcNow:yyyyMMddHHmmss}.jsonl";
+         string backupPath = Path.Combine(GetSessionDirectory(workspaceId, sessionId), backupFileName);
+         var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
+         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
+         try
+         {
+             var dir = Path.GetDirectoryName(backupPath);
+             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+             if (File.Exists(jsonlPath))
+             {
+                 using var src = new FileStream(jsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                 using var dst = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                 await src.CopyToAsync(dst, ct).ConfigureAwait(false);
+                 await dst.FlushAsync(ct).ConfigureAwait(false);
+             }
+             else
+             {
+                 await File.WriteAllTextAsync(backupPath, string.Empty, Encoding.UTF8, ct).ConfigureAwait(false);
+             }
+         }
+         finally
+         {
+             sessionLock.Release();
+         }
+         return backupFileName;
+     }
 
     /// <summary>
     /// need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件；任一时刻可被 GetMessagesAsync 完整解析）。

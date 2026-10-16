@@ -44,6 +44,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { SendHorizontal, Square } from 'lucide-vue-next';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { haloEventBus } from '@/bridge/hostBridge';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
@@ -93,12 +94,32 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
   }
 }
 
+function focusInput(): void {
+  try {
+    const el = (inputRef.value as unknown as { focus?: () => void }) || null;
+    if (el && typeof el.focus === 'function') el.focus();
+  } catch { /* ignore */ }
+}
+
+let unsubPrefill: (() => void) | null = null;
+
 onMounted(() => {
   agentStore.bind();
   window.addEventListener('keydown', handleGlobalKeydown);
+  // need07：分支草稿预填（仅当前会话）
+  unsubPrefill = haloEventBus.on<{ text?: string; sessionId?: string }>('chat:prefill-draft', (payload) => {
+    try {
+      const sid = String(payload?.sessionId || '');
+      if (sid && sid !== (workspaceStore.activeSessionId || '')) return;
+      draft.value = String(payload?.text || '');
+      focusInput();
+    } catch { /* ignore */ }
+  });
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  try { unsubPrefill?.(); } catch { /* ignore */ }
+  unsubPrefill = null;
 });
 </script>

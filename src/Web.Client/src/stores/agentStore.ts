@@ -598,6 +598,53 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  function isBusyForHistory(sessionId: string): boolean {
+    const t = getTurn(sessionId);
+    return !!t && (t.isGenerating || t.streamingActive || t.turnNotice.includes('压缩中'));
+  }
+
+  // need07：重放 user（截断→重载→同文复发，避免双 user）
+  async function replayUserMessage(msgId: string): Promise<boolean> {
+    const ws = useWorkspaceStore();
+    const sid = (activeSessionId.value || '').trim();
+    if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
+    const target = ws.sessionMessages.find((m) => String(m.id) === String(msgId));
+    const text = String(target?.content || '').trim();
+    if (!text) return false;
+    try {
+      const res = await getHostBridge().truncateSessionHistory(
+        ws.activeWorkspaceId || ws.activeWorkspace?.id || '', sid, msgId, true);
+      if (!res.ok || !res.data) return false;
+      const replayText = String((res.data.replayText as unknown as string) || text);
+      await ws.loadSessionMessages(sid);
+      await ws.refreshBudget();
+      return await sendPrompt(replayText);
+    } catch (err) {
+      console.error('[agentStore] replayUserMessage failed:', err);
+      return false;
+    }
+  }
+
+  // need07：重放 assistant（后端按前驱 user 切面，返回复发原文）
+  async function replayAssistantTurn(assistantId: string): Promise<boolean> {
+    const ws = useWorkspaceStore();
+    const sid = (activeSessionId.value || '').trim();
+    if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
+    try {
+      const res = await getHostBridge().truncateSessionHistory(
+        ws.activeWorkspaceId || ws.activeWorkspace?.id || '', sid, assistantId, true);
+      if (!res.ok || !res.data) return false;
+      const replayText = String((res.data.replayText as unknown as string) || '').trim();
+      if (!replayText) return false;
+      await ws.loadSessionMessages(sid);
+      await ws.refreshBudget();
+      return await sendPrompt(replayText);
+    } catch (err) {
+      console.error('[agentStore] replayAssistantTurn failed:', err);
+      return false;
+    }
+  }
+
   function bind(): void {
     ensureListeners();
   }
@@ -658,6 +705,8 @@ export const useAgentStore = defineStore('agent', () => {
     resetTurnState,
     isCompacting,
     sendPrompt,
+    replayUserMessage,
+    replayAssistantTurn,
     stopGenerating,
   };
 });

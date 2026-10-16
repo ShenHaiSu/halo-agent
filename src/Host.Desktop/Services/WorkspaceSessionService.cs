@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.LlmGateway.Models;
 using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Infrastructure.Storage;
 
@@ -25,7 +26,11 @@ public interface IWorkspaceSessionService
     Task<SessionMetadata> CreateSessionAsync(string workspaceId, string? title = null, string? providerId = null, string? modelId = null, CancellationToken ct = default);
     Task<SessionMetadata?> GetSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
     Task<List<UnifiedChatMessage>> GetSessionMessagesAsync(string workspaceId, string sessionId, CancellationToken ct = default);
-    Task<bool> AppendSessionMessageAsync(string workspaceId, string sessionId, UnifiedChatMessage message, CancellationToken ct = default);
+     Task<bool> AppendSessionMessageAsync(string workspaceId, string sessionId, UnifiedChatMessage message, CancellationToken ct = default);
+     /// <summary>need07：重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
+     Task<HistoryTruncateResult> TruncateSessionHistoryAsync(string workspaceId, string sessionId, string anchorMessageId, bool removeAnchor, CancellationToken ct = default);
+     /// <summary>need07：分支（includeAnchor=true 含锚轮，false 排除锚点）。</summary>
+     Task<SessionMetadata> BranchSessionAsync(string workspaceId, string sourceSessionId, string anchorMessageId, bool includeAnchor, CancellationToken ct = default);
     Task<bool> UpdateSessionTitleAsync(string workspaceId, string sessionId, string newTitle, CancellationToken ct = default);
     Task<bool> SetSessionPinnedAsync(string workspaceId, string sessionId, bool isPinned, CancellationToken ct = default);
     Task<bool> DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
@@ -381,8 +386,113 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         return _sessionRepository.DeleteSessionAsync(workspaceId, sessionId, ct);
     }
 
-    public Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default)
-    {
-        return _sessionRepository.ExportSessionMarkdownAsync(workspaceId, sessionId, ct);
-    }
-}
+     public Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+     {
+         return _sessionRepository.ExportSessionMarkdownAsync(workspaceId, sessionId, ct);
+     }
+
+     /// <summary>need07：重放截断。持追加锁；切面以后端为准；失败不动盘。</summary>
+     public async Task<HistoryTruncateResult> TruncateSessionHistoryAsync(string workspaceId, string sessionId, string anchorMessageId, bool removeAnchor, CancellationToken ct = default)
+     {
+         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+             return HistoryTruncateResult.Fail("SESSION_NOT_FOUND");
+         if (string.IsNullOrWhiteSpace(anchorMessageId))
+             return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND");
+         var appendLock = GetSessionAppendLock(sessionId);
+         await appendLock.WaitAsync(ct).ConfigureAwait(false);
+         try
+         {
+             var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+             if (meta == null) return HistoryTruncateResult.Fail("SESSION_NOT_FOUND");
+             var messages = await _sessionRepository.GetMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+             int idx = messages.FindIndex(m => string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase));
+             if (idx < 0) return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND");
+             string role = (messages[idx].Role ?? string.Empty).ToLowerInvariant();
+             int cut; string? replayText;
+             if (string.Equals(role, "assistant", StringComparison.Ordinal))
+             {
+                 int j = idx;
+                 while (j >= 0 && !string.Equals(messages[j].Role, "user", StringComparison.OrdinalIgnoreCase)) j--;
+                 if (j < 0) return HistoryTruncateResult.Fail("NO_PRIOR_USER");
+                 cut = j; replayText = messages[j].Content;
+             }
+             else if (string.Equals(role, "user", StringComparison.Ordinal))
+             {
+                 cut = idx; replayText = messages[idx].Content;
+             }
+             else
+             {
+                 cut = removeAnchor ? idx : idx + 1; replayText = messages[idx].Content;
+             }
+             if (string.IsNullOrWhiteSpace(replayText)) return HistoryTruncateResult.Fail("EMPTY_REPLAY_TEXT");
+             var kept = messages.Take(cut).ToList();
+             int removed = messages.Count - kept.Count;
+             string bak = await _sessionRepository.BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.replay-bak-", ct).ConfigureAwait(false);
+             try { await _sessionRepository.RewriteMessagesJsonlAsync(workspaceId, sessionId, kept, ct).ConfigureAwait(false); }
+             catch { return HistoryTruncateResult.Fail("REWRITE_ERROR"); }
+             meta.MessageCount = kept.Count;
+             var lastSnap = kept.LastOrDefault(m => m.InputTokens.HasValue && m.InputTokens.Value > 0);
+             meta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
+             meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
+             meta.UpdatedAtUtc = DateTime.UtcNow;
+             await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
+             try { Infrastructure.Logging.HaloLogger.App.Info($"[History] truncate ws={workspaceId} sess={sessionId} anchor={anchorMessageId} kept={kept.Count} removed={removed} bak={bak}"); } catch { }
+             return HistoryTruncateResult.Ok(kept.Count, removed, replayText, bak);
+         }
+         finally { appendLock.Release(); }
+     }
+
+     /// <summary>need07：分支。前缀复制建新会话，原会话不动。</summary>
+     public async Task<SessionMetadata> BranchSessionAsync(string workspaceId, string sourceSessionId, string anchorMessageId, bool includeAnchor, CancellationToken ct = default)
+     {
+         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sourceSessionId))
+             throw new ArgumentException("Workspace ID 与源会话 ID 不能为空");
+         var srcMeta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, sourceSessionId, ct).ConfigureAwait(false);
+         if (srcMeta == null) throw new InvalidOperationException("SESSION_NOT_FOUND");
+         var messages = await _sessionRepository.GetMessagesAsync(workspaceId, sourceSessionId, ct).ConfigureAwait(false);
+         int idx = messages.FindIndex(m => string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase));
+         if (idx < 0) throw new InvalidOperationException("ANCHOR_NOT_FOUND");
+         int end = idx;
+         if (string.Equals(messages[idx].Role, "assistant", StringComparison.OrdinalIgnoreCase))
+         {
+             int t = idx + 1;
+             while (t < messages.Count && string.Equals(messages[t].Role, "tool", StringComparison.OrdinalIgnoreCase)) t++;
+             end = t - 1;
+         }
+         var prefix = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
+         string title = string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话" ? "新建会话" : srcMeta.Title + "·分支";
+         var created = await CreateSessionAsync(workspaceId, title, srcMeta.ProviderId, srcMeta.ModelId, ct).ConfigureAwait(false);
+         var cloned = prefix.Select(m => new UnifiedChatMessage
+         {
+             Role = m.Role, Content = m.Content, ReasoningContent = m.ReasoningContent,
+             ToolCalls = m.ToolCalls != null ? new List<UnifiedToolCall>(m.ToolCalls) : null,
+             ToolCallId = m.ToolCallId, Name = m.Name,
+             InputTokens = m.InputTokens, OutputTokens = m.OutputTokens, CachedTokens = m.CachedTokens,
+         }).ToList();
+         await _sessionRepository.RewriteMessagesJsonlAsync(workspaceId, created.Id, cloned, ct).ConfigureAwait(false);
+         var newMeta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, created.Id, ct).ConfigureAwait(false);
+         if (newMeta != null)
+         {
+             newMeta.MessageCount = cloned.Count;
+             var lastSnap = cloned.LastOrDefault(m => m.InputTokens.HasValue && m.InputTokens.Value > 0);
+             newMeta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
+             newMeta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
+             newMeta.CumulativePromptTokens = 0; newMeta.CumulativeCompletionTokens = 0;
+             newMeta.UpdatedAtUtc = DateTime.UtcNow;
+             await RefreshMetaIndexAsync(workspaceId, created.Id, newMeta, ct).ConfigureAwait(false);
+             try
+             {
+                 string dir = _sessionRepository.GetSessionDirectory(workspaceId, created.Id);
+                 System.IO.Directory.CreateDirectory(dir);
+                 string shortSrc = sourceSessionId.Length > 8 ? sourceSessionId.Substring(0, 8) : sourceSessionId;
+                 string infoPath = System.IO.Path.Combine(dir, "messages.branch-src-" + shortSrc + ".json");
+                 string infoJson = System.Text.Json.JsonSerializer.Serialize(new { sourceSessionId, anchorMessageId, copiedAtUtc = DateTime.UtcNow, copiedMessages = cloned.Count });
+                 await System.IO.File.WriteAllTextAsync(infoPath, infoJson, ct).ConfigureAwait(false);
+             }
+             catch { }
+             try { Infrastructure.Logging.HaloLogger.App.Info($"[History] branch ws={workspaceId} src={sourceSessionId} anchor={anchorMessageId} new={created.Id} copied={cloned.Count}"); } catch { }
+             return newMeta;
+         }
+         return created;
+     }
+ }

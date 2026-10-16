@@ -352,11 +352,16 @@ export interface ContextBudgetStatusDto {
     assembledText: string; blocks: PromptBlockPreview[]; totalEstimatedTokens: number; stableEstimatedTokens: number;
     prefixHash: string; workspaceId: string; unknownVariables: string[]; isDefault: boolean; fallbackReason?: string | null;
   }
-  export interface LastSentPromptSnapshot { reqId: string; sessionId: string; workspaceId: string; prefixHash: string; charLength: number; sentAtUtc: string; }
-  export interface PromptDiagnosticsDto {
-    currentPreview: PromptPreviewDto; lastSent?: LastSentPromptSnapshot | null; previewEqualsLastSent: boolean;
-    compressorPromptPreview: string; titlePromptPreview: string;
-  }
+   export interface LastSentPromptSnapshot { reqId: string; sessionId: string; workspaceId: string; prefixHash: string; charLength: number; sentAtUtc: string; }
+   export interface PromptDiagnosticsDto {
+     currentPreview: PromptPreviewDto; lastSent?: LastSentPromptSnapshot | null; previewEqualsLastSent: boolean;
+     compressorPromptPreview: string; titlePromptPreview: string;
+   }
+   // need07：历史右键（截断/分支）
+   export interface HistoryTruncateResultDto {
+     success: boolean; errorCode?: string | null; keptMessages: number; removedMessages: number;
+     replayText?: string | null; backupFileName?: string | null;
+   }
 
 export interface HostBridgeApi {
   // Stage 01
@@ -430,6 +435,9 @@ export interface HostBridgeApi {
    resetPromptConfig: (blockId?: string) => Promise<BridgeResponse<PromptConfigDocument>>;
    previewPrompt: (workspaceId: string) => Promise<BridgeResponse<PromptPreviewDto>>;
    getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
+   // need07
+   truncateSessionHistory: (workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
+   branchSession: (workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) => Promise<BridgeResponse<SessionMetadata>>;
 }
 
 declare global {
@@ -1390,6 +1398,47 @@ function createBrowserMockBridge(): HostBridgeApi {
          },
        };
      },
+     // need07 mock：与真后端同语义（轮次展开 + 前驱 user 切面）
+     async truncateSessionHistory(_workspaceId: string, sessionId: string, anchorMessageId: string) {
+       const msgs = mockMessages[sessionId] || [];
+       const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
+       if (idx < 0) return { ok: false, code: 'ANCHOR_NOT_FOUND', message: '历史已变化，请刷新后重试' };
+       const role = String(msgs[idx].role || '').toLowerCase();
+       let cut = idx;
+       let replayText: string | null = null;
+       if (role === 'assistant') {
+         let j = idx;
+         while (j >= 0 && String(msgs[j].role || '').toLowerCase() !== 'user') j--;
+         if (j < 0) return { ok: false, code: 'NO_PRIOR_USER', message: '找不到上一条用户消息，无法重放' };
+         cut = j; replayText = String(msgs[j].content || '');
+       } else {
+         replayText = String(msgs[idx].content || '');
+       }
+       if (!replayText.trim()) return { ok: false, code: 'EMPTY_REPLAY_TEXT', message: '该消息内容为空，无法重放' };
+       const kept = msgs.slice(0, cut);
+       const removed = msgs.length - kept.length;
+       mockMessages[sessionId] = kept;
+       return { ok: true, data: { success: true, keptMessages: kept.length, removedMessages: removed, replayText, backupFileName: 'mock-replay-bak' } };
+     },
+     async branchSession(workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) {
+       const msgs = mockMessages[sourceSessionId] || [];
+       const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
+       if (idx < 0) return { ok: false, code: 'ANCHOR_NOT_FOUND', message: '历史已变化，请刷新后重试' };
+       let end = idx;
+       if (String(msgs[idx].role || '').toLowerCase() === 'assistant') {
+         let t2 = idx + 1;
+         while (t2 < msgs.length && String(msgs[t2].role || '').toLowerCase() === 'tool') t2++;
+         end = t2 - 1;
+       }
+       const prefix = (includeAnchor ? msgs.slice(0, end + 1) : msgs.slice(0, idx)).map((m) => ({ ...m }));
+       const res = await (this as unknown as { createSession: (w: string, t?: string) => Promise<{ ok: boolean; data: unknown }> }).createSession(workspaceId, '分支会话');
+       const sess = (res as unknown as { data: SessionMetadata }).data;
+       mockMessages[sess.id] = prefix;
+       const list = mockSessions[workspaceId] || [];
+       const hit = list.find((s) => s.id === sess.id);
+       if (hit) hit.messageCount = prefix.length;
+       return { ok: true, data: sess as SessionMetadata };
+     },
   };
 }
 
@@ -1659,6 +1708,16 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
      async getPromptDiagnostics(workspaceId: string, sessionId?: string) {
        return normalizeBridgePayload<BridgeResponse<PromptDiagnosticsDto>>(
          await rawBridge.getPromptDiagnostics(workspaceId ?? '', sessionId ?? '')
+       );
+     },
+     async truncateSessionHistory(workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) {
+       return normalizeBridgePayload<BridgeResponse<HistoryTruncateResultDto>>(
+         await rawBridge.truncateSessionHistory(workspaceId ?? '', sessionId ?? '', anchorMessageId ?? '', removeAnchor ?? true)
+       );
+     },
+     async branchSession(workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) {
+       return normalizeBridgePayload<BridgeResponse<SessionMetadata>>(
+         await rawBridge.branchSession(workspaceId ?? '', sourceSessionId ?? '', anchorMessageId ?? '', includeAnchor ?? true)
        );
      },
   };

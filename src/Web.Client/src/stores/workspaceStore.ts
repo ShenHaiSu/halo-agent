@@ -2,6 +2,7 @@
   import { ref, computed } from 'vue';
   import {
     getHostBridge,
+    haloEventBus,
     type WorkspaceInfo,
     type SessionMetadata,
     type UnifiedChatMessage,
@@ -503,6 +504,45 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  // need07：重放截断（removeAnchor=true 为重放模式，切面以后端为准）
+  async function truncateHistory(anchorMessageId: string, removeAnchor = true): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
+    if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.truncateSessionHistory(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, removeAnchor);
+      if (res.ok && res.data) {
+        await loadSessionMessages(activeSessionId.value);
+        await refreshBudget();
+        return { ok: true, replayText: (res.data.replayText as string) || '' };
+      }
+      return { ok: false, message: res.message || '截断失败', code: res.code };
+    } catch (err) {
+      console.error('[workspaceStore] truncateHistory failed:', err);
+      return { ok: false, message: String(err) };
+    }
+  }
+
+  // need07：分支（user→排除锚点+草稿预填原文；assistant→含整轮+草稿空）
+  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant'): Promise<boolean> {
+    if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+    const includeAnchor = kind === 'assistant';
+    const anchor = sessionMessages.value.find((m) => String(m.id) === String(anchorMessageId));
+    const draftText = kind === 'user' ? String(anchor?.content || '') : '';
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.branchSession(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, includeAnchor);
+      if (!res.ok || !res.data) return false;
+      const created = res.data;
+      sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)];
+      await selectSession(created.id);
+      haloEventBus.emitLocal('chat:prefill-draft', { text: draftText, sessionId: created.id });
+      return true;
+    } catch (err) {
+      console.error('[workspaceStore] branchFromMessage failed:', err);
+      return false;
+    }
+  }
+
   async function initialize(): Promise<void> {
     await loadWorkspaces();
     if (activeWorkspaceId.value) {
@@ -545,6 +585,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     togglePinSession,
     deleteSession,
     loadSessionMessages,
+    truncateHistory,
+    branchFromMessage,
     appendMessage,
     generateTitleAfterFirstRound,
     titleLocked,

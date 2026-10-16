@@ -14,7 +14,10 @@
       <template v-for="item in timelineItems" :key="item.key">
         <!-- User -->
         <div v-if="item.kind === 'user'" class="flex justify-end">
-          <div class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0">
+          <div
+            class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+            @contextmenu.prevent="openMenu($event, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') })"
+          >
             {{ item.msg?.content }}
           </div>
         </div>
@@ -28,6 +31,7 @@
             v-if="item.group?.content"
             class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
             v-html="renderMarkdown(item.group?.content || '')"
+            @contextmenu.prevent="openMenu($event, { kind: 'assistant', id: String(item.group?.assistantId || item.group?.key || ''), text: String(item.group?.content || '') })"
           />
           <div v-if="item.group?.reasoning || (item.group?.toolMessages?.length || 0) > 0" class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden" data-testid="turn-thinking-tools">
             <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="toggleTurn(item.group?.key || item.key)">
@@ -102,6 +106,16 @@
         <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ agentStore.telemetry.cachedTokens }} · {{ cachePercent }})</span>
         <span>Out: {{ agentStore.telemetry.outputTokens }}</span>
       </div>
+      <MessageContextMenu
+        :visible="menuState.visible"
+        :x="menuState.x"
+        :y="menuState.y"
+        :busy="menuBusy"
+        :can-copy="menuCanCopy"
+        @copy="onMenuCopy"
+        @replay="onMenuReplay"
+        @branch="onMenuBranch"
+      />
     </div>
   </div>
 </template>
@@ -116,6 +130,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentStore, type AgentToolCard } from '@/stores/agentStore';
 import { useAppearanceStore } from '@/stores/appearanceStore';
 import ToolCallCard from '@/components/chat/ToolCallCard.vue';
+import MessageContextMenu from '@/components/chat/MessageContextMenu.vue';
+import { copyTextToClipboard, type HistoryTarget } from '@/utils/historyAnchor';
 import type { UnifiedChatMessage } from '@/bridge/hostBridge';
 import { buildTurnGroups, type TurnGroup } from '@/utils/turnGroup';
 
@@ -269,6 +285,52 @@ function cachePercentOf(cached: number, input: number): string {
   return `${Math.round((cached / input) * 100)}%`;
 }
 
+// need07：右键菜单（锚点定位 + 摆位 + 编排下沉 store）
+const menuState = reactive<{ visible: boolean; x: number; y: number; target: HistoryTarget | null }>({
+  visible: false, x: 0, y: 0, target: null,
+});
+const menuBusy = computed(() => {
+  const sid = workspaceStore.activeSessionId || '';
+  return agentStore.isGenerating || agentStore.streamingActive || (sid ? agentStore.isCompacting(sid) : false);
+});
+const menuCanCopy = computed(() => String(menuState.target?.text || '').length > 0);
+function openMenu(e: MouseEvent, target: HistoryTarget): void {
+  if (!target.id) return;
+  const w = 176 + 24;
+  const h = 140 + 16;
+  menuState.x = Math.max(8, Math.min(e.clientX, window.innerWidth - w));
+  menuState.y = Math.max(8, Math.min(e.clientY, window.innerHeight - h));
+  menuState.target = target;
+  menuState.visible = true;
+}
+function closeMenu(): void { menuState.visible = false; }
+async function onMenuCopy(): Promise<void> {
+  const target = menuState.target;
+  closeMenu();
+  if (!target || !target.text) return;
+  const ok = await copyTextToClipboard(target.text);
+  try { (window as unknown as { $message?: { success: (s: string) => void; error: (s: string) => void } }).$message?.[ok ? 'success' : 'error']?.(ok ? '已复制' : '复制失败'); } catch { /* ignore */ }
+  if (ok === false) { /* 保持静默，仅日志 */ console.warn('[history] copy failed'); }
+}
+async function onMenuReplay(): Promise<void> {
+  const target = menuState.target;
+  closeMenu();
+  if (!target || menuBusy.value) return;
+  if (target.kind === 'user') await agentStore.replayUserMessage(target.id);
+  else await agentStore.replayAssistantTurn(target.id);
+}
+async function onMenuBranch(): Promise<void> {
+  const target = menuState.target;
+  closeMenu();
+  if (!target || menuBusy.value) return;
+  await workspaceStore.branchFromMessage(target.id, target.kind);
+}
+function bindMenuGlobalClose(): void {
+  window.addEventListener('click', closeMenu);
+  window.addEventListener('resize', closeMenu);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+}
+
 function truncateToolText(s: string): string {
   void s;
   return '';
@@ -314,6 +376,7 @@ function scheduleScrollTimelineToBottom(): void {
 watch(
   () => workspaceStore.activeSessionId,
   () => {
+    closeMenu();
     void nextTick(() => scheduleScrollTimelineToBottom());
   }
 );
@@ -331,6 +394,7 @@ watch(
 );
 onMounted(() => {
   void nextTick(() => scheduleScrollTimelineToBottom());
+  bindMenuGlobalClose();
 });
 onUnmounted(() => {
   if (scrollBottomRaf) cancelAnimationFrame(scrollBottomRaf);

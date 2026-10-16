@@ -175,3 +175,18 @@ public sealed class ContextBudgetStatusDto
      /// <summary>need05-06：拼接对比断裂块名（stable/- 首轮无依据）。</summary>
      public string? PrefixDivergenceBlock { get; set; }
  }
+
+ /// <summary>need07：历史截断结果（重放用）。</summary>
+ public sealed class HistoryTruncateResult
+ {
+     public bool Success { get; init; }
+     public string? ErrorCode { get; init; }
+     public int KeptMessages { get; init; }
+     public int RemovedMessages { get; init; }
+     public string? ReplayText { get; init; }
+     public string? BackupFileName { get; init; }
+     public static HistoryTruncateResult Ok(int kept, int removed, string? replay, string? bak)
+         => new() { Success = true, KeptMessages = kept, RemovedMessages = removed, ReplayText = replay, BackupFileName = bak };
+     public static HistoryTruncateResult Fail(string code)
+         => new() { Success = false, ErrorCode = code };
+ }
