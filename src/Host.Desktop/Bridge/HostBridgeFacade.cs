@@ -28,7 +28,8 @@ namespace Host.Desktop.Bridge;
     private readonly Form? _mainForm;
     private readonly StoragePathManager _storageManager;
     private readonly HaloHttpClientFactory _httpClientFactory;
-    private readonly ProviderConfigService _providerConfigService;
+     private readonly ProviderConfigService _providerConfigService;
+     private readonly PromptConfigService _promptConfigService;
     private readonly ILlmGatewayClient _llmGatewayClient;
     private readonly ISessionRepository _sessionRepository;
     private readonly IWorkspaceSessionService _workspaceSessionService;
@@ -40,12 +41,13 @@ namespace Host.Desktop.Bridge;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
-    public ProviderConfigService ProviderConfigService => _providerConfigService;
-    public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
-    public ISessionRepository SessionRepository => _sessionRepository;
-    public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
-    public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-    public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService);
+     public ProviderConfigService ProviderConfigService => _providerConfigService;
+     public PromptConfigService PromptConfigService => _promptConfigService;
+     public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
+     public ISessionRepository SessionRepository => _sessionRepository;
+     public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
+     public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
+     public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService);
     public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
 
     public HostBridgeFacade(
@@ -58,20 +60,22 @@ namespace Host.Desktop.Bridge;
         ISessionRepository? sessionRepository = null,
         IWorkspaceSessionService? workspaceSessionService = null,
         ITokenBudgetService? tokenBudgetService = null,
-        IAgentOrchestrator? agentOrchestrator = null,
-        ICompactionService? compactionService = null)
+         IAgentOrchestrator? agentOrchestrator = null,
+         ICompactionService? compactionService = null,
+         PromptConfigService? promptConfigService = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
         _gpuDisabled = gpuDisabled;
         _httpClientFactory = httpClientFactory ?? new HaloHttpClientFactory();
-        _providerConfigService = providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
-        _llmGatewayClient = llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
-        _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
-        _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
-        _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
-        _agentOrchestrator = agentOrchestrator;
-        _compactionService = compactionService;
+         _providerConfigService = providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
+         _promptConfigService = promptConfigService ?? new PromptConfigService(_storageManager);
+         _llmGatewayClient = llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
+         _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
+         _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
+         _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
+         _agentOrchestrator = agentOrchestrator;
+         _compactionService = compactionService;
     }
 
     /// <summary>
@@ -235,7 +239,8 @@ namespace Host.Desktop.Bridge;
             }
 
             // 新目录切换成功后，确保新目录下的 network.json 与 providers.json 已初始化并同步至网络工厂
-            _providerConfigService.EnsureInitialized();
+             _providerConfigService.EnsureInitialized();
+             try { _promptConfigService.EnsureInitialized(); } catch { }
 
             JsEventDispatcher.Publish("storage:changed", new
             {

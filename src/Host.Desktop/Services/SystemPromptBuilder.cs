@@ -1,90 +1,230 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Tools.Process;
 
 namespace Host.Desktop.Services;
 
+/// <summary>need06-03：提示词渲染上下文（变量替换输入）。</summary>
+public sealed record PromptContext(
+    string OsVersion,
+    string OsArch,
+    string WsName,
+    string WsRoot,
+    string PythonStatus,
+    string Today);
+
 /// <summary>
-/// Stage 06 动态系统提示词引擎：将 Host OS/Arch、工作区、cmd/python 优先铁律与工具指南
-/// 动态注入每次 ReAct 推理的 System 指令。模板严格对齐 docs/develop/stage06/02 文档。
+/// need06-03：动态系统提示词引擎（配置化重构）。
+/// 唯一拼装路径 BuildCore：预览与实发共用；老 BuildAsync 保留为兼容壳（默认配置渲染）。
 /// </summary>
 public sealed class SystemPromptBuilder
 {
-    /// <summary>
-    /// 复用 CommandRunnerProbe 探测本机 Python 状态（带版本号），供 System Prompt 与 UI 状态栏共享。
-    /// 成功示例："3.11.9 (C:\Python311\python.exe)"；未检出返回 "(未检测到 Python)" 风格文本。
-    /// 永不抛异常，探测失败即返回兜底文本。
-    /// </summary>
+    private static string? _pyCache;
+    private static long _pyCacheTick;
+    private static readonly object PyCacheLock = new();
+    private static readonly Regex UnknownVarRegex = new(@"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", RegexOptions.Compiled);
+
     public static string GetPythonStatus()
     {
+        lock (PyCacheLock)
+        {
+            if (_pyCache != null && Environment.TickCount64 - _pyCacheTick < 60_000)
+                return _pyCache;
+        }
+        string display;
         try
         {
             var probe = CommandRunnerProbe.ProbePython();
             if (probe == null || !probe.Found || string.IsNullOrWhiteSpace(probe.ExePath))
             {
-                return "(Python not detected - fall back to cmd.exe)";
+                display = "(Python not detected - fall back to cmd.exe)";
             }
-
-            string version = TryGetPythonVersion(probe.ExePath, probe.LauncherArgsPrefix);
-            string display = string.IsNullOrWhiteSpace(version)
-                ? probe.DisplayName
-                : $"{version} ({probe.ExePath})";
-            return display;
+            else
+            {
+                string version = TryGetPythonVersion(probe.ExePath, probe.LauncherArgsPrefix);
+                display = string.IsNullOrWhiteSpace(version) ? probe.DisplayName : $"{version} ({probe.ExePath})";
+            }
         }
         catch
         {
-            return "(Python not detected - fall back to cmd.exe)";
+            display = "(Python not detected - fall back to cmd.exe)";
+        }
+        lock (PyCacheLock)
+        {
+            _pyCache = display;
+            _pyCacheTick = Environment.TickCount64;
+        }
+        return display;
+    }
+
+    public static void ClearPythonCacheForTests()
+    {
+        lock (PyCacheLock)
+        {
+            _pyCache = null;
+            _pyCacheTick = 0;
         }
     }
 
-    /// <summary>
-    /// 动态拼装 Markdown 系统提示词模板。
-    /// </summary>
+    /// <summary>兼容壳：默认配置渲染，保证老单测与老调用方逐字节一致。</summary>
     public static Task<string> BuildAsync(WorkspaceInfo workspace, string? pythonStatusOverride = null)
     {
         if (workspace == null) throw new ArgumentNullException(nameof(workspace));
+        var cfg = PromptDefaults.CreateDefault();
+        var ctx = CreateContext(workspace, pythonStatusOverride, dateOverride: null);
+        var (assembled, _, _) = BuildCore(cfg, ctx);
+        return Task.FromResult(assembled);
+    }
 
+    public static PromptPreviewDto BuildPreview(
+        PromptConfigDocument cfg,
+        WorkspaceInfo ws,
+        string? pyOverride = null,
+        string? dateOverride = null,
+        string? workspaceIdOverride = null)
+    {
+        cfg ??= PromptDefaults.CreateDefault();
+        if (ws == null) throw new ArgumentNullException(nameof(ws));
+        var ctx = CreateContext(ws, pyOverride, dateOverride);
+        var (assembled, blocks, unknownVars) = BuildCore(cfg, ctx);
+        bool isDefault = IsDefaultConfig(cfg);
+        int total = TokenBudgetService.EstimateTokens(assembled);
+        int stable = blocks.Where(b => b.Enabled && b.IsStable).Sum(b => b.EstimatedTokens);
+        string hash = HeaderVariableResolver.ComputeDeterministicHash16(assembled ?? string.Empty);
+        return new PromptPreviewDto
+        {
+            AssembledText = assembled,
+            Blocks = blocks,
+            TotalEstimatedTokens = total,
+            StableEstimatedTokens = stable,
+            PrefixHash = hash,
+            WorkspaceId = workspaceIdOverride ?? ws.Id ?? string.Empty,
+            UnknownVariables = unknownVars,
+            IsDefault = isDefault,
+            FallbackReason = null,
+        };
+    }
+
+    internal static (string assembled, List<PromptBlockPreview> blocks, List<string> unknownVars) BuildCore(
+        PromptConfigDocument cfg, PromptContext ctx)
+    {
+        var blocks = new List<PromptBlockPreview>();
+        var unknown = new List<string>();
+        if (!cfg.EnableHaloPrefix)
+            return (string.Empty, blocks, unknown);
+
+        var ordered = new List<(string id, string text, bool stable, bool enabled)>();
+        string customPlacement = string.Equals(cfg.CustomPlacement, "head", StringComparison.OrdinalIgnoreCase) ? "head" : "tail";
+        string customRendered = string.Empty;
+        bool hasCustom = cfg.EnableCustom && !string.IsNullOrWhiteSpace(cfg.CustomText);
+        if (hasCustom)
+            customRendered = RenderTemplate(cfg.CustomText, ctx, unknown).TrimEnd();
+
+        if (hasCustom && customPlacement == "head")
+            ordered.Add(("custom", customRendered, true, true));
+        if (cfg.EnableIdentity && !string.IsNullOrWhiteSpace(cfg.IdentityText))
+            ordered.Add(("identity", (cfg.IdentityText ?? string.Empty).TrimEnd(), true, true));
+        if (cfg.EnableRuntime)
+        {
+            string rt = RenderTemplate(cfg.RuntimeTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+            if (!string.IsNullOrWhiteSpace(rt)) ordered.Add(("runtime", rt, true, true));
+        }
+        if (cfg.EnableCmdPython && !string.IsNullOrWhiteSpace(cfg.CmdPythonText))
+            ordered.Add(("cmdPython", (cfg.CmdPythonText ?? string.Empty).TrimEnd(), true, true));
+        if (cfg.EnableToolGuide)
+        {
+            string tg = RenderTemplate(cfg.ToolGuideTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+            if (!string.IsNullOrWhiteSpace(tg)) ordered.Add(("toolGuide", tg, true, true));
+        }
+        if (cfg.EnableEphemeral)
+        {
+            string eph = RenderTemplate(cfg.EphemeralTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+            if (!string.IsNullOrWhiteSpace(eph))
+            {
+                if (!eph.Contains(PrefixCachePredictor.EphemeralMarker, StringComparison.Ordinal))
+                    eph = "## 4. Session Ephemeral\n" + eph.TrimStart();
+                ordered.Add(("ephemeral", eph, false, true));
+            }
+        }
+        if (hasCustom && customPlacement == "tail")
+            ordered.Add(("custom", customRendered, false, true));
+
+        foreach (var (id, text, stable, _) in ordered)
+        {
+            blocks.Add(new PromptBlockPreview
+            {
+                BlockId = id,
+                Enabled = true,
+                RenderedText = text,
+                EstimatedTokens = TokenBudgetService.EstimateTokens(text),
+                IsStable = stable,
+            });
+        }
+
+        // 关断块也记录（Enabled=false），满足 T2 断言 Blocks 全 Disabled
+        if (blocks.Count == 0 && cfg.EnableHaloPrefix)
+        {
+            foreach (string id in new[] { "identity", "runtime", "cmdPython", "toolGuide", "ephemeral", "custom" })
+                blocks.Add(new PromptBlockPreview { BlockId = id, Enabled = false, RenderedText = string.Empty, EstimatedTokens = 0, IsStable = !string.Equals(id, "ephemeral", StringComparison.Ordinal) });
+            return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+        }
+        if (!cfg.EnableHaloPrefix)
+            return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+
+        string assembled = ordered.Count == 0
+            ? string.Empty
+            : string.Join("\n\n", ordered.Select(p => p.text.TrimEnd().TrimEnd('\r', '\n'))) + "\n";
+        return (assembled, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+    }
+
+    private static PromptContext CreateContext(WorkspaceInfo ws, string? pyOverride, string? dateOverride)
+    {
         string osVersion = RuntimeInformation.OSDescription?.Trim() ?? Environment.OSVersion.VersionString;
         string arch = RuntimeInformation.OSArchitecture.ToString();
-        string wsName = string.IsNullOrWhiteSpace(workspace.Name) ? "workspace" : workspace.Name.Trim();
-        string wsRoot = string.IsNullOrWhiteSpace(workspace.RootPath) ? Environment.CurrentDirectory : workspace.RootPath;
-        string pythonStatus = string.IsNullOrWhiteSpace(pythonStatusOverride) ? GetPythonStatus() : pythonStatusOverride.Trim();
-        string today = DateTime.Now.ToString("yyyy-MM-dd");
+        string wsName = string.IsNullOrWhiteSpace(ws.Name) ? "workspace" : ws.Name.Trim();
+        string wsRoot = string.IsNullOrWhiteSpace(ws.RootPath) ? Environment.CurrentDirectory : ws.RootPath;
+        string pythonStatus = string.IsNullOrWhiteSpace(pyOverride) ? GetPythonStatus() : pyOverride.Trim();
+        string today = string.IsNullOrWhiteSpace(dateOverride) ? DateTime.Now.ToString("yyyy-MM-dd") : dateOverride.Trim();
+        return new PromptContext(osVersion, arch, wsName, wsRoot, pythonStatus, today);
+    }
 
-        string prompt =
-            "You are Halo-Agent, an expert software engineering and system automation AI agent running natively on Windows.\n" +
-            "\n" +
-            "## 1. Runtime & Environment Facts\n" +
-            $"- Host OS: {osVersion} (Architecture: {arch})\n" +
-            $"- Active Workspace Name: {wsName}\n" +
-            $"- Active Workspace Root Path: {wsRoot}\n" +
-            "- Default Command Shell: `cmd.exe` (Windows Command Prompt)\n" +
-            "\n" +
-            "## 2. Command Execution Strategy (CRITICAL RULE)\n" +
-            "Because PowerShell versions vary drastically between Windows 7 (PowerShell 2.0) and Windows 10/11 (PowerShell 5.1+), you MUST follow this strict execution priority when using `exec_command`:\n" +
-            "1. **FIRST CHOICE (`runner: \"cmd\"`)**: Always default to standard Windows `cmd.exe` commands (`dir`, `type`, `findstr`, `copy`, `move`, `del`, `mkdir`, `where`, `tasklist`, `dotnet`, `node`, `git`, etc.) for shell operations and project builds.\n" +
-            "2. **SECOND CHOICE (`runner: \"python\"`)**: When you need complex text processing, regex transformations, JSON/XML manipulation, or multi-step data calculation that is awkward in `cmd.exe`, use `runner: \"python\"` to run inline Python code or `.py` scripts.\n" +
-            "3. **AVOID PowerShell**: Do NOT invoke `powershell` or `pwsh` unless the user explicitly asks you to debug a `.ps1` script.\n" +
-            "\n" +
-            "## 3. Standard Tool Usage Guidelines\n" +
-            "- Before modifying an existing file, ALWAYS read the relevant section first using `read_file`.\n" +
-            "- For targeted modifications to existing files, prefer `edit_file` (providing enough surrounding lines in `old_string` for a unique match) instead of overwriting the entire file with `write_file`.\n" +
-            "- Use `list_dir` and `grep_search` to explore the workspace efficiently rather than spawning unnecessary shell processes.\n" +
-            $"- All relative paths passed to tools resolve against the Active Workspace Root Path (`{wsRoot}`).\n";
+    internal static string RenderTemplate(string template, PromptContext ctx, List<string>? unknownSink = null)
+    {
+        string s = template ?? string.Empty;
+        s = s.Replace("{{OsVersion}}", ctx.OsVersion)
+             .Replace("{{OsArch}}", ctx.OsArch)
+             .Replace("{{WorkspaceName}}", ctx.WsName)
+             .Replace("{{WorkspaceRoot}}", ctx.WsRoot)
+             .Replace("{{PythonStatus}}", ctx.PythonStatus)
+             .Replace("{{CurrentDate}}", ctx.Today);
+        foreach (Match m in UnknownVarRegex.Matches(s))
+        {
+            string name = m.Groups[1].Value;
+            unknownSink?.Add(name);
+        }
+        return s;
+    }
 
-        // need05-02: stable/ephemeral split.
-        // 易变行(日期/Python状态)只出现在尾部 ## 4. Session Ephemeral. 对调用方仍返回一个string(零破坏).
-        prompt +=
-            "\n" +
-            "## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n" +
-            $"- Current Date: {today}\n" +
-            $"- Detected Python Runtime: {pythonStatus}\n" +
-            "- SessionHash: 由网关头携带,此处不重复\n";
-
-        return Task.FromResult(prompt);
+    private static bool IsDefaultConfig(PromptConfigDocument cfg)
+    {
+        var def = PromptDefaults.CreateDefault();
+        return cfg.EnableHaloPrefix == def.EnableHaloPrefix
+            && cfg.EnableIdentity && cfg.EnableRuntime && cfg.EnableCmdPython && cfg.EnableToolGuide && cfg.EnableEphemeral
+            && !cfg.EnableCustom
+            && string.Equals(cfg.CustomPlacement, "tail", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrEmpty(cfg.CustomText)
+            && string.Equals(cfg.IdentityText, PromptDefaults.IdentityText, StringComparison.Ordinal)
+            && string.Equals(cfg.RuntimeTemplate, PromptDefaults.RuntimeTemplate, StringComparison.Ordinal)
+            && string.Equals(cfg.CmdPythonText, PromptDefaults.CmdPythonText, StringComparison.Ordinal)
+            && string.Equals(cfg.ToolGuideTemplate, PromptDefaults.ToolGuideTemplate, StringComparison.Ordinal)
+            && string.Equals(cfg.EphemeralTemplate, PromptDefaults.EphemeralTemplate, StringComparison.Ordinal);
     }
 
     private static string TryGetPythonVersion(string exePath, string launcherPrefix)
@@ -116,7 +256,6 @@ public sealed class SystemPromptBuilder
             }
 
             string combined = (stdout + "\n" + stderr).Trim();
-            // 期望形如 "Python 3.11.9"：取首个含 Python 的行并截断
             foreach (string rawLine in combined.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {
                 string line = rawLine.Trim();

@@ -138,14 +138,14 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         string expectedHash = HeaderVariableResolver.ComputeDeterministicHash16(ws.Id + ":" + session.Id);
         Assert.Equal(expectedHash, session.SessionHash);
 
-        // 2. 追加第一条 User 消息，应自动将默认标题更新为用户指令摘要
-        var userMsg1 = UnifiedChatMessage.User("请帮我实现一个高效的二分查找算法代码");
-        await _service.AppendSessionMessageAsync(ws.Id, session.Id, userMsg1);
-
-        var updatedSession = await _service.GetSessionAsync(ws.Id, session.Id);
-        Assert.NotNull(updatedSession);
-        Assert.Equal(1, updatedSession!.MessageCount);
-        Assert.Contains("二分查找", updatedSession.Title);
+         // 2. 追加第一条 User 消息，应自动将默认标题更新为 T1 五字标题（need03-03：第一句话去空格后前 5 字）
+         var userMsg1 = UnifiedChatMessage.User("请帮我实现一个高效的二分查找算法代码");
+         await _service.AppendSessionMessageAsync(ws.Id, session.Id, userMsg1);
+ 
+         var updatedSession = await _service.GetSessionAsync(ws.Id, session.Id);
+         Assert.NotNull(updatedSession);
+         Assert.Equal(1, updatedSession!.MessageCount);
+         Assert.Equal("请帮我实现", updatedSession.Title);
 
         // 3. 追加 Assistant 消息
         var assistantMsg = UnifiedChatMessage.Assistant("以下是 C# 实现的二分查找代码：...");
@@ -244,10 +244,11 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         latestUser.InputTokens = 150;
         messages.Add(latestUser);
 
-        // 3. 执行原子成对截断构建：设置总预算无法容纳全部历史，仅允许容纳 首锚点 + 最新轮次 + 提示
-        // 总可用输入预算设为 450 tokens
-        int limitedBudget = 450;
-        var truncated = _budgetService.BuildWithinBudget(messages, limitedBudget);
+         // 3. 执行原子成对截断构建：设置总预算无法容纳全部历史，仅允许容纳 首锚点 + 最新轮次 + 提示
+         // need04-05 起为纯启发式估算（不消费 InputTokens 快照），本组消息启发式总量约 200 tokens，
+         // 故预算设为 150 tokens 以触发截断（旧 450 按快照口径已不够触发）
+         int limitedBudget = 150;
+         var truncated = _budgetService.BuildWithinBudget(messages, limitedBudget);
 
         // 4. 断言验证
         // (a) 必须保留首个用户锚点
@@ -286,8 +287,8 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         Assert.Equal(8192, status.TotalContextTokens);
         Assert.Equal(2048, status.MaxOutputTokens);
         Assert.Equal(1024, status.SafetyBuffer);
-        Assert.Equal(8192 - 2048 - 1024, status.AvailableInputTokens);
-        Assert.True(status.UsedInputTokens > 0);
+         Assert.Equal(8192 - 2048 - 1024 - 150, status.AvailableInputTokens); // need05-01：可用 = 总量 - 输出 - 安全 - 占用快照（末条 InputTokens=150）
+         Assert.Equal(150, status.UsedInputTokens); // 占用快照 = 末条 InputTokens（need05-01 覆盖语义）
         Assert.False(status.IsNearLimit);
     }
 

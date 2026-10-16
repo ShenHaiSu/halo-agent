@@ -58,66 +58,49 @@ public interface IAgentOrchestrator
 /// 用户输入 -&gt; 预算裁剪 -&gt; 双协议流式推理 -&gt; 工具调度执行 -&gt; 结果回写 JSONL -&gt; 下一轮，直至无 ToolCalls。
 /// 工具参数瑕疵绝不抛异常中断，转自愈提示回传 LLM；支持 CancellationToken 取消并杀子进程。
 /// </summary>
-public sealed class AgentOrchestrator : IAgentOrchestrator
-{
-    public int MaxIterations { get; }
-
-    private readonly IWorkspaceSessionService _sessionService;
-    private readonly ITokenBudgetService _budgetService;
-    private readonly ILlmGatewayClient _gatewayClient;
-    private readonly ToolRegistry _toolRegistry;
-    private readonly StoragePathManager? _storageManager;
-    private readonly ProviderConfigService? _providerConfigService;
-
-    public AgentOrchestrator(
-        IWorkspaceSessionService sessionService,
-        ITokenBudgetService budgetService,
-        ILlmGatewayClient gatewayClient,
-        ToolRegistry? toolRegistry = null,
-        StoragePathManager? storageManager = null,
-        ProviderConfigService? providerConfigService = null,
-        int maxIterations = 25)
-    {
-        _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
-        _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
-        _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
-        _toolRegistry = toolRegistry ?? new ToolRegistry();
-        _storageManager = storageManager;
-        _providerConfigService = providerConfigService;
-        MaxIterations = maxIterations > 0 ? maxIterations : 25;
-    }
-
-    public async Task<AgentTurnResult> RunAgentTurnAsync(
-        string workspaceId,
-        string sessionId,
-        string userText,
-        string? providerId = null,
-        string? modelId = null,
-        CancellationToken cancellationToken = default)
-    {
-        // 快速取消路径：<100ms 内响应取消，不做任何 IO
-        if (cancellationToken.IsCancellationRequested)
-        {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-before-start" });
-            return AgentTurnResult.Cancelled(0, 0);
-        }
-
-        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
-        {
-            return AgentTurnResult.Failed("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
-        }
-
-        if (string.IsNullOrWhiteSpace(userText))
-        {
-            return AgentTurnResult.Failed("EMPTY_PROMPT", "用户输入不能为空");
-        }
-
-        WorkspaceInfo? workspace;
-        SessionMetadata? session;
-        try
-        {
-            workspace = await _sessionService.GetWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
-            session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
+ public sealed class AgentOrchestrator : IAgentOrchestrator
+ {
+     public int MaxIterations { get; }
+     private readonly IWorkspaceSessionService _sessionService;
+     private readonly ITokenBudgetService _budgetService;
+     private readonly ILlmGatewayClient _gatewayClient;
+     private readonly ToolRegistry _toolRegistry;
+     private readonly StoragePathManager? _storageManager;
+     private readonly ProviderConfigService? _providerConfigService;
+     private readonly PromptConfigService? _promptConfigService;
+     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25)
+     {
+         _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
+         _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
+         _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
+         _toolRegistry = toolRegistry ?? new ToolRegistry();
+         _storageManager = storageManager;
+         _providerConfigService = providerConfigService;
+         _promptConfigService = promptConfigService;
+         MaxIterations = maxIterations > 0 ? maxIterations : 25;
+     }
+     public async Task<AgentTurnResult> RunAgentTurnAsync(string workspaceId, string sessionId, string userText, string? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
+     {
+         if (cancellationToken.IsCancellationRequested)
+         {
+             PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-before-start" });
+             return AgentTurnResult.Cancelled(0, 0);
+         }
+         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+         {
+             return AgentTurnResult.Failed("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
+         }
+         if (string.IsNullOrWhiteSpace(userText))
+         {
+             return AgentTurnResult.Failed("EMPTY_PROMPT", "用户输入不能为空");
+         }
+         WorkspaceInfo? workspace;
+         SessionMetadata? session;
+         try
+         {
+             workspace = await _sessionService.GetWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+             session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
+             session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -150,20 +133,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // 解析 Provider / Model（测试无配置时回退默认）
         var (provider, model) = ResolveProviderAndModel(providerId, modelId, session);
 
-        string systemPrompt;
-        try
-        {
-            systemPrompt = await SystemPromptBuilder.BuildAsync(workspace).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-during-prompt" });
-            return AgentTurnResult.Cancelled(0, 0);
-        }
-        catch (Exception ex)
-        {
-            return AgentTurnResult.Failed("SYSTEM_PROMPT_ERROR", ex.Message);
-        }
+         string systemPrompt;
+         try
+         {
+             var promptCfg = _promptConfigService?.GetPromptConfigInternal() ?? PromptDefaults.CreateDefault();
+             var preview = SystemPromptBuilder.BuildPreview(promptCfg, workspace, pyOverride: null, dateOverride: null);
+             systemPrompt = preview.AssembledText;
+         }
+         catch (OperationCanceledException)
+         {
+             PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-during-prompt" });
+             return AgentTurnResult.Cancelled(0, 0);
+         }
+         catch (Exception ex)
+         {
+             try { systemPrompt = await SystemPromptBuilder.BuildAsync(workspace).ConfigureAwait(false); }
+             catch (Exception ex2) { return AgentTurnResult.Failed("SYSTEM_PROMPT_ERROR", ex2.Message); }
+             Infrastructure.Logging.HaloLogger.App.Warn("[Prompt] 配置渲染失败，已回退默认模板", ex);
+         }
 
         string dataRoot = _storageManager?.CurrentDataRoot ?? string.Empty;
         int toolExecutions = 0;
@@ -190,11 +177,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
             List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history);
 
-            var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1)
-            {
-                UnifiedChatMessage.System(systemPrompt)
-            };
-            requestMessages.AddRange(budgeted);
+             var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1);
+             if (!string.IsNullOrWhiteSpace(systemPrompt)) requestMessages.Add(UnifiedChatMessage.System(systemPrompt));
+             requestMessages.AddRange(budgeted);
 
             string requestId = Guid.NewGuid().ToString("N");
             string sessionHash = !string.IsNullOrWhiteSpace(session.SessionHash)

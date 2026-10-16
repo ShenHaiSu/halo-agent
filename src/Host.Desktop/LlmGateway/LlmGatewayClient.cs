@@ -128,10 +128,16 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
          }
          catch { /* 预测永不阻塞主链路 */ }
  
-         // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
-         string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
-         // 记录请求追踪日志
-         LogRequestTrace(request, endpointUrl, prefixHash, predictedHit, predictedCached, divergenceBlock);
+          // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
+          string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
+          try
+          {
+              string sysHash = HeaderVariableResolver.ComputeDeterministicHash16(request.SystemInstructions ?? string.Empty);
+              Services.PromptLastSentStore.Record(request.HeaderContext.SessionId, new Services.LastSentPromptSnapshot { ReqId = request.RequestId, SessionId = request.HeaderContext.SessionId, WorkspaceId = request.HeaderContext.WorkspaceId, PrefixHash = sysHash, CharLength = (request.SystemInstructions ?? string.Empty).Length, SentAtUtc = DateTime.UtcNow.ToString("o") });
+          }
+          catch { }
+          // 记录请求追踪日志
+          LogRequestTrace(request, endpointUrl, prefixHash, predictedHit, predictedCached, divergenceBlock);
 
         var stopwatch = Stopwatch.StartNew();
         long? ttftMs = null;

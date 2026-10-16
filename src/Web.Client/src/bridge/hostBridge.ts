@@ -331,15 +331,32 @@ export interface ContextBudgetStatusDto {
    prefixDivergenceBlock?: string | null;
  }
  
- export interface CompactionResultDto {
-  success: boolean;
-  errorCode?: string | null;
-  errorMessage?: string | null;
-  removedMessages: number;
-  keptMessages: number;
-  summaryPreview: string;
-  backupFileName?: string | null;
-}
+  export interface CompactionResultDto {
+    success: boolean;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    removedMessages: number;
+    keptMessages: number;
+    summaryPreview: string;
+    backupFileName?: string | null;
+  }
+  export interface PromptConfigDocument {
+    version: number; enableHaloPrefix: boolean; enableIdentity: boolean; enableRuntime: boolean;
+    enableCmdPython: boolean; enableToolGuide: boolean; enableEphemeral: boolean; enableCustom: boolean;
+    customPlacement: 'head' | 'tail'; customText: string; identityText: string; runtimeTemplate: string;
+    cmdPythonText: string; toolGuideTemplate: string; ephemeralTemplate: string; scope: string;
+    updatedAtUtc: string; isDefault?: boolean; fallbackReason?: string | null;
+  }
+  export interface PromptBlockPreview { blockId: string; enabled: boolean; renderedText: string; estimatedTokens: number; isStable: boolean; }
+  export interface PromptPreviewDto {
+    assembledText: string; blocks: PromptBlockPreview[]; totalEstimatedTokens: number; stableEstimatedTokens: number;
+    prefixHash: string; workspaceId: string; unknownVariables: string[]; isDefault: boolean; fallbackReason?: string | null;
+  }
+  export interface LastSentPromptSnapshot { reqId: string; sessionId: string; workspaceId: string; prefixHash: string; charLength: number; sentAtUtc: string; }
+  export interface PromptDiagnosticsDto {
+    currentPreview: PromptPreviewDto; lastSent?: LastSentPromptSnapshot | null; previewEqualsLastSent: boolean;
+    compressorPromptPreview: string; titlePromptPreview: string;
+  }
 
 export interface HostBridgeApi {
   // Stage 01
@@ -407,6 +424,12 @@ export interface HostBridgeApi {
   // need05-03: /compact 上下文压缩
   compactSession: (workspaceId: string, sessionId: string, providerId?: string, modelId?: string, keepLastGroups?: number) => Promise<BridgeResponse<CompactionResultDto>>;
   getCompactBackupList: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
+   // need06: 前置提示词可配化
+   getPromptConfig: () => Promise<BridgeResponse<PromptConfigDocument>>;
+   savePromptConfig: (config: PromptConfigDocument | string) => Promise<BridgeResponse<PromptConfigDocument>>;
+   resetPromptConfig: (blockId?: string) => Promise<BridgeResponse<PromptConfigDocument>>;
+   previewPrompt: (workspaceId: string) => Promise<BridgeResponse<PromptPreviewDto>>;
+   getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
 }
 
 declare global {
@@ -690,9 +713,43 @@ function createBrowserMockBridge(): HostBridgeApi {
         ],
       },
     ],
-  };
-
-  return {
+   };
+   const mockPromptDefaults: PromptConfigDocument = {
+     version: 1, enableHaloPrefix: true, enableIdentity: true, enableRuntime: true,
+     enableCmdPython: true, enableToolGuide: true, enableEphemeral: true, enableCustom: false,
+     customPlacement: 'tail', customText: '',
+     identityText: 'You are Halo-Agent, an expert software engineering and system automation AI agent running natively on Windows.',
+     runtimeTemplate: '## 1. Runtime & Environment Facts\n- Host OS: {{OsVersion}} (Architecture: {{OsArch}})\n- Active Workspace Name: {{WorkspaceName}}\n- Active Workspace Root Path: {{WorkspaceRoot}}\n- Default Command Shell: `cmd.exe` (Windows Command Prompt)',
+     cmdPythonText: '## 2. Command Execution Strategy (CRITICAL RULE)\nBecause PowerShell versions vary drastically, default to cmd.exe first, python second. AVOID powershell unless asked.',
+     toolGuideTemplate: '## 3. Standard Tool Usage Guidelines\n- Read before modifying.',
+     ephemeralTemplate: '## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n- Current Date: {{CurrentDate}}\n- Detected Python Runtime: {{PythonStatus}}',
+     scope: 'global', updatedAtUtc: new Date().toISOString(),
+   };
+   let mockPromptConfig: PromptConfigDocument = { ...mockPromptDefaults };
+   const estimateMockTokens = (t: string): number => {
+     if (!t) return 0;
+     let ascii = 0; let cjk = 0; let other = 0;
+     for (const ch of t) { const c = ch.codePointAt(0) || 0; if (c <= 127) ascii++; else if (c >= 0x4e00 && c <= 0x9fff) cjk++; else other++; }
+     return Math.max(1, Math.ceil(ascii / 3.6 + cjk * 1.55 + other * 1.2));
+   };
+   const buildMockPreview = (cfg: PromptConfigDocument, workspaceId: string): PromptPreviewDto => {
+     if (!cfg.enableHaloPrefix) {
+       return { assembledText: '', blocks: [], totalEstimatedTokens: 0, stableEstimatedTokens: 0, prefixHash: 'mock', workspaceId, unknownVariables: [], isDefault: false };
+     }
+     const parts: Array<{ blockId: string; text: string; isStable: boolean }> = [];
+     if (cfg.enableCustom && cfg.customText.trim() && cfg.customPlacement === 'head') parts.push({ blockId: 'custom', text: cfg.customText.trim(), isStable: true });
+     if (cfg.enableIdentity) parts.push({ blockId: 'identity', text: cfg.identityText.trim(), isStable: true });
+     if (cfg.enableRuntime) parts.push({ blockId: 'runtime', text: cfg.runtimeTemplate.trim(), isStable: true });
+     if (cfg.enableCmdPython) parts.push({ blockId: 'cmdPython', text: cfg.cmdPythonText.trim(), isStable: true });
+     if (cfg.enableToolGuide) parts.push({ blockId: 'toolGuide', text: cfg.toolGuideTemplate.trim(), isStable: true });
+     if (cfg.enableEphemeral) parts.push({ blockId: 'ephemeral', text: cfg.ephemeralTemplate.trim(), isStable: false });
+     if (cfg.enableCustom && cfg.customText.trim() && cfg.customPlacement === 'tail') parts.push({ blockId: 'custom', text: cfg.customText.trim(), isStable: false });
+     const assembled = parts.length ? parts.map((p) => p.text).join('\n\n') + '\n' : '';
+     const blocks: PromptBlockPreview[] = parts.map((p) => ({ blockId: p.blockId, enabled: true, renderedText: p.text, estimatedTokens: estimateMockTokens(p.text), isStable: p.isStable }));
+     const stable = blocks.filter((b) => b.isStable).reduce((a, b) => a + b.estimatedTokens, 0);
+     return { assembledText: assembled, blocks, totalEstimatedTokens: estimateMockTokens(assembled), stableEstimatedTokens: stable, prefixHash: 'mock', workspaceId, unknownVariables: [], isDefault: false };
+   };
+   return {
     async getSystemInfo() {
       return {
         ok: true,
@@ -1295,9 +1352,44 @@ function createBrowserMockBridge(): HostBridgeApi {
       }, 60);
       return { ok: true, data: { success: true, removedMessages: 2, keptMessages: 4, summaryPreview: 'Mock 要点' } };
     },
-    async getCompactBackupList(_workspaceId: string, _sessionId: string) {
-      return { ok: true, data: '[]' };
-    },
+     async getCompactBackupList(_workspaceId: string, _sessionId: string) {
+       return { ok: true, data: '[]' };
+     },
+     // need06 mock 仅示意，联调以真后端为准
+     async getPromptConfig() {
+       return { ok: true, data: { ...mockPromptConfig } };
+     },
+     async savePromptConfig(config: PromptConfigDocument | string) {
+       const parsed: PromptConfigDocument = typeof config === 'string' ? JSON.parse(config) : JSON.parse(JSON.stringify(config));
+       mockPromptConfig = parsed;
+       return { ok: true, message: '提示词配置已保存，下一轮对话起生效 (Mock)', data: { ...mockPromptConfig } };
+     },
+     async resetPromptConfig(blockId?: string) {
+       if (!blockId) { mockPromptConfig = { ...mockPromptDefaults }; }
+       else if (blockId === 'identity') { mockPromptConfig.identityText = mockPromptDefaults.identityText; mockPromptConfig.enableIdentity = true; }
+       else if (blockId === 'runtime') { mockPromptConfig.runtimeTemplate = mockPromptDefaults.runtimeTemplate; mockPromptConfig.enableRuntime = true; }
+       else if (blockId === 'cmdPython') { mockPromptConfig.cmdPythonText = mockPromptDefaults.cmdPythonText; mockPromptConfig.enableCmdPython = true; }
+       else if (blockId === 'toolGuide') { mockPromptConfig.toolGuideTemplate = mockPromptDefaults.toolGuideTemplate; mockPromptConfig.enableToolGuide = true; }
+       else if (blockId === 'ephemeral') { mockPromptConfig.ephemeralTemplate = mockPromptDefaults.ephemeralTemplate; mockPromptConfig.enableEphemeral = true; }
+       else if (blockId === 'custom') { mockPromptConfig.customText = ''; mockPromptConfig.enableCustom = false; mockPromptConfig.customPlacement = 'tail'; }
+       return { ok: true, message: '已恢复默认 (Mock)', data: { ...mockPromptConfig } };
+     },
+     async previewPrompt(workspaceId: string) {
+       return { ok: true, data: buildMockPreview(mockPromptConfig, workspaceId) };
+     },
+     async getPromptDiagnostics(workspaceId: string, sessionId?: string) {
+       const currentPreview = buildMockPreview(mockPromptConfig, workspaceId);
+       return {
+         ok: true,
+         data: {
+           currentPreview,
+           lastSent: sessionId ? { reqId: 'mock_req_001', sessionId, workspaceId, prefixHash: currentPreview.prefixHash, charLength: currentPreview.assembledText.length, sentAtUtc: new Date().toISOString() } : null,
+           previewEqualsLastSent: true,
+           compressorPromptPreview: '你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表（Mock 预览）。',
+           titlePromptPreview: '你是会话标题生成器（Mock 预览）。（对话正文已脱除）',
+         },
+       };
+     },
   };
 }
 
@@ -1306,21 +1398,57 @@ function toCamelKey(key: string): string {
   return key.charAt(0).toLowerCase() + key.slice(1);
 }
 
-function normalizeBridgePayload<T>(input: any, preserveDictionaryKeys = false): T {
-  if (input === null || input === undefined || typeof input !== 'object') {
-    return input as T;
-  }
-  if (Array.isArray(input)) {
-    return input.map((item) => normalizeBridgePayload(item, false)) as unknown as T;
-  }
-  const result: Record<string, any> = {};
-  for (const [key, value] of Object.entries(input)) {
-    const outKey = preserveDictionaryKeys ? key : toCamelKey(key);
-    const isStringDictionary = outKey === 'resolvedHeaders';
-    result[outKey] = normalizeBridgePayload(value, isStringDictionary);
-  }
-  return result as T;
-}
+ function normalizeBridgePayload<T>(input: any, preserveDictionaryKeys = false): T {
+   // CefSharp 会把 C# DateTime 转成 JS Date（typeof object）。旧实现直接 Object.entries(Date)
+   // → {}，导致 updatedAtUtc 回传变成 {"updatedAtUtc":{}}，后端 STJ 报 Unsupported token StartObject。
+   // 此处优先还原为 ISO 字符串，保证往返契约始终是 string。
+   if (input instanceof Date) {
+     return (Number.isNaN(input.getTime()) ? new Date().toISOString() : input.toISOString()) as unknown as T;
+   }
+   if (input === null || input === undefined || typeof input !== 'object') {
+     return input as T;
+   }
+   if (Array.isArray(input)) {
+     return input.map((item) => normalizeBridgePayload(item, false)) as unknown as T;
+   }
+   const result: Record<string, any> = {};
+   for (const [key, value] of Object.entries(input)) {
+     const outKey = preserveDictionaryKeys ? key : toCamelKey(key);
+     const isStringDictionary = outKey === 'resolvedHeaders';
+     result[outKey] = normalizeBridgePayload(value, isStringDictionary);
+   }
+   return result as T;
+ }
+
+ /** need06：保存前把 updatedAtUtc 归一为 ISO 字符串。CefSharp 回传的 Date / 已损坏的 {} / 数字时间戳全部在此消化，后端只收干净 string。 */
+ function sanitizePromptConfigForSave(config: PromptConfigDocument | string): string {
+   if (typeof config === 'string') {
+     return config;
+   }
+   const raw = config as unknown as Record<string, unknown>;
+   const copy: Record<string, unknown> = { ...raw };
+   copy.updatedAtUtc = toIsoDateString(raw.updatedAtUtc);
+   return JSON.stringify(copy);
+ }
+
+ function toIsoDateString(v: unknown): string {
+   if (typeof v === 'string' && v.trim()) {
+     const t = Date.parse(v);
+     // 能解析就原样保留（后端 STJ 只认 ISO）；解析不了就用现在时间兜底，避免把垃圾发给后端。
+     return Number.isNaN(t) ? new Date().toISOString() : v;
+   }
+   if (v instanceof Date && !Number.isNaN(v.getTime())) {
+     return v.toISOString();
+   }
+   if (typeof v === 'number' && Number.isFinite(v)) {
+     // 10 位按秒、13 位按毫秒换算成 ISO
+     const ms = v >= 100_000_000_000 ? v : v * 1000;
+     const d = new Date(ms);
+     return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+   }
+   // {} / null / undefined / 其他：直接用当前时间，后端 Save 会再归一为 UtcNow
+   return new Date().toISOString();
+ }
 
 function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
   return {
@@ -1510,11 +1638,29 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
         await rawBridge.compactSession(workspaceId, sessionId, providerId ?? '', modelId ?? '', keepLastGroups ?? 6)
       );
     },
-    async getCompactBackupList(workspaceId: string, sessionId: string) {
-      return normalizeBridgePayload<BridgeResponse<string>>(
-        await rawBridge.getCompactBackupList(workspaceId, sessionId)
-      );
-    },
+     async getCompactBackupList(workspaceId: string, sessionId: string) {
+       return normalizeBridgePayload<BridgeResponse<string>>(
+         await rawBridge.getCompactBackupList(workspaceId, sessionId)
+       );
+     },
+     async getPromptConfig() {
+       return normalizeBridgePayload<BridgeResponse<PromptConfigDocument>>(await rawBridge.getPromptConfig());
+     },
+     async savePromptConfig(config: PromptConfigDocument | string) {
+       const payload = sanitizePromptConfigForSave(config);
+       return normalizeBridgePayload<BridgeResponse<PromptConfigDocument>>(await rawBridge.savePromptConfig(payload));
+     },
+     async resetPromptConfig(blockId?: string) {
+       return normalizeBridgePayload<BridgeResponse<PromptConfigDocument>>(await rawBridge.resetPromptConfig(blockId ?? ''));
+     },
+     async previewPrompt(workspaceId: string) {
+       return normalizeBridgePayload<BridgeResponse<PromptPreviewDto>>(await rawBridge.previewPrompt(workspaceId ?? ''));
+     },
+     async getPromptDiagnostics(workspaceId: string, sessionId?: string) {
+       return normalizeBridgePayload<BridgeResponse<PromptDiagnosticsDto>>(
+         await rawBridge.getPromptDiagnostics(workspaceId ?? '', sessionId ?? '')
+       );
+     },
   };
 }
 

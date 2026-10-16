@@ -42,26 +42,32 @@
             </div>
           </n-tab-pane>
 
-          <n-tab-pane name="runtime" tab="系统运行环境">
-            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
-              <SystemRuntimePanel />
-            </div>
-          </n-tab-pane>
+           <n-tab-pane name="runtime" tab="系统运行环境">
+             <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+               <SystemRuntimePanel />
+             </div>
+           </n-tab-pane>
+ 
+           <n-tab-pane name="prompt" tab="提示词与预发送">
+             <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+               <PromptSettingsView />
+             </div>
+           </n-tab-pane>
         </n-tabs>
       </div>
-    </n-drawer-content>
-  </n-drawer>
-</template>
-
-<script setup lang="ts">
-import { ref, computed, watch } from 'vue';
-import ProviderManagerView from './ProviderManagerView.vue';
-import NetworkProxySettings from './NetworkProxySettings.vue';
-import StorageSettingsPanel from './StorageSettingsPanel.vue';
-import SystemRuntimePanel from './SystemRuntimePanel.vue';
-import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
-
-export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime';
+     </n-drawer-content>
+   </n-drawer>
+ </template>
+ 
+ <script setup lang="ts">
+ import { ref, computed, watch } from 'vue';
+ import ProviderManagerView from './ProviderManagerView.vue';
+ import NetworkProxySettings from './NetworkProxySettings.vue';
+ import StorageSettingsPanel from './StorageSettingsPanel.vue';
+ import SystemRuntimePanel from './SystemRuntimePanel.vue';
+ import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
+ import PromptSettingsView from './PromptSettingsView.vue';
+ export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt';
 
 const props = defineProps<{
   show: boolean;
