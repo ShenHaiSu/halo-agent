@@ -116,12 +116,22 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
         bool providerRejectsUsage = RejectUsageFeatureProviders.ContainsKey(request.Provider.Id);
         bool includeUsageInStream = !providerRejectsUsage;
 
-        string requestPayload = adapter.SerializeRequest(request, includeUsageInStream);
-
-        // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
-        string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
-        // 记录请求追踪日志
-        LogRequestTrace(request, endpointUrl, prefixHash);
+         string requestPayload = adapter.SerializeRequest(request, includeUsageInStream);
+ 
+         // need05-06：本地预测（分块 LCP 推测 + 拼接对比），只记日志/预测存储，不参与实际命中率口径。
+         double? predictedHit = null; int predictedCached = 0; string divergenceBlock = "-";
+         try
+         {
+             var snapshot = Services.PrefixCachePredictor.BuildSnapshot(request.SystemInstructions, request.Messages, request.Tools);
+             (predictedHit, predictedCached, divergenceBlock) = Services.PrefixCachePredictor.TrackRequest(
+                 request.HeaderContext.SessionHash, request.HeaderContext.SessionId, snapshot);
+         }
+         catch { /* 预测永不阻塞主链路 */ }
+ 
+         // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
+         string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
+         // 记录请求追踪日志
+         LogRequestTrace(request, endpointUrl, prefixHash, predictedHit, predictedCached, divergenceBlock);
 
         var stopwatch = Stopwatch.StartNew();
         long? ttftMs = null;
@@ -206,7 +216,8 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
                 await writer.WriteAsync(evt, CancellationToken.None).ConfigureAwait(false);
             }
 
-            LogResponseTrace(request, finalStatusCode, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
+             RecordPredictionActual(request, inTokens, cachedTokens);
+             LogResponseTrace(request, finalStatusCode, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames, predictedHit, predictedCached, divergenceBlock);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -250,57 +261,73 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
         return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
-    private void LogRequestTrace(UnifiedLlmRequest request, string endpointUrl, string? prefixHash = null)
-    {
-        try
-        {
-            string proxySummary = GetProxySummary(request.Provider);
-            string headersSummary = GetCustomHeadersSummary(request.Provider, request.HeaderContext);
-            // need05-02：[REQ] 追加 prefixHash + msgCount + inputEst（联调 grep reqId 看哈希变化 vs 命中率因果）
-            int msgCount = request.Messages?.Count ?? 0;
-            int inputEst = 0;
-            if (request.Messages != null)
-            {
-                foreach (var m in request.Messages) inputEst += Services.TokenBudgetService.EstimateMessageTokens(m);
-            }
-
-            string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}] | prefixHash={prefixHash ?? "-"} | msgCount={msgCount} | inputEst={inputEst}";
-            AppendAuditTrace(line);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Warn("写入 LLM Trace 请求审计失败", ex);
-        }
-    }
-
-    private void LogResponseTrace(
-        UnifiedLlmRequest request,
-        int statusCode,
-        long totalMs,
-        long? ttftMs,
-        int inTokens,
-        int outTokens,
-        int cachedTokens,
-        int totalTokens,
-        int toolCallCount,
-        HashSet<string> toolNames)
-    {
-        try
-        {
-            double hitRate = (inTokens > 0) ? ((double)cachedTokens / inTokens * 100.0) : 0.0;
-            string toolCallsText = toolCallCount > 0
-                ? $"{toolCallCount}({string.Join(",", toolNames)})"
-                : "0";
-
-            long effectiveTtft = ttftMs ?? totalMs;
-            string line = $"[RES] reqId={request.RequestId} | status={statusCode} | ttftMs={effectiveTtft} | totalMs={totalMs} | inTokens={inTokens} (cached={cachedTokens}, hitRate={hitRate:F1}%) | outTokens={outTokens} | toolCalls={toolCallsText}";
-            AppendAuditTrace(line);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Warn("写入 LLM Trace 响应审计失败", ex);
-        }
-    }
+     private void LogRequestTrace(UnifiedLlmRequest request, string endpointUrl, string? prefixHash = null, double? predictedHit = null, int predictedCached = 0, string? divergenceBlock = null)
+     {
+         try
+         {
+             string proxySummary = GetProxySummary(request.Provider);
+             string headersSummary = GetCustomHeadersSummary(request.Provider, request.HeaderContext);
+             // need05-02：[REQ] 追加 prefixHash + msgCount + inputEst（联调 grep reqId 看哈希变化 vs 命中率因果）
+             // need05-06：追加 predictedHit/divergence（发送前本地推测，不代表账单口径）
+             int msgCount = request.Messages?.Count ?? 0;
+             int inputEst = 0;
+             if (request.Messages != null)
+             {
+                 foreach (var m in request.Messages) inputEst += Services.TokenBudgetService.EstimateMessageTokens(m);
+             }
+ 
+             string predText = predictedHit.HasValue ? $"{predictedHit.Value * 100.0:F1}%" : "-";
+             string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}] | prefixHash={prefixHash ?? "-"} | msgCount={msgCount} | inputEst={inputEst} | predictedHit={predText} (cached~{predictedCached}, div={divergenceBlock ?? "-"})";
+             AppendAuditTrace(line);
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Warn("写入 LLM Trace 请求审计失败", ex);
+         }
+     }
+ 
+     private static void RecordPredictionActual(UnifiedLlmRequest request, int inTokens, int cachedTokens)
+     {
+         try
+         {
+             if (inTokens > 0)
+                 Services.PrefixCachePredictor.RecordActual(request.HeaderContext.SessionHash, request.HeaderContext.SessionId, inTokens, cachedTokens);
+         }
+         catch { /* 预测存储永不抛 */ }
+     }
+ 
+     private void LogResponseTrace(
+         UnifiedLlmRequest request,
+         int statusCode,
+         long totalMs,
+         long? ttftMs,
+         int inTokens,
+         int outTokens,
+         int cachedTokens,
+         int totalTokens,
+         int toolCallCount,
+         HashSet<string> toolNames,
+         double? predictedHit = null,
+         int predictedCached = 0,
+         string? divergenceBlock = null)
+     {
+         try
+         {
+             double hitRate = (inTokens > 0) ? ((double)cachedTokens / inTokens * 100.0) : 0.0;
+             string toolCallsText = toolCallCount > 0
+                 ? $"{toolCallCount}({string.Join(",", toolNames)})"
+                 : "0";
+ 
+             long effectiveTtft = ttftMs ?? totalMs;
+             string predText = predictedHit.HasValue ? $"{predictedHit.Value * 100.0:F1}%" : "-";
+             string line = $"[RES] reqId={request.RequestId} | status={statusCode} | ttftMs={effectiveTtft} | totalMs={totalMs} | inTokens={inTokens} (cached={cachedTokens}, hitRate={hitRate:F1}%) | outTokens={outTokens} | toolCalls={toolCallsText} | predictedHit={predText} (cached~{predictedCached}, div={divergenceBlock ?? "-"})";
+             AppendAuditTrace(line);
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Warn("写入 LLM Trace 响应审计失败", ex);
+         }
+     }
 
     private void AppendAuditTrace(string line)
     {

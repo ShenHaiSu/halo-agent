@@ -318,17 +318,20 @@ export interface ContextBudgetStatusDto {
   isNearLimit: boolean;
   sessionHash: string;
   protocol: string;
-  // need05-01：占用/账单分离 + 未知态（全部可选，旧后端缺键即兼容）
-  lastPromptTokens?: number | null; // null = unknown（无快照）
-  lastCachedTokens?: number | null; // null = unknown；非 null 时恒 ≤ lastPromptTokens
-  cacheHitRate?: number | null; // = cached/input；未知则 null（不画 0%）
-  usedInputIsEstimated?: boolean; // true = UsedInputTokens 来自估算回退
-  occupancyState?: string; // known | unknown | estimated
-  billedPromptTokens?: number; // Σ账单 prompt
-  billedCompletionTokens?: number;
-}
-
-export interface CompactionResultDto {
+   lastPromptTokens?: number | null; // null = unknown（无快照）
+   lastCachedTokens?: number | null; // null = unknown；非 null 时恒 ≤ lastPromptTokens
+   cacheHitRate?: number | null; // = cached/input；未知则 null（不画 0%）
+   usedInputIsEstimated?: boolean; // true = UsedInputTokens 来自估算回退
+   occupancyState?: string; // known | unknown | estimated
+   billedPromptTokens?: number; // Σ账单 prompt
+   billedCompletionTokens?: number;
+   // need05-06：本地预测（发送前分块 LCP 推测；实测优先，预测只做未知态兜底）
+   predictedCacheHitRate?: number | null;
+   predictedCachedTokens?: number | null;
+   prefixDivergenceBlock?: string | null;
+ }
+ 
+ export interface CompactionResultDto {
   success: boolean;
   errorCode?: string | null;
   errorMessage?: string | null;
@@ -1254,19 +1257,22 @@ function createBrowserMockBridge(): HostBridgeApi {
           maxOutputTokens: 4096,
           safetyBuffer: 1024,
           usedInputTokens: rounded,
-          availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - rounded),
-          usagePercentage: Math.round((rounded / 128000) * 1000) / 10,
-          isNearLimit: false,
-          sessionHash: 'f0e1d2c3b4a59687',
-          protocol: 'chat',
-          // need05-01 mock：固定新增字段
-          lastPromptTokens: rounded,
-          lastCachedTokens: Math.min(rounded, 80),
-          cacheHitRate: rounded > 0 ? Math.min(80, rounded) / rounded : null,
-          usedInputIsEstimated: false,
-          occupancyState: 'estimated',
-          billedPromptTokens: 1200,
-          billedCompletionTokens: 300,
+           availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - rounded),
+           usagePercentage: Math.round((rounded / 128000) * 1000) / 10,
+           isNearLimit: false,
+           sessionHash: 'f0e1d2c3b4a59687',
+           protocol: 'chat',
+           lastPromptTokens: rounded,
+           lastCachedTokens: Math.min(rounded, 80),
+           cacheHitRate: rounded > 0 ? Math.min(80, rounded) / rounded : null,
+           usedInputIsEstimated: false,
+           occupancyState: 'estimated',
+           billedPromptTokens: 1200,
+           billedCompletionTokens: 300,
+           // need05-06 mock：本地预测兜底字段
+           predictedCacheHitRate: rounded > 0 ? Math.min(80, rounded) / rounded : null,
+           predictedCachedTokens: Math.min(rounded, 80),
+           prefixDivergenceBlock: 'latest',
         },
       };
     },

@@ -91,10 +91,10 @@
               <span class="text-secondary shrink-0">计费累计 in/out/Σ</span>
               <span class="text-primary font-medium whitespace-nowrap">{{ billedDisplay }}</span>
             </div>
-            <div class="flex items-center justify-between">
-              <span class="text-secondary">命中率 cache/input</span>
-              <span class="text-primary font-medium">{{ hitRateDisplay }}</span>
-            </div>
+             <div class="flex items-center justify-between" :title="hitRateTitle">
+               <span class="text-secondary">命中率 cache/input</span>
+               <span class="font-medium" :class="hitRateIsPredicted ? 'text-secondary' : 'text-primary'">{{ hitRateDisplay }}</span>
+             </div>
             <div class="flex items-center justify-between">
               <span class="text-secondary">最大输出预留 (Reserve)</span>
               <span class="text-secondary">{{ maxOutputTokens.toLocaleString() }} tokens</span>
@@ -268,11 +268,26 @@ const billedDisplay = computed(() => {
   if (p === undefined || p === null || c === undefined || c === null) return '-';
   return `${formatCompact(p)} / ${formatCompact(c)} / ${formatCompact(p + c)}`;
 });
-const hitRateDisplay = computed(() => {
-  const r = budgetStatus.value?.cacheHitRate;
-  if (r === undefined || r === null) return '-';
-  return `${Math.round(r * 100)}%`;
-});
+ const hitRateIsPredicted = computed(() => {
+   const r = budgetStatus.value?.cacheHitRate;
+   if (r !== undefined && r !== null) return false;
+   const p = budgetStatus.value?.predictedCacheHitRate;
+   return p !== undefined && p !== null;
+ });
+ const hitRateDisplay = computed(() => {
+   const r = budgetStatus.value?.cacheHitRate;
+   if (r !== undefined && r !== null) return `${Math.round(r * 100)}%`;
+   // need05-06：无实测时用本地预测灰色 ~ 显示，绝不画 0% 误导
+   const p = budgetStatus.value?.predictedCacheHitRate;
+   if (p === undefined || p === null) return '-';
+   return `~${Math.round(p * 100)}%·预估`;
+ });
+ const hitRateTitle = computed(() => {
+   const div = budgetStatus.value?.prefixDivergenceBlock || '-';
+   const pc = budgetStatus.value?.predictedCachedTokens;
+   if (hitRateIsPredicted.value) return `本地预估（非账单口径）：断裂块 ${div}，预期命中 ~${pc ?? '?'} tokens；收到后端 usage 后自动校准为实测值`;
+   return `实测命中率（后端 usage 口径）：断裂块 ${div}`;
+ });
 // need05-03：压缩忙态（压缩中不可取消，按钮置灰）
 const isCompacting = computed(() => {
   const sid = activeSession.value?.id || '';

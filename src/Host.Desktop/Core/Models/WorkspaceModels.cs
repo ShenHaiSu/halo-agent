@@ -166,6 +166,12 @@ public sealed class ContextBudgetStatusDto
     public string OccupancyState { get; set; } = "known";
     /// <summary>need05-01：Σ账单 prompt（拷贝 meta.CumulativePromptTokens）。</summary>
     public long BilledPromptTokens { get; set; }
-    /// <summary>need05-01：Σ账单 completion。</summary>
-    public long BilledCompletionTokens { get; set; }
-}
+     /// <summary>need05-01：Σ账单 completion。</summary>
+     public long BilledCompletionTokens { get; set; }
+     /// <summary>need05-06：本地预测命中率（发送前分块 LCP 推测，无实测时前端灰色 ~ 显示）。</summary>
+     public double? PredictedCacheHitRate { get; set; }
+     /// <summary>need05-06：本地预测命中 tokens（= 稳定前缀 tokens）。</summary>
+     public int? PredictedCachedTokens { get; set; }
+     /// <summary>need05-06：拼接对比断裂块名（stable/- 首轮无依据）。</summary>
+     public string? PrefixDivergenceBlock { get; set; }
+ }

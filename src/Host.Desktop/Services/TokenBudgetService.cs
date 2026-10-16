@@ -327,45 +327,48 @@ public sealed class TokenBudgetService : ITokenBudgetService
     /// <summary>
     /// 计算上下文配额状态 DTO
     /// </summary>
-    public ContextBudgetStatusDto CalculateBudgetStatus(
-        ModelConfig model,
-        IReadOnlyList<UnifiedChatMessage> messages,
-        string? sessionHash = null)
-    {
-        int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
-        int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
-        int safetyBuffer = DefaultSafetyBuffer;
-        // need04-05：快照语义：IN=末条精确快照（无则估算）；available 必须减去 used；分母统一 maxContext
-        // need05-01：占用/账单分离 + 未知态：prompt 快照优先，无快照则 usedInput 回退估算并标记 estimated/unknown
-        var (prompt, cached, isEst) = ResolveOccupancy(messages);
-        int msgCount = messages?.Count ?? 0;
-        int usedInput = prompt ?? (msgCount == 0 ? 0 : messages!.Sum(m => EstimateMessageTokens(m)));
-        int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer - usedInput);
-        double percentage = maxContext > 0
-            ? Math.Min(100.0, Math.Round((double)usedInput / maxContext * 100.0, 1))
-            : 0.0;
-        bool isNearLimit = percentage >= 85.0;
-        return new ContextBudgetStatusDto
-        {
-            TotalContextTokens = maxContext,
-            MaxOutputTokens = maxOutput,
-            SafetyBuffer = safetyBuffer,
-            UsedInputTokens = usedInput,
-            AvailableInputTokens = availableInput,
-            UsagePercentage = percentage,
-            IsNearLimit = isNearLimit,
-            SessionHash = sessionHash,
-            Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
-            LastPromptTokens = prompt,
-            LastCachedTokens = cached,
-            CacheHitRate = (prompt.HasValue && cached.HasValue && prompt.Value > 0) ? (double)cached.Value / prompt.Value : (double?)null,
-            // 空会话视为 known 且非估算（前端画 0/128K(0%) 蓝色）；有消息无快照才 estimated/unknown
-            UsedInputIsEstimated = isEst && msgCount > 0,
-            // 空会话 messages.Count==0 视为 known+0%（与 znaide 默认 Some(0) 对齐）；有消息无快照才 unknown
-            OccupancyState = prompt.HasValue ? "known" : (msgCount == 0 ? "known" : "unknown"),
-            // Billed* 由 GetBudgetStatusAsync 读 meta 后填入
-        };
-    }
+     public ContextBudgetStatusDto CalculateBudgetStatus(
+         ModelConfig model,
+         IReadOnlyList<UnifiedChatMessage> messages,
+         string? sessionHash = null)
+     {
+         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
+         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
+         int safetyBuffer = DefaultSafetyBuffer;
+         var (prompt, cached, isEst) = ResolveOccupancy(messages);
+         int msgCount = messages?.Count ?? 0;
+         int usedInput = prompt ?? (msgCount == 0 ? 0 : messages!.Sum(m => EstimateMessageTokens(m)));
+         int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer - usedInput);
+         double percentage = maxContext > 0
+             ? Math.Min(100.0, Math.Round((double)usedInput / maxContext * 100.0, 1))
+             : 0.0;
+         bool isNearLimit = percentage >= 85.0;
+         var dto = new ContextBudgetStatusDto
+         {
+             TotalContextTokens = maxContext,
+             MaxOutputTokens = maxOutput,
+             SafetyBuffer = safetyBuffer,
+             UsedInputTokens = usedInput,
+             AvailableInputTokens = availableInput,
+             UsagePercentage = percentage,
+             IsNearLimit = isNearLimit,
+             SessionHash = sessionHash,
+             Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
+             LastPromptTokens = prompt,
+             LastCachedTokens = cached,
+             CacheHitRate = (prompt.HasValue && cached.HasValue && prompt.Value > 0) ? (double)cached.Value / prompt.Value : (double?)null,
+             UsedInputIsEstimated = isEst && msgCount > 0,
+             OccupancyState = prompt.HasValue ? "known" : (msgCount == 0 ? "known" : "unknown"),
+         };
+         if (!string.IsNullOrWhiteSpace(sessionHash)
+             && PrefixCachePredictor.TryGetPrediction(sessionHash, out var pHit, out var pCached, out var divBlock))
+         {
+             dto.PredictedCacheHitRate = pHit;
+             dto.PredictedCachedTokens = pCached;
+             dto.PrefixDivergenceBlock = divBlock;
+         }
+         return dto;
+     }
  
     public async Task<ContextBudgetStatusDto> GetBudgetStatusAsync(
         string providerId,
