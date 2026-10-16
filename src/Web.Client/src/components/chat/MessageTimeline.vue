@@ -13,14 +13,30 @@
       <!-- 持久化时间线：user/system 顶层 + 轮次归并容器 -->
       <template v-for="item in timelineItems" :key="item.key">
         <!-- User -->
-        <div v-if="item.kind === 'user'" class="flex justify-end">
-          <div
-            class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
-            @contextmenu.prevent="openMenu($event, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') })"
-          >
-            {{ item.msg?.content }}
-          </div>
-        </div>
+         <!-- User -->
+         <div v-if="item.kind === 'user'" class="flex justify-end">
+           <div
+             class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+             @contextmenu.prevent="openMenu($event, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') })"
+           >
+             {{ item.msg?.content }}
+             <div v-if="msgImages(item.msg).length" class="mt-1.5 flex flex-wrap gap-1.5" data-testid="msg-images">
+               <template v-for="img in msgImages(item.msg)" :key="img.imageId">
+                 <n-image
+                   v-if="thumbOf(img)"
+                   :src="thumbOf(img)"
+                   :alt="img.fileName"
+                   width="96"
+                   object-fit="cover"
+                   class="rounded border"
+                   :data-testid="`msg-image-${img.imageId}`"
+                 />
+                 <n-tag v-else size="small" :bordered="true" :title="img.fileName">{{ img.fileName }}</n-tag>
+               </template>
+             </div>
+             <div v-if="hasLostImage(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
+           </div>
+         </div>
         <!-- System -->
         <div v-else-if="item.kind === 'system'" class="text-[11px] text-secondary text-center font-mono px-4">
           {{ item.msg?.content }}
@@ -106,19 +122,19 @@
         <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ agentStore.telemetry.cachedTokens }} · {{ cachePercent }})</span>
         <span>Out: {{ agentStore.telemetry.outputTokens }}</span>
       </div>
-      <MessageContextMenu
-        :visible="menuState.visible"
-        :x="menuState.x"
-        :y="menuState.y"
-        :busy="menuBusy"
-        :can-copy="menuCanCopy"
-        @copy="onMenuCopy"
-        @replay="onMenuReplay"
-        @branch="onMenuBranch"
-      />
-    </div>
-  </div>
-</template>
+       <MessageContextMenu
+         :visible="menuState.visible"
+         :x="menuState.x"
+         :y="menuState.y"
+         :busy="menuBusy"
+         :can-copy="menuCanCopy"
+         @copy="onMenuCopy"
+         @replay="onMenuReplay"
+         @branch="onMenuBranch"
+       />
+     </div>
+   </div>
+ </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
@@ -132,8 +148,8 @@ import { useAppearanceStore } from '@/stores/appearanceStore';
 import ToolCallCard from '@/components/chat/ToolCallCard.vue';
 import MessageContextMenu from '@/components/chat/MessageContextMenu.vue';
 import { copyTextToClipboard, type HistoryTarget } from '@/utils/historyAnchor';
-import type { UnifiedChatMessage } from '@/bridge/hostBridge';
-import { buildTurnGroups, type TurnGroup } from '@/utils/turnGroup';
+ import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@/bridge/hostBridge';
+ import { buildTurnGroups, imagesOf, type TurnGroup } from '@/utils/turnGroup';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
@@ -221,17 +237,57 @@ function toCard(m: UnifiedChatMessage, group: TurnGroup): AgentToolCard {
   }
   const content = String(m.content || '');
   const isErr = content.includes('[Tool Error');
-  return {
-    callId,
-    functionName: ref?.name || (m.name as string) || 'tool',
-    argsJson,
-    status: isErr ? 'error' : 'done',
-    resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
-    exitCode: null,
-    durationMs: null,
-    iteration: 0,
-  };
-}
+   return {
+     callId,
+     functionName: ref?.name || (m.name as string) || 'tool',
+     argsJson,
+     status: isErr ? 'error' : 'done',
+     resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
+     exitCode: null,
+     durationMs: null,
+     iteration: 0,
+     images: imagesOf(m),
+   };
+ }
+ 
+ // ---- need09-05：时间轴缩略图（miss 异步回填；失败置 lost + 黄字；只认 images 数组） ----
+ const thumbnailCache = ref<Record<string, string>>({});
+ const lostImageIds = ref<Record<string, boolean>>({});
+ const thumbPending = new Set<string>();
+ 
+ function msgImages(msg: UnifiedChatMessage | undefined): ChatImageRef[] {
+   return imagesOf(msg);
+ }
+ 
+ function hasLostImage(msg: UnifiedChatMessage | undefined): boolean {
+   return msgImages(msg).some((i) => lostImageIds.value[i.imageId] || i.lost === true);
+ }
+ 
+ function thumbOf(img: ChatImageRef): string {
+   const hit = thumbnailCache.value[img.imageId];
+   if (hit) return hit;
+   if (img.lost === true || lostImageIds.value[img.imageId]) return '';
+   if (!thumbPending.has(img.imageId)) {
+     thumbPending.add(img.imageId);
+     void (async () => {
+       try {
+         const ws = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
+         const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+         const res = await getHostBridge().getImageThumbnail(ws, sid, img.imageId);
+         if (res.ok && typeof res.data === 'string' && res.data) {
+           thumbnailCache.value = { ...thumbnailCache.value, [img.imageId]: res.data };
+         } else {
+           lostImageIds.value = { ...lostImageIds.value, [img.imageId]: true };
+         }
+       } catch {
+         lostImageIds.value = { ...lostImageIds.value, [img.imageId]: true };
+       } finally {
+         thumbPending.delete(img.imageId);
+       }
+     })();
+   }
+   return '';
+ }
 
 function hasFailedTool(g: TurnGroup): boolean {
   return g.toolMessages.some((m) => String(m.content || '').includes('[Tool Error'));

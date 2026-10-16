@@ -466,7 +466,25 @@
                         @click="setPreset(mdl, 'maxOutputTokens', p.value)"
                       >{{ p.label }}</n-button>
                     </div>
+                  <!-- need09-03：模型多模态能力位（与 protocol/temperature 同卡片行区，不新开卡片） -->
+                  <div class="col-span-12 space-y-1.5 min-w-0 rounded-md border border-subtle/60 p-2">
+                    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[11px] text-secondary">可读图片（多模态）</span>
+                        <n-switch :value="visionOf(mdl).supportsVision === true" size="small" :data-testid="`model-supports-vision-switch-${mIdx}`" @update:value="(v: boolean) => setVisionField(mdl, 'supportsVision', v)" />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[11px] text-secondary">每轮最多图片（0=默认4，上限16）</span>
+                        <n-input-number :value="visionOf(mdl).maxImagesPerTurn ?? 4" :min="0" :max="16" :step="1" :disabled="!visionOf(mdl).supportsVision" size="small" class="font-mono text-xs w-28" :data-testid="`model-max-images-input-${mIdx}`" @update:value="(v: number | null) => setVisionField(mdl, 'maxImagesPerTurn', v)" />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[11px] text-secondary">清晰度</span>
+                        <n-select :value="visionOf(mdl).visionDetail ?? 'auto'" :options="visionDetailOptions" :disabled="!visionOf(mdl).supportsVision" size="small" class="w-28" :data-testid="`model-vision-detail-select-${mIdx}`" @update:value="(v: string) => setVisionField(mdl, 'visionDetail', v)" />
+                      </div>
+                    </div>
+                    <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。</div>
                   </div>
+                </div>
                 </div>
                 <div class="text-[11px] font-mono text-secondary break-all min-w-0">
                   {{ mdl.protocol === 'resp' ? 'resp → ' : 'chat → ' }}{{ mdl.protocol === 'resp' ? computedRespEndpoint : computedChatEndpoint }}
@@ -597,6 +615,70 @@ const apiKeyInput = ref<string>('');
 const endpointPreview = ref<ProviderEndpointPreviewDto | null>(null);
 const testingProvider = ref(false);
 const providerTestResult = ref<ProxyConnectivityTestResult | null>(null);
+const visionDetailOptions = [
+  { label: 'auto（自动）', value: 'auto' },
+  { label: 'low（省流）', value: 'low' },
+  { label: 'high（高清）', value: 'high' },
+];
+
+// need09-03：vision 归一（老 providers.json 缺字段回退 false/4/auto；非法 detail 回 auto；只保留值不丢配置）
+function normalizeVisionFields(mdl: ModelConfig): void {
+  const m = mdl as unknown as Record<string, unknown>;
+  if (typeof m['supportsVision'] !== 'boolean') m['supportsVision'] = false;
+  if (!Number.isFinite(m['maxImagesPerTurn'] as number)) m['maxImagesPerTurn'] = 4;
+  m['maxImagesPerTurn'] = Math.trunc(m['maxImagesPerTurn'] as number);
+  if (!['auto', 'low', 'high'].includes(String(m['visionDetail'] ?? 'auto'))) m['visionDetail'] = 'auto';
+  if (m['visionDetail'] == null || m['visionDetail'] === '') m['visionDetail'] = 'auto';
+}
+
+function ensureVisionDefaults(mdl: ModelConfig): void {
+  normalizeVisionFields(mdl);
+}
+
+function clampMaxImages(mdl: ModelConfig): void {
+  const m = mdl as unknown as Record<string, unknown>;
+  if (!Number.isFinite(m['maxImagesPerTurn'] as number)) {
+    m['maxImagesPerTurn'] = 4;
+    return;
+  }
+  let v = Math.trunc(m['maxImagesPerTurn'] as number);
+  if (v < 0) v = 0;
+  if (v > 16) v = 16;
+  m['maxImagesPerTurn'] = v;
+}
+
+function normalizeAllVisionFields(): void {
+  if (!editingProvider.value) return;
+  for (const mdl of editingProvider.value.models) normalizeVisionFields(mdl);
+}
+// need09-03：模板读写代理（hostBridge.ts 由 D 轨道独占，本轨道不改 ModelConfig 类型；经由 any 视图读写，D 合入类型后行为一致）
+interface VisionFieldView {
+  supportsVision?: boolean;
+  maxImagesPerTurn?: number | null;
+  visionDetail?: string | null;
+}
+
+function visionOf(mdl: ModelConfig): VisionFieldView {
+  return mdl as unknown as VisionFieldView;
+}
+
+function setVisionField(mdl: ModelConfig, field: 'supportsVision' | 'maxImagesPerTurn' | 'visionDetail', value: unknown): void {
+  const m = mdl as unknown as Record<string, unknown>;
+  if (field === 'supportsVision') {
+    m['supportsVision'] = value === true;
+  } else if (field === 'maxImagesPerTurn') {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) {
+      m['maxImagesPerTurn'] = 4;
+    } else {
+      m['maxImagesPerTurn'] = Math.min(16, Math.max(0, Math.trunc(n)));
+    }
+  } else {
+    const s = String(value ?? 'auto');
+    m['visionDetail'] = ['auto', 'low', 'high'].includes(s) ? s : 'auto';
+  }
+  normalizeVisionFields(mdl);
+}
 
 const providerProxyModeOptions = [
   { label: '继承全局代理设置 (Inherit)', value: 'Inherit' },
@@ -682,6 +764,7 @@ function selectProvider(providerId: string) {
   const target = configStore.providersDoc.providers.find((p) => p.id === providerId);
   if (target) {
     editingProvider.value = JSON.parse(JSON.stringify(target));
+    normalizeAllVisionFields();
     apiKeyInput.value = '';
     providerTestResult.value = null;
     expandedModelIndex.value = null;
@@ -702,6 +785,7 @@ watch(
       const current = list.find((p) => p.id === selectedProviderId.value);
       if (current) {
         editingProvider.value = JSON.parse(JSON.stringify(current));
+        normalizeAllVisionFields();
       }
     }
   },
@@ -806,7 +890,10 @@ function addModelRow() {
     maxOutputTokens: 4096,
     temperature: 0.2,
     enabled: true,
-  });
+    supportsVision: false,
+    maxImagesPerTurn: 4,
+    visionDetail: 'auto',
+  } as unknown as ModelConfig);
   expandedModelIndex.value = editingProvider.value.models.length - 1;
 }
 
@@ -871,7 +958,10 @@ function handleAddNewProvider() {
         maxOutputTokens: 4096,
         temperature: 0.2,
         enabled: true,
-      },
+        supportsVision: false,
+        maxImagesPerTurn: 4,
+        visionDetail: 'auto',
+      } as unknown as ModelConfig,
     ],
   };
 
@@ -889,10 +979,22 @@ async function handleSaveCurrentProvider(showToast = true) {
     message.warning('服务商名称不能为空');
     return;
   }
+  // need09-03：vision 纳入 draft 脏检查（随 editingProvider 同一套保存按钮落盘；发送前 0..16 钳制，0=默认4 语义由后端解释）
 
   const payload: ProviderConfig = JSON.parse(JSON.stringify(editingProvider.value));
   if (apiKeyInput.value.trim()) {
     payload.apiKey = apiKeyInput.value.trim();
+  }
+  for (const mdl of payload.models) {
+    const m = mdl as unknown as Record<string, unknown>;
+    if (typeof m['supportsVision'] !== 'boolean') m['supportsVision'] = false;
+    let n = Number(m['maxImagesPerTurn']);
+    if (!Number.isFinite(n)) n = 4;
+    n = Math.trunc(n);
+    if (n < 0) n = 0;
+    if (n > 16) n = 16;
+    m['maxImagesPerTurn'] = n;
+    if (!['auto', 'low', 'high'].includes(String(m['visionDetail'] ?? 'auto'))) m['visionDetail'] = 'auto';
   }
 
   const res = await configStore.upsertProvider(payload);

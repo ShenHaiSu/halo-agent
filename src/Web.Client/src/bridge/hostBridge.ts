@@ -111,15 +111,41 @@ export interface ProxyConnectivityTestResult {
   diagnosticCategory: string;
 }
 
-export interface ModelConfig {
-  id: string;
-  displayName: string;
-  protocol: LlmProtocolType;
-  maxContextTokens: number;
-  maxOutputTokens: number;
-  temperature?: number | null;
-  enabled: boolean;
-}
+ export interface ModelConfig {
+   id: string;
+   displayName: string;
+   protocol: LlmProtocolType;
+   maxContextTokens: number;
+   maxOutputTokens: number;
+   temperature?: number | null;
+   enabled: boolean;
+   supportsVision?: boolean;
+   maxImagesPerTurn?: number;
+   visionDetail?: string | null;
+ }
+ 
+ // need09-05：聊天图片引用（缺字段/null/空 = 纯文本）
+ export interface ChatImageRef {
+   imageId: string;
+   fileName: string;
+   mime: string;
+   relPath: string;
+   width: number;
+   height: number;
+   sizeBytes: number;
+   sha16: string;
+   lost?: boolean;
+ }
+ 
+ // need09-03：模型多模态能力位归一化（缺省 false/4/auto；maxImagesPerTurn 0=默认4）
+ export function normalizeVisionFlag(m: Record<string, unknown>): void {
+   const r = m as unknown as { supportsVision?: unknown; maxImagesPerTurn?: unknown; visionDetail?: unknown };
+   if (typeof r.supportsVision !== 'boolean') r.supportsVision = false;
+   if (!Number.isFinite(r.maxImagesPerTurn as number)) r.maxImagesPerTurn = 4;
+   r.maxImagesPerTurn = Math.trunc(r.maxImagesPerTurn as number);
+   if (r.maxImagesPerTurn === 0) r.maxImagesPerTurn = 4;
+   if (!['auto', 'low', 'high'].includes(String((r.visionDetail as string) || 'auto'))) r.visionDetail = 'auto';
+ }
 
 export interface CustomHeaderEntry {
   key: string;
@@ -287,26 +313,27 @@ export interface SessionMetadata {
   updatedAtUtc: string;
 }
 
-export interface UnifiedChatMessage {
-  id: string;
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string | null;
-  reasoningContent?: string | null;
-  toolCalls?: Array<{
-    id: string;
-    type: string;
-    function: {
-      name: string;
-      arguments: string;
-    };
-  }> | null;
-  toolCallId?: string | null;
-  name?: string | null;
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-  cachedTokens?: number | null;
-  createdAtUtc: string;
-}
+ export interface UnifiedChatMessage {
+   id: string;
+   role: 'system' | 'user' | 'assistant' | 'tool';
+   content?: string | null;
+   reasoningContent?: string | null;
+   toolCalls?: Array<{
+     id: string;
+     type: string;
+     function: {
+       name: string;
+       arguments: string;
+     };
+   }> | null;
+   toolCallId?: string | null;
+   name?: string | null;
+   inputTokens?: number | null;
+   outputTokens?: number | null;
+   cachedTokens?: number | null;
+   createdAtUtc: string;
+   images?: ChatImageRef[] | null;
+ }
 
 export interface ContextBudgetStatusDto {
   totalContextTokens: number;
@@ -407,14 +434,20 @@ export interface HostBridgeApi {
   cancelSessionRun: (sessionId: string) => Promise<BridgeResponse<boolean>>;
 
   // Stage 06: Agent ReAct 编排
-  startAgentTurn: (
-    workspaceId: string,
-    sessionId: string,
-    userText: string,
-    providerId?: string,
-    modelId?: string
-  ) => Promise<BridgeResponse<string>>;
-  cancelAgentTurn: (sessionId: string) => Promise<BridgeResponse<boolean>>;
+   // Stage 06: Agent ReAct 编排
+   startAgentTurn: (
+     workspaceId: string,
+     sessionId: string,
+     userText: string,
+     providerId?: string,
+     modelId?: string,
+     attachmentsJson?: string
+   ) => Promise<BridgeResponse<string>>;
+   cancelAgentTurn: (sessionId: string) => Promise<BridgeResponse<boolean>>;
+  // need09-05：缩略图（只传缩略图不传原图，长边≤256px dataURL）
+  getImageThumbnail: (workspaceId: string, sessionId: string, imageId: string) => Promise<BridgeResponse<string>>;
+  // need09-06：问询回答提交（ticket 错返回 ASK_TICKET_MISMATCH）
+  resolveAskUser: (sessionId: string, ticketId: string, answersJson: string) => Promise<BridgeResponse<boolean>>;
 
   // Stage 04: Workspace, Session & Budget
   getWorkspaces: () => Promise<BridgeResponse<WorkspaceInfo[]>>;
@@ -559,22 +592,23 @@ function normalizeNetworkSettingsDto(res: BridgeResponse<GlobalNetworkSettings>)
   return res;
 }
 
-function normalizeProvidersDocDto(res: BridgeResponse<ProvidersConfigDocument>): BridgeResponse<ProvidersConfigDocument> {
-  if (res.data && Array.isArray(res.data.providers)) {
-    res.data.providers = res.data.providers.map((p) => ({
-      ...p,
-      proxyMode: normalizeProviderProxyMode(p.proxyMode),
-      customHeaders: Array.isArray(p.customHeaders) ? p.customHeaders : [],
-      models: Array.isArray(p.models)
-        ? p.models.map((m) => ({
-            ...m,
-            protocol: normalizeLlmProtocol(m.protocol),
-          }))
-        : [],
-    }));
-  }
-  return res;
-}
+ function normalizeProvidersDocDto(res: BridgeResponse<ProvidersConfigDocument>): BridgeResponse<ProvidersConfigDocument> {
+   if (res.data && Array.isArray(res.data.providers)) {
+     res.data.providers = res.data.providers.map((p) => ({
+       ...p,
+       proxyMode: normalizeProviderProxyMode(p.proxyMode),
+       customHeaders: Array.isArray(p.customHeaders) ? p.customHeaders : [],
+       models: Array.isArray(p.models)
+         ? p.models.map((m) => {
+             const mm = { ...m, protocol: normalizeLlmProtocol(m.protocol) };
+             normalizeVisionFlag(mm as unknown as Record<string, unknown>);
+             return mm;
+           })
+         : [],
+     }));
+   }
+   return res;
+ }
 
 function normalizeVersionedBaseUrlClient(baseUrl: string): string {
   const trimmed = (baseUrl || 'https://api.openai.com/v1').trim();
@@ -591,6 +625,36 @@ function normalizeVersionedBaseUrlClient(baseUrl: string): string {
 
 function createBrowserMockBridge(): HostBridgeApi {
   let mockDataRoot = 'C:\\HaloAgentData';
+  // need09-06 Mock：问询票据簿 + 假问询回放（2 题：单选 + 开放）
+  const mockAskTickets: Record<string, string> = {};
+  function mockFireAskUser(sessionId: string): void {
+    const ticketId = `tick_${Math.random().toString(36).substring(2, 10)}`;
+    mockAskTickets[sessionId] = ticketId;
+    haloEventBus.emitLocal('agent:ask-user-requested', {
+      sessionId,
+      ticketId,
+      callId: 'mock_call_ask_001',
+      questions: [
+        {
+          id: 'framework',
+          question: '本轮重构优先选用哪个前端框架？',
+          options: [
+            { label: 'Vue 3', description: '存量一致，推荐' },
+            { label: 'React', description: '需重写构建链' },
+          ],
+          multiSelect: false,
+          allowCustom: true,
+        },
+        {
+          id: 'notes',
+          question: '还有哪些补充要求？（开放问答）',
+          options: [],
+          multiSelect: false,
+          allowCustom: true,
+        },
+      ],
+    });
+  }
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
   let mockWorkspaces: WorkspaceInfo[] = [
@@ -685,49 +749,58 @@ function createBrowserMockBridge(): HostBridgeApi {
           },
         ],
         models: [
-          {
-            id: 'gpt-4o',
-            displayName: 'GPT-4o (Chat Completions)',
-            protocol: 'chat',
-            maxContextTokens: 128000,
-            maxOutputTokens: 4096,
-            temperature: 0.2,
-            enabled: true,
-          },
-          {
-            id: 'o3-mini',
-            displayName: 'o3-mini (Responses API)',
-            protocol: 'resp',
-            maxContextTokens: 200000,
-            maxOutputTokens: 16384,
-            temperature: null,
-            enabled: true,
-          },
+           {
+             id: 'gpt-4o',
+             displayName: 'GPT-4o (Chat Completions)',
+             protocol: 'chat',
+             maxContextTokens: 128000,
+             maxOutputTokens: 4096,
+             temperature: 0.2,
+             enabled: true,
+             supportsVision: true,
+             maxImagesPerTurn: 4,
+             visionDetail: 'auto',
+           },
+           {
+             id: 'o3-mini',
+             displayName: 'o3-mini (Responses API)',
+             protocol: 'resp',
+             maxContextTokens: 200000,
+             maxOutputTokens: 16384,
+             temperature: null,
+             enabled: true,
+             supportsVision: false,
+             maxImagesPerTurn: 4,
+             visionDetail: 'auto',
+           },
         ],
       },
-      {
-        id: 'provider-deepseek',
-        name: 'DeepSeek Official',
-        enabled: true,
-        baseUrl: 'https://api.deepseek.com/v1',
-        apiKeyEncrypted: '',
-        apiKeyMasked: '',
-        hasApiKey: false,
-        proxyMode: 'Inherit',
-        customProxy: null,
-        enableCustomHeaders: false,
-        customHeaders: [],
-        models: [
-          {
-            id: 'deepseek-chat',
-            displayName: 'DeepSeek-V3 (Chat)',
-            protocol: 'chat',
-            maxContextTokens: 64000,
-            maxOutputTokens: 8192,
-            temperature: 0.1,
-            enabled: true,
-          },
-        ],
+       {
+         id: 'provider-deepseek',
+         name: 'DeepSeek Official',
+         enabled: true,
+         baseUrl: 'https://api.deepseek.com/v1',
+         apiKeyEncrypted: '',
+         apiKeyMasked: '',
+         hasApiKey: false,
+         proxyMode: 'Inherit',
+         customProxy: null,
+         enableCustomHeaders: false,
+         customHeaders: [],
+         models: [
+           {
+             id: 'deepseek-chat',
+             displayName: 'DeepSeek-V3 (Chat)',
+             protocol: 'chat',
+             maxContextTokens: 64000,
+             maxOutputTokens: 8192,
+             temperature: 0.1,
+             enabled: true,
+             supportsVision: false,
+             maxImagesPerTurn: 4,
+             visionDetail: 'auto',
+           },
+         ],
       },
     ],
    };
@@ -1091,71 +1164,111 @@ function createBrowserMockBridge(): HostBridgeApi {
             outputTokens: 25,
             cachedInputTokens: 80,
             totalTokens: 145,
-          },
-        });
-        haloEventBus.emitLocal('llm:stream-event', {
-          sessionId,
-          kind: 'StreamCompleted',
-        });
-      }, 50);
-
-      return {
-        ok: true,
-        message: '流式请求已启动 (Mock)',
-        data: sessionId,
-      };
-    },
-    async cancelSessionRun(_sessionId: string) {
-      return {
-        ok: true,
-        message: '已发送取消指令 (Mock)',
-        data: true,
-      };
-    },
-    async startAgentTurn(workspaceId: string, sessionId: string, userText: string) {
-      void workspaceId;
-      void userText;
-      // 模拟一轮 ReAct：思考增量 -> 文本增量 -> 工具卡片事件 -> 完成
+           },
+         });
+         haloEventBus.emitLocal('llm:stream-event', {
+           sessionId,
+           kind: 'StreamCompleted',
+         });
+       }, 50);
+ 
+       return {
+         ok: true,
+         message: '流式请求已启动 (Mock)',
+         data: sessionId,
+       };
+     },
+     async startAgentTurn(workspaceId: string, sessionId: string, userText: string, providerId?: string, modelId?: string, attachmentsJson?: string) {
+       void workspaceId;
+       void providerId;
+       void modelId;
+       // need09-04/05 Mock：解析附件数，回放含图轮次
+       let imgCount = 0;
+       try {
+         const raw = String(attachmentsJson || '');
+         if (raw.trim()) {
+           const arr = JSON.parse(raw) as unknown;
+           if (Array.isArray(arr)) imgCount = arr.length;
+         } else {
+           const m = /\[image:[^\]]+\]/g;
+           const hits = String(userText || '').match(m);
+           if (hits) imgCount = hits.length;
+         }
+       } catch { imgCount = 0; }
+       const withImg = imgCount > 0 ? `（含 ${imgCount} 张图片 Mock）` : '';
+      // need09-06 Mock 演示钩子：含 ask/提问/选择关键字时 1s 后回放假问询
+      if (/ask|提问|选择|确认/i.test(String(userText || ''))) {
+        setTimeout(() => { mockFireAskUser(sessionId); }, 1000);
+      }
+       // 模拟一轮 ReAct：思考增量 -> 文本增量 -> 工具卡片事件 -> 完成
+       setTimeout(() => {
+         haloEventBus.emitLocal('agent:turn-event', {
+           sessionId,
+           kind: 'IterationStarted',
+           payload: { iteration: 1, maxIterations: 25 },
+         });
+         haloEventBus.emitLocal('llm:stream-event', {
+           sessionId,
+           kind: 'ReasoningDelta',
+           textDelta: '正在分析任务，准备调用工具...',
+         });
+         haloEventBus.emitLocal('llm:stream-event', {
+           sessionId,
+           kind: 'TextDelta',
+           textDelta: `收到任务${withImg}（Mock 演示模式），正在编排工具调用。`,
+         });
+         haloEventBus.emitLocal('agent:turn-event', {
+           sessionId,
+           kind: 'ToolCallStarted',
+           payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir' },
+         });
+         haloEventBus.emitLocal('agent:turn-event', {
+           sessionId,
+           kind: 'ToolExecutionCompleted',
+           payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir', success: true, exitCode: 0, durationMs: 8 },
+         });
+         haloEventBus.emitLocal('agent:turn-event', {
+           sessionId,
+           kind: 'TurnCompleted',
+           payload: { iterations: 1, toolExecutions: 1, protocol: 'chat', inputTokens: 120, outputTokens: 25, cachedTokens: 80 },
+         });
+       }, 60);
+ 
+       return {
+         ok: true,
+         message: 'Agent 推理已启动 (Mock)',
+         data: sessionId,
+       };
+     },
+     // need09-05 Mock：1px 透明 png 占位缩略图
+     async getImageThumbnail(_workspaceId: string, _sessionId: string, _imageId: string) {
+       void _workspaceId; void _sessionId; void _imageId;
+       return {
+         ok: true,
+         data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+       };
+     },
+    // need09-06 Mock：ticket 校验 + 提交回 resolved 事件
+    async resolveAskUser(sessionId: string, ticketId: string, _answersJson: string) {
+      void _answersJson;
+      const expect = mockAskTickets[sessionId];
+      if (!expect || expect !== ticketId) {
+        return { ok: false, code: 'ASK_TICKET_MISMATCH', message: '问询票据不匹配', data: false };
+      }
+      delete mockAskTickets[sessionId];
       setTimeout(() => {
-        haloEventBus.emitLocal('agent:turn-event', {
-          sessionId,
-          kind: 'IterationStarted',
-          payload: { iteration: 1, maxIterations: 25 },
-        });
-        haloEventBus.emitLocal('llm:stream-event', {
-          sessionId,
-          kind: 'ReasoningDelta',
-          textDelta: '正在分析任务，准备调用工具...',
-        });
-        haloEventBus.emitLocal('llm:stream-event', {
-          sessionId,
-          kind: 'TextDelta',
-          textDelta: '收到任务（Mock 演示模式），正在编排工具调用。',
-        });
-        haloEventBus.emitLocal('agent:turn-event', {
-          sessionId,
-          kind: 'ToolCallStarted',
-          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir' },
-        });
-        haloEventBus.emitLocal('agent:turn-event', {
-          sessionId,
-          kind: 'ToolExecutionCompleted',
-          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir', success: true, exitCode: 0, durationMs: 8 },
-        });
-        haloEventBus.emitLocal('agent:turn-event', {
-          sessionId,
-          kind: 'TurnCompleted',
-          payload: { iterations: 1, toolExecutions: 1, protocol: 'chat', inputTokens: 120, outputTokens: 25, cachedTokens: 80 },
-        });
-      }, 60);
-
-      return {
-        ok: true,
-        message: 'Agent 推理已启动 (Mock)',
-        data: sessionId,
-      };
+        haloEventBus.emitLocal('agent:ask-user-resolved', { sessionId, ticketId, outcome: 'submitted' });
+      }, 50);
+      return { ok: true, data: true };
     },
-    async cancelAgentTurn(_sessionId: string) {
+     async cancelSessionRun(_sessionId: string) {
+       return {
+         ok: true,
+         message: '已发送取消指令 (Mock)',
+         data: true,
+       };
+     },
+     async cancelAgentTurn(_sessionId: string) {
       return {
         ok: true,
         message: '已发送取消指令 (Mock)',
@@ -1473,8 +1586,8 @@ function createBrowserMockBridge(): HostBridgeApi {
        if (hit) hit.messageCount = prefix.length;
        return { ok: true, data: sess as SessionMetadata };
      },
-  };
-}
+   };
+ }
 
 function toCamelKey(key: string): string {
   if (!key) return key;
@@ -1655,13 +1768,43 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     async cancelSessionRun(sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelSessionRun(sessionId));
     },
-    async startAgentTurn(workspaceId: string, sessionId: string, userText: string, providerId?: string, modelId?: string) {
-      return normalizeBridgePayload<BridgeResponse<string>>(
-        await rawBridge.startAgentTurn(workspaceId, sessionId, userText, providerId ?? '', modelId ?? '')
-      );
-    },
-    async cancelAgentTurn(sessionId: string) {
-      return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelAgentTurn(sessionId));
+     async startAgentTurn(workspaceId: string, sessionId: string, userText: string, providerId?: string, modelId?: string, attachmentsJson?: string) {
+       const extra = typeof attachmentsJson === 'string' ? attachmentsJson : '';
+       // 老后端仅 5 参：有附件时尝试 6 参，失败回退 5 参（图片占位符文本仍发送，不崩）
+       if (extra) {
+         try {
+           return normalizeBridgePayload<BridgeResponse<string>>(
+             await rawBridge.startAgentTurn(workspaceId, sessionId, userText, providerId ?? '', modelId ?? '', extra)
+           );
+         } catch { /* fall through to 5-arg */ }
+       }
+       return normalizeBridgePayload<BridgeResponse<string>>(
+         await rawBridge.startAgentTurn(workspaceId, sessionId, userText, providerId ?? '', modelId ?? '')
+       );
+     },
+     async cancelAgentTurn(sessionId: string) {
+       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelAgentTurn(sessionId));
+     },
+     async getImageThumbnail(workspaceId: string, sessionId: string, imageId: string) {
+       try {
+         if (typeof rawBridge.getImageThumbnail === 'function') {
+           return normalizeBridgePayload<BridgeResponse<string>>(
+             await rawBridge.getImageThumbnail(workspaceId, sessionId, imageId)
+           );
+         }
+       } catch { /* fall through */ }
+       return { ok: false, code: 'THUMB_UNAVAILABLE', message: '缩略图接口不可用' };
+     },
+    // need09-06：问询回答提交（老后端无此方法时报 ASK_UNSUPPORTED，不丢草稿）
+    async resolveAskUser(sessionId: string, ticketId: string, answersJson: string) {
+      try {
+        if (typeof rawBridge.resolveAskUser === 'function') {
+          return normalizeBridgePayload<BridgeResponse<boolean>>(
+            await rawBridge.resolveAskUser(sessionId ?? '', ticketId ?? '', answersJson ?? '')
+          );
+        }
+      } catch { /* fall through */ }
+      return { ok: false, code: 'ASK_UNSUPPORTED', message: '问询提交通道不可用' };
     },
 
     // Stage 04 Native Wrappers

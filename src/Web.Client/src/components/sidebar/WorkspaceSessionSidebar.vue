@@ -227,6 +227,7 @@
                     <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
                     <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
                   </div>
+                  <n-tag v-if="hasAskPending(sess.id)" type="error" size="tiny" :bordered="false" :data-testid="`sess-ask-badge-${sess.id}`" class="mt-1 self-start">待回答</n-tag>
                 </div>
               </div>
 
@@ -322,6 +323,7 @@
                     <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
                     <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
                   </div>
+                  <n-tag v-if="hasAskPending(sess.id)" type="error" size="tiny" :bordered="false" :data-testid="`sess-ask-badge-${sess.id}`" class="mt-1 self-start">待回答</n-tag>
                 </div>
               </div>
 
@@ -414,6 +416,16 @@ import { formatSessionTime, formatRelativeTime, sessionTimeTitle, isBadTime } fr
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
+// need09-06：问询 pending 红点（独立 askUserStore 分桶；后台只红点不弹窗，禁止抢焦点）
+import { useAskUserStore } from '@/stores/askUserStore';
+const askUserStore = useAskUserStore();
+function hasAskPending(sessId: string): boolean {
+  try {
+    return askUserStore.hasPending(sessId);
+  } catch {
+    return false;
+  }
+}
 
 const runningSessionIdSet = computed(() => new Set(agentStore.runningSessionIds));
 function isSessionRunning(sessId: string): boolean {
@@ -546,6 +558,8 @@ async function handleCreateNewSession(): Promise<void> {
     cancelDeleteConfirm();
     openMenuSessionId.value = null;
     await workspaceStore.selectSession(sessionId);
+    // need09-06：点击切回有 pending 的会话自动弹问询框（AskUserModal 跟随 activeSessionId，无 pending 则保持关闭）
+    if (hasAskPending(sessionId)) askUserStore.openModal(sessionId);
   }
 
 function startInlineRename(sess: SessionMetadata): void {
