@@ -32,7 +32,7 @@ public sealed class ExecCommandTool : IToolHandler
         + "\"command\":{\"type\":\"string\",\"description\":\"The command line to execute (when runner is 'cmd') or the Python code/script arguments to execute (when runner is 'python').\"},"
         + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"description\":\"Execution runtime. Defaults to 'cmd' (recommended primary choice). Use 'python' as the secondary choice for Python inline scripts (-c) or script execution.\"},"
         + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional working directory relative to the current workspace root, or an absolute path. Defaults to the current workspace root.\"},"
-        + "\"timeout_ms\":{\"type\":\"integer\",\"description\":\"Optional timeout in milliseconds. Defaults to 30000 (30s), maximum 300000 (5m).\"}"
+        + "\"timeout_ms\":{\"type\":\"integer\",\"description\":\"Optional timeout in milliseconds. 0 = infinite wait (cancellable by user). If omitted defaults to server config (default 30000). Positive values are capped by server max (default 300000, 0 = no cap).\"}"
         + "},\"required\":[\"command\"]}");
 
     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
@@ -44,11 +44,11 @@ public sealed class ExecCommandTool : IToolHandler
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, context.CancellationToken);
             CancellationToken token = linkedCts.Token;
 
-            // ---- 参数解析 ----
+            // ---- 参数解析（need08：0=无限语义，01 §4.1）----
             string command = string.Empty;
             string runner = "cmd";
             string? workdirArg = null;
-            int timeoutMs = DefaultTimeoutMs;
+            int? parsedTimeout = null; // null=缺省/非数字
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(
@@ -70,9 +70,9 @@ public sealed class ExecCommandTool : IToolHandler
                 }
 
                 if (root.TryGetProperty("timeout_ms", out JsonElement timeoutEl) && timeoutEl.ValueKind == JsonValueKind.Number
-                    && timeoutEl.TryGetInt32(out int parsedTimeout))
+                    && timeoutEl.TryGetInt32(out int parsed))
                 {
-                    timeoutMs = parsedTimeout;
+                    parsedTimeout = parsed;
                 }
             }
             catch (JsonException ex)
@@ -81,7 +81,6 @@ public sealed class ExecCommandTool : IToolHandler
                     $"参数 JSON 解析失败：{ex.Message}。请检查 command/runner/workdir/timeout_ms 字段后重试。",
                     durationMs: sw.ElapsedMilliseconds);
             }
-
             if (string.IsNullOrWhiteSpace(command))
             {
                 return ToolResult.Fail(
@@ -96,12 +95,10 @@ public sealed class ExecCommandTool : IToolHandler
                     durationMs: sw.ElapsedMilliseconds);
             }
 
-            if (timeoutMs <= 0)
-            {
-                timeoutMs = DefaultTimeoutMs;
-            }
-
-            timeoutMs = Math.Min(timeoutMs, MaxTimeoutMs);
+            // need08：超时解析 0=无限（01 §4.1）；null 快照→回退旧常量，保证老单测行为不变
+            int cfgD = context.ExecDefaultTimeoutMsOverride ?? DefaultTimeoutMs;
+            int cfgM = context.ExecMaxTimeoutMsOverride ?? MaxTimeoutMs;
+            var (timeoutMs, infinite) = Host.Desktop.Core.Models.AgentTimeoutResolver.Resolve(parsedTimeout, cfgD, cfgM);
 
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
@@ -182,30 +179,48 @@ public sealed class ExecCommandTool : IToolHandler
             Task<byte[]> stdoutTask = ReadStreamBytesAsync(process.StandardOutput.BaseStream, token);
             Task<byte[]> stderrTask = ReadStreamBytesAsync(process.StandardError.BaseStream, token);
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeoutCts.CancelAfter(timeoutMs);
-            try
+            if (infinite)
             {
-                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            {
-                // 超时：关闭 Job 句柄即原子强杀整棵进程树，再兜底 Kill
-                job.Dispose();
-                TryKill(process);
-                string partial = await CollectPartialAsync(stdoutTask, stderrTask).ConfigureAwait(false);
-                var (timeoutDisplay, timeoutSpill) = ToolOutputGuard.ApplyGuard(
-                    partial, context.DataRoot, context.WorkspaceId, context.SessionId, call.Id);
-                string timeoutMsg = $"命令执行超时（{timeoutMs}ms），进程树已强制终止。请拆小命令、增大 timeout_ms（最大 300000）后重试。";
-                return new ToolResult
+                Infrastructure.Logging.HaloLogger.Tool.Info($"exec_command infinite wait (call {call.Id})，仅用户取消可终止");
+                // 不建 timeoutCts，直接等用户取消；取消时显式杀树后向外抛（外层统一转“已被取消”）
+                try
                 {
-                    Success = false,
-                    Output = timeoutDisplay,
-                    Error = timeoutMsg,
-                    ExitCode = -1,
-                    DurationMs = sw.ElapsedMilliseconds,
-                    SpilledFile = timeoutSpill,
-                };
+                    await process.WaitForExitAsync(token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    job.Dispose();
+                    TryKill(process);
+                    throw;
+                }
+            }
+            else
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeoutCts.CancelAfter(timeoutMs);
+                try
+                {
+                    await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    // 超时：关闭 Job 句柄即原子强杀整棵进程树，再兜底 Kill
+                    job.Dispose();
+                    TryKill(process);
+                    string partial = await CollectPartialAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                    var (timeoutDisplay, timeoutSpill) = ToolOutputGuard.ApplyGuard(
+                        partial, context.DataRoot, context.WorkspaceId, context.SessionId, call.Id);
+                    string timeoutMsg = $"命令执行超时（{timeoutMs}ms），进程树已强制终止。请拆小命令、增大 timeout_ms（最大 {cfgM}）后重试。";
+                    return new ToolResult
+                    {
+                        Success = false,
+                        Output = timeoutDisplay,
+                        Error = timeoutMsg,
+                        ExitCode = -1,
+                        DurationMs = sw.ElapsedMilliseconds,
+                        SpilledFile = timeoutSpill,
+                    };
+                }
             }
 
             // 正常退出：等待流读取收尾（有界等待防挂起）

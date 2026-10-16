@@ -30,6 +30,7 @@ namespace Host.Desktop.Bridge;
     private readonly HaloHttpClientFactory _httpClientFactory;
      private readonly ProviderConfigService _providerConfigService;
      private readonly PromptConfigService _promptConfigService;
+     private readonly AgentConfigService _agentConfigService;
     private readonly ILlmGatewayClient _llmGatewayClient;
     private readonly ISessionRepository _sessionRepository;
     private readonly IWorkspaceSessionService _workspaceSessionService;
@@ -43,11 +44,12 @@ namespace Host.Desktop.Bridge;
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
      public ProviderConfigService ProviderConfigService => _providerConfigService;
      public PromptConfigService PromptConfigService => _promptConfigService;
+     public AgentConfigService AgentConfigService => _agentConfigService;
      public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
      public ISessionRepository SessionRepository => _sessionRepository;
      public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
      public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-     public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService);
+     public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService);
     public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
 
     public HostBridgeFacade(
@@ -62,7 +64,8 @@ namespace Host.Desktop.Bridge;
         ITokenBudgetService? tokenBudgetService = null,
          IAgentOrchestrator? agentOrchestrator = null,
          ICompactionService? compactionService = null,
-         PromptConfigService? promptConfigService = null)
+         PromptConfigService? promptConfigService = null,
+         AgentConfigService? agentConfigService = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
@@ -70,6 +73,7 @@ namespace Host.Desktop.Bridge;
         _httpClientFactory = httpClientFactory ?? new HaloHttpClientFactory();
          _providerConfigService = providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
          _promptConfigService = promptConfigService ?? new PromptConfigService(_storageManager);
+         _agentConfigService = agentConfigService ?? new AgentConfigService(_storageManager);
          _llmGatewayClient = llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
          _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
          _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
@@ -239,6 +243,8 @@ namespace Host.Desktop.Bridge;
             }
 
             // 新目录切换成功后，确保新目录下的 network.json 与 providers.json 已初始化并同步至网络工厂
+            // need08：新目录切换成功后，确保 agent.json 已初始化
+            try { _agentConfigService.EnsureInitialized(); } catch { }
              _providerConfigService.EnsureInitialized();
              try { _promptConfigService.EnsureInitialized(); } catch { }
 
@@ -1065,7 +1071,6 @@ namespace Host.Desktop.Bridge;
             {
                 return BridgeResponse<ToolResult>.Fail("WORKSPACE_NOT_FOUND", $"工作区不存在：'{workspaceId}'");
             }
-
             var context = new ToolContext
             {
                 WorkspaceRoot = ws.RootPath,
@@ -1073,6 +1078,13 @@ namespace Host.Desktop.Bridge;
                 SessionId = sessionId ?? string.Empty,
                 DataRoot = _storageManager.CurrentDataRoot,
             };
+            try
+            {
+                var agentCfg = _agentConfigService.GetInternal();
+                context.ExecDefaultTimeoutMsOverride = agentCfg.ExecDefaultTimeoutMs;
+                context.ExecMaxTimeoutMsOverride = agentCfg.ExecMaxTimeoutMs;
+            }
+            catch { /* 调试单跑快照失败则回退常量，不阻断 */ }
             var call = new ToolCallDto(
                 string.IsNullOrWhiteSpace(toolCallId) ? $"call_{Guid.NewGuid():N}"[..12] : toolCallId.Trim(),
                 toolName.Trim(),

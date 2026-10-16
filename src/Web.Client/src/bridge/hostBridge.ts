@@ -347,6 +347,11 @@ export interface ContextBudgetStatusDto {
     cmdPythonText: string; toolGuideTemplate: string; ephemeralTemplate: string; scope: string;
     updatedAtUtc: string; isDefault?: boolean; fallbackReason?: string | null;
   }
+  // need08：智能体行为配置（config/agent.json；超时毫秒，0=无限）
+  export interface AgentConfigDocument {
+    version: number; execDefaultTimeoutMs: number; execMaxTimeoutMs: number; maxIterations: number;
+    scope: string; updatedAtUtc: string; isDefault?: boolean; fallbackReason?: string | null;
+  }
   export interface PromptBlockPreview { blockId: string; enabled: boolean; renderedText: string; estimatedTokens: number; isStable: boolean; }
   export interface PromptPreviewDto {
     assembledText: string; blocks: PromptBlockPreview[]; totalEstimatedTokens: number; stableEstimatedTokens: number;
@@ -434,6 +439,10 @@ export interface HostBridgeApi {
    savePromptConfig: (config: PromptConfigDocument | string) => Promise<BridgeResponse<PromptConfigDocument>>;
    resetPromptConfig: (blockId?: string) => Promise<BridgeResponse<PromptConfigDocument>>;
    previewPrompt: (workspaceId: string) => Promise<BridgeResponse<PromptPreviewDto>>;
+   // need08: 智能体行为配置（命令超时 + 工具轮次可配，0=无限）
+   getAgentConfig: () => Promise<BridgeResponse<AgentConfigDocument>>;
+   saveAgentConfig: (config: AgentConfigDocument | string) => Promise<BridgeResponse<AgentConfigDocument>>;
+   resetAgentConfig: (field?: string) => Promise<BridgeResponse<AgentConfigDocument>>;
    getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
    // need07
    truncateSessionHistory: (workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
@@ -734,6 +743,12 @@ function createBrowserMockBridge(): HostBridgeApi {
      scope: 'global', updatedAtUtc: new Date().toISOString(),
    };
    let mockPromptConfig: PromptConfigDocument = { ...mockPromptDefaults };
+   // need08 mock 仅示意，联调以真后端为准
+   const mockAgentDefaults: AgentConfigDocument = {
+     version: 1, execDefaultTimeoutMs: 30000, execMaxTimeoutMs: 300000, maxIterations: 25,
+     scope: 'global', updatedAtUtc: new Date().toISOString(),
+   };
+   let mockAgentConfig: AgentConfigDocument = { ...mockAgentDefaults };
    const estimateMockTokens = (t: string): number => {
      if (!t) return 0;
      let ascii = 0; let cjk = 0; let other = 0;
@@ -1382,6 +1397,25 @@ function createBrowserMockBridge(): HostBridgeApi {
        else if (blockId === 'custom') { mockPromptConfig.customText = ''; mockPromptConfig.enableCustom = false; mockPromptConfig.customPlacement = 'tail'; }
        return { ok: true, message: '已恢复默认 (Mock)', data: { ...mockPromptConfig } };
      },
+     // need08 mock 仅示意，联调以真后端为准
+     async getAgentConfig() {
+       return { ok: true, data: { ...mockAgentConfig } };
+     },
+     async saveAgentConfig(config: AgentConfigDocument | string) {
+       const parsed: AgentConfigDocument = typeof config === 'string' ? JSON.parse(config) : JSON.parse(JSON.stringify(config));
+       mockAgentConfig = { ...parsed, updatedAtUtc: new Date().toISOString() };
+       return { ok: true, message: '智能体行为配置已保存，下一轮对话起生效 (Mock)', data: { ...mockAgentConfig } };
+     },
+     async resetAgentConfig(field?: string) {
+       const id = (field || '').trim().toLowerCase();
+       if (!id || id === 'all' || id === 'default') { mockAgentConfig = { ...mockAgentDefaults }; }
+       else if (['defaulttimeout', 'execdefaulttimeoutms', 'default', 'default-timeout', 'default_timeout'].includes(id)) { mockAgentConfig.execDefaultTimeoutMs = mockAgentDefaults.execDefaultTimeoutMs; }
+       else if (['maxtimeout', 'execmaxtimeoutms', 'max', 'max-timeout', 'max_timeout'].includes(id)) { mockAgentConfig.execMaxTimeoutMs = mockAgentDefaults.execMaxTimeoutMs; }
+       else if (['iterations', 'maxiterations', 'rounds', 'max-iterations', 'max_iterations'].includes(id)) { mockAgentConfig.maxIterations = mockAgentDefaults.maxIterations; }
+       else { return { ok: false, code: 'AGENT_VALIDATION', message: `字段 [field]：未知恢复项：${field}` }; }
+       mockAgentConfig.updatedAtUtc = new Date().toISOString();
+       return { ok: true, message: '已恢复默认 (Mock)', data: { ...mockAgentConfig } };
+     },
      async previewPrompt(workspaceId: string) {
        return { ok: true, data: buildMockPreview(mockPromptConfig, workspaceId) };
      },
@@ -1479,6 +1513,16 @@ function toCamelKey(key: string): string {
    copy.updatedAtUtc = toIsoDateString(raw.updatedAtUtc);
    return JSON.stringify(copy);
  }
+/** need08：同 need06 归一逻辑，智能体行为配置保存前把 updatedAtUtc 归一为 ISO 字符串。 */
+function sanitizeAgentConfigForSave(config: AgentConfigDocument | string): string {
+  if (typeof config === 'string') {
+    return config;
+  }
+  const raw = config as unknown as Record<string, unknown>;
+  const copy: Record<string, unknown> = { ...raw };
+  copy.updatedAtUtc = toIsoDateString(raw.updatedAtUtc);
+  return JSON.stringify(copy);
+}
 
  function toIsoDateString(v: unknown): string {
    if (typeof v === 'string' && v.trim()) {
@@ -1701,6 +1745,16 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
      },
      async resetPromptConfig(blockId?: string) {
        return normalizeBridgePayload<BridgeResponse<PromptConfigDocument>>(await rawBridge.resetPromptConfig(blockId ?? ''));
+     },
+     async getAgentConfig() {
+       return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.getAgentConfig());
+     },
+     async saveAgentConfig(config: AgentConfigDocument | string) {
+       const payload = sanitizeAgentConfigForSave(config);
+       return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.saveAgentConfig(payload));
+     },
+     async resetAgentConfig(field?: string) {
+       return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.resetAgentConfig(field ?? ''));
      },
      async previewPrompt(workspaceId: string) {
        return normalizeBridgePayload<BridgeResponse<PromptPreviewDto>>(await rawBridge.previewPrompt(workspaceId ?? ''));

@@ -14,43 +14,49 @@
       <div class="settings-drawer-body min-w-0 max-w-full overflow-x-hidden">
         <n-tabs
           v-model:value="activeTab"
-          type="line"
-          placement="top"
-          class="sticky top-0 z-10 bg-[var(--bg-surface)]"
+          type="card"
+          placement="left"
+          class="settings-left-tabs"
         >
           <n-tab-pane name="appearance" tab="主题和样式">
-            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
               <AppearanceSettingsPanel />
             </div>
           </n-tab-pane>
 
           <n-tab-pane name="providers" tab="模型与服务商">
-            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
               <ProviderManagerView />
             </div>
           </n-tab-pane>
 
           <n-tab-pane name="network" tab="网络与代理">
-            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
               <NetworkProxySettings />
             </div>
           </n-tab-pane>
 
           <n-tab-pane name="storage" tab="存储与日志">
-            <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
               <StorageSettingsPanel />
             </div>
           </n-tab-pane>
 
            <n-tab-pane name="runtime" tab="系统运行环境">
-             <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
                <SystemRuntimePanel />
              </div>
            </n-tab-pane>
- 
+
            <n-tab-pane name="prompt" tab="提示词与预发送">
-             <div class="pt-3 min-w-0 max-w-full overflow-x-hidden">
+             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
                <PromptSettingsView />
+             </div>
+           </n-tab-pane>
+
+           <n-tab-pane name="agent" tab="智能体行为">
+             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+               <AgentBehaviorView />
              </div>
            </n-tab-pane>
         </n-tabs>
@@ -67,7 +73,8 @@
  import SystemRuntimePanel from './SystemRuntimePanel.vue';
  import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
  import PromptSettingsView from './PromptSettingsView.vue';
- export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt';
+ import AgentBehaviorView from './AgentBehaviorView.vue';
+ export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent';
 
 const props = defineProps<{
   show: boolean;
@@ -102,3 +109,74 @@ const visible = computed({
   set: (val: boolean) => emit('update:show', val),
 });
 </script>
+<style scoped>
+.settings-drawer-body {
+  margin: 0;
+  padding: 0;
+}
+:deep(.n-drawer-body-content-wrapper) {
+  padding: 10px 8px 8px 4px !important;
+}
+.settings-left-tabs {
+  min-height: 60vh;
+}
+.settings-left-tabs :deep(.n-tabs-nav) {
+  width: 116px;
+  flex-shrink: 0;
+  padding-left: 0;
+  margin-left: 0;
+}
+.settings-left-tabs :deep(.n-tabs-nav-scroll-wrapper),
+.settings-left-tabs :deep(.n-tabs-nav-scroll-content) {
+  padding-left: 0;
+  margin-left: 0;
+}
+.settings-left-tabs :deep(.n-tabs-tab) {
+  justify-content: flex-start;
+  padding: 4px 6px;
+  font-size: 12px;
+  margin-left: 0;
+}
+.settings-left-tabs :deep(.n-tab-pane) {
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+}
+.settings-tab-content {
+  padding-left: 4px;
+  padding-top: 0;
+}
+/* 信息密度：压缩各面板常用的外层间距 */
+.settings-left-tabs :deep(.space-y-4 > :not([hidden]) ~ :not([hidden])) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: 0;
+}
+.settings-left-tabs :deep(.space-y-3 > :not([hidden]) ~ :not([hidden])) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.375rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: 0;
+}
+.settings-left-tabs :deep(.gap-4) {
+  gap: 0.5rem;
+}
+.settings-left-tabs :deep(.gap-3) {
+  gap: 0.375rem;
+}
+.settings-left-tabs :deep(.p-3) {
+  padding: 0.375rem;
+}
+.settings-left-tabs :deep(.p-3\.5) {
+  padding: 0.5rem;
+}
+/* n-card 紧凑化 */
+.settings-left-tabs :deep(.n-card > .n-card-header) {
+  padding: 6px 8px;
+}
+.settings-left-tabs :deep(.n-card > .n-card-header .n-card-header__title) {
+  font-size: 13px;
+}
+.settings-left-tabs :deep(.n-card > .n-card__content) {
+  padding: 6px 8px;
+}
+</style>

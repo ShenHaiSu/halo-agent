@@ -46,6 +46,13 @@ public sealed class ToolContext
     /// </summary>
     public Func<CommandRunnerProbe.ProbeResult>? PythonProbeOverride { get; init; }
 
+    /// <summary>
+    /// need08：命令超时配置快照（null=读服务/常量回退，保证老单测行为不变）。
+    /// 由 AgentOrchestrator 每次调度前填入；HostBridgeFacade.ExecuteTool 现场读取填入。
+    /// </summary>
+    public int? ExecDefaultTimeoutMsOverride { get; set; }
+    public int? ExecMaxTimeoutMsOverride { get; set; }
+
     public CancellationToken CancellationToken { get; init; } = CancellationToken.None;
 
     /// <summary>

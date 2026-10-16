@@ -61,6 +61,8 @@ public interface IAgentOrchestrator
  public sealed class AgentOrchestrator : IAgentOrchestrator
  {
      public int MaxIterations { get; }
+     /// <summary>need08：本轮解析出的有效轮次上限（0=无限）。构造值保持兼容，老属性不动。</summary>
+     public int ResolvedMaxIterations { get; private set; }
      private readonly IWorkspaceSessionService _sessionService;
      private readonly ITokenBudgetService _budgetService;
      private readonly ILlmGatewayClient _gatewayClient;
@@ -68,7 +70,8 @@ public interface IAgentOrchestrator
      private readonly StoragePathManager? _storageManager;
      private readonly ProviderConfigService? _providerConfigService;
      private readonly PromptConfigService? _promptConfigService;
-     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25)
+     private readonly AgentConfigService? _agentConfigService;
+     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25, AgentConfigService? agentConfigService = null)
      {
          _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
          _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
@@ -77,7 +80,9 @@ public interface IAgentOrchestrator
          _storageManager = storageManager;
          _providerConfigService = providerConfigService;
          _promptConfigService = promptConfigService;
+         _agentConfigService = agentConfigService;
          MaxIterations = maxIterations > 0 ? maxIterations : 25;
+         ResolvedMaxIterations = MaxIterations;
      }
      public async Task<AgentTurnResult> RunAgentTurnAsync(string workspaceId, string sessionId, string userText, string? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
      {
@@ -157,9 +162,44 @@ public interface IAgentOrchestrator
         // need05-01：本轮账单累计 Σ（含工具循环的多 call；单 call 轮即等于 usage）。失败/取消分支直接返回不发布，不计入。
         long turnBilledIn = 0;
         long turnBilledOut = 0;
-
-        // (2) MaxIterations ReAct 循环
-        for (int iteration = 1; iteration <= MaxIterations; iteration++)
+        // need08：轮首快照（追加 user 之后、循环之前，只读一次；保存不中断本轮，下一轮生效）
+        int effectiveMax = MaxIterations;
+        int cfgExecDefaultMs = AgentDefaults.DefaultTimeoutMs;
+        int cfgExecMaxMs = AgentDefaults.MaxTimeoutMs;
+        try
+        {
+            if (_agentConfigService != null)
+            {
+                var cfg = _agentConfigService.GetInternal();
+                cfgExecDefaultMs = cfg.ExecDefaultTimeoutMs;
+                cfgExecMaxMs = cfg.ExecMaxTimeoutMs;
+                if (cfg.MaxIterations == 0)
+                {
+                    effectiveMax = 0; // 无限轮次
+                }
+                else if (cfg.MaxIterations > 0)
+                {
+                    effectiveMax = Math.Min(cfg.MaxIterations, AgentDefaults.HardIterationsCeil);
+                }
+                else
+                {
+                    Infrastructure.Logging.HaloLogger.App.Warn($"[Agent] agent.json 轮次非法（{cfg.MaxIterations}），已回退构造值 {MaxIterations}");
+                    effectiveMax = MaxIterations;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn("[Agent] 智能体行为配置读取失败，已回退构造值", ex);
+            effectiveMax = MaxIterations;
+        }
+        ResolvedMaxIterations = effectiveMax;
+        if (effectiveMax == 0)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn($"[Agent] infinite iterations for session {sessionId}，仅取消/模型停手可结束");
+        }
+        // (2) ReAct 循环（need08：effectiveMax<=0 即无限轮次，永不进截断分支）
+        for (int iteration = 1; effectiveMax <= 0 || iteration <= effectiveMax; iteration++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -224,7 +264,7 @@ public interface IAgentOrchestrator
             long ttftMark = Environment.TickCount64;
             bool ttftSent = false;
 
-            PublishTurnEvent(sessionId, "IterationStarted", new { iteration, maxIterations = MaxIterations });
+            PublishTurnEvent(sessionId, "IterationStarted", new { iteration, maxIterations = effectiveMax });
 
             try
             {
@@ -444,17 +484,17 @@ public interface IAgentOrchestrator
                 return AgentTurnResult.Completed(iteration, toolExecutions);
             }
 
-            // 达到最大迭代仍有工具调用 → 截断暂停
-            if (iteration >= MaxIterations)
+            // 达到最大迭代仍有工具调用 → 截断暂停（need08：无限模式 effectiveMax<=0 永不进）
+            if (effectiveMax > 0 && iteration >= effectiveMax)
             {
                 try
                 {
                     var notice = UnifiedChatMessage.Assistant(
-                        $"已达到单轮最大迭代次数（{MaxIterations}），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。");
+                        $"已达到单轮最大迭代次数（{effectiveMax}），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。");
                     await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, notice, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch { /* ignore */ }
-                PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = iteration, toolExecutions, maxIterations = MaxIterations });
+                PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = iteration, toolExecutions, maxIterations = effectiveMax });
                 return AgentTurnResult.Truncated(iteration, toolExecutions);
             }
 
@@ -481,7 +521,9 @@ public interface IAgentOrchestrator
                         WorkspaceId = workspaceId,
                         SessionId = sessionId,
                         DataRoot = dataRoot,
-                        CancellationToken = cancellationToken
+                        CancellationToken = cancellationToken,
+                        ExecDefaultTimeoutMsOverride = cfgExecDefaultMs,
+                        ExecMaxTimeoutMsOverride = cfgExecMaxMs,
                     };
                     toolResult = await _toolRegistry.DispatchAsync(dto, toolContext, cancellationToken).ConfigureAwait(false);
                     toolResult ??= ToolResult.Fail($"工具 '{call.FunctionName}' 返回空结果，请重试。");
@@ -531,9 +573,9 @@ public interface IAgentOrchestrator
             }
         }
 
-        // 理论不可达（循环内 iteration>=MaxIterations 即返回），兜底截断
-        PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = MaxIterations, toolExecutions, maxIterations = MaxIterations });
-        return AgentTurnResult.Truncated(MaxIterations, toolExecutions);
+        // 理论不可达（有限循环内 iteration>=effectiveMax 即返回；无限循环内必 return），兜底截断
+        PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = effectiveMax, toolExecutions, maxIterations = effectiveMax });
+        return AgentTurnResult.Truncated(effectiveMax, toolExecutions);
     }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(
