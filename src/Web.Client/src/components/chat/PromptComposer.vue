@@ -53,9 +53,22 @@ const inputRef = ref<unknown>(null);
 
 const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id));
 
+// need05-03：/compact 输入框命令（发送前拦截，不走推理通道）
+async function handleCompactCommand(): Promise<void> {
+  const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+  draft.value = '';
+  if (!sid) return;
+  workspaceStore.touchSessionTime(sid);
+  await workspaceStore.compactSession(sid);
+}
+
 function handleSend(): void {
   const text = draft.value.trim();
   if (!text || agentStore.isGenerating) return;
+  if (text === '/compact') {
+    void handleCompactCommand();
+    return;
+  }
   draft.value = '';
   void agentStore.sendPrompt(text);
 }

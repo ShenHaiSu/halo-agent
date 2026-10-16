@@ -27,6 +27,10 @@ public interface ISessionRepository
     Task<bool> DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
     Task<bool> DeleteWorkspaceDirectoryAsync(string workspaceId, CancellationToken ct = default);
     Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+    /// <summary>need05-03：重写前全量备份 messages.jsonl，返回备份文件名。</summary>
+    Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default);
+    /// <summary>need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件）。</summary>
+    Task RewriteMessagesJsonlAsync(string workspaceId, string sessionId, IReadOnlyList<UnifiedChatMessage> messages, CancellationToken ct = default);
     string GetWorkspaceDirectory(string workspaceId);
     string GetSessionDirectory(string workspaceId, string sessionId);
     string GetMessagesJsonlPath(string workspaceId, string sessionId);
@@ -395,6 +399,82 @@ public sealed class SessionRepository : ISessionRepository
         return Task.FromResult(true);
     }
 
+    /// <summary>
+    /// need05-03：备份 messages.jsonl → messages.compact-bak-{UTC:yyyyMMddHHmmss}.jsonl，返回备份文件名。
+    /// 与 AppendMessageAsync 持同一把 _sessionLocks[sessionId] 锁，天然互斥。
+    /// </summary>
+    public async Task<string> BackupMessagesJsonlAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
+        string backupFileName = $"messages.compact-bak-{DateTime.UtcNow:yyyyMMddHHmmss}.jsonl";
+        string backupPath = Path.Combine(GetSessionDirectory(workspaceId, sessionId), backupFileName);
+        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
+        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var dir = Path.GetDirectoryName(backupPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            if (File.Exists(jsonlPath))
+            {
+                using var src = new FileStream(jsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var dst = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await src.CopyToAsync(dst, ct).ConfigureAwait(false);
+                await dst.FlushAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(backupPath, string.Empty, Encoding.UTF8, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            sessionLock.Release();
+        }
+        return backupFileName;
+    }
+
+    /// <summary>
+    /// need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件；任一时刻可被 GetMessagesAsync 完整解析）。
+    /// </summary>
+    public async Task RewriteMessagesJsonlAsync(string workspaceId, string sessionId, IReadOnlyList<UnifiedChatMessage> messages, CancellationToken ct = default)
+    {
+        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
+        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
+        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var dir = Path.GetDirectoryName(jsonlPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            string tmpPath = jsonlPath + $".{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await using (var fs = new FileStream(tmpPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+                {
+                    foreach (var m in messages)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        string line = JsonSerializer.Serialize(m, HaloJsonOptions.CompactCamelCase) + "\n";
+                        byte[] bytes = Encoding.UTF8.GetBytes(line);
+                        await fs.WriteAsync(bytes, ct).ConfigureAwait(false);
+                    }
+                    await fs.FlushAsync(ct).ConfigureAwait(false);
+                }
+                File.Move(tmpPath, jsonlPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tmpPath))
+                {
+                    try { File.Delete(tmpPath); } catch { /* ignore */ }
+                }
+            }
+        }
+        finally
+        {
+            sessionLock.Release();
+        }
+    }
+
     public async Task<string> ExportSessionMarkdownAsync(string workspaceId, string sessionId, CancellationToken ct = default)
     {
         var meta = await LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
@@ -414,7 +494,11 @@ public sealed class SessionRepository : ISessionRepository
         }
         sb.AppendLine($"- **Created At**: `{meta?.CreatedAtUtc:yyyy-MM-dd HH:mm:ss} UTC`");
         sb.AppendLine($"- **Message Count**: {messages.Count}");
-        sb.AppendLine($"- **Total Tokens**: In {meta?.TotalInputTokens ?? 0} / Out {meta?.TotalOutputTokens ?? 0}");
+        // need05-01：占用/累计分开口径（旧 meta 缺键显示 ?，绝不把未知画成 0）
+        string occIn = (meta != null && meta.TotalInputTokens > 0) ? meta.TotalInputTokens.ToString() : "?";
+        string billP = (meta != null && (meta.CumulativePromptTokens > 0 || meta.TotalInputTokens > 0)) ? meta.CumulativePromptTokens.ToString() : "?";
+        string billC = (meta != null && (meta.CumulativeCompletionTokens > 0 || meta.TotalOutputTokens > 0)) ? meta.CumulativeCompletionTokens.ToString() : "?";
+        sb.AppendLine($"- 占用 IN {occIn}（快照=末轮 prompt） / 本轮 OUT 按轮 / 累计 Σ {billP}+{billC}");
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();

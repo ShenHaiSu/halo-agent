@@ -79,9 +79,16 @@ public sealed class SessionMetadata
     public string? ModelId { get; set; }
 
     public int MessageCount { get; set; }
+    /// <summary>need05-01：占用快照=末轮 prompt（覆盖语义，有精确值则覆盖）。</summary>
     public long TotalInputTokens { get; set; }
+    /// <summary>need05-01：Σ账单=累计 completion（只增不减，compact/clear 外永不减少）。</summary>
     public long TotalOutputTokens { get; set; }
+    /// <summary>need05-01：占用快照的子集（覆盖语义，恒 ≤ TotalInputTokens）。</summary>
     public long TotalCachedTokens { get; set; }
+    /// <summary>need05-01：Σ账单=累计 prompt，每次 usage.prompt 到账累加，compact 重写时保留，clear 时清零。</summary>
+    public long CumulativePromptTokens { get; set; }
+    /// <summary>need05-01：Σ账单=累计 completion，每次 usage.completion 到账累加。</summary>
+    public long CumulativeCompletionTokens { get; set; }
 
     public bool IsPinned { get; set; }
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
@@ -147,4 +154,18 @@ public sealed class ContextBudgetStatusDto
     public bool IsNearLimit { get; set; }
     public string? SessionHash { get; set; }
     public string? Protocol { get; set; }
+    /// <summary>need05-01：精确占用快照（末轮 prompt），null = unknown（无快照）。</summary>
+    public int? LastPromptTokens { get; set; }
+    /// <summary>need05-01：占用快照子集，null = unknown；非 null 时恒 ≤ LastPromptTokens。</summary>
+    public int? LastCachedTokens { get; set; }
+    /// <summary>need05-01：= cached/input；input&lt;=0 或任一 null 则 null（未知不画 0%）。</summary>
+    public double? CacheHitRate { get; set; }
+    /// <summary>need05-01：true = UsedInputTokens 来自估算回退（流式中/无快照）。</summary>
+    public bool UsedInputIsEstimated { get; set; }
+    /// <summary>need05-01：known | unknown | estimated。空会话为 known+0%；有消息无快照为 unknown。</summary>
+    public string OccupancyState { get; set; } = "known";
+    /// <summary>need05-01：Σ账单 prompt（拷贝 meta.CumulativePromptTokens）。</summary>
+    public long BilledPromptTokens { get; set; }
+    /// <summary>need05-01：Σ账单 completion。</summary>
+    public long BilledCompletionTokens { get; set; }
 }

@@ -62,8 +62,6 @@ public sealed class SystemPromptBuilder
             $"- Active Workspace Name: {wsName}\n" +
             $"- Active Workspace Root Path: {wsRoot}\n" +
             "- Default Command Shell: `cmd.exe` (Windows Command Prompt)\n" +
-            $"- Detected Python Runtime: {pythonStatus}\n" +
-            $"- Current Date: {today}\n" +
             "\n" +
             "## 2. Command Execution Strategy (CRITICAL RULE)\n" +
             "Because PowerShell versions vary drastically between Windows 7 (PowerShell 2.0) and Windows 10/11 (PowerShell 5.1+), you MUST follow this strict execution priority when using `exec_command`:\n" +
@@ -76,6 +74,15 @@ public sealed class SystemPromptBuilder
             "- For targeted modifications to existing files, prefer `edit_file` (providing enough surrounding lines in `old_string` for a unique match) instead of overwriting the entire file with `write_file`.\n" +
             "- Use `list_dir` and `grep_search` to explore the workspace efficiently rather than spawning unnecessary shell processes.\n" +
             $"- All relative paths passed to tools resolve against the Active Workspace Root Path (`{wsRoot}`).\n";
+
+        // need05-02: stable/ephemeral split.
+        // 易变行(日期/Python状态)只出现在尾部 ## 4. Session Ephemeral. 对调用方仍返回一个string(零破坏).
+        prompt +=
+            "\n" +
+            "## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n" +
+            $"- Current Date: {today}\n" +
+            $"- Detected Python Runtime: {pythonStatus}\n" +
+            "- SessionHash: 由网关头携带,此处不重复\n";
 
         return Task.FromResult(prompt);
     }

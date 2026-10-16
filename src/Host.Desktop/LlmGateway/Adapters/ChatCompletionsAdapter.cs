@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using Host.Desktop.Core.Models;
@@ -119,10 +120,11 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
             writer.WriteEndArray(); // messages
 
             // 6. 工具定义列表（嵌套式）
+            // need05-02：按 name 升序稳定排序后序列化（内容不动），保证请求前缀后段字节稳定
             if (request.Tools != null && request.Tools.Count > 0)
             {
                 writer.WriteStartArray("tools");
-                foreach (var tool in request.Tools)
+                foreach (var tool in request.Tools.OrderBy(t => t.Name, StringComparer.Ordinal))
                 {
                     writer.WriteStartObject();
                     writer.WriteString("type", "function");

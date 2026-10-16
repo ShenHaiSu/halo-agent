@@ -133,18 +133,37 @@ public sealed class TokenBudgetService : ITokenBudgetService
          return messages.Sum(m => EstimateMessageTokens(m));
     }
  
-     /// <summary>need04-05：末条 assistant 的 CachedTokens（钳制 ≤ usedInput），无则 0。</summary>
-     public static int ResolveCachedTokens(IReadOnlyList<UnifiedChatMessage>? messages, int usedInput)
+    /// <summary>need04-05：末条 assistant 的 CachedTokens（钳制 ≤ usedInput），无则 0。</summary>
+    public static int ResolveCachedTokens(IReadOnlyList<UnifiedChatMessage>? messages, int usedInput)
     {
-         if (messages != null)
+        if (messages != null)
         {
-             for (int i = messages.Count - 1; i >= 0; i--)
+            for (int i = messages.Count - 1; i >= 0; i--)
             {
-                 var v = messages[i]?.CachedTokens;
-                 if (v.HasValue && v.Value > 0) return Math.Min((int)v.Value, Math.Max(0, usedInput));
+                var v = messages[i]?.CachedTokens;
+                if (v.HasValue && v.Value > 0) return Math.Min((int)v.Value, Math.Max(0, usedInput));
             }
         }
-         return 0;
+        return 0;
+    }
+ 
+    /// <summary>
+    /// need05-01：与 ResolveUsedInputTokens 并列，返回是否估算 + 可空快照。
+    /// 口径：IN=占用快照（末轮 prompt），cache⊆IN，无精确值 = unknown。
+    /// </summary>
+    public static (int? prompt, int? cached, bool isEstimated) ResolveOccupancy(IReadOnlyList<UnifiedChatMessage>? messages)
+    {
+        int? p = null; int? c = null;
+        if (messages != null) for (int i = messages.Count - 1; i >= 0; i--)
+        {
+            var m = messages[i]; if (m == null) continue;
+            if (p == null && m.InputTokens.HasValue && m.InputTokens.Value > 0) p = (int)m.InputTokens.Value;
+            if (c == null && m.CachedTokens.HasValue && m.CachedTokens.Value > 0) c = (int)m.CachedTokens.Value;
+            if (p != null) break; // 以末个 prompt 快照为准；cached 取该轮或更近轮的最大可见值后钳制
+        }
+        if (p == null) return (null, null, true);
+        if (c.HasValue) c = Math.Min(c.Value, Math.Max(0, p.Value));
+        return (p, c, false);
     }
 
     /// <summary>
@@ -280,9 +299,14 @@ public sealed class TokenBudgetService : ITokenBudgetService
         return result;
     }
 
+    /// <summary>need05-02：块状高低水位淘汰阈值：占用/maxContext ≥92% 才触发裁剪。</summary>
+    public const double HighWaterMark = 0.92;
+    /// <summary>need05-02：触发后一次裁到 70% 低水位，避免逐轮微调抖动前缀。</summary>
+    public const double LowWaterMark = 0.70;
+
     /// <summary>
-    /// 根据当前模型配置执行裁剪
-    /// AvailableInputBudget = MaxContextTokens - MaxOutputTokens - SafetyBuffer
+    /// need05-02：根据当前模型配置执行裁剪（块状高低水位）。
+    /// 未达 92% 高水位：原样返回，前缀零抖动；达线：一次裁到 70% 低水位（复用原子组裁剪）。
     /// </summary>
     public List<UnifiedChatMessage> TruncateToBudget(
         ModelConfig model,
@@ -291,9 +315,13 @@ public sealed class TokenBudgetService : ITokenBudgetService
     {
         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
-        int availableInputBudget = Math.Max(1000, maxContext - maxOutput - safetyBuffer);
-
-        return BuildWithinBudget(messages, availableInputBudget);
+        var (prompt, _, _) = ResolveOccupancy(messages);
+        int used = prompt ?? ResolveUsedInputTokens(messages);
+        double ratio = maxContext > 0 ? (double)used / maxContext : 0;
+        if (ratio < HighWaterMark) return messages.ToList(); // 未达线：原样返回，前缀零抖动
+        int target = (int)(maxContext * LowWaterMark);
+        int budget = Math.Max(1000, target - maxOutput - safetyBuffer);
+        return BuildWithinBudget(messages, budget); // 达线才进现有原子组裁剪
     }
 
     /// <summary>
@@ -308,7 +336,10 @@ public sealed class TokenBudgetService : ITokenBudgetService
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
         int safetyBuffer = DefaultSafetyBuffer;
         // need04-05：快照语义：IN=末条精确快照（无则估算）；available 必须减去 used；分母统一 maxContext
-        int usedInput = ResolveUsedInputTokens(messages);
+        // need05-01：占用/账单分离 + 未知态：prompt 快照优先，无快照则 usedInput 回退估算并标记 estimated/unknown
+        var (prompt, cached, isEst) = ResolveOccupancy(messages);
+        int msgCount = messages?.Count ?? 0;
+        int usedInput = prompt ?? (msgCount == 0 ? 0 : messages!.Sum(m => EstimateMessageTokens(m)));
         int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer - usedInput);
         double percentage = maxContext > 0
             ? Math.Min(100.0, Math.Round((double)usedInput / maxContext * 100.0, 1))
@@ -324,7 +355,15 @@ public sealed class TokenBudgetService : ITokenBudgetService
             UsagePercentage = percentage,
             IsNearLimit = isNearLimit,
             SessionHash = sessionHash,
-            Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat"
+            Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
+            LastPromptTokens = prompt,
+            LastCachedTokens = cached,
+            CacheHitRate = (prompt.HasValue && cached.HasValue && prompt.Value > 0) ? (double)cached.Value / prompt.Value : (double?)null,
+            // 空会话视为 known 且非估算（前端画 0/128K(0%) 蓝色）；有消息无快照才 estimated/unknown
+            UsedInputIsEstimated = isEst && msgCount > 0,
+            // 空会话 messages.Count==0 视为 known+0%（与 znaide 默认 Some(0) 对齐）；有消息无快照才 unknown
+            OccupancyState = prompt.HasValue ? "known" : (msgCount == 0 ? "known" : "unknown"),
+            // Billed* 由 GetBudgetStatusAsync 读 meta 后填入
         };
     }
  
@@ -355,6 +394,7 @@ public sealed class TokenBudgetService : ITokenBudgetService
         }
         List<UnifiedChatMessage> messages = new();
         string? sessionHash = null;
+        long billedPrompt = 0; long billedCompletion = 0;
         if (_workspaceSessionService != null && !string.IsNullOrWhiteSpace(workspaceId) && !string.IsNullOrWhiteSpace(sessionId))
         {
             try
@@ -363,12 +403,18 @@ public sealed class TokenBudgetService : ITokenBudgetService
                 var sessions = await _workspaceSessionService.GetSessionsByWorkspaceAsync(workspaceId, ct).ConfigureAwait(false);
                 var currentSession = sessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
                 sessionHash = currentSession?.SessionHash;
+                // need05-01：Σ账单透传（旧 meta 缺键即 0）
+                billedPrompt = currentSession?.CumulativePromptTokens ?? 0;
+                billedCompletion = currentSession?.CumulativeCompletionTokens ?? 0;
             }
             catch
             {
                 // 使用默认回退
             }
         }
-        return CalculateBudgetStatus(model, messages, sessionHash);
+        var dto = CalculateBudgetStatus(model, messages, sessionHash);
+        dto.BilledPromptTokens = billedPrompt;
+        dto.BilledCompletionTokens = billedCompletion;
+        return dto;
     }
 }

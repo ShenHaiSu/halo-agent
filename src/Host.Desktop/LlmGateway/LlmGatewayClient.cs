@@ -118,8 +118,10 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
 
         string requestPayload = adapter.SerializeRequest(request, includeUsageInStream);
 
+        // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
+        string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
         // 记录请求追踪日志
-        LogRequestTrace(request, endpointUrl);
+        LogRequestTrace(request, endpointUrl, prefixHash);
 
         var stopwatch = Stopwatch.StartNew();
         long? ttftMs = null;
@@ -248,14 +250,21 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
         return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
-    private void LogRequestTrace(UnifiedLlmRequest request, string endpointUrl)
+    private void LogRequestTrace(UnifiedLlmRequest request, string endpointUrl, string? prefixHash = null)
     {
         try
         {
             string proxySummary = GetProxySummary(request.Provider);
             string headersSummary = GetCustomHeadersSummary(request.Provider, request.HeaderContext);
+            // need05-02：[REQ] 追加 prefixHash + msgCount + inputEst（联调 grep reqId 看哈希变化 vs 命中率因果）
+            int msgCount = request.Messages?.Count ?? 0;
+            int inputEst = 0;
+            if (request.Messages != null)
+            {
+                foreach (var m in request.Messages) inputEst += Services.TokenBudgetService.EstimateMessageTokens(m);
+            }
 
-            string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}]";
+            string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}] | prefixHash={prefixHash ?? "-"} | msgCount={msgCount} | inputEst={inputEst}";
             AppendAuditTrace(line);
         }
         catch (Exception ex)

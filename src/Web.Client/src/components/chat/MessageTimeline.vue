@@ -48,7 +48,11 @@
               </div>
             </n-collapse-transition>
           </div>
-          <div v-if="item.group && hasTelemetryGroup(item.group)" class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <div
+            v-if="item.group && hasTelemetryGroup(item.group)"
+            class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5"
+            title="IN为末轮快照，多轮工具调用轮内多次请求只记末次占用，累计见顶栏Σ"
+          >
             <span>协议: {{ protocolOfGroup(item.group!) }}</span>
             <span>IN {{ item.group?.telemetry?.inputTokens ?? '-' }} · Cache {{ item.group?.telemetry?.cachedTokens ?? 0 }} · {{ cachePercentOf(item.group?.telemetry?.cachedTokens ?? 0, item.group?.telemetry?.inputTokens ?? 0) }}</span>
             <span>OUT {{ item.group?.telemetry?.outputTokens ?? '-' }}</span>
@@ -87,7 +91,11 @@
       </n-alert>
 
       <!-- Telemetry footer（本轮快照语义：IN=总量快照，OUT=本轮生成） -->
-      <div v-if="showLiveTelemetry" class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2">
+      <div
+        v-if="showLiveTelemetry"
+        class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2"
+        title="IN为末轮快照，多轮工具调用轮内多次请求只记末次占用，累计见顶栏Σ"
+      >
         <span>协议: {{ agentStore.telemetry.protocol === 'resp' ? 'RESP (/v1/responses)' : 'CHAT (/v1/chat/completions)' }}</span>
         <span v-if="agentStore.telemetry.ttftMs !== null">首字: {{ agentStore.telemetry.ttftMs }}ms</span>
         <span v-if="agentStore.telemetry.totalMs !== null">总耗时: {{ (agentStore.telemetry.totalMs / 1000).toFixed(1) }}s</span>
@@ -255,8 +263,9 @@ function protocolOfGroup(_g: TurnGroup): string {
   return p === 'resp' ? 'RESP' : 'CHAT';
 }
 
+// need05-01：持久 footer 文案冻结为 IN {input} · Cache {cached} · {p}%；分母 0 显示 - 而非 0%（区分未知）
 function cachePercentOf(cached: number, input: number): string {
-  if (!input || input <= 0) return '0%';
+  if (!input || input <= 0) return '-';
   return `${Math.round((cached / input) * 100)}%`;
 }
 
@@ -272,7 +281,7 @@ const showLiveTelemetry = computed(() => {
 
 const cachePercent = computed(() => {
   const t = agentStore.telemetry;
-  if (t.inputTokens <= 0) return '0%';
+  if (t.inputTokens <= 0) return '-';
   return `${Math.round((t.cachedTokens / t.inputTokens) * 100)}%`;
 });
 // 进入会话自动滚到底：主界面渲染完毕后检测纵向滚动条位置与可滚动高度，有向下空间即滚到底。

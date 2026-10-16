@@ -45,6 +45,9 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
     }
 
+    /// <summary>need05-03：供压缩服务做备份/原子重写（调用方须持有追加锁）。</summary>
+    internal ISessionRepository SessionRepository => _sessionRepository;
+
     public static string NormalizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
@@ -267,6 +270,9 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             else meta.TotalInputTokens += TokenBudgetService.EstimateMessageTokens(message);
             if (message.OutputTokens.HasValue) meta.TotalOutputTokens += message.OutputTokens.Value;
             if (message.CachedTokens.HasValue && message.CachedTokens.Value > 0) meta.TotalCachedTokens = message.CachedTokens.Value;
+            // need05-01：Σ账单累计（每次 usage 到账累加；user/tool 估算分支不碰 Cumulative；compact 重写保留，clear 清零）
+            if (message.InputTokens.HasValue && message.InputTokens.Value > 0) meta.CumulativePromptTokens += message.InputTokens.Value;
+            if (message.OutputTokens.HasValue && message.OutputTokens.Value > 0) meta.CumulativeCompletionTokens += message.OutputTokens.Value;
             meta.UpdatedAtUtc = DateTime.UtcNow;
 
             // need03-03 T1：首条 user 且未冻结时取第一句话前 5 字（与前端 instantTitleFromUserText 同语义，surrogate 安全）
@@ -290,20 +296,7 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
                 }
             }
 
-            await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
-
-            // 3. 同步更新 sessions-index.json
-            var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
-            int idx = sessions.FindIndex(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0)
-            {
-                sessions[idx] = meta;
-            }
-            else
-            {
-                sessions.Insert(0, meta);
-            }
-            await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+            await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
 
             return true;
         }
@@ -312,6 +305,32 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             appendLock.Release();
         }
     }
+
+    /// <summary>
+    /// need05-03：Append 后半段“存 meta+刷 index”抽取，供压缩重写复用（纯搬代码，不改语义）。
+    /// 注意：调用方须已持有会话级互斥（Append 持 _sessionAppendLocks[sessionId]，压缩持同一把锁）。
+    /// </summary>
+    internal async Task RefreshMetaIndexAsync(string workspaceId, string sessionId, SessionMetadata meta, CancellationToken ct = default)
+    {
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        // 同步更新 sessions-index.json
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        int idx = sessions.FindIndex(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            sessions[idx] = meta;
+        }
+        else
+        {
+            sessions.Insert(0, meta);
+        }
+        await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>need05-03：供压缩服务持有追加锁（与 AppendSessionMessageAsync 同一把锁，天然互斥）。</summary>
+    internal SemaphoreSlim GetSessionAppendLock(string sessionId) =>
+        _sessionAppendLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
 
     public async Task<bool> UpdateSessionTitleAsync(string workspaceId, string sessionId, string newTitle, CancellationToken ct = default)
     {

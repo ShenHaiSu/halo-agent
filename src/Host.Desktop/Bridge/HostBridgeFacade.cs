@@ -36,6 +36,7 @@ namespace Host.Desktop.Bridge;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
+    private ICompactionService? _compactionService;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
@@ -45,6 +46,7 @@ namespace Host.Desktop.Bridge;
     public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
     public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
     public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService);
+    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
 
     public HostBridgeFacade(
         Form? mainForm,
@@ -56,7 +58,8 @@ namespace Host.Desktop.Bridge;
         ISessionRepository? sessionRepository = null,
         IWorkspaceSessionService? workspaceSessionService = null,
         ITokenBudgetService? tokenBudgetService = null,
-        IAgentOrchestrator? agentOrchestrator = null)
+        IAgentOrchestrator? agentOrchestrator = null,
+        ICompactionService? compactionService = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
@@ -68,6 +71,7 @@ namespace Host.Desktop.Bridge;
         _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
         _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
         _agentOrchestrator = agentOrchestrator;
+        _compactionService = compactionService;
     }
 
     /// <summary>
@@ -1075,6 +1079,137 @@ namespace Host.Desktop.Bridge;
         {
             HaloLogger.App.Error($"ExecuteTool failed for '{toolName}'", ex);
             return BridgeResponse<ToolResult>.Fail("TOOL_EXEC_ERROR", ex.Message);
+        }
+    }
+
+    #endregion
+
+    #region need05 Compact: 上下文压缩编排（后台 Task + CompactStarted/Completed/Failed 事件）
+
+    /// <summary>
+    /// need05-03：/compact 入口。后台 Task 运行压缩，不阻塞 CEF 线程；
+    /// 前后发布 agent:turn-event（CompactStarted → CompactCompleted/CompactFailed）。
+    /// 不复用 _activeSessionTokens 的 agent: 键（避免与推理互相取消），另起 compact: 键且不提供 Cancel 入口。
+    /// </summary>
+    public Task<BridgeResponse<CompactionResult>> CompactSession(
+        string workspaceId,
+        string sessionId,
+        string? providerId = null,
+        string? modelId = null,
+        int keepLastGroups = 6)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Task.FromResult(BridgeResponse<CompactionResult>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
+            }
+
+            string wsId = workspaceId.Trim();
+            string sessId = sessionId.Trim();
+            string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
+            string? modId = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
+            int keep = keepLastGroups < 1 ? 6 : keepLastGroups;
+            string compactKey = "compact:" + sessId;
+
+            if (_activeSessionTokens.ContainsKey(compactKey))
+            {
+                return Task.FromResult(BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候"));
+            }
+
+            JsEventDispatcher.Publish("agent:turn-event", new
+            {
+                sessionId = sessId,
+                kind = "CompactStarted",
+                payload = new { sessionId = sessId },
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            _ = Task.Run(async () =>
+            {
+                var cts = new CancellationTokenSource();
+                _activeSessionTokens[compactKey] = cts;
+                try
+                {
+                    var result = await CompactionService.CompactAsync(wsId, sessId, provId, modId, keep, cts.Token).ConfigureAwait(false);
+                    if (result.Success)
+                    {
+                        JsEventDispatcher.Publish("agent:turn-event", new
+                        {
+                            sessionId = sessId,
+                            kind = "CompactCompleted",
+                            payload = new
+                            {
+                                removedMessages = result.RemovedMessages,
+                                keptMessages = result.KeptMessages,
+                                summaryPreview = result.SummaryPreview,
+                                backupFileName = result.BackupFileName,
+                                updatedAtUtc = DateTime.UtcNow.ToString("o")
+                            },
+                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        });
+                    }
+                    else
+                    {
+                        JsEventDispatcher.Publish("agent:turn-event", new
+                        {
+                            sessionId = sessId,
+                            kind = "CompactFailed",
+                            payload = new { errorCode = result.ErrorCode, errorMessage = result.ErrorMessage },
+                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Error($"[HostBridge] Compact failed for session '{sessId}'", ex);
+                    JsEventDispatcher.Publish("agent:turn-event", new
+                    {
+                        sessionId = sessId,
+                        kind = "CompactFailed",
+                        payload = new { errorCode = "COMPACT_EXCEPTION", errorMessage = ex.Message },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
+                }
+                finally
+                {
+                    _activeSessionTokens.TryRemove(compactKey, out _);
+                    cts.Dispose();
+                }
+            }, CancellationToken.None);
+
+            return Task.FromResult(BridgeResponse<CompactionResult>.Success(default!, "压缩已启动"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("CompactSession failed", ex);
+            return Task.FromResult(BridgeResponse<CompactionResult>.Fail("COMPACT_START_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>need05-03：列出压缩备份文件名（审计用），返回 JSON 数组字符串。</summary>
+    public Task<BridgeResponse<string>> GetCompactBackupList(string workspaceId, string sessionId)
+    {
+        try
+        {
+            string sessionDir = _sessionRepository.GetSessionDirectory(workspaceId, sessionId);
+            var names = new List<string>();
+            if (Directory.Exists(sessionDir))
+            {
+                names = Directory.GetFiles(sessionDir, "messages.compact-bak-*.jsonl")
+                    .Select(Path.GetFileName)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Select(n => n!)
+                    .OrderByDescending(n => n, StringComparer.Ordinal)
+                    .ToList();
+            }
+            string json = JsonSerializer.Serialize(names, HaloJsonOptions.IndentedCamelCase);
+            return Task.FromResult(BridgeResponse<string>.Success(json));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"GetCompactBackupList failed for session '{sessionId}'", ex);
+            return Task.FromResult(BridgeResponse<string>.Fail("COMPACT_BACKUP_LIST_ERROR", ex.Message));
         }
     }
 

@@ -28,6 +28,24 @@ export interface AgentTelemetry {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  // need05-01：Σ账单 + 占用态 + 流式估算（与 znaide round_est + ≈ 同语义）
+  billedPrompt: number;
+  billedCompletion: number;
+  occupancyState: string;
+  liveEst: number;
+}
+
+/** need05-01：前端估算函数（与 znaide app.rs:2119 同口径）：ASCII/4 向上取整，非 ASCII 按 1 */
+export function estTokens(text: string): number {
+  if (!text) return 0;
+  let ascii = 0;
+  let other = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp <= 127) ascii++;
+    else other++;
+  }
+  return other + Math.ceil(ascii / 4);
 }
 
 interface TurnEventPayload {
@@ -61,6 +79,10 @@ function emptyTelemetry(fallbackProtocol = 'chat'): AgentTelemetry {
     inputTokens: 0,
     outputTokens: 0,
     cachedTokens: 0,
+    billedPrompt: 0,
+    billedCompletion: 0,
+    occupancyState: 'known',
+    liveEst: 0,
   };
 }
 
@@ -239,16 +261,19 @@ export const useAgentStore = defineStore('agent', () => {
         t.streamingActive = true;
         t.isGenerating = true;
         t.streamingText += evt.textDelta;
+        t.telemetry.liveEst += estTokens(evt.textDelta); // need05-01：流式中 ≈ 估算
         touch(t);
       } else if (evt.kind === 'ReasoningDelta' && evt.textDelta) {
         t.streamingActive = true;
         t.isGenerating = true;
         t.streamingReasoning += evt.textDelta;
+        t.telemetry.liveEst += estTokens(evt.textDelta);
         touch(t);
       } else if (evt.kind === 'UsageUpdated' && evt.usage) {
         t.telemetry.inputTokens = evt.usage.inputTokens || 0;
         t.telemetry.outputTokens = evt.usage.outputTokens || 0;
         t.telemetry.cachedTokens = evt.usage.cachedInputTokens || 0;
+        t.telemetry.liveEst = 0; // need05-01：Usage 到账切真实，≈ 消失
         touch(t);
       }
     });
@@ -380,6 +405,9 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.inputTokens = num(payload['inputTokens']);
         t.telemetry.outputTokens = num(payload['outputTokens']);
         t.telemetry.cachedTokens = num(payload['cachedTokens']);
+        t.telemetry.billedPrompt = num(payload['billedPrompt']); // need05-01：Σ
+        t.telemetry.billedCompletion = num(payload['billedCompletion']);
+        t.telemetry.liveEst = 0;
         touch(t);
         touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
         void refreshAfterTool(sid, 'persisted');
@@ -390,6 +418,9 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.inputTokens = num(payload['inputTokens']);
         t.telemetry.outputTokens = num(payload['outputTokens']);
         t.telemetry.cachedTokens = num(payload['cachedTokens']);
+        t.telemetry.billedPrompt = num(payload['billedPrompt']); // need05-01：Σ
+        t.telemetry.billedCompletion = num(payload['billedCompletion']);
+        t.telemetry.liveEst = 0;
         t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
         t.isGenerating = false;
         t.streamingActive = false;
@@ -397,6 +428,29 @@ export const useAgentStore = defineStore('agent', () => {
         touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
         void finishTurn(sid);
         void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
+        break;
+      }
+      case 'CompactStarted': {
+        // need05-03：压缩开始，不可中断；按钮置灰由 turnNotice 含“压缩中”驱动
+        t.isGenerating = true;
+        t.turnNotice = '压缩中…不可中断';
+        touch(t);
+        break;
+      }
+      case 'CompactCompleted': {
+        t.isGenerating = false;
+        t.streamingActive = false;
+        t.turnNotice = `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
+        touch(t);
+        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+        void refreshAfterTool(sid, 'finish'); // 重拉消息与预算
+        break;
+      }
+      case 'CompactFailed': {
+        t.isGenerating = false;
+        t.streamingActive = false;
+        t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '压缩失败';
+        touch(t);
         break;
       }
       case 'TurnTruncated': {
@@ -477,10 +531,16 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  function isCompacting(sessionId: string): boolean {
+    const t = getTurn(sessionId);
+    return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
+  }
+
   async function sendPrompt(text: string): Promise<boolean> {
     const content = (text || '').trim();
     const sessionId = activeSessionId.value;
     if (!content || !sessionId) return false;
+    if (isCompacting(sessionId)) return false; // need05-03：压缩中拒绝发送
     if (ensureTurn(sessionId).isGenerating) return false;
 
     const workspaceId = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
@@ -522,6 +582,7 @@ export const useAgentStore = defineStore('agent', () => {
   async function stopGenerating(targetSessionId?: string): Promise<void> {
     const sessionId = (targetSessionId ?? activeSessionId.value).trim();
     if (!sessionId) return;
+    if (isCompacting(sessionId)) return; // need05-03：压缩中不可中断，中断按钮无效
     try {
       const bridge = getHostBridge();
       await bridge.cancelAgentTurn(sessionId);
@@ -595,6 +656,7 @@ export const useAgentStore = defineStore('agent', () => {
     refreshAfterTool,
     bind,
     resetTurnState,
+    isCompacting,
     sendPrompt,
     stopGenerating,
   };

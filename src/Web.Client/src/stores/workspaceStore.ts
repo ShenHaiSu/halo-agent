@@ -449,6 +449,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return String(res.data);
   }
 
+  // need05-03：/compact 统一入口（取 activeProvider/Model 传参，成功后重拉消息与预算），供命令与按钮共用
+  async function compactSession(sessionId: string, keepLastGroups = 6): Promise<boolean> {
+    if (!activeWorkspaceId.value || !sessionId) return false;
+    try {
+      const bridge = getHostBridge();
+      const pId = configStore.activeProvider?.id || '';
+      const mId = configStore.activeModel?.id || '';
+      const res = await bridge.compactSession(activeWorkspaceId.value, sessionId, pId, mId, keepLastGroups);
+      if (res.ok) {
+        if (sessionId === activeSessionId.value) {
+          await loadSessionMessages(sessionId);
+          await refreshBudget();
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('[workspaceStore] compactSession failed:', err);
+      return false;
+    }
+  }
+
   async function exportSessionMarkdown(sessionId: string): Promise<string> {
     if (!activeWorkspaceId.value || !sessionId) return '';
     try {
@@ -529,6 +551,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     autoTitleDone,
     titleGenerating,
     exportSessionMarkdown,
+    compactSession,
     refreshBudget,
   };
 });

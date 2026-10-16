@@ -167,6 +167,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         string dataRoot = _storageManager?.CurrentDataRoot ?? string.Empty;
         int toolExecutions = 0;
+        // need05-01：本轮账单累计 Σ（含工具循环的多 call；单 call 轮即等于 usage）。失败/取消分支直接返回不发布，不计入。
+        long turnBilledIn = 0;
+        long turnBilledOut = 0;
 
         // (2) MaxIterations ReAct 循环
         for (int iteration = 1; iteration <= MaxIterations; iteration++)
@@ -184,6 +187,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
             }
 
+            // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
             List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history);
 
             var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1)
@@ -329,6 +333,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             break;
                         case UnifiedStreamEventKind.UsageUpdated:
                             usage = evt.Usage;
+                            // need05-01：账单累计（本轮内多次 LLM 调用的 Σ；streamError/cancel 分支直接返回，此处不回滚但不发布）
+                            if (evt.Usage != null)
+                            {
+                                turnBilledIn += evt.Usage.InputTokens;
+                                turnBilledOut += evt.Usage.OutputTokens;
+                            }
                             break;
                         case UnifiedStreamEventKind.StreamCancelled:
                             streamCancelled = true;
@@ -417,6 +427,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 return AgentTurnResult.Cancelled(iteration, toolExecutions);
             }
 
+            // need05-01：inputTokens 仍是末 call 占用（不是 Σ，避免重蹈 04-05 膨胀）；billed* 为本轮多次调用的 Σ。
             PublishTurnEvent(sessionId, "AssistantMessagePersisted", new
             {
                 iteration,
@@ -425,6 +436,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 inputTokens = usage?.InputTokens ?? 0,
                 outputTokens = usage?.OutputTokens ?? 0,
                 cachedTokens = usage?.CachedInputTokens ?? 0,
+                billedPrompt = turnBilledIn,
+                billedCompletion = turnBilledOut,
                 updatedAtUtc = DateTime.UtcNow.ToString("o")
             });
 
@@ -439,6 +452,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     inputTokens = usage?.InputTokens ?? 0,
                     outputTokens = usage?.OutputTokens ?? 0,
                     cachedTokens = usage?.CachedInputTokens ?? 0,
+                    billedPrompt = turnBilledIn,
+                    billedCompletion = turnBilledOut,
                     updatedAtUtc = DateTime.UtcNow.ToString("o")
                 });
                 return AgentTurnResult.Completed(iteration, toolExecutions);

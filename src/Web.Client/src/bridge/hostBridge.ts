@@ -280,6 +280,8 @@ export interface SessionMetadata {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCachedTokens: number;
+  cumulativePromptTokens?: number; // need05-01：Σ账单 prompt
+  cumulativeCompletionTokens?: number; // need05-01：Σ账单 completion
   isPinned: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
@@ -316,6 +318,24 @@ export interface ContextBudgetStatusDto {
   isNearLimit: boolean;
   sessionHash: string;
   protocol: string;
+  // need05-01：占用/账单分离 + 未知态（全部可选，旧后端缺键即兼容）
+  lastPromptTokens?: number | null; // null = unknown（无快照）
+  lastCachedTokens?: number | null; // null = unknown；非 null 时恒 ≤ lastPromptTokens
+  cacheHitRate?: number | null; // = cached/input；未知则 null（不画 0%）
+  usedInputIsEstimated?: boolean; // true = UsedInputTokens 来自估算回退
+  occupancyState?: string; // known | unknown | estimated
+  billedPromptTokens?: number; // Σ账单 prompt
+  billedCompletionTokens?: number;
+}
+
+export interface CompactionResultDto {
+  success: boolean;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  removedMessages: number;
+  keptMessages: number;
+  summaryPreview: string;
+  backupFileName?: string | null;
 }
 
 export interface HostBridgeApi {
@@ -381,6 +401,9 @@ export interface HostBridgeApi {
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
   exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
   getContextBudget: (providerId: string, modelId: string, workspaceId: string, sessionId: string) => Promise<BridgeResponse<ContextBudgetStatusDto>>;
+  // need05-03: /compact 上下文压缩
+  compactSession: (workspaceId: string, sessionId: string, providerId?: string, modelId?: string, keepLastGroups?: number) => Promise<BridgeResponse<CompactionResultDto>>;
+  getCompactBackupList: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
 }
 
 declare global {
@@ -1223,20 +1246,51 @@ function createBrowserMockBridge(): HostBridgeApi {
     async getContextBudget(_providerId: string, _modelId: string, _workspaceId: string, sessionId: string) {
       const msgs = mockMessages[sessionId] || [];
       const used = msgs.reduce((acc, m) => acc + (m.content?.length || 0) * 0.5, 120);
+      const rounded = Math.round(used);
       return {
         ok: true,
         data: {
           totalContextTokens: 128000,
           maxOutputTokens: 4096,
           safetyBuffer: 1024,
-          usedInputTokens: Math.round(used),
-          availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - Math.round(used)),
-          usagePercentage: Math.round((Math.round(used) / 128000) * 1000) / 10,
+          usedInputTokens: rounded,
+          availableInputTokens: Math.max(0, 128000 - 4096 - 1024 - rounded),
+          usagePercentage: Math.round((rounded / 128000) * 1000) / 10,
           isNearLimit: false,
           sessionHash: 'f0e1d2c3b4a59687',
           protocol: 'chat',
+          // need05-01 mock：固定新增字段
+          lastPromptTokens: rounded,
+          lastCachedTokens: Math.min(rounded, 80),
+          cacheHitRate: rounded > 0 ? Math.min(80, rounded) / rounded : null,
+          usedInputIsEstimated: false,
+          occupancyState: 'estimated',
+          billedPromptTokens: 1200,
+          billedCompletionTokens: 300,
         },
       };
+    },
+    // need05-03 mock：插入一条假摘要 + 事件回放
+    async compactSession(_workspaceId: string, sessionId: string) {
+      if (!mockMessages[sessionId]) mockMessages[sessionId] = [];
+      mockMessages[sessionId].push({
+        id: `msg_mock_summary_${Date.now()}`,
+        role: 'user',
+        content: '【上下文摘要：压缩自此前 2 条，由模型自动生成，细节以备份为准】\n- Mock 要点：任务目标/进展、关键结论、用户偏好、未办事项',
+        createdAtUtc: new Date().toISOString(),
+      } as UnifiedChatMessage);
+      setTimeout(() => {
+        haloEventBus.emitLocal('agent:turn-event', { sessionId, kind: 'CompactStarted', payload: { sessionId } });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'CompactCompleted',
+          payload: { removedMessages: 2, keptMessages: 4, summaryPreview: 'Mock 要点', updatedAtUtc: new Date().toISOString() },
+        });
+      }, 60);
+      return { ok: true, data: { success: true, removedMessages: 2, keptMessages: 4, summaryPreview: 'Mock 要点' } };
+    },
+    async getCompactBackupList(_workspaceId: string, _sessionId: string) {
+      return { ok: true, data: '[]' };
     },
   };
 }
@@ -1443,6 +1497,16 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     async getContextBudget(providerId: string, modelId: string, workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<ContextBudgetStatusDto>>(
         await rawBridge.getContextBudget(providerId, modelId, workspaceId, sessionId)
+      );
+    },
+    async compactSession(workspaceId: string, sessionId: string, providerId?: string, modelId?: string, keepLastGroups?: number) {
+      return normalizeBridgePayload<BridgeResponse<CompactionResultDto>>(
+        await rawBridge.compactSession(workspaceId, sessionId, providerId ?? '', modelId ?? '', keepLastGroups ?? 6)
+      );
+    },
+    async getCompactBackupList(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<string>>(
+        await rawBridge.getCompactBackupList(workspaceId, sessionId)
       );
     },
   };
