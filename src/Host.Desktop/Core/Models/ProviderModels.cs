@@ -93,9 +93,9 @@ public sealed class ModelConfig
     public int MaxImagesPerTurn { get; set; } = 4;
 
     /// <summary>
-    /// need09-03：图片清晰度透传（chat image_url.detail）。仅 auto|low|high，非法值网关回退 auto（不拒绝）。
+    /// need09-03：图片清晰度透传（chat image_url.detail）。auto|low|high，缺失/非法网关回退 high（不拒绝，原图 base64 直发不压缩）。
     /// </summary>
-    public string? VisionDetail { get; set; } = "auto";
+    public string? VisionDetail { get; set; } = "high";
 
     public ModelConfig Clone()
     {
@@ -124,12 +124,12 @@ public static class VisionDefaults
     public const int DefaultMaxImages = 4;
     /// <summary>每轮图片数上限（含 0 哨兵在内合法区间为 0..16）。</summary>
     public const int MaxAllowedImages = 16;
-    public const string DefaultDetail = "auto";
+    public const string DefaultDetail = "high";
 
     /// <summary>0/负数 → 默认 4；正数原样返回（上限由校验层拒绝，不在此钳制）。</summary>
     public static int ResolveMaxImages(int configured) => configured <= 0 ? DefaultMaxImages : configured;
 
-    /// <summary>仅 auto|low|high 通过（大小写不敏感），其余一律回退 auto（不拒绝）。</summary>
+    /// <summary>auto|low|high 通过（大小写不敏感，显式 auto 保留），缺失/非法一律回退 high（不拒绝）。</summary>
     public static string NormalizeDetail(string? detail)
     {
         string d = (detail ?? string.Empty).Trim().ToLowerInvariant();
@@ -137,7 +137,8 @@ public static class VisionDefaults
         {
             "low" => "low",
             "high" => "high",
-            _ => "auto",
+            "auto" => "auto",
+            _ => "high",
         };
     }
 }

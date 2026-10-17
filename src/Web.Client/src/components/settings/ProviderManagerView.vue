@@ -466,25 +466,27 @@
                         @click="setPreset(mdl, 'maxOutputTokens', p.value)"
                       >{{ p.label }}</n-button>
                     </div>
+                  </div>
                   <!-- need09-03：模型多模态能力位（与 protocol/temperature 同卡片行区，不新开卡片） -->
                   <div class="col-span-12 space-y-1.5 min-w-0 rounded-md border border-subtle/60 p-2">
-                    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-                      <div class="flex items-center gap-2">
-                        <span class="text-[11px] text-secondary">可读图片（多模态）</span>
-                        <n-switch :value="visionOf(mdl).supportsVision === true" size="small" :data-testid="`model-supports-vision-switch-${mIdx}`" @update:value="(v: boolean) => setVisionField(mdl, 'supportsVision', v)" />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="text-[11px] text-secondary">每轮最多图片（0=默认4，上限16）</span>
-                        <n-input-number :value="visionOf(mdl).maxImagesPerTurn ?? 4" :min="0" :max="16" :step="1" :disabled="!visionOf(mdl).supportsVision" size="small" class="font-mono text-xs w-28" :data-testid="`model-max-images-input-${mIdx}`" @update:value="(v: number | null) => setVisionField(mdl, 'maxImagesPerTurn', v)" />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="text-[11px] text-secondary">清晰度</span>
-                        <n-select :value="visionOf(mdl).visionDetail ?? 'auto'" :options="visionDetailOptions" :disabled="!visionOf(mdl).supportsVision" size="small" class="w-28" :data-testid="`model-vision-detail-select-${mIdx}`" @update:value="(v: string) => setVisionField(mdl, 'visionDetail', v)" />
-                      </div>
-                    </div>
-                    <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。</div>
-                  </div>
-                </div>
+                     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                       <div class="flex items-center gap-2">
+                         <span class="text-[11px] text-secondary">可读图片（多模态）</span>
+                         <n-switch :value="visionOf(mdl).supportsVision === true" size="small" :data-testid="`model-supports-vision-switch-${mIdx}`" @update:value="(v: boolean) => setVisionField(mdl, 'supportsVision', v)" />
+                       </div>
+                       <template v-if="visionOf(mdl).supportsVision === true">
+                         <div class="flex items-center gap-2">
+                           <span class="text-[11px] text-secondary">每轮最多图片（0=默认4，上限16）</span>
+                           <n-input-number :value="visionOf(mdl).maxImagesPerTurn ?? 4" :min="0" :max="16" :step="1" size="small" class="font-mono text-xs w-28" :data-testid="`model-max-images-input-${mIdx}`" @update:value="(v: number | null) => setVisionField(mdl, 'maxImagesPerTurn', v)" />
+                         </div>
+                         <div class="flex items-center gap-2">
+                           <span class="text-[11px] text-secondary">清晰度</span>
+                           <n-select :value="visionOf(mdl).visionDetail ?? 'high'" :options="visionDetailOptions" size="small" class="w-28" :data-testid="`model-vision-detail-select-${mIdx}`" @update:value="(v: string) => setVisionField(mdl, 'visionDetail', v)" />
+                         </div>
+                       </template>
+                     </div>
+                     <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。</div>
+                   </div>
                 </div>
                 <div class="text-[11px] font-mono text-secondary break-all min-w-0">
                   {{ mdl.protocol === 'resp' ? 'resp → ' : 'chat → ' }}{{ mdl.protocol === 'resp' ? computedRespEndpoint : computedChatEndpoint }}
@@ -616,19 +618,19 @@ const endpointPreview = ref<ProviderEndpointPreviewDto | null>(null);
 const testingProvider = ref(false);
 const providerTestResult = ref<ProxyConnectivityTestResult | null>(null);
 const visionDetailOptions = [
+  { label: 'high（高清·默认）', value: 'high' },
   { label: 'auto（自动）', value: 'auto' },
   { label: 'low（省流）', value: 'low' },
-  { label: 'high（高清）', value: 'high' },
 ];
 
-// need09-03：vision 归一（老 providers.json 缺字段回退 false/4/auto；非法 detail 回 auto；只保留值不丢配置）
+// need09-03：vision 归一（老 providers.json 缺字段回退 false/4/high；非法 detail 回 high；显式 auto 保留；只保留值不丢配置）
 function normalizeVisionFields(mdl: ModelConfig): void {
   const m = mdl as unknown as Record<string, unknown>;
   if (typeof m['supportsVision'] !== 'boolean') m['supportsVision'] = false;
   if (!Number.isFinite(m['maxImagesPerTurn'] as number)) m['maxImagesPerTurn'] = 4;
   m['maxImagesPerTurn'] = Math.trunc(m['maxImagesPerTurn'] as number);
-  if (!['auto', 'low', 'high'].includes(String(m['visionDetail'] ?? 'auto'))) m['visionDetail'] = 'auto';
-  if (m['visionDetail'] == null || m['visionDetail'] === '') m['visionDetail'] = 'auto';
+  if (m['visionDetail'] == null || m['visionDetail'] === '') m['visionDetail'] = 'high';
+  if (!['auto', 'low', 'high'].includes(String(m['visionDetail']))) m['visionDetail'] = 'high';
 }
 
 function ensureVisionDefaults(mdl: ModelConfig): void {
@@ -674,8 +676,8 @@ function setVisionField(mdl: ModelConfig, field: 'supportsVision' | 'maxImagesPe
       m['maxImagesPerTurn'] = Math.min(16, Math.max(0, Math.trunc(n)));
     }
   } else {
-    const s = String(value ?? 'auto');
-    m['visionDetail'] = ['auto', 'low', 'high'].includes(s) ? s : 'auto';
+    const s = String(value ?? 'high');
+    m['visionDetail'] = ['auto', 'low', 'high'].includes(s) ? s : 'high';
   }
   normalizeVisionFields(mdl);
 }
@@ -892,7 +894,7 @@ function addModelRow() {
     enabled: true,
     supportsVision: false,
     maxImagesPerTurn: 4,
-    visionDetail: 'auto',
+    visionDetail: 'high',
   } as unknown as ModelConfig);
   expandedModelIndex.value = editingProvider.value.models.length - 1;
 }
@@ -960,7 +962,7 @@ function handleAddNewProvider() {
         enabled: true,
         supportsVision: false,
         maxImagesPerTurn: 4,
-        visionDetail: 'auto',
+        visionDetail: 'high',
       } as unknown as ModelConfig,
     ],
   };
@@ -994,7 +996,7 @@ async function handleSaveCurrentProvider(showToast = true) {
     if (n < 0) n = 0;
     if (n > 16) n = 16;
     m['maxImagesPerTurn'] = n;
-    if (!['auto', 'low', 'high'].includes(String(m['visionDetail'] ?? 'auto'))) m['visionDetail'] = 'auto';
+    if (!['auto', 'low', 'high'].includes(String(m['visionDetail'] ?? 'high'))) m['visionDetail'] = 'high';
   }
 
   const res = await configStore.upsertProvider(payload);

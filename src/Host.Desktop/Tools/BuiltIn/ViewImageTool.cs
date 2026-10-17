@@ -26,7 +26,7 @@ public sealed class ViewImageTool : IToolHandler
     public ToolDefinition GetDefinition() => new(Name, Description,
         "{\"type\":\"object\",\"properties\":{"
         + "\"path\":{\"type\":\"string\",\"description\":\"Image path relative to workspace root, or an absolute file path. Required.\"},"
-        + "\"detail\":{\"type\":\"string\",\"description\":\"Image detail level: auto|low|high. Defaults to auto.\"}"
+        + "\"detail\":{\"type\":\"string\",\"description\":\"Image detail level: auto|low|high. Defaults to high.\"}"
         + "},\"required\":[\"path\"]}");
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
@@ -35,7 +35,7 @@ public sealed class ViewImageTool : IToolHandler
         try
         {
             string? pathArg = null;
-            string detail = "auto";
+            string detail = "high";
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(
@@ -44,12 +44,12 @@ public sealed class ViewImageTool : IToolHandler
                 if (root.TryGetProperty("path", out JsonElement pEl) && pEl.ValueKind == JsonValueKind.String)
                     pathArg = pEl.GetString();
                 if (root.TryGetProperty("detail", out JsonElement dEl) && dEl.ValueKind == JsonValueKind.String)
-                    detail = dEl.GetString() ?? "auto";
+                    detail = dEl.GetString() ?? "high";
             }
             catch (JsonException ex)
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。正确示例：{{\"path\": \"assets/a.png\", \"detail\": \"auto\"}}。",
+                    $"参数 JSON 解析失败：{ex.Message}。正确示例：{{\"path\": \"assets/a.png\", \"detail\": \"high\"}}。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 

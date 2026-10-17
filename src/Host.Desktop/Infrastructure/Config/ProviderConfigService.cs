@@ -563,7 +563,7 @@ public sealed class ProviderConfigService
             .ToList();
         return clone;
     }
-    /// <summary>need09-03：模型 vision 能力位校验（maxImages 0..16 else PROVIDER_VALIDATION；detail 非法回退 auto；老 json 缺字段即默认值）。</summary>
+    /// <summary>need09-03：模型 vision 能力位校验（maxImages 0..16 else PROVIDER_VALIDATION；detail 缺失/非法回退 high；老 json 缺字段即默认值）。</summary>
     private static ModelConfig NormalizeModelForStorage(ModelConfig m)
     {
         if (m.MaxImagesPerTurn < 0 || m.MaxImagesPerTurn > VisionDefaults.MaxAllowedImages)

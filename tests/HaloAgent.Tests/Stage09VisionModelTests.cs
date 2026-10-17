@@ -43,7 +43,7 @@ public sealed class Stage09VisionModelTests : IDisposable
         return new ProviderConfigService(storage, new HaloHttpClientFactory());
     }
 
-    [Fact(DisplayName = "S09-V1: 老 providers.json 缺字段回退 false/4/auto")]
+    [Fact(DisplayName = "S09-V1: 老 providers.json 缺字段回退 false/4/high")]
     public void LegacyModelJson_FallsBackToVisionDefaults()
     {
         string legacy = "{\"id\":\"gpt-4o\",\"displayName\":\"GPT\",\"protocol\":\"chat\",\"maxContextTokens\":128000,\"maxOutputTokens\":4096,\"enabled\":true}";
@@ -51,7 +51,7 @@ public sealed class Stage09VisionModelTests : IDisposable
         Assert.NotNull(model);
         Assert.False(model!.SupportsVision);
         Assert.Equal(4, model.MaxImagesPerTurn);
-        Assert.Equal("auto", model.VisionDetail);
+        Assert.Equal("high", model.VisionDetail);
         Assert.Equal(4, VisionDefaults.ResolveMaxImages(0));
     }
 
@@ -72,7 +72,7 @@ public sealed class Stage09VisionModelTests : IDisposable
         Assert.Throws<ProviderConfigValidationException>(() => svc.UpsertProvider(provider2));
     }
 
-    [Fact(DisplayName = "S09-V3: 边界值 0 与 16 通过，非法 detail 回退 auto")]
+    [Fact(DisplayName = "S09-V3: 边界值 0 与 16 通过，非法 detail 回退 high")]
     public void BoundaryValues_Accepted_DetailNormalized()
     {
         var svc = NewService();
@@ -90,7 +90,7 @@ public sealed class Stage09VisionModelTests : IDisposable
         Assert.NotNull(round);
         Assert.True(round!.SupportsVision);
         Assert.Equal(0, round.MaxImagesPerTurn);
-        Assert.Equal("auto", round.VisionDetail);
+        Assert.Equal("high", round.VisionDetail);
         Assert.Equal(4, VisionDefaults.ResolveMaxImages(round.MaxImagesPerTurn));
     }
 
@@ -116,7 +116,8 @@ public sealed class Stage09VisionModelTests : IDisposable
     {
         Assert.Equal("low", VisionDefaults.NormalizeDetail("LOW"));
         Assert.Equal("high", VisionDefaults.NormalizeDetail(" High "));
-        Assert.Equal("auto", VisionDefaults.NormalizeDetail(null));
-        Assert.Equal("auto", VisionDefaults.NormalizeDetail("4k"));
+        Assert.Equal("auto", VisionDefaults.NormalizeDetail("auto"));
+        Assert.Equal("high", VisionDefaults.NormalizeDetail(null));
+        Assert.Equal("high", VisionDefaults.NormalizeDetail("4k"));
     }
 }
