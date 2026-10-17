@@ -24,21 +24,13 @@
         @beforeinput="onBeforeInput"
         @click="onEditorClick"
       />
-      <!-- 附件条 -->
-      <div v-if="attachmentList.length" class="flex flex-wrap gap-1.5">
-        <ComposerAttachmentTag
-          v-for="att in attachmentList"
-          :key="att.attId"
-          :attachment="att"
-          @remove="removeImage"
-        />
-      </div>
-      <!-- 警告条 -->
+      <!-- 警告条（紧凑：小字号小边距） -->
       <n-alert
         v-if="visionWarn"
         type="warning"
         :show-icon="false"
-        class="text-xs"
+        size="small"
+        class="composer-vision-warn"
         data-testid="composer-vision-warn"
       >
         当前模型不支持看图，发送时将自动忽略图片（文字仍发送）
@@ -99,23 +91,22 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
  import { useWorkspaceStore } from '@/stores/workspaceStore';
  import { useAgentStore } from '@/stores/agentStore';
  import { useConfigStore } from '@/stores/configStore';
-import ComposerAttachmentTag from '@/components/chat/ComposerAttachmentTag.vue';
-import {
-  cleanupObjectUrls,
-  createEmptyDraft,
-  genAttId,
-  insertImage,
-  isEmpty,
-  MAX_IMAGE_BYTES,
-  MAX_PASTE_TEXT,
-  removeAttachment,
-  safeFileName,
-  toSendPayload,
-  type AttachmentSource,
-  type ComposerAttachment,
-  type ComposerDraft,
-  type ComposerImageMime,
-} from '@/utils/composerModel';
+ import {
+   cleanupObjectUrls,
+   createEmptyDraft,
+   genAttId,
+   insertImage,
+   isEmpty,
+   MAX_IMAGE_BYTES,
+   MAX_PASTE_TEXT,
+   removeAttachment,
+   safeFileName,
+   toSendPayload,
+   type AttachmentSource,
+   type ComposerAttachment,
+   type ComposerDraft,
+   type ComposerImageMime,
+ } from '@/utils/composerModel';
 import { acceptImageFile, collectImageFiles, extractPaste, firstHtmlImgSrc } from '@/utils/clipboardImage';
 
 const workspaceStore = useWorkspaceStore();
@@ -168,35 +159,27 @@ function shortNameOf(n: string): string {
   const arr = [...String(n || '')];
   return arr.length <= 12 ? n : arr.slice(0, 12).join('') + '…';
 }
-
-function createPillEl(att: ComposerAttachment): HTMLSpanElement {
-  const span = document.createElement('span');
-  span.className = 'img-tag' + (att.status === 'ready' ? '' : ' invalid');
-  span.contentEditable = 'false';
-  span.setAttribute('data-att', att.attId);
-  span.title = att.error || att.fileName;
-  if (att.objectUrl) {
-    const img = document.createElement('img');
-    img.src = att.objectUrl;
-    img.alt = att.fileName;
-    img.className = 'img-thumb';
-    img.draggable = false;
-    span.appendChild(img);
-  }
-  const fn = document.createElement('span');
-  fn.className = 'fname';
-  fn.textContent = shortNameOf(att.fileName);
-  span.appendChild(fn);
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'img-x';
-  btn.textContent = '×';
-  btn.setAttribute('data-testid', `att-remove-${att.attId}`);
-  btn.setAttribute('data-x', att.attId);
-  btn.setAttribute('aria-label', `移除图片 ${att.fileName}`);
-  span.appendChild(btn);
-  return span;
-}
+ function createPillEl(att: ComposerAttachment): HTMLSpanElement {
+   // 文本 tag：仅文件名 + ×，不渲染缩略图（objectUrl 仅用于发送，不进 DOM）
+   const span = document.createElement('span');
+   span.className = 'img-tag' + (att.status === 'ready' ? '' : ' invalid');
+   span.contentEditable = 'false';
+   span.setAttribute('data-att', att.attId);
+   span.title = att.error || att.fileName;
+   const fn = document.createElement('span');
+   fn.className = 'fname';
+   fn.textContent = shortNameOf(att.fileName);
+   span.appendChild(fn);
+   const btn = document.createElement('button');
+   btn.type = 'button';
+   btn.className = 'img-x';
+   btn.textContent = '×';
+   btn.setAttribute('data-testid', `att-remove-${att.attId}`);
+   btn.setAttribute('data-x', att.attId);
+   btn.setAttribute('aria-label', `移除图片 ${att.fileName}`);
+   span.appendChild(btn);
+   return span;
+ }
 
 /** 编辑器 DOM → 段模型（文本保留原生；pill 按 data-att 还原 image 段） */
 function readEditorToDraft(): void {
@@ -437,34 +420,47 @@ function tryHandleHtmlImage(html: string): boolean {
   return true;
 }
 
-function onPaste(e: ClipboardEvent): void {
-  if (agentStore.isGenerating || askMasked.value) {
-    e.preventDefault();
-    return;
-  }
-  const { files, text, html } = extractPaste(e);
-  if (files.length > 0) {
-    e.preventDefault();
-    for (const f of files) {
-      const named = f.name ? f : new File([f], `pasted-${Date.now()}.png`, { type: f.type });
-      addFile(named, 'paste');
-    }
-    if (text.trim()) insertTextAtCaret(text);
-    return;
-  }
-  if (/<img/i.test(html)) {
-    if (tryHandleHtmlImage(html)) {
-      e.preventDefault();
-      return;
-    }
-    return; // 兜底走原生粘贴
-  }
-  if (text && text.length > MAX_PASTE_TEXT) {
-    e.preventDefault();
-    insertTextAtCaret(text.slice(0, MAX_PASTE_TEXT));
-    message.warning(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
-  }
-}
+ // 单次 Ctrl+V 双触发/双源复用兜底：同指纹 300ms 内只处理一次
+ let lastPasteSig = '';
+ let lastPasteAt = 0;
+ function pasteFingerprint(files: File[], text: string, html: string): string {
+   return files.map((f) => `${f.size}|${String(f.type || '').toLowerCase()}`).join(';') + `|t${text.length}|h${html.length}`;
+ }
+ function onPaste(e: ClipboardEvent): void {
+   if (agentStore.isGenerating || askMasked.value) {
+     e.preventDefault();
+     return;
+   }
+   const { files, text, html } = extractPaste(e);
+   if (files.length > 0) {
+     e.preventDefault();
+     e.stopPropagation();
+     const sig = pasteFingerprint(files, text, html);
+     const now = Date.now();
+     if (sig === lastPasteSig && now - lastPasteAt < 300) return;
+     lastPasteSig = sig;
+     lastPasteAt = now;
+     for (const f of files) {
+       const named = f.name ? f : new File([f], `pasted-${Date.now()}.png`, { type: f.type });
+       addFile(named, 'paste');
+     }
+     if (text.trim()) insertTextAtCaret(text);
+     return;
+   }
+   if (/<img/i.test(html)) {
+     if (tryHandleHtmlImage(html)) {
+       e.preventDefault();
+       e.stopPropagation();
+       return;
+     }
+     return; // 兜底走原生粘贴
+   }
+   if (text && text.length > MAX_PASTE_TEXT) {
+     e.preventDefault();
+     insertTextAtCaret(text.slice(0, MAX_PASTE_TEXT));
+     message.warning(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
+   }
+ }
 
 function onDrop(e: DragEvent): void {
   e.preventDefault();
@@ -805,45 +801,52 @@ onUnmounted(() => {
   border-color: rgba(59, 130, 246, 0.9);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
-.img-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border-subtle, #374151);
-  border-radius: 6px;
-  padding: 2px 6px;
-  font-size: 12px;
-  background: var(--bg-elevated, #1f2937);
-  vertical-align: middle;
-  margin: 0 2px;
-  user-select: none;
-}
-.img-tag.invalid {
-  border-color: #f43f5e;
-  background: rgba(244, 63, 94, 0.08);
-}
-.img-tag .img-thumb {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-.img-tag .fname {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.img-tag .img-x {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
-  color: inherit;
-}
-.img-tag .img-x:hover {
-  color: #f43f5e;
-}
-</style>
+ .img-tag {
+   display: inline-flex;
+   align-items: center;
+   gap: 2px;
+   border: 1px solid var(--border-subtle, #374151);
+   border-radius: 4px;
+   padding: 0 6px;
+   font-size: 11px;
+   line-height: 18px;
+   background: var(--bg-elevated, #1f2937);
+   vertical-align: middle;
+   margin: 0 1px;
+   user-select: none;
+ }
+ .img-tag.invalid {
+   border-color: #f43f5e;
+   background: rgba(244, 63, 94, 0.08);
+ }
+ .img-tag .fname {
+   max-width: 120px;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
+ .img-tag .img-x {
+   border: none;
+   background: transparent;
+   cursor: pointer;
+   font-size: 12px;
+   line-height: 1;
+   padding: 0;
+   color: inherit;
+ }
+ .img-tag .img-x:hover {
+   color: #f43f5e;
+ }
+ /* 警告条紧凑化：覆盖 naive-ui 默认大内边距 + 缩小字号（<style> 非 scoped，用后代选择器） */
+ .composer-vision-warn {
+   font-size: 11px;
+   line-height: 1.5;
+ }
+ .composer-vision-warn .n-alert-body {
+   padding: 4px 8px !important;
+ }
+ .composer-vision-warn .n-alert-body__content {
+   font-size: 11px !important;
+   line-height: 1.5 !important;
+ }
+ </style>
