@@ -26,6 +26,7 @@
         multiple
         clearable
         filterable
+        :filter="filterProviderOption"
         size="small"
         placeholder="Provider"
         :options="providerOptions"
@@ -38,6 +39,7 @@
         multiple
         clearable
         filterable
+        :filter="filterModelOption"
         size="small"
         placeholder="Model"
         :options="modelOptions"
@@ -46,6 +48,15 @@
         @update:value="onScopeChange"
       />
       <n-button size="small" type="primary" ghost data-testid="usage-query-btn" :loading="store.loading" @click="store.refresh()">查询</n-button>
+      <div class="flex items-center gap-1.5 shrink-0 pl-1" data-testid="usage-mask-provider-block">
+        <n-switch
+          :value="privacy.settings.maskProviderName"
+          size="small"
+          data-testid="usage-mask-provider-switch"
+          @update:value="onMaskProviderChange"
+        />
+        <span class="text-[11px] text-secondary select-none" title="隐藏真实服务商名称，仅显示 5 位随机代号">模糊 Provider</span>
+      </div>
     </div>
 
     <n-alert v-if="store.error" type="warning" :show-icon="false" style="font-size: 12px;">{{ store.error }}</n-alert>
@@ -130,7 +141,7 @@
           <tbody>
             <tr v-for="r in store.pageData.rows" :key="r.id" class="border-b border-subtle hover:bg-elevated/50">
               <td class="py-1 pr-2 font-mono whitespace-nowrap">{{ r.requestDatetime }}</td>
-              <td class="py-1 pr-2">{{ r.providerName }}</td>
+              <td class="py-1 pr-2 font-mono" :title="displayTitle(r.providerName)">{{ displayName(r.providerName) }}</td>
               <td class="py-1 pr-2 font-mono">{{ r.modelId }}</td>
               <td class="py-1 pr-2 text-right font-mono">{{ fmtInt(r.inputTokens) }}</td>
               <td class="py-1 pr-2 text-right font-mono">{{ fmtInt(r.outputTokens) }}</td>
@@ -169,18 +180,22 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import { NButton, NButtonGroup, NSelect, NDatePicker, NRadioGroup, NRadioButton, NEmpty, NAlert, NPagination } from 'naive-ui';
+import { NButton, NButtonGroup, NSelect, NDatePicker, NRadioGroup, NRadioButton, NEmpty, NAlert, NPagination, NSwitch } from 'naive-ui';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent, DatasetComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { useUsageAnalyticsStore, USAGE_PRESETS } from '@/stores/usageAnalyticsStore';
+import { usePrivacyStore } from '@/stores/privacyStore';
 import { getHostBridge, type UsageDbStatus } from '@/bridge/hostBridge';
 import { formatTokenShort } from '@/utils/formatSmartBytes';
+import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@/utils/maskProvider';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, DatasetComponent, CanvasRenderer]);
 
 const store = useUsageAnalyticsStore();
+const privacy = usePrivacyStore();
+const masked = computed(() => privacy.settings.maskProviderName);
 const stackedEl = ref<HTMLElement | null>(null);
 const hitEl = ref<HTMLElement | null>(null);
 const pieEl = ref<HTMLElement | null>(null);
@@ -190,9 +205,39 @@ let pieChart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 const dbStatus = ref<UsageDbStatus | null>(null);
 
-const providerOptions = computed(() => store.options.providers.map((p) => ({ label: p.name, value: p.id })));
-const modelOptions = computed(() => store.modelOptions.map((m) => ({ label: m.label, value: m.key })));
+const providerOptions = computed(() => store.options.providers.map((p) => ({ label: displayProviderName(p.id, p.name, masked.value), value: p.id, realName: p.name })));
+const modelOptions = computed(() => store.modelOptions.map((m) => ({ label: displayProviderModel(m.providerId, m.providerName, m.modelId, masked.value), value: m.key, realName: m.label })));
 const hasTrendData = computed(() => store.trend.dates.length > 0 && store.trend.perModel.length > 0);
+
+/** 下拉搜索：模糊开启时，代号和真名都能搜到（防“搜 Open 搜不到 O***”） */
+function filterProviderOption(pattern: string, option: unknown): boolean {
+  const o = option as { label?: string; realName?: string };
+  const pat = (pattern || '').trim().toLowerCase();
+  if (!pat) return true;
+  const label = String(o?.label || '').toLowerCase();
+  const real = String(o?.realName || '').toLowerCase();
+  return label.includes(pat) || real.includes(pat);
+}
+function filterModelOption(pattern: string, option: unknown): boolean {
+  const o = option as { label?: string; realName?: string };
+  const pat = (pattern || '').trim().toLowerCase();
+  if (!pat) return true;
+  const label = String(o?.label || '').toLowerCase();
+  const real = String(o?.realName || '').toLowerCase();
+  return label.includes(pat) || real.includes(pat);
+}
+
+/** 明细表 Provider 列：模糊时显示代号，hover（title）可看真名 */
+function displayName(realName: string): string {
+  return displayProviderNameByName(realName, masked.value);
+}
+function displayTitle(realName: string): string {
+  return masked.value ? realName : '';
+}
+function onMaskProviderChange(val: boolean): void {
+  privacy.setMaskProviderName(val);
+  renderAll();
+}
 
 function fmtInt(n: number): string {
   const v = Number.isFinite(n) ? Math.floor(n) : 0;
@@ -248,8 +293,9 @@ function renderStacked(): void {
   if (!stackedEl.value) return;
   if (!stackedChart) stackedChart = echarts.init(stackedEl.value, null, { renderer: 'canvas' });
   const dates = store.trend.dates;
+  const maskOn = masked.value;
   const series = store.trend.perModel.map((s) => ({
-    name: s.providerName + '/' + s.modelId,
+    name: displayProviderModel('', s.providerName, s.modelId, maskOn),
     type: 'bar',
     stack: 'total',
     emphasis: { focus: 'series' },
@@ -329,6 +375,7 @@ function renderHit(): void {
 function renderPie(): void {
   if (!pieEl.value) return;
   if (!pieChart) pieChart = echarts.init(pieEl.value, null, { renderer: 'canvas' });
+  const maskOn = masked.value;
   pieChart.setOption({
     backgroundColor: 'transparent',
     textStyle: baseText(),
@@ -342,7 +389,7 @@ function renderPie(): void {
     legend: { bottom: 0, textStyle: baseText() },
     series: [{
       type: 'pie', radius: ['50%', '70%'],
-      data: store.share.map((s) => ({ name: s.name, value: s.value })),
+      data: store.share.map((s) => ({ name: displayProviderNameByName(s.name, maskOn), value: s.value })),
       emphasis: { focus: 'series' },
       label: { fontFamily: FONT, fontSize: 11, formatter: '{b}\n{d}%' },
     }],
@@ -359,8 +406,10 @@ function renderAll(): void {
 }
 
 watch(() => [store.trend, store.share, store.metric], () => { renderAll(); }, { deep: true });
+watch(masked, () => { renderAll(); });
 
 onMounted(async () => {
+  privacy.ensureLoaded();
   await store.loadOptions();
   await store.refresh();
   try {
