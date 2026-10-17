@@ -176,14 +176,90 @@ public sealed class Stage09MultimodalAdapterTests
         Assert.Contains("view_image", respJson);
     }
 
-    private static int CountOccurrences(string text, string needle)
-    {
-        int count = 0, idx = 0;
-        while ((idx = text.IndexOf(needle, idx, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            idx += needle.Length;
-        }
-        return count;
-    }
+     private static int CountOccurrences(string text, string needle)
+     {
+         int count = 0, idx = 0;
+         while ((idx = text.IndexOf(needle, idx, StringComparison.Ordinal)) >= 0)
+         {
+             count++;
+             idx += needle.Length;
+         }
+         return count;
+     }
+ 
+     private static byte[] TinyPng() => Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+ 
+     [Fact(DisplayName = "N11-1: 真盘读盘→dataURL（Chat 含 data: 前缀）")]
+     public void Need11_RealDisk_ChatContainsDataUrl()
+     {
+         string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "n11_" + System.Guid.NewGuid().ToString("N"));
+         string ws = "ws", sess = "sess";
+         try
+         {
+             Host.Desktop.LlmGateway.Models.ImageDataRegistry.Clear();
+             var (r, _) = Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.SaveImage(root, ws, sess, "a.png", "image/png", TinyPng(), 1, 1);
+             var model = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "high" };
+             var msg = UnifiedChatMessage.User("看这张图"); msg.Images = new List<ChatImageRef> { r };
+             var req = ImgRequest(model, new List<UnifiedChatMessage> { msg }, img => Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.ResolveDataUrl(root, ws, sess, img));
+             string payload = new ChatCompletionsAdapter().SerializeRequest(req);
+             using var doc = JsonDocument.Parse(payload);
+             var parts = doc.RootElement.GetProperty("messages").EnumerateArray().ToList()[1].GetProperty("content").EnumerateArray().ToList();
+             Assert.Equal(2, parts.Count);
+             Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetProperty("url").GetString());
+         }
+         finally { try { System.IO.Directory.Delete(root, true); } catch { } }
+     }
+ 
+     [Fact(DisplayName = "N11-2: 丢失附件静默丢图保文（双协议）")]
+     public void Need11_MissingFile_TextOnly()
+     {
+         string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "n11_" + System.Guid.NewGuid().ToString("N"));
+         string ws = "ws", sess = "sess";
+         try
+         {
+             var (r, _) = Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.SaveImage(root, ws, sess, "b.png", "image/png", TinyPng(), 1, 1);
+             string? abs = Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.FindImagePath(root, ws, sess, r.ImageId);
+             Assert.NotNull(abs); System.IO.File.Delete(abs!);
+             System.Func<ChatImageRef, string?> resolver = img => Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.ResolveDataUrl(root, ws, sess, img);
+             var chatModel = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, SupportsVision = true, MaxImagesPerTurn = 4 };
+             var respModel = new ModelConfig { Id = "o3", Protocol = LlmProtocolType.Resp, SupportsVision = true, MaxImagesPerTurn = 4 };
+             var m1 = UnifiedChatMessage.User("文字仍在"); m1.Images = new List<ChatImageRef> { r };
+             var m2 = UnifiedChatMessage.User("文字仍在"); m2.Images = new List<ChatImageRef> { r };
+             string chatPayload = new ChatCompletionsAdapter().SerializeRequest(ImgRequest(chatModel, new List<UnifiedChatMessage> { m1 }, resolver));
+             string respPayload = new ResponsesApiAdapter().SerializeRequest(ImgRequest(respModel, new List<UnifiedChatMessage> { m2 }, resolver));
+             Assert.DoesNotContain("image_url", chatPayload); Assert.Contains("6587", chatPayload);
+             Assert.DoesNotContain("input_image", respPayload); Assert.Contains("6587", respPayload);
+             using (var cdoc = JsonDocument.Parse(chatPayload))
+             {
+                 var cm = cdoc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+                 Assert.Equal("文字仍在", cm[1].GetProperty("content").GetString());
+             }
+         }
+         finally { try { System.IO.Directory.Delete(root, true); } catch { } }
+     }
+ 
+     [Fact(DisplayName = "N11-3: Responses 补 detail + tool 附图首位 input_text")]
+     public void Need11_Resp_DetailAndToolText()
+     {
+         var model = new ModelConfig { Id = "o3", Protocol = LlmProtocolType.Resp, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "low" };
+         var um = UnifiedChatMessage.User("看这张图"); um.Images = new List<ChatImageRef> { Img("img_n11") };
+         var req = ImgRequest(model, new List<UnifiedChatMessage> { um }, _ => "data:image/png;base64,QUJD");
+         using var doc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(req));
+         var parts = doc.RootElement.GetProperty("input").EnumerateArray().ToList()[0].GetProperty("content").EnumerateArray().ToList();
+         Assert.Equal("low", parts[1].GetProperty("detail").GetString());
+         var tool = UnifiedChatMessage.Tool("c1", "已读取 a.png（1x1）"); tool.Images = new List<ChatImageRef> { Img("img_n11") };
+         var treq = ImgRequest(model, new List<UnifiedChatMessage> { tool }, _ => "data:image/png;base64,QUJD");
+         using var tdoc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(treq));
+         var tinput = tdoc.RootElement.GetProperty("input").EnumerateArray().ToList();
+         Assert.Equal(2, tinput.Count);
+         var tparts = tinput[1].GetProperty("content").EnumerateArray().ToList();
+         Assert.Equal("input_text", tparts[0].GetProperty("type").GetString());
+         Assert.False(string.IsNullOrWhiteSpace(tparts[0].GetProperty("text").GetString()));
+         Assert.Equal("input_image", tparts[1].GetProperty("type").GetString());
+         Assert.Equal("low", tparts[1].GetProperty("detail").GetString());
+         var emptyTool = UnifiedChatMessage.Tool("c2", "  "); emptyTool.Images = new List<ChatImageRef> { Img("img_n11") };
+         using var edoc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(ImgRequest(model, new List<UnifiedChatMessage> { emptyTool }, _ => "data:image/png;base64,QUJD")));
+         var eparts = edoc.RootElement.GetProperty("input").EnumerateArray().ToList()[1].GetProperty("content").EnumerateArray().ToList();
+         Assert.Equal("图片如下：", eparts[0].GetProperty("text").GetString());
+     }
 }
