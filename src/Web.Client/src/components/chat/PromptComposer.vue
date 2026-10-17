@@ -788,13 +788,13 @@ onUnmounted(() => {
   outline: none;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--color-primary, #e5e7eb);
+  color: var(--text-primary, #e5e7eb);
   word-break: break-word;
   white-space: pre-wrap;
 }
 .composer-editor:empty::before {
   content: '输入任务指令，Enter 发送，Shift+Enter 换行，可粘贴/拖入图片…';
-  color: var(--color-secondary, #6b7280);
+  color: var(--text-secondary, #6b7280);
   pointer-events: none;
 }
 .composer-editor.masked {
