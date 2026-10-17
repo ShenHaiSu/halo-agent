@@ -138,5 +138,50 @@ public sealed class Stage09ViewImageTests : IDisposable
         var missing = await tool.ExecuteAsync(Call("{\"path\":\"nope.png\"}"), Ctx());
         Assert.False(missing.Success);
         Assert.Contains("文件不存在", missing.Error);
-    }
+     }
+     [Fact(DisplayName = "S09-VI9: 超 2048 长边图无损直存（字节一致，重读命中缓存）")]
+     public async Task LargeImage_Lossless_AndCacheHit()
+     {
+         byte[] png = BuildMinimalPng(3000, 8);
+         File.WriteAllBytes(Path.Combine(_workspace, "big.png"), png);
+         var tool = new ViewImageTool();
+         var r1 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\",\"detail\":\"high\"}"), Ctx());
+         Assert.True(r1.Success, r1.Error);
+         var img = r1.Images![0];
+         Assert.Equal(3000, img.Width);
+         Assert.Equal(8, img.Height);
+         Assert.Equal(Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.ComputeSha16(png), img.Sha16);
+         string abs = Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test",
+             img.RelPath.Replace('/', Path.DirectorySeparatorChar));
+         Assert.Equal(png, File.ReadAllBytes(abs));
+         var r2 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\"}"), Ctx());
+         Assert.True(r2.Success, r2.Error);
+         Assert.Equal(img.ImageId, r2.Images![0].ImageId);
+         string[] files = Directory.GetFiles(
+             Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test", "attachments"), "*", SearchOption.AllDirectories);
+         Assert.Single(files);
+     }
+
+     private static byte[] BuildMinimalPng(int width, int height)
+     {
+         using var ms = new MemoryStream();
+         ms.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+         WriteChunk(ms, "IHDR", new byte[]
+         {
+             (byte)(width >> 24), (byte)(width >> 16), (byte)(width >> 8), (byte)width,
+             (byte)(height >> 24), (byte)(height >> 16), (byte)(height >> 8), (byte)height,
+             8, 2, 0, 0, 0,
+         });
+         WriteChunk(ms, "IDAT", Array.Empty<byte>());
+         WriteChunk(ms, "IEND", Array.Empty<byte>());
+         return ms.ToArray();
+     }
+
+     private static void WriteChunk(MemoryStream ms, string type, byte[] data)
+     {
+         ms.Write(new byte[] { (byte)(data.Length >> 24), (byte)(data.Length >> 16), (byte)(data.Length >> 8), (byte)data.Length });
+         foreach (char c in type) ms.WriteByte((byte)c);
+         ms.Write(data, 0, data.Length);
+         ms.Write(new byte[] { 0, 0, 0, 0 });
+     }
 }

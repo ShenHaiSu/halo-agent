@@ -773,7 +773,24 @@ public static class ImageAttachmentStore
         catch { /* 解析永不抛 */ }
         return (0, 0);
     }
-    /// <summary>need09-05：归一化（长边≤maxEdge 才原样；超限则 System.Drawing 等比缩放转 JPEG q85；失败回退原图）。</summary>
+     /// <summary>need09-fix：无损入库（tool 读图与贴图统一入口）：原字节直存，仅解析宽高作元数据，永不缩放/转码。
+     /// detail 只影响发往模型的清晰度参数，不影响落盘字节；同图重读 sha 一致，直接命中去重缓存。</summary>
+     public static (byte[] Bytes, string Mime, int Width, int Height) PrepareLossless(byte[] bytes, string mime)
+     {
+         var (w, h) = TryParseDimensions(bytes, mime);
+         if (w <= 0 || h <= 0)
+         {
+             try
+             {
+                 using var probe = System.Drawing.Image.FromStream(new MemoryStream(bytes, writable: false));
+                 w = probe.Width; h = probe.Height;
+             }
+             catch { /* 维度解析失败保留 0,0，不阻断入库 */ }
+         }
+         return (bytes, mime, w, h);
+     }
+     /// <summary>need09-05：归一化（长边≤maxEdge 才原样；超限则 System.Drawing 等比缩放转 JPEG q85；失败回退原图）。
+     /// need09-fix：已停用——tool/贴图入库统一走 PrepareLossless 无损直存，避免历史降质与缓存 key 失配。本方法仅保留兼容历史附件读取。</summary>
     public static (byte[] Bytes, string Mime, int Width, int Height) NormalizeImage(byte[] bytes, string mime, int maxEdge = NormalizeMaxEdge)
     {
         var (w, h) = TryParseDimensions(bytes, mime);

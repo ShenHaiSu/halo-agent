@@ -163,7 +163,8 @@ public sealed partial class HostBridgeFacade
                 catch { continue; }
                 if (raw.Length == 0 || raw.Length > Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes) continue;
                 if (!Infrastructure.Storage.ImageAttachmentStore.CheckMagic(raw, mime)) continue;
-                var (bytes, normMime, w, h) = Infrastructure.Storage.ImageAttachmentStore.NormalizeImage(raw, mime);
+                 // need09-fix：贴图与 tool 统一无损直存（原字节落盘，sha 去重），detail 只影响发模参数，不降质、不转码。
+                 var (bytes, normMime, w, h) = Infrastructure.Storage.ImageAttachmentStore.PrepareLossless(raw, mime);
                 var (imgRef, _) = Infrastructure.Storage.ImageAttachmentStore.SaveImage(
                     dataRoot, workspaceId, sessionId, fileName, normMime, bytes, w, h);
                 refs.Add(imgRef);

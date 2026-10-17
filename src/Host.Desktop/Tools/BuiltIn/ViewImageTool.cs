@@ -8,9 +8,9 @@ using Host.Desktop.Tools.Safety;
 namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>
-/// need09-05：view_image（第 7 号工具）。模型自主读取图片：
-/// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤8MB → 归一化（长边≤2048 q85 副本，sha16 去重）
-/// → ToolResult.Success(摘要文本, Images=[ref])。base64 永不进事件/日志。
+ /// need09-05：view_image（第 7 号工具）。模型自主读取图片：
+ /// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤8MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
+ /// → ToolResult.Success(摘要文本, Images=[ref])。base64 永不进事件/日志。
 /// </summary>
 public sealed class ViewImageTool : IToolHandler
 {
@@ -138,14 +138,16 @@ public sealed class ViewImageTool : IToolHandler
                     durationMs: sw.ElapsedMilliseconds));
             }
 
-            var (bytes, normMime, w, h) = ImageAttachmentStore.NormalizeImage(raw, mime);
+             // need09-fix：无损入库：detail 仅作为发模清晰度提示（见摘要），落盘永远保留原字节；
+             // 同图重读 sha 一致，直接命中去重缓存；历史读取 ResolveDataUrl 原样回传，永不降质。
+             detail = VisionDefaults.NormalizeDetail(detail);
+             var (bytes, normMime, w, h) = ImageAttachmentStore.PrepareLossless(raw, mime);
             string dataRoot = string.IsNullOrWhiteSpace(context.DataRoot)
                 ? Path.GetTempPath() : context.DataRoot;
             var (imgRef, _) = ImageAttachmentStore.SaveImage(
                 dataRoot, context.WorkspaceId ?? string.Empty, context.SessionId ?? string.Empty,
                 Path.GetFileName(fullPath), normMime, bytes, w, h);
 
-            detail = VisionDefaults.NormalizeDetail(detail);
             string summary = $"已读取 {imgRef.FileName}（{w}x{h}，{imgRef.SizeBytes / 1024} KB，sha16={imgRef.Sha16}，detail={detail}）。"
                 + $"图片已作为附件加入本轮上下文，可直接描述其内容。";
             if (summary.Length > SummaryMaxChars)
