@@ -311,20 +311,31 @@ public interface IAgentOrchestrator
                 model.Id,
                 requestId);
 
-            var toolDefs = _toolRegistry.GetDefinitions()
-                .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
-                .ToList();
-
-            var request = new UnifiedLlmRequest
-            {
-                RequestId = requestId,
-                Provider = provider,
-                Model = model,
-                HeaderContext = headerContext,
-                SystemInstructions = systemPrompt,
-                Messages = requestMessages,
-                Tools = toolDefs
-            };
+             var toolDefs = _toolRegistry.GetDefinitions()
+                 .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
+                 .ToList();
+             // need11-01：读盘→dataURL 本轮内存缓存（重启/多会话安全，无全局锁；null 也缓存避免重复读丢失文件）
+             var imgCache = new Dictionary<string, string?>(StringComparer.Ordinal);
+             Func<ChatImageRef, string?> imgResolver = img =>
+             {
+                 if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
+                 string key = img.ImageId.Trim();
+                 if (imgCache.TryGetValue(key, out var hit)) return hit;
+                 string? url = ImageAttachmentStore.ResolveDataUrl(dataRoot, workspaceId, sessionId, img);
+                 imgCache[key] = url;
+                 return url;
+             };
+             var request = new UnifiedLlmRequest
+             {
+                 RequestId = requestId,
+                 Provider = provider,
+                 Model = model,
+                 HeaderContext = headerContext,
+                 SystemInstructions = systemPrompt,
+                 Messages = requestMessages,
+                 Tools = toolDefs,
+                 ImageResolver = imgResolver,
+             };
 
             // (5) 流式推理：汇总增量并实时推送
             var textAcc = new System.Text.StringBuilder();
@@ -621,7 +632,12 @@ public interface IAgentOrchestrator
                       + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
                       + HintForTool(call.FunctionName);
 
-                var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
+                 var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
+                 // need11-fix: view_image 等工具返回的 Images 必须挂到 tool 消息上，否则下一轮 PlanTurn 读不到，静默丢图（仅文本上游）。
+                 if (toolResult.Success && toolResult.Images != null && toolResult.Images.Count > 0)
+                 {
+                     toolMessage.Images = new List<Host.Desktop.Core.Models.ChatImageRef>(toolResult.Images);
+                 }
 
                 try
                 {

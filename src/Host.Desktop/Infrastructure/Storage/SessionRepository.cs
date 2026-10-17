@@ -655,22 +655,37 @@ public static class ImageAttachmentStore
     }
     public static string GetAttachmentsDir(string dataRoot, string workspaceId, string sessionId) =>
         Path.Combine(string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot, "sessions", workspaceId, sessionId, "attachments");
-    /// <summary>need09-05：按 imageId 扫描附件目录（跨日期去重命中即复用）。</summary>
-    public static string? FindImagePath(string dataRoot, string workspaceId, string sessionId, string imageId)
-    {
-        try
-        {
-            string dir = GetAttachmentsDir(dataRoot, workspaceId, sessionId);
-            if (!Directory.Exists(dir)) return null;
-            foreach (string dateDir in Directory.GetDirectories(dir))
-            {
-                string[] hits = Directory.GetFiles(dateDir, imageId + "_*");
-                if (hits.Length > 0) return hits.OrderBy(h => h, StringComparer.Ordinal).First();
-            }
-        }
-        catch { /* 查找永不抛 */ }
-        return null;
-    }
+     /// <summary>need09-05：按 imageId 扫描附件目录（跨日期去重命中即复用）。</summary>
+     public static string? FindImagePath(string dataRoot, string workspaceId, string sessionId, string imageId)
+     {
+         try
+         {
+             string dir = GetAttachmentsDir(dataRoot, workspaceId, sessionId);
+             if (!Directory.Exists(dir)) return null;
+             foreach (string dateDir in Directory.GetDirectories(dir))
+             {
+                 string[] hits = Directory.GetFiles(dateDir, imageId + "_*");
+                 if (hits.Length > 0) return hits.OrderBy(h => h, StringComparer.Ordinal).First();
+             }
+         }
+         catch { /* 查找永不抛 */ }
+         return null;
+     }
+     public static string? ResolveDataUrl(string dataRoot, string workspaceId, string sessionId, ChatImageRef img)
+     {
+         try
+         {
+             if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
+             string? abs = FindImagePath(dataRoot, workspaceId, sessionId, img.ImageId.Trim());
+             if (abs == null || !File.Exists(abs)) return null;
+             byte[] bytes = File.ReadAllBytes(abs);
+             if (bytes.Length == 0 || bytes.Length > MaxImageBytes) return null;
+             string mime = MimeFromExtension(abs);
+             if (!CheckMagic(bytes, mime)) return null;
+             return ToDataUrl(bytes, mime);
+         }
+         catch { return null; }
+     }
     /// <summary>need09-05：保存图片附件（sha16 去重；返回引用，IsNew 标识是否新落盘）。</summary>
     public static (ChatImageRef Ref, bool IsNew) SaveImage(string dataRoot, string workspaceId, string sessionId, string fileName, string mime, byte[] bytes, int width, int height)
     {

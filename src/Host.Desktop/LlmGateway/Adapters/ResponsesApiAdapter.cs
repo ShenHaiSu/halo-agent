@@ -82,13 +82,14 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     writer.WriteString("type", "input_text");
                     writer.WriteString("text", msg.Content ?? string.Empty);
                     writer.WriteEndObject();
-                    foreach (var r in kept)
-                    {
-                        writer.WriteStartObject();
-                        writer.WriteString("type", "input_image");
-                        writer.WriteString("image_url", r.DataUrl!);
-                        writer.WriteEndObject();
-                    }
+                     foreach (var r in kept)
+                     {
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "input_image");
+                         writer.WriteString("image_url", r.DataUrl!);
+                         writer.WriteString("detail", VisionDefaults.NormalizeDetail(request.Model.VisionDetail));
+                         writer.WriteEndObject();
+                     }
                     writer.WriteEndArray();
                     writer.WriteEndObject();
                 }
@@ -128,22 +129,28 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     writer.WriteString("call_id", msg.ToolCallId ?? string.Empty);
                     writer.WriteString("output", msg.Content ?? string.Empty);
                     writer.WriteEndObject();
-                    if (kept.Count > 0)
-                    {
-                        writer.WriteStartObject();
-                        writer.WriteString("type", "message");
-                        writer.WriteString("role", "user");
-                        writer.WriteStartArray("content");
-                        foreach (var r in kept)
-                        {
-                            writer.WriteStartObject();
-                            writer.WriteString("type", "input_image");
-                            writer.WriteString("image_url", r.DataUrl!);
-                            writer.WriteEndObject();
-                        }
-                        writer.WriteEndArray();
-                        writer.WriteEndObject();
-                    }
+                     if (kept.Count > 0)
+                     {
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "message");
+                         writer.WriteString("role", "user");
+                         writer.WriteStartArray("content");
+                         string toolText = string.IsNullOrWhiteSpace(msg.Content) ? "图片如下：" : msg.Content;
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "input_text");
+                         writer.WriteString("text", toolText);
+                         writer.WriteEndObject();
+                         foreach (var r in kept)
+                         {
+                             writer.WriteStartObject();
+                             writer.WriteString("type", "input_image");
+                             writer.WriteString("image_url", r.DataUrl!);
+                             writer.WriteString("detail", VisionDefaults.NormalizeDetail(request.Model.VisionDetail));
+                             writer.WriteEndObject();
+                         }
+                         writer.WriteEndArray();
+                         writer.WriteEndObject();
+                     }
                 }
                 else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
                 {
