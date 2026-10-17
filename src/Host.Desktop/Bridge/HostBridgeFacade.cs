@@ -49,7 +49,7 @@ namespace Host.Desktop.Bridge;
      public ISessionRepository SessionRepository => _sessionRepository;
      public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
      public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-     public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService);
+      public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal);
     public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
 
     public HostBridgeFacade(
@@ -311,6 +311,77 @@ namespace Host.Desktop.Bridge;
             return Task.FromResult(BridgeResponse<bool>.Fail("OPEN_EXPLORER_ERROR", ex.Message));
         }
     }
+     /// <summary>
+     /// 聊天 markdown 链接统一出口：http(s) 交系统默认浏览器，本地路径交 explorer 定位，永不在 CEF 主帧内导航。
+     /// 安全铁律：文件一律 explorer /select 定位，绝不 UseShellExecute 直接打开（防模型输出的 exe/bat 被执行）。
+     /// </summary>
+     public Task<BridgeResponse<bool>> OpenExternalLink(string href, string? workspaceRoot = null)
+     {
+         try
+         {
+             string link = (href ?? string.Empty).Trim();
+             if (string.IsNullOrWhiteSpace(link))
+             {
+                 return Task.FromResult(BridgeResponse<bool>.Fail("EMPTY_LINK", "链接为空"));
+             }
+             // 防护：拒绝 javascript:/data:/vbscript: 等可执行伪协议
+             if (link.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+                 || link.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                 || link.StartsWith("vbscript:", StringComparison.OrdinalIgnoreCase))
+             {
+                 return Task.FromResult(BridgeResponse<bool>.Fail("BLOCKED_SCHEME", "该链接协议不允许打开"));
+             }
+             if (link.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                 || link.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+             {
+                 Process.Start(new ProcessStartInfo { FileName = link, UseShellExecute = true });
+                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已交系统浏览器打开"));
+             }
+             // 本地路径：支持 file:/// 与绝对/工作区相对路径，统一落到 explorer 定位
+             string candidate = link;
+             if (candidate.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+             {
+                 try { candidate = new Uri(candidate).LocalPath; }
+                 catch { return Task.FromResult(BridgeResponse<bool>.Fail("BAD_FILE_URL", "文件链接格式非法")); }
+             }
+             string fullPath;
+             try
+             {
+                 fullPath = Host.Desktop.Tools.Safety.PathSafetyValidator.ResolveWorkspacePath(workspaceRoot ?? string.Empty, candidate);
+             }
+             catch (Exception ex)
+             {
+                 return Task.FromResult(BridgeResponse<bool>.Fail("BAD_PATH", "路径无法解析：" + ex.Message));
+             }
+             if (File.Exists(fullPath))
+             {
+                 Process.Start(new ProcessStartInfo
+                 {
+                     FileName = "explorer.exe",
+                     Arguments = $"/select,\"{fullPath}\"",
+                     UseShellExecute = true
+                 });
+                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中定位文件"));
+             }
+             if (Directory.Exists(fullPath))
+             {
+                 Process.Start(new ProcessStartInfo
+                 {
+                     FileName = "explorer.exe",
+                     Arguments = $"\"{fullPath}\"",
+                     UseShellExecute = true
+                 });
+                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中打开目录"));
+             }
+             return Task.FromResult(BridgeResponse<bool>.Fail("PATH_NOT_FOUND", $"本地路径不存在：'{fullPath}'"));
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error($"OpenExternalLink failed for '{href}'", ex);
+             return Task.FromResult(BridgeResponse<bool>.Fail("OPEN_LINK_ERROR", ex.Message));
+         }
+     }
+
 
     public async Task<BridgeResponse<int>> CleanupExpiredLogs(int retentionDays = 14)
     {

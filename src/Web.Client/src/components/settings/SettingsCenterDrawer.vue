@@ -65,14 +65,20 @@
                <SkillMemoryView />
              </div>
            </n-tab-pane>
+
+           <n-tab-pane name="usage" tab="用量分析">
+             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+               <UsageAnalyticsView v-if="activeTab === 'usage'" ref="usageViewRef" />
+             </div>
+           </n-tab-pane>
          </n-tabs>
       </div>
      </n-drawer-content>
    </n-drawer>
  </template>
- 
+
  <script setup lang="ts">
- import { ref, computed, watch } from 'vue';
+ import { ref, computed, watch, nextTick } from 'vue';
  import ProviderManagerView from './ProviderManagerView.vue';
  import NetworkProxySettings from './NetworkProxySettings.vue';
  import StorageSettingsPanel from './StorageSettingsPanel.vue';
@@ -81,7 +87,9 @@
  import PromptSettingsView from './PromptSettingsView.vue';
  import AgentBehaviorView from './AgentBehaviorView.vue';
  import SkillMemoryView from './SkillMemoryView.vue';
- export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory';
+ import { defineAsyncComponent } from 'vue';
+ const UsageAnalyticsView = defineAsyncComponent(() => import('./UsageAnalyticsView.vue'));
+ export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory' | 'usage';
 
 const props = defineProps<{
   show: boolean;
@@ -95,6 +103,8 @@ const emit = defineEmits<{
 const activeTab = ref<SettingsCenterTab>(
   props.defaultTab || 'appearance'
 );
+
+const usageViewRef = ref<{ refresh: () => Promise<void>; resize: () => void } | null>(null);
 
 watch(
   () => props.defaultTab,
@@ -110,6 +120,15 @@ watch(
     if (val) activeTab.value = props.defaultTab || 'appearance';
   }
 );
+
+// need12：用量 Tab 懒挂载后容器才有宽度，激活时下一帧 resize 图表
+watch(activeTab, async (val) => {
+  if (val === 'usage') {
+    await nextTick();
+    await nextTick();
+    try { usageViewRef.value?.resize(); } catch { /* ignore */ }
+  }
+});
 
 const visible = computed({
   get: () => props.show,

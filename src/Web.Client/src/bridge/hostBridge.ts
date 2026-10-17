@@ -395,20 +395,45 @@ export interface ContextBudgetStatusDto {
      success: boolean; errorCode?: string | null; keptMessages: number; removedMessages: number;
      replayText?: string | null; backupFileName?: string | null;
    }
-   // need10：技能与记忆只读管理（查/开关/删除，不含新建与编辑）
-   export type SkillMemoryKind = 'skill' | 'memory';
-   export type SkillMemoryScope = 'global' | 'project';
-   export type SkillMemoryScopeFilter = 'global' | 'project' | 'all';
-   export interface SkillMemoryListItem {
-     name: string; scope: SkillMemoryScope; title: string; summary: string; pin: string;
-     enabled: boolean; priority: number; version: number; estTokens: number; chars: number;
-     hash: string; hasAssets: boolean; updatedAtUtc: string; dirPath: string;
+    export type SkillMemoryKind = 'skill' | 'memory';
+    export type SkillMemoryScope = 'global' | 'project';
+   export interface HistoryHealResultDto {
+     success: boolean; errorCode?: string | null; syntheticAppended: number; orphanToolsRemoved: number;
+     keptMessages: number; backupFileName?: string | null;
    }
-   export interface SkillMemoryDetail extends SkillMemoryListItem {
-     bodyPreview: string; truncated: boolean; bodyTotalChars: number;
+   export interface HistoryDeleteResultDto {
+     success: boolean; errorCode?: string | null; keptMessages: number; syntheticAppended: number;
+     orphanToolsRemoved: number; backupFileName?: string | null;
    }
-   export interface SkillMemoryOpResult { ok: boolean; bakFileName?: string | null; notice: string; }
-
+    export type SkillMemoryScopeFilter = 'global' | 'project' | 'all';
+    export interface SkillMemoryListItem {
+      name: string; scope: SkillMemoryScope; title: string; summary: string; pin: string;
+      enabled: boolean; priority: number; version: number; estTokens: number; chars: number;
+      hash: string; hasAssets: boolean; updatedAtUtc: string; dirPath: string;
+    }
+    export interface SkillMemoryDetail extends SkillMemoryListItem {
+      bodyPreview: string; truncated: boolean; bodyTotalChars: number;
+    }
+    export interface SkillMemoryOpResult { ok: boolean; bakFileName?: string | null; notice: string; }
+    // need12：用量分析 DTO（与后端 UsageMetricsService 同构；preset 由后端换算，前端只透传）
+    export type UsagePreset = 'today' | 'yesterday' | 'last3' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'all' | 'custom';
+    export interface UsageFilter {
+      preset: UsagePreset;
+      startDate?: string;
+      endDate?: string;
+      providerIds?: string[];
+      modelKeys?: string[];
+    }
+    export interface UsageProviderOption { id: string; name: string }
+    export interface UsageModelOption { providerId: string; providerName: string; modelId: string; display: string; key: string; label: string }
+    export interface UsageFilterOptions { providers: UsageProviderOption[]; models: UsageModelOption[] }
+    export interface UsageOverview { totalRequests: number; sumInput: number; sumOutput: number; sumCached: number; hitRate: number; activeModels: number }
+    export interface UsageTrendSeries { key: string; providerName: string; modelId: string; values: number[] }
+    export interface UsageTrend { dates: string[]; perModel: UsageTrendSeries[]; hitRates: number[]; totals: number[] }
+    export interface UsageProviderShareItem { providerId: string; name: string; value: number; share: number }
+    export interface UsageRowDto { id: number; requestDate: string; requestTime: string; requestDatetime: string; providerName: string; modelId: string; modelDisplay: string; protocol: string; inputTokens: number; outputTokens: number; cachedTokens: number; hitRate: number; status: string }
+    export interface UsagePage { total: number; page: number; pageSize: number; rows: UsageRowDto[] }
+    export interface UsageDbStatus { dbPath: string; recordCount: number; dbSizeBytes: number; oldestDate?: string | null; newestDate?: string | null }
 export interface HostBridgeApi {
   // Stage 01
   getSystemInfo: () => Promise<BridgeResponse<SystemRuntimeInfo>>;
@@ -417,7 +442,9 @@ export interface HostBridgeApi {
   selectFolderDialog: (initialPath?: string) => Promise<BridgeResponse<string | null>>;
   changeStoragePath: (newPath: string, migrateData: boolean) => Promise<BridgeResponse<StorageMigrationResult>>;
   resetStoragePathToDefault: (migrateData: boolean) => Promise<BridgeResponse<StorageMigrationResult>>;
-  openPathInExplorer: (targetPath: string) => Promise<BridgeResponse<boolean>>;
+   openPathInExplorer: (targetPath: string) => Promise<BridgeResponse<boolean>>;
+   /** 聊天 markdown 链接统一出口：后端转系统浏览器 / explorer，永不在 CEF 内渲染。 */
+   openExternalLink: (href: string, workspaceRoot?: string) => Promise<BridgeResponse<boolean>>;
   cleanupExpiredLogs: (retentionDays?: number) => Promise<BridgeResponse<number>>;
   writeDiagnosticLog: (channel: string, message: string) => Promise<BridgeResponse<boolean>>;
   setWindowTitle: (title: string) => Promise<BridgeResponse<boolean>>;
@@ -493,6 +520,8 @@ export interface HostBridgeApi {
    getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
    // need07
    truncateSessionHistory: (workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
+   healSessionHistory: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<HistoryHealResultDto>>;
+   deleteSessionMessage: (workspaceId: string, sessionId: string, messageId: string) => Promise<BridgeResponse<HistoryDeleteResultDto>>;
    // need10：技能与记忆只读管理（查/开关/删除；无新建与编辑）
    listSkillMemory: (kind: SkillMemoryKind, scope: SkillMemoryScopeFilter, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryListItem[]>>;
    getSkillMemoryDetail: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryDetail>>;
@@ -500,7 +529,14 @@ export interface HostBridgeApi {
    deleteSkillMemory: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryOpResult>>;
    openSkillMemoryFolder: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<boolean>>;
    branchSession: (workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) => Promise<BridgeResponse<SessionMetadata>>;
-}
+    // need12：用量分析（服务端聚合只读）
+    getUsageFilterOptions: () => Promise<BridgeResponse<UsageFilterOptions>>;
+    getUsageOverview: (filter: UsageFilter | string) => Promise<BridgeResponse<UsageOverview>>;
+    getUsageTrend: (filter: UsageFilter | string, metric?: string) => Promise<BridgeResponse<UsageTrend>>;
+    getUsageProviderShare: (filter: UsageFilter | string) => Promise<BridgeResponse<UsageProviderShareItem[]>>;
+    queryUsagePage: (filter: UsageFilter | string, page: number, pageSize: number) => Promise<BridgeResponse<UsagePage>>;
+    getUsageDbStatus: () => Promise<BridgeResponse<UsageDbStatus>>;
+ }
 
 declare global {
   interface Window {
@@ -982,6 +1018,13 @@ function createBrowserMockBridge(): HostBridgeApi {
       return this.changeStoragePath('C:\\HaloAgentData', migrateData);
     },
     async openPathInExplorer() {
+      return { ok: true, data: true };
+    },
+    async openExternalLink(href: string) {
+      try {
+        const link = String(href || '');
+        if (/^https?:\/\//i.test(link)) window.open(link, '_blank', 'noopener');
+      } catch { /* mock 忽略 */ }
       return { ok: true, data: true };
     },
     async cleanupExpiredLogs() {
@@ -1606,6 +1649,17 @@ function createBrowserMockBridge(): HostBridgeApi {
        if (hit) hit.messageCount = prefix.length;
        return { ok: true, data: sess as SessionMetadata };
      },
+     async healSessionHistory(_workspaceId: string, sessionId: string) {
+       return { ok: true, data: { success: true, syntheticAppended: 0, orphanToolsRemoved: 0, keptMessages: (mockMessages[sessionId] || []).length, backupFileName: null } };
+     },
+     async deleteSessionMessage(_workspaceId: string, sessionId: string, messageId: string) {
+       const msgs = mockMessages[sessionId] || [];
+       const idx = msgs.findIndex((m) => String(m.id) === String(messageId));
+       if (idx < 0) return { ok: false, code: 'MESSAGE_NOT_FOUND', message: '消息不存在' };
+       const kept = msgs.filter((_, i) => i !== idx);
+       mockMessages[sessionId] = kept;
+       return { ok: true, data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' } };
+     },
      // need10 mock 仅示意，联调以真后端为准
      async listSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScopeFilter) {
        const mk = (name: string, sc: SkillMemoryScope, title: string, summary: string, enabled: boolean): SkillMemoryListItem => ({
@@ -1637,6 +1691,26 @@ function createBrowserMockBridge(): HostBridgeApi {
      },
      async openSkillMemoryFolder() {
        return { ok: true, data: true };
+     },
+     async getUsageFilterOptions() {
+       return { ok: true, data: { providers: [{ id: 'p-openai', name: 'OpenAI' }, { id: 'p-deepseek', name: 'DeepSeek' }], models: [{ providerId: 'p-openai', providerName: 'OpenAI', modelId: 'gpt-4o', display: 'GPT-4o', key: 'k1', label: 'OpenAI/gpt-4o' }, { providerId: 'p-deepseek', providerName: 'DeepSeek', modelId: 'deepseek-chat', display: 'DeepSeek-V3', key: 'k2', label: 'DeepSeek/deepseek-chat' }] } };
+     },
+     async getUsageOverview() {
+       return { ok: true, data: { totalRequests: 42, sumInput: 82400, sumOutput: 11200, sumCached: 56320, hitRate: 0.6838, activeModels: 3 } };
+     },
+     async getUsageTrend() {
+       const dates = ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17'];
+       return { ok: true, data: { dates, perModel: [{ key: 'k1', providerName: 'OpenAI', modelId: 'gpt-4o', values: [1200, 1800, 900, 2400, 3100, 1500, 2100] }, { key: 'k2', providerName: 'DeepSeek', modelId: 'deepseek-chat', values: [900, 700, 1200, 600, 1100, 900, 800] }], hitRates: [0.62, 0.65, 0.58, 0.71, 0.69, 0.66, 0.68], totals: [2500, 3100, 2400, 3800, 4900, 2900, 3500] } };
+     },
+     async getUsageProviderShare() {
+       return { ok: true, data: [{ providerId: 'p-openai', name: 'OpenAI', value: 16900, share: 0.68 }, { providerId: 'p-deepseek', name: 'DeepSeek', value: 7900, share: 0.32 }] };
+     },
+     async queryUsagePage(_filter: unknown, page: number, pageSize: number) {
+       const rows = Array.from({ length: Math.min(8, pageSize) }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, requestDate: '2026-10-17', requestTime: '10:20:0' + i, requestDatetime: '2026-10-17 10:20:0' + i, providerName: i % 2 ? 'DeepSeek' : 'OpenAI', modelId: i % 2 ? 'deepseek-chat' : 'gpt-4o', modelDisplay: i % 2 ? 'DeepSeek-V3' : 'GPT-4o', protocol: 'chat', inputTokens: 1200 + i * 100, outputTokens: 200 + i * 10, cachedTokens: 800 + i * 60, hitRate: 0.66, status: 'ok' }));
+       return { ok: true, data: { total: 42, page, pageSize, rows } };
+     },
+     async getUsageDbStatus() {
+       return { ok: true, data: { dbPath: 'mock-usage.db', recordCount: 42, dbSizeBytes: 49152, oldestDate: '2026-10-11', newestDate: '2026-10-17' } };
      },
    };
  }
@@ -1731,6 +1805,18 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
     async openPathInExplorer(targetPath: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.openPathInExplorer(targetPath));
     },
+     async openExternalLink(href: string, workspaceRoot?: string) {
+       const raw = rawBridge as unknown as { openExternalLink?: (h: string, w: string) => Promise<unknown> };
+       if (typeof raw.openExternalLink === 'function') {
+         return normalizeBridgePayload<BridgeResponse<boolean>>(await raw.openExternalLink(href, workspaceRoot ?? ''));
+       }
+       // 旧后端兼容：http(s) 用默认方式打开，本地路径退化为 explorer 定位
+       if (/^https?:\/\//i.test(String(href || ''))) {
+         try { window.open(href, '_blank', 'noopener'); } catch { /* ignore */ }
+         return { ok: true, data: true };
+       }
+       return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.openPathInExplorer(href));
+     },
     async cleanupExpiredLogs(retentionDays = 14) {
       return normalizeBridgePayload<BridgeResponse<number>>(await rawBridge.cleanupExpiredLogs(retentionDays));
     },
@@ -1969,6 +2055,16 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
          await rawBridge.branchSession(workspaceId ?? '', sourceSessionId ?? '', anchorMessageId ?? '', includeAnchor ?? true)
        );
      },
+     async healSessionHistory(workspaceId: string, sessionId: string) {
+       return normalizeBridgePayload<BridgeResponse<HistoryHealResultDto>>(
+         await rawBridge.healSessionHistory(workspaceId ?? '', sessionId ?? '')
+       );
+     },
+     async deleteSessionMessage(workspaceId: string, sessionId: string, messageId: string) {
+       return normalizeBridgePayload<BridgeResponse<HistoryDeleteResultDto>>(
+         await rawBridge.deleteSessionMessage(workspaceId ?? '', sessionId ?? '', messageId ?? '')
+       );
+     },
      async listSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScopeFilter, workspaceId?: string) {
        try {
          if (typeof rawBridge.listSkillMemory !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
@@ -2009,7 +2105,47 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
          );
        } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
      },
-  };
+     async getUsageFilterOptions() {
+       try {
+         if (typeof rawBridge.getUsageFilterOptions !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<UsageFilterOptions>>(await rawBridge.getUsageFilterOptions());
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+     async getUsageOverview(filter: UsageFilter | string) {
+       try {
+         if (typeof rawBridge.getUsageOverview !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
+         return normalizeBridgePayload<BridgeResponse<UsageOverview>>(await rawBridge.getUsageOverview(payload));
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+     async getUsageTrend(filter: UsageFilter | string, metric?: string) {
+       try {
+         if (typeof rawBridge.getUsageTrend !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
+         return normalizeBridgePayload<BridgeResponse<UsageTrend>>(await rawBridge.getUsageTrend(payload, metric ?? 'total'));
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+     async getUsageProviderShare(filter: UsageFilter | string) {
+       try {
+         if (typeof rawBridge.getUsageProviderShare !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
+         return normalizeBridgePayload<BridgeResponse<UsageProviderShareItem[]>>(await rawBridge.getUsageProviderShare(payload));
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+     async queryUsagePage(filter: UsageFilter | string, page: number, pageSize: number) {
+       try {
+         if (typeof rawBridge.queryUsagePage !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
+         return normalizeBridgePayload<BridgeResponse<UsagePage>>(await rawBridge.queryUsagePage(payload, page ?? 1, pageSize ?? 50));
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+     async getUsageDbStatus() {
+       try {
+         if (typeof rawBridge.getUsageDbStatus !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<UsageDbStatus>>(await rawBridge.getUsageDbStatus());
+       } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
+     },
+   };
 }
 
 let resolvedBridge: HostBridgeApi | null = null;

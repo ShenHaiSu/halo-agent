@@ -43,13 +43,25 @@
       <span v-if="isExec && card.exitCode !== null && card.exitCode !== undefined" class="font-mono text-[11px] shrink-0" :class="card.exitCode === 0 ? 'text-[var(--stat-add-text)]' : 'text-[var(--stat-del-text)]'">
         Exit: {{ card.exitCode }}
       </span>
-
-      <ChevronDown
-        class="w-3.5 h-3.5 text-secondary shrink-0 transition-transform"
-        :class="expanded ? 'rotate-180' : ''"
-      />
-    </div>
-
+       <ChevronDown
+         class="w-3.5 h-3.5 text-secondary shrink-0 transition-transform"
+         :class="expanded ? 'rotate-180' : ''"
+       />
+     </div>
+ 
+     <!-- need12 R1：流式写入字节计数行（write_file/edit_file 专属） -->
+     <div
+       v-if="showBytesRow"
+       class="flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] text-secondary border-t border-subtle bytes-counter"
+       data-testid="tool-bytes-counter"
+       :title="bytesTooltip"
+     >
+       <span class="bytes-dot" :class="bytesDotClass"></span>
+       <span class="truncate" style="font-variant-numeric: tabular-nums;">{{ bytesText }}</span>
+       <span v-if="isReceiving" class="shimmer shrink-0">流式接收中…</span>
+       <span v-else-if="card.status === 'running'" class="shrink-0">正在写入磁盘…</span>
+       <span v-else-if="card.status === 'done'" class="shrink-0 text-[var(--stat-add-text)]">✓</span>
+     </div>
     <!-- Body -->
     <n-collapse-transition :show="expanded">
       <div class="border-t border-subtle">
@@ -170,9 +182,10 @@ import {
   Terminal,
   Wrench,
 } from 'lucide-vue-next';
-import type { AgentToolCard } from '@/stores/agentStore';
-import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+ import type { AgentToolCard } from '@/stores/agentStore';
+ import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
+ import { useWorkspaceStore } from '@/stores/workspaceStore';
+ import { formatSmartBytes } from '@/utils/formatSmartBytes';
 
 const props = defineProps<{
   card: AgentToolCard;
@@ -190,9 +203,27 @@ function toggle(): void {
   expanded.value = !expanded.value;
 }
 
-const isFileEdit = computed(() => props.card.functionName === 'edit_file' || props.card.functionName === 'write_file');
-const isExec = computed(() => props.card.functionName === 'exec_command');
-const isViewImage = computed(() => props.card.functionName === 'view_image');
+ const isFileEdit = computed(() => props.card.functionName === 'edit_file' || props.card.functionName === 'write_file');
+ const isExec = computed(() => props.card.functionName === 'exec_command');
+ const isViewImage = computed(() => props.card.functionName === 'view_image');
+ 
+ // ---- need12 R1：字节计数行 ----
+ const receivedBytes = computed(() => Math.max(0, Math.floor(props.card.receivedBytes || 0)));
+ const showBytesRow = computed(() => isFileEdit.value);
+ const isReceiving = computed(() => props.card.status === 'running' && (props.card.fileBytes === null || props.card.fileBytes === undefined));
+ const bytesText = computed(() => {
+   if (props.card.status === 'done' && typeof props.card.fileBytes === 'number' && Number.isFinite(props.card.fileBytes)) {
+     return `参数已接收 ${formatSmartBytes(receivedBytes.value)} · 落盘 ${formatSmartBytes(props.card.fileBytes)}`;
+   }
+   const hot = receivedBytes.value >= 50 * 1024 ? ' 🔥' : '';
+   return `参数已接收 ${formatSmartBytes(receivedBytes.value)}${hot}`;
+ });
+ const bytesTooltip = computed(() => `参数线字节（含 JSON 转义）≈ ${receivedBytes.value.toLocaleString('en-US')}；文件实际字节以完成态为准`);
+ const bytesDotClass = computed(() => {
+   if (props.card.status === 'done') return 'bytes-dot-done';
+   if (props.card.status === 'error') return 'bytes-dot-error';
+   return 'bytes-dot-run';
+ });
 
 const iconComponent = computed(() => {
   switch (props.card.functionName) {
@@ -388,4 +419,14 @@ async function handleCopy(): Promise<void> {
     message.info('复制失败，请手动选择文本');
   }
 }
-</script>
+ </script>
+ 
+ <style scoped>
+ .bytes-dot { width: 7px; height: 7px; border-radius: 9999px; flex-shrink: 0; }
+ .bytes-dot-run { background: #3b82f6; animation: bytes-pulse 1.2s ease-in-out infinite; }
+ .bytes-dot-done { background: #10b981; }
+ .bytes-dot-error { background: #ef4444; }
+ @keyframes bytes-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
+ .shimmer { animation: bytes-pulse 1.2s ease-in-out infinite; }
+ .bytes-counter { font-variant-numeric: tabular-nums; }
+ </style>

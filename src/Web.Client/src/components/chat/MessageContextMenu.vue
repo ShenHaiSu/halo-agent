@@ -27,33 +27,42 @@
       <RotateCcw class="w-3.5 h-3.5 shrink-0" />
       <span>重放</span>
     </button>
-    <button
-      data-testid="context-menu-branch"
-      class="history-context-menu-item"
-      :disabled="busy"
-      :title="busy ? '生成中不可操作，请稍后再试' : '从这里创建分支会话'"
-      @click="emit('branch')"
-    >
-      <GitBranch class="w-3.5 h-3.5 shrink-0" />
-      <span>从这里分支</span>
-    </button>
-  </div>
+     <button
+       data-testid="context-menu-branch"
+       class="history-context-menu-item"
+       :disabled="busy"
+       :title="busy ? '生成中不可操作，请稍后再试' : '从这里创建分支会话'"
+       @click="emit('branch')"
+     >
+       <GitBranch class="w-3.5 h-3.5 shrink-0" />
+       <span>从这里分支</span>
+     </button>
+     <button
+       data-testid="context-menu-delete"
+       class="history-context-menu-item history-context-menu-danger"
+       :disabled="busy"
+       :title="busy ? '生成中不可操作，请稍后再试' : '删除这条消息（先备份，可从备份恢复）'"
+       @click="emit('delete')"
+     >
+       <Trash2 class="w-3.5 h-3.5 shrink-0" />
+       <span>删除此消息</span>
+     </button>
+   </div>
 </template>
+ <script setup lang="ts">
+ import { Copy, RotateCcw, GitBranch, Trash2 } from 'lucide-vue-next';
 
-<script setup lang="ts">
-import { Copy, RotateCcw, GitBranch } from 'lucide-vue-next';
+ defineProps<{
+   visible: boolean;
+   x: number;
+   y: number;
+   busy: boolean;
+   canCopy: boolean;
+ }>();
 
-defineProps<{
-  visible: boolean;
-  x: number;
-  y: number;
-  busy: boolean;
-  canCopy: boolean;
-}>();
-
-const emit = defineEmits<{
-  (e: 'copy' | 'replay' | 'branch'): void;
-}>();
+ const emit = defineEmits<{
+   (e: 'copy' | 'replay' | 'branch' | 'delete'): void;
+ }>();
 </script>
 
 <style scoped>
@@ -86,8 +95,11 @@ const emit = defineEmits<{
 .history-context-menu-item:hover:not(:disabled) {
   background: var(--bg-elevated, rgba(128, 128, 128, 0.18));
 }
-.history-context-menu-item:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
+ .history-context-menu-item:disabled {
+   opacity: 0.4;
+   cursor: not-allowed;
+ }
+ .history-context-menu-danger {
+   color: var(--text-danger, #f87171);
+ }
 </style>

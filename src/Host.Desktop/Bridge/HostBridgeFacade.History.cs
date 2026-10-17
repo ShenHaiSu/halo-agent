@@ -55,4 +55,77 @@ public sealed partial class HostBridgeFacade
             return BridgeResponse<SessionMetadata>.Fail("BRANCH_ERROR", ex.Message);
         }
     }
+     public async Task<BridgeResponse<HistoryHealResult>> HealSessionHistory(string workspaceId, string sessionId)
+     {
+         try
+         {
+             if (IsHistoryBusy(sessionId))
+                 return BridgeResponse<HistoryHealResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
+             var result = await _workspaceSessionService.HealSessionHistoryAsync(
+                 workspaceId, sessionId).ConfigureAwait(false);
+             if (!result.Success)
+                 return BridgeResponse<HistoryHealResult>.Fail(result.ErrorCode ?? "HEAL_FAILED", result.ErrorCode ?? "愈合失败");
+             return BridgeResponse<HistoryHealResult>.Success(result);
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error($"HealSessionHistory failed for session '{sessionId}'", ex);
+             return BridgeResponse<HistoryHealResult>.Fail("HEAL_ERROR", ex.Message);
+         }
+     }
+
+     public async Task<BridgeResponse<HistoryDeleteResult>> DeleteSessionMessage(
+         string workspaceId, string sessionId, string messageId)
+     {
+         try
+         {
+             if (IsHistoryBusy(sessionId))
+                 return BridgeResponse<HistoryDeleteResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
+             var result = await _workspaceSessionService.DeleteSessionMessageAsync(
+                 workspaceId, sessionId, messageId).ConfigureAwait(false);
+             if (!result.Success)
+                 return BridgeResponse<HistoryDeleteResult>.Fail(result.ErrorCode ?? "DELETE_FAILED", result.ErrorCode ?? "删除失败");
+             return BridgeResponse<HistoryDeleteResult>.Success(result);
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error($"DeleteSessionMessage failed for session '{sessionId}' msg '{messageId}'", ex);
+             return BridgeResponse<HistoryDeleteResult>.Fail("DELETE_ERROR", ex.Message);
+         }
+     }
+
+     /// <summary>
+     /// 启动时全量扫描：遍历全部工作区/会话做孤儿愈合（只读无伤会话直接跳过，只写脏会话）。
+     /// 后台 fire-and-forget 调用，永不阻塞 UI。
+     /// </summary>
+     public async Task<BridgeResponse<int>> ScanAndHealAllSessions()
+     {
+         int healedSessions = 0;
+         try
+         {
+             var workspaces = await _workspaceSessionService.GetAllWorkspacesAsync().ConfigureAwait(false);
+             foreach (var ws in workspaces)
+             {
+                 List<SessionMetadata> sessions;
+                 try { sessions = await _workspaceSessionService.GetSessionsByWorkspaceAsync(ws.Id).ConfigureAwait(false); }
+                 catch { continue; }
+                 foreach (var sess in sessions)
+                 {
+                     try
+                     {
+                         var r = await _workspaceSessionService.HealSessionHistoryAsync(ws.Id, sess.Id).ConfigureAwait(false);
+                         if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0)) healedSessions++;
+                     }
+                     catch { /* 单会话失败不影响其余 */ }
+                 }
+             }
+             HaloLogger.App.Info($"[History] startup orphan scan done, healedSessions={healedSessions}");
+             return BridgeResponse<int>.Success(healedSessions);
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error("ScanAndHealAllSessions failed", ex);
+             return BridgeResponse<int>.Fail("SCAN_ERROR", ex.Message);
+         }
+     }
 }
