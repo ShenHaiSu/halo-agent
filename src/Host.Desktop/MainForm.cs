@@ -55,13 +55,14 @@ public sealed class MainForm : Form
 
         CefSharpSettings.ConcurrentTaskExecution = true;
 
-        _chromeBrowser = new ChromiumWebBrowser(initialUrl)
-        {
-            Dock = DockStyle.Fill,
-            MenuHandler = new CustomMenuHandler(_isDevelopment),
-            LifeSpanHandler = new CustomLifeSpanHandler()
-        };
-
+         _chromeBrowser = new ChromiumWebBrowser(initialUrl)
+         {
+             Dock = DockStyle.Fill,
+             MenuHandler = new CustomMenuHandler(_isDevelopment),
+             LifeSpanHandler = new CustomLifeSpanHandler(),
+             // 导航守卫：外部链接永不进主帧（http(s) 转系统浏览器），杜绝 markdown 链接点击白屏
+             RequestHandler = new ExternalNavigationRequestHandler()
+         };
         _hostBridgeFacade = new HostBridgeFacade(this, _storageManager, _gpuDisabled);
 
         // 注册异步 JS Bridge 对象至 window.hostBridge
@@ -76,6 +77,12 @@ public sealed class MainForm : Form
         _chromeBrowser.LoadError += OnLoadError;
 
         Controls.Add(_chromeBrowser);
+         // 启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；脏会话会自动补 synthetic cancelled tool）
+         _ = Task.Run(async () =>
+         {
+             try { await _hostBridgeFacade.ScanAndHealAllSessions().ConfigureAwait(false); }
+             catch (Exception ex) { HaloLogger.App.Warn("[History] startup orphan scan failed", ex); }
+         });
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
     }
 

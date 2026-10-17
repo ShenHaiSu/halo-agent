@@ -133,7 +133,9 @@ public sealed class WriteFileTool : IToolHandler
                 sb.Append(" [警告：目标位于当前工作区之外，请确认路径无误]");
             }
 
-            return Task.FromResult(ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds));
+             var ok = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
+             ok.FileBytes = byteSize;
+             return Task.FromResult(ok);
         }
         catch (Exception ex)
         {

@@ -22,7 +22,8 @@ public sealed class StoragePathManager
          "logs",
          "cef-cache",
          "skills",
-         "memory"
+         "memory",
+         "metrics"
      };
 
      private static readonly string[] MigratableSubDirectories =
@@ -32,8 +33,10 @@ public sealed class StoragePathManager
          "sessions",
          "logs",
          "skills",
-         "memory"
+         "memory",
+         "metrics"
      };
+
 
     private readonly object _stateLock = new();
     private string _currentDataRoot;
@@ -74,6 +77,8 @@ public sealed class StoragePathManager
      public string GlobalSkillsDirectory => Path.Combine(CurrentDataRoot, "skills");
      /// <summary>need09-01：Global Memory 域根目录（随数据根迁移）。</summary>
      public string GlobalMemoryDirectory => Path.Combine(CurrentDataRoot, "memory");
+     /// <summary>need12：用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
+     public string MetricsDirectory => Path.Combine(CurrentDataRoot, "metrics");
      /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
      public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;
      /// <summary>need09-01：标准子目录清单（含 skills/memory）。</summary>

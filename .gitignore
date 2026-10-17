@@ -68,3 +68,6 @@ Thumbs.db
 *.bak
 *.swp
 *~
+
+# HaloAgent local state (skills/memory indexes, session cache)
+.haloagent/

@@ -214,3 +214,36 @@ public sealed class ContextBudgetStatusDto
      public static HistoryTruncateResult Fail(string code)
          => new() { Success = false, ErrorCode = code };
  }
+  /// <summary>孤儿 tool_calls 愈合结果：补 synthetic cancelled tool + 清理无主 tool 消息。</summary>
+ public sealed class HistoryHealResult
+ {
+     public bool Success { get; init; }
+     public string? ErrorCode { get; init; }
+     /// <summary>补上的 synthetic cancelled tool 消息数。</summary>
+     public int SyntheticAppended { get; init; }
+     /// <summary>清理掉的无主 tool 消息数（找不到归属 assistant tool_call）。</summary>
+     public int OrphanToolsRemoved { get; init; }
+     public int KeptMessages { get; init; }
+     public string? BackupFileName { get; init; }
+     public static HistoryHealResult Ok(int synthetic, int removed, int kept, string? bak)
+         => new() { Success = true, SyntheticAppended = synthetic, OrphanToolsRemoved = removed, KeptMessages = kept, BackupFileName = bak };
+     public static HistoryHealResult Clean(int kept)
+         => new() { Success = true, KeptMessages = kept };
+     public static HistoryHealResult Fail(string code)
+         => new() { Success = false, ErrorCode = code };
+ }
+
+ /// <summary>单条消息删除结果（删除后顺带做一次孤儿愈合，保证历史仍可直接发模型）。</summary>
+ public sealed class HistoryDeleteResult
+ {
+     public bool Success { get; init; }
+     public string? ErrorCode { get; init; }
+     public int KeptMessages { get; init; }
+     public int SyntheticAppended { get; init; }
+     public int OrphanToolsRemoved { get; init; }
+     public string? BackupFileName { get; init; }
+     public static HistoryDeleteResult Ok(int kept, int synthetic, int removed, string? bak)
+         => new() { Success = true, KeptMessages = kept, SyntheticAppended = synthetic, OrphanToolsRemoved = removed, BackupFileName = bak };
+     public static HistoryDeleteResult Fail(string code)
+         => new() { Success = false, ErrorCode = code };
+ }

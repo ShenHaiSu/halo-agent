@@ -12,47 +12,68 @@ import { useAskUserStore } from '@/stores/askUserStore';
 
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
- export interface AgentToolCard {
-   callId: string;
-   functionName: string;
-   argsJson: string;
-   status: AgentToolCardStatus;
-   resultText: string;
-   exitCode: number | null;
-   durationMs: number | null;
-   iteration: number;
-   images?: Array<{ imageId: string; fileName: string; mime: string; relPath: string; width: number; height: number; sizeBytes: number; sha16: string; lost?: boolean }>;
- }
+  export interface AgentToolCard {
+    callId: string;
+    functionName: string;
+    argsJson: string;
+    status: AgentToolCardStatus;
+    resultText: string;
+    exitCode: number | null;
+    durationMs: number | null;
+    iteration: number;
+    /** need12 R1：流式参数已接收字节（UTF-8，后端节流发布；旧后端回退估算）。 */
+    receivedBytes: number;
+    /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
+    fileBytes?: number | null;
+    images?: Array<{ imageId: string; fileName: string; mime: string; relPath: string; width: number; height: number; sizeBytes: number; sha16: string; lost?: boolean }>;
+  }
  
  /** need09-04：sendPrompt 可选第二参附件项 */
  export interface AgentSendAttachment { attId: string; fileName: string; mime: string; base64: string }
 
-export interface AgentTelemetry {
-  protocol: string;
-  ttftMs: number | null;
-  totalMs: number | null;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
-  // need05-01：Σ账单 + 占用态 + 流式估算（与 znaide round_est + ≈ 同语义）
-  billedPrompt: number;
-  billedCompletion: number;
-  occupancyState: string;
-  liveEst: number;
-}
-
-/** need05-01：前端估算函数（与 znaide app.rs:2119 同口径）：ASCII/4 向上取整，非 ASCII 按 1 */
-export function estTokens(text: string): number {
-  if (!text) return 0;
-  let ascii = 0;
-  let other = 0;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) || 0;
-    if (cp <= 127) ascii++;
-    else other++;
-  }
-  return other + Math.ceil(ascii / 4);
-}
+ export interface AgentTelemetry {
+   protocol: string;
+   ttftMs: number | null;
+   totalMs: number | null;
+   inputTokens: number;
+   outputTokens: number;
+   cachedTokens: number;
+   // need05-01：Σ账单 + 占用态 + 流式估算（与 znaide round_est + ≈ 同语义）
+   billedPrompt: number;
+   billedCompletion: number;
+   occupancyState: string;
+   liveEst: number;
+ }
+ 
+ /** need05-01：前端估算函数（与 znaide app.rs:2119 同口径）：ASCII/4 向上取整，非 ASCII 按 1 */
+ export function estTokens(text: string): number {
+   if (!text) return 0;
+   let ascii = 0;
+   let other = 0;
+   for (const ch of text) {
+     const cp = ch.codePointAt(0) || 0;
+     if (cp <= 127) ascii++;
+     else other++;
+   }
+   return other + Math.ceil(ascii / 4);
+ }
+ 
+ /** need12 R1：旧后端兼容——前端按 UTF-8 估算 delta 字节数（与后端 GetByteCount 同单位）。 */
+ export function estimateUtf8Bytes(text: string): number {
+   if (!text) return 0;
+   try {
+     if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).length;
+   } catch { /* fall through */ }
+   let n = 0;
+   for (const ch of text) {
+     const cp = ch.codePointAt(0) || 0;
+     if (cp <= 0x7f) n += 1;
+     else if (cp <= 0x7ff) n += 2;
+     else if (cp <= 0xffff) n += 3;
+     else n += 4;
+   }
+   return n;
+ }
 
 interface TurnEventPayload {
   sessionId: string;
@@ -317,96 +338,120 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.ttftMs = num(payload['ttftMs']);
         touch(t);
         break;
-      case 'ToolCallStarted': {
-        const callId = str(payload['callId']);
-        const functionName = str(payload['functionName']) || 'tool';
-        const args = pickArgs(payload);
-        if (callId && !t.toolCards.some((c) => c.callId === callId)) {
-          t.toolCards.push({
-            callId,
-            functionName,
-            argsJson: args,
-            status: 'running',
-            resultText: '',
-            exitCode: null,
-            durationMs: null,
-            iteration: num(payload['iteration']),
-          });
-        } else if (callId && args) {
-          const ex = t.toolCards.find((c) => c.callId === callId);
-          if (ex && !ex.argsJson) ex.functionName = functionName || ex.functionName;
-          if (ex && !ex.argsJson) ex.argsJson = args;
-        }
-        touch(t);
-        break;
-      }
-      case 'ToolCallUpdated':
-      case 'ToolCallArgs':
-      case 'ToolCallCompleted': {
-        const callId = str(payload['callId']);
-        const args = pickArgs(payload);
-        const card = t.toolCards.find((c) => c.callId === callId);
-        if (card && args) {
-          card.argsJson = args;
-          if (payload['functionName']) card.functionName = str(payload['functionName']);
-        } else if (callId && args) {
-          t.toolCards.push({
-            callId,
-            functionName: str(payload['functionName']) || 'tool',
-            argsJson: args,
-            status: 'running',
-            resultText: '',
-            exitCode: null,
-            durationMs: null,
-            iteration: num(payload['iteration']),
-          });
-        }
-        touch(t);
-        break;
-      }
-      case 'ToolExecutionStarted': {
-        const callId = str(payload['callId']);
-        const args = pickArgs(payload);
-        const card = t.toolCards.find((c) => c.callId === callId);
-        if (card) {
-          card.status = 'running';
-          if (payload['functionName']) card.functionName = str(payload['functionName']);
-          if (args) card.argsJson = args;
-        } else if (callId) {
-          t.toolCards.push({
-            callId,
-            functionName: str(payload['functionName']) || 'tool',
-            argsJson: args,
-            status: 'running',
-            resultText: '',
-            exitCode: null,
-            durationMs: null,
-            iteration: num(payload['iteration']),
-          });
-        }
-        touch(t);
-        break;
-      }
-      case 'ToolExecutionCompleted': {
-        const callId = str(payload['callId']);
-        const card = t.toolCards.find((c) => c.callId === callId);
-        if (card) {
-          const success = payload['success'] !== false;
-          card.status = success ? 'done' : 'error';
-          card.exitCode = payload['exitCode'] === null || payload['exitCode'] === undefined ? null : num(payload['exitCode']);
-          card.durationMs = payload['durationMs'] === null || payload['durationMs'] === undefined ? null : num(payload['durationMs']);
-          const args = pickArgs(payload);
-          if (args) card.argsJson = args;
-          const rt = payload['resultText'];
-          if (typeof rt === 'string' && rt) card.resultText = truncateText(rt);
-        }
-        // need04-03：工具完成只内存更新+标脏，不全量拉取（跳动主因）；等 AssistantMessagePersisted 再对账
-        dirtyPersisted.value[sid] = true;
-        touch(t);
-        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-        void workspaceStore.refreshBudget().catch(() => undefined);
-        break;
-      }
+       case 'ToolCallStarted': {
+         const callId = str(payload['callId']);
+         const functionName = str(payload['functionName']) || 'tool';
+         const args = pickArgs(payload);
+         const rb = typeof payload['receivedBytes'] === 'number' ? (payload['receivedBytes'] as number) : 0;
+         if (callId && !t.toolCards.some((c) => c.callId === callId)) {
+           t.toolCards.push({
+             callId,
+             functionName,
+             argsJson: args,
+             status: 'running',
+             resultText: '',
+             exitCode: null,
+             durationMs: null,
+             iteration: num(payload['iteration']),
+             receivedBytes: rb,
+           });
+         } else if (callId && args) {
+           const ex = t.toolCards.find((c) => c.callId === callId);
+           if (ex && !ex.argsJson) ex.functionName = functionName || ex.functionName;
+           if (ex && !ex.argsJson) ex.argsJson = args;
+           if (ex) ex.receivedBytes = rb;
+         }
+         touch(t);
+         break;
+       }
+       case 'ToolCallUpdated':
+       case 'ToolCallArgs':
+       case 'ToolCallCompleted': {
+         const callId = str(payload['callId']);
+         const args = pickArgs(payload);
+         const argsDelta = typeof payload['argsDelta'] === 'string' ? (payload['argsDelta'] as string) : '';
+         const hasBytes = typeof payload['receivedBytes'] === 'number';
+         const fallbackBytes = argsDelta ? estimateUtf8Bytes(argsDelta) : 0;
+         const card = t.toolCards.find((c) => c.callId === callId);
+         if (card) {
+           if (args) {
+             card.argsJson = args;
+             if (kind === 'ToolCallCompleted') {
+               // 终值对账：全量 args 的 UTF-8 长度即终值（覆盖节流欠量）
+               card.receivedBytes = estimateUtf8Bytes(args);
+             } else if (hasBytes) {
+               card.receivedBytes = num(payload['receivedBytes']);
+             } else if (fallbackBytes > 0) {
+               card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+             }
+           } else if (hasBytes) {
+             card.receivedBytes = num(payload['receivedBytes']);
+           } else if (fallbackBytes > 0) {
+             card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+           }
+           if (payload['functionName']) card.functionName = str(payload['functionName']);
+         } else if (callId && (args || argsDelta || hasBytes)) {
+           t.toolCards.push({
+             callId,
+             functionName: str(payload['functionName']) || 'tool',
+             argsJson: args,
+             status: 'running',
+             resultText: '',
+             exitCode: null,
+             durationMs: null,
+             iteration: num(payload['iteration']),
+             receivedBytes: hasBytes ? num(payload['receivedBytes']) : fallbackBytes,
+           });
+         }
+         touch(t);
+         break;
+       }
+       case 'ToolExecutionStarted': {
+         const callId = str(payload['callId']);
+         const args = pickArgs(payload);
+         const card = t.toolCards.find((c) => c.callId === callId);
+         if (card) {
+           card.status = 'running';
+           if (payload['functionName']) card.functionName = str(payload['functionName']);
+           if (args) card.argsJson = args;
+         } else if (callId) {
+           t.toolCards.push({
+             callId,
+             functionName: str(payload['functionName']) || 'tool',
+             argsJson: args,
+             status: 'running',
+             resultText: '',
+             exitCode: null,
+             durationMs: null,
+             iteration: num(payload['iteration']),
+             receivedBytes: 0,
+           });
+         }
+         touch(t);
+         break;
+       }
+       case 'ToolExecutionCompleted': {
+         const callId = str(payload['callId']);
+         const card = t.toolCards.find((c) => c.callId === callId);
+         if (card) {
+           const success = payload['success'] !== false;
+           card.status = success ? 'done' : 'error';
+           card.exitCode = payload['exitCode'] === null || payload['exitCode'] === undefined ? null : num(payload['exitCode']);
+           card.durationMs = payload['durationMs'] === null || payload['durationMs'] === undefined ? null : num(payload['durationMs']);
+           const args = pickArgs(payload);
+           if (args) card.argsJson = args;
+           const rt = payload['resultText'];
+           if (typeof rt === 'string' && rt) card.resultText = truncateText(rt);
+           const fb = payload['fileBytes'];
+           card.fileBytes = typeof fb === 'number' && Number.isFinite(fb) ? fb : null;
+         }
+         // need04-03：工具完成只内存更新+标脏，不全量拉取（跳动主因）；等 AssistantMessagePersisted 再对账
+         dirtyPersisted.value[sid] = true;
+         touch(t);
+         touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+         void workspaceStore.refreshBudget().catch(() => undefined);
+         break;
+       }
       case 'AssistantMessagePersisted': {
         t.telemetry.inputTokens = num(payload['inputTokens']);
         t.telemetry.outputTokens = num(payload['outputTokens']);

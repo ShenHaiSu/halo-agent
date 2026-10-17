@@ -24,11 +24,14 @@ public sealed class ToolResult
     /// <summary>执行耗时毫秒。</summary>
     public long DurationMs { get; set; }
 
-    /// <summary>超长输出落盘文件绝对路径（未超限为 null）。</summary>
-    public string? SpilledFile { get; set; }
-    /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
+     /// <summary>超长输出落盘文件绝对路径（未超限为 null）。</summary>
+     public string? SpilledFile { get; set; }
+     /// <summary>need12：文件写入类工具落盘字节数（WriteFileTool 显式回填，前端完成态展示用）。</summary>
+     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+     public long? FileBytes { get; set; }
+     /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
+     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+     public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
     public static ToolResult Ok(
         string output,
         int exitCode = 0,

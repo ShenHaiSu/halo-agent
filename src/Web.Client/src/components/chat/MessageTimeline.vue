@@ -43,12 +43,13 @@
         </div>
         <!-- 轮次容器：正文常显 + 思考+工具归并舱（默认收缩） -->
         <div v-else class="space-y-2 min-w-0">
-          <div
-            v-if="item.group?.content"
-            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
-            v-html="renderMarkdown(item.group?.content || '')"
-            @contextmenu.prevent="openMenu($event, { kind: 'assistant', id: String(item.group?.assistantId || item.group?.key || ''), text: String(item.group?.content || '') })"
-          />
+           <div
+             v-if="item.group?.content"
+             class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+             v-html="renderMarkdown(item.group?.content || '')"
+             @click="onMarkdownLinkClick"
+             @contextmenu.prevent="openMenu($event, { kind: 'assistant', id: String(item.group?.assistantId || item.group?.key || ''), text: String(item.group?.content || '') })"
+           />
           <div v-if="item.group?.reasoning || (item.group?.toolMessages?.length || 0) > 0" class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden" data-testid="turn-thinking-tools">
             <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="toggleTurn(item.group?.key || item.key)">
               <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] min-w-0">
@@ -91,11 +92,12 @@
         <div v-if="agentStore.toolCards.length" class="space-y-1.5" data-testid="active-turn-tools">
           <ToolCallCard v-for="card in agentStore.toolCards" :key="card.callId" :card="card" :default-collapsed="true" />
         </div>
-        <div
-          v-if="agentStore.streamingText"
-          class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
-          v-html="renderMarkdown(agentStore.streamingText)"
-        />
+         <div
+           v-if="agentStore.streamingText"
+           class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+           v-html="renderMarkdown(agentStore.streamingText)"
+           @click="onMarkdownLinkClick"
+         />
         <div v-else-if="agentStore.streamingActive && agentStore.isGenerating" class="flex items-center gap-2 text-xs text-secondary">
           <Loader2 class="w-3.5 h-3.5 animate-spin" />
           <span>Agent 推理中...</span>
@@ -116,12 +118,12 @@
         class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2"
         title="IN为末轮快照，多轮工具调用轮内多次请求只记末次占用，累计见顶栏Σ"
       >
-        <span>协议: {{ agentStore.telemetry.protocol === 'resp' ? 'RESP (/v1/responses)' : 'CHAT (/v1/chat/completions)' }}</span>
-        <span v-if="agentStore.telemetry.ttftMs !== null">首字: {{ agentStore.telemetry.ttftMs }}ms</span>
-        <span v-if="agentStore.telemetry.totalMs !== null">总耗时: {{ (agentStore.telemetry.totalMs / 1000).toFixed(1) }}s</span>
-        <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ agentStore.telemetry.cachedTokens }} · {{ cachePercent }})</span>
-        <span>Out: {{ agentStore.telemetry.outputTokens }}</span>
-      </div>
+         <span>协议: {{ agentStore.telemetry.protocol === 'resp' ? 'RESP (/v1/responses)' : 'CHAT (/v1/chat/completions)' }}</span>
+         <span v-if="agentStore.telemetry.ttftMs !== null">首字: {{ agentStore.telemetry.ttftMs }}ms</span>
+         <span v-if="agentStore.telemetry.totalMs !== null">总耗时: {{ (agentStore.telemetry.totalMs / 1000).toFixed(1) }}s</span>
+         <span>In: {{ agentStore.telemetry.inputTokens }} (Cache {{ agentStore.telemetry.cachedTokens }} · {{ cachePercent }})</span>
+         <span>Out: {{ agentStore.telemetry.outputTokens }}</span>
+       </div>
        <MessageContextMenu
          :visible="menuState.visible"
          :x="menuState.x"
@@ -131,8 +133,9 @@
          @copy="onMenuCopy"
          @replay="onMenuReplay"
          @branch="onMenuBranch"
+         @delete="onMenuDelete"
        />
-     </div>
+      </div>
    </div>
  </template>
 
@@ -155,7 +158,9 @@ const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
 const appearanceStore = useAppearanceStore();
 const { sessionMessages, budgetStatus } = storeToRefs(workspaceStore);
+ import { useDialog } from 'naive-ui';
 const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
+ const dialog = useDialog();
 
 const persistedMessages = computed<UnifiedChatMessage[]>(() => sessionMessages.value || []);
 // need04-04：默认全部收缩（与旧 collapsedReasoning 默认展开相反）；切卡保留在内存
@@ -237,17 +242,18 @@ function toCard(m: UnifiedChatMessage, group: TurnGroup): AgentToolCard {
   }
   const content = String(m.content || '');
   const isErr = content.includes('[Tool Error');
-   return {
-     callId,
-     functionName: ref?.name || (m.name as string) || 'tool',
-     argsJson,
-     status: isErr ? 'error' : 'done',
-     resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
-     exitCode: null,
-     durationMs: null,
-     iteration: 0,
-     images: imagesOf(m),
-   };
+    return {
+      callId,
+      functionName: ref?.name || (m.name as string) || 'tool',
+      argsJson,
+      status: isErr ? 'error' : 'done',
+      resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
+      exitCode: null,
+      durationMs: null,
+      iteration: 0,
+      receivedBytes: 0,
+      images: imagesOf(m),
+    };
  }
  
  // ---- need09-05：时间轴缩略图（miss 异步回填；失败置 lost + 黄字；只认 images 数组） ----
@@ -324,6 +330,34 @@ function renderMarkdown(content: string): string {
     return `<pre>${escapeHtml(content || '')}</pre>`;
   }
 }
+ // 链接永不进 CEF 主帧：渲染侧强制外链属性（漏网时走 popup→系统浏览器），点击侧委托后端系统打开。
+ const defaultLinkOpenRender = md.renderer.rules.link_open;
+ md.renderer.rules.link_open = (tokens, idx, options, env, self): string => {
+   try {
+     tokens[idx].attrSet('target', '_blank');
+     tokens[idx].attrSet('rel', 'noopener noreferrer');
+   } catch { /* 属性加不上也不阻断渲染 */ }
+   if (defaultLinkOpenRender) return defaultLinkOpenRender(tokens, idx, options, env, self);
+   return self.renderToken(tokens, idx, options);
+ };
+
+ async function onMarkdownLinkClick(e: MouseEvent): Promise<void> {
+   const el = e.target as HTMLElement | null;
+   const anchor = el?.closest?.('a[href]') as HTMLAnchorElement | null;
+   if (!anchor) return;
+   const href = (anchor.getAttribute('href') || '').trim();
+   if (!href || href.startsWith('#')) return;
+   // 拦截 CEF 帧内导航，转后端系统级打开（浏览器 / explorer），杜绝白屏
+   e.preventDefault();
+   e.stopPropagation();
+   try {
+     const workspaceRoot = workspaceStore.activeWorkspace?.rootPath || '';
+     const res = await getHostBridge().openExternalLink(href, workspaceRoot);
+     if (!res.ok) console.warn('[markdown-link] open failed:', res.code, res.message);
+   } catch (err) {
+     console.warn('[markdown-link] open failed:', err);
+   }
+ }
 
 function hasTelemetryGroup(g: TurnGroup): boolean {
   return !!g.telemetry && (g.telemetry.inputTokens != null || g.telemetry.outputTokens != null);
@@ -350,15 +384,15 @@ const menuBusy = computed(() => {
   return agentStore.isGenerating || agentStore.streamingActive || (sid ? agentStore.isCompacting(sid) : false);
 });
 const menuCanCopy = computed(() => String(menuState.target?.text || '').length > 0);
-function openMenu(e: MouseEvent, target: HistoryTarget): void {
-  if (!target.id) return;
-  const w = 176 + 24;
-  const h = 140 + 16;
-  menuState.x = Math.max(8, Math.min(e.clientX, window.innerWidth - w));
-  menuState.y = Math.max(8, Math.min(e.clientY, window.innerHeight - h));
-  menuState.target = target;
-  menuState.visible = true;
-}
+ function openMenu(e: MouseEvent, target: HistoryTarget): void {
+   if (!target.id) return;
+   const w = 176 + 24;
+   const h = 176 + 16;
+   menuState.x = Math.max(8, Math.min(e.clientX, window.innerWidth - w));
+   menuState.y = Math.max(8, Math.min(e.clientY, window.innerHeight - h));
+   menuState.target = target;
+   menuState.visible = true;
+ }
 function closeMenu(): void { menuState.visible = false; }
 async function onMenuCopy(): Promise<void> {
   const target = menuState.target;
@@ -381,6 +415,25 @@ async function onMenuBranch(): Promise<void> {
   if (!target || menuBusy.value) return;
   await workspaceStore.branchFromMessage(target.id, target.kind);
 }
+ function onMenuDelete(): void {
+   const target = menuState.target;
+   closeMenu();
+   if (!target || !target.id || menuBusy.value) return;
+   const label = target.kind === 'user' ? '这条用户消息' : '本轮 assistant 回复';
+   dialog.warning({
+     title: '删除消息',
+     content: `确定删除${label}吗？删除前会自动备份；若因此缺失工具回包，会自动补中断占位，保证历史仍可继续对话。`,
+     positiveText: '删除',
+     negativeText: '取消',
+     onPositiveClick: async () => {
+       const res = await workspaceStore.deleteMessage(target.id);
+       try {
+         (window as unknown as { $message?: { success: (s: string) => void; error: (s: string) => void } })
+           .$message?.[res.ok ? 'success' : 'error']?.(res.ok ? '已删除' : (res.message || '删除失败'));
+       } catch { /* ignore */ }
+     },
+   });
+ }
 function bindMenuGlobalClose(): void {
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', closeMenu);

@@ -71,7 +71,8 @@ public interface IAgentOrchestrator
      private readonly ProviderConfigService? _providerConfigService;
      private readonly PromptConfigService? _promptConfigService;
      private readonly AgentConfigService? _agentConfigService;
-     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25, AgentConfigService? agentConfigService = null)
+     private readonly UsageMetricsService? _usageMetrics;
+     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25, AgentConfigService? agentConfigService = null, UsageMetricsService? usageMetrics = null)
      {
          _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
          _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
@@ -81,6 +82,7 @@ public interface IAgentOrchestrator
          _providerConfigService = providerConfigService;
          _promptConfigService = promptConfigService;
          _agentConfigService = agentConfigService;
+         _usageMetrics = usageMetrics ?? (_storageManager != null ? new UsageMetricsService(_storageManager) : null);
          MaxIterations = maxIterations > 0 ? maxIterations : 25;
          ResolvedMaxIterations = MaxIterations;
      }
@@ -122,6 +124,13 @@ public interface IAgentOrchestrator
         {
             return AgentTurnResult.Failed("SESSION_NOT_FOUND", $"会话不存在：'{sessionId}'");
         }
+         // 轮前兜底：上一轮若死在“assistant 已落盘、tool 回包未落盘”之间，历史尾部就是孤儿 tool_calls，
+         // 直接发模型必 400。先愈合（补 synthetic cancelled tool），再追加本轮 user 消息。
+         try
+         {
+             await _sessionService.HealSessionHistoryAsync(workspaceId, sessionId, CancellationToken.None).ConfigureAwait(false);
+         }
+         catch { /* 愈合失败不阻塞本轮，网关错误会正常上报 */ }
 
         // (1) 追加 UserMessage 至 messages.jsonl
         var userMessage = UnifiedChatMessage.User(userText.Trim());
@@ -202,9 +211,11 @@ public interface IAgentOrchestrator
 
         string dataRoot = _storageManager?.CurrentDataRoot ?? string.Empty;
         int toolExecutions = 0;
-        // need05-01：本轮账单累计 Σ（含工具循环的多 call；单 call 轮即等于 usage）。失败/取消分支直接返回不发布，不计入。
-        long turnBilledIn = 0;
-        long turnBilledOut = 0;
+         // need05-01：本轮账单累计 Σ（含工具循环的多 call；单 call 轮即等于 usage）。失败/取消分支直接返回不发布，不计入。
+         long turnBilledIn = 0;
+         long turnBilledOut = 0;
+         // need12：轮内用量行收集（每次 HTTP 请求一行，轮末单事务批量写库）。
+         var usageRows = new List<PendingUsageRow>();
         // need08：轮首快照（追加 user 之后、循环之前，只读一次；保存不中断本轮，下一轮生效）
         int effectiveMax = MaxIterations;
         int cfgExecDefaultMs = AgentDefaults.DefaultTimeoutMs;
@@ -395,23 +406,42 @@ public interface IAgentOrchestrator
                                 {
                                     pending.FunctionName = evt.ToolCall.FunctionName;
                                 }
-                                PublishTurnEvent(sessionId, "ToolCallStarted", new
-                                {
-                                    iteration,
-                                    callId = cid,
-                                    functionName = pending.FunctionName
-                                });
-                            }
-                            break;
-                        case UnifiedStreamEventKind.ToolCallArgsDelta:
-                            if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId) && evt.TextDelta != null)
-                            {
-                                if (pendingTools.TryGetValue(evt.ToolCall.CallId, out var p))
-                                {
-                                    p.ArgsBuilder.Append(evt.TextDelta);
-                                }
-                            }
-                            break;
+                                  PublishTurnEvent(sessionId, "ToolCallStarted", new
+                                  {
+                                      iteration,
+                                      callId = cid,
+                                      functionName = pending.FunctionName,
+                                      receivedBytes = 0L
+                                  });
+                             }
+                             break;
+                         case UnifiedStreamEventKind.ToolCallArgsDelta:
+                             if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId) && evt.TextDelta != null)
+                             {
+                                 if (pendingTools.TryGetValue(evt.ToolCall.CallId, out var p))
+                                 {
+                                     p.ArgsBuilder.Append(evt.TextDelta);
+                                     try { p.ReceivedBytes += System.Text.Encoding.UTF8.GetByteCount(evt.TextDelta); }
+                                     catch { p.ReceivedBytes = p.ArgsBuilder.Length; }
+                                     bool isFileWrite = p.FunctionName is "write_file" or "edit_file";
+                                     long now = Environment.TickCount64;
+                                     bool throttleHit = (now - p.LastPublishTick) >= 150 || evt.TextDelta.Length > 4096;
+                                     if (isFileWrite ? throttleHit : true)
+                                     {
+                                         p.LastPublishTick = now; p.LastPublishedBytes = p.ReceivedBytes;
+                                         PublishTurnEvent(sessionId, "ToolCallUpdated", new
+                                         {
+                                             iteration,
+                                             callId = evt.ToolCall.CallId,
+                                             functionName = p.FunctionName,
+                                             argsDelta = evt.TextDelta,
+                                             receivedBytes = p.ReceivedBytes,
+                                             argsLength = p.ArgsBuilder.Length
+                                         });
+                                     }
+                                 }
+                             }
+                             break;
                         case UnifiedStreamEventKind.ToolCallCompleted:
                             if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
                             {
@@ -426,21 +456,24 @@ public interface IAgentOrchestrator
                                 {
                                     done2.FunctionName = evt.ToolCall.FunctionName;
                                 }
-                                if (!string.IsNullOrWhiteSpace(evt.ToolCall.ArgumentsJson))
-                                {
-                                    done2.ArgsBuilder.Clear();
-                                    done2.ArgsBuilder.Append(evt.ToolCall.ArgumentsJson);
-                                }
-                                // P1：把完整参数实时推送给前端，转入对应会话桶，避免卡片参数区永久为空
-                                PublishTurnEvent(sessionId, "ToolCallUpdated", new
-                                {
-                                    iteration,
-                                    callId = cid2,
-                                    functionName = done2.FunctionName,
-                                    argsJson = done2.ArgsBuilder.ToString()
-                                });
-                            }
-                            break;
+                                 if (!string.IsNullOrWhiteSpace(evt.ToolCall.ArgumentsJson))
+                                 {
+                                     done2.ArgsBuilder.Clear();
+                                     done2.ArgsBuilder.Append(evt.ToolCall.ArgumentsJson);
+                                     try { done2.ReceivedBytes = System.Text.Encoding.UTF8.GetByteCount(evt.ToolCall.ArgumentsJson); } catch { }
+                                 }
+                                 // P1：把完整参数实时推送给前端，转入对应会话桶，避免卡片参数区永久为空
+                                 PublishTurnEvent(sessionId, "ToolCallUpdated", new
+                                 {
+                                     iteration,
+                                     callId = cid2,
+                                     functionName = done2.FunctionName,
+                                     argsJson = done2.ArgsBuilder.ToString(),
+                                     receivedBytes = done2.ReceivedBytes,
+                                     argsLength = done2.ArgsBuilder.Length
+                                 });
+                             }
+                             break;
                         case UnifiedStreamEventKind.UsageUpdated:
                             usage = evt.Usage;
                             // need05-01：账单累计（本轮内多次 LLM 调用的 Σ；streamError/cancel 分支直接返回，此处不回滚但不发布）
@@ -488,21 +521,25 @@ public interface IAgentOrchestrator
                     }
                     catch { /* 取消路径下持久化失败不掩盖取消语义 */ }
                 }
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
+                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                 CollectUsageRow(usageRows, provider, model, usage, "cancelled", requestId, sessionId, workspaceId);
+                 FlushUsageRows(usageRows, sessionId, workspaceId);
+                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
             }
 
-            if (streamErrorCode != null)
-            {
-                try
-                {
-                    var errMsg = UnifiedChatMessage.Assistant($"本次推理遇到错误（{streamErrorCode}）：{streamErrorMessage}");
-                    await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, errMsg, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch { /* ignore */ }
-                PublishTurnEvent(sessionId, "TurnError", new { iteration, errorCode = streamErrorCode, errorMessage = streamErrorMessage });
-                return AgentTurnResult.Failed(streamErrorCode, streamErrorMessage ?? string.Empty, iteration, toolExecutions);
-            }
+             if (streamErrorCode != null)
+             {
+                 try
+                 {
+                     var errMsg = UnifiedChatMessage.Assistant($"本次推理遇到错误（{streamErrorCode}）：{streamErrorMessage}");
+                     await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, errMsg, CancellationToken.None).ConfigureAwait(false);
+                 }
+                 catch { /* ignore */ }
+                 PublishTurnEvent(sessionId, "TurnError", new { iteration, errorCode = streamErrorCode, errorMessage = streamErrorMessage });
+                 CollectUsageRow(usageRows, provider, model, usage, "error", requestId, sessionId, workspaceId);
+                 FlushUsageRows(usageRows, sessionId, workspaceId);
+                 return AgentTurnResult.Failed(streamErrorCode, streamErrorMessage ?? string.Empty, iteration, toolExecutions);
+             }
 
             // 汇总 AssistantMessage 并持久化
             var completedCalls = new List<UnifiedToolCall>();
@@ -520,12 +557,14 @@ public interface IAgentOrchestrator
                 textAcc.Length > 0 ? textAcc.ToString() : null,
                 completedCalls.Count > 0 ? completedCalls : null,
                 reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null);
-            if (usage != null)
-            {
-                assistantMessage.InputTokens = usage.InputTokens;
-                assistantMessage.OutputTokens = usage.OutputTokens;
-                assistantMessage.CachedTokens = usage.CachedInputTokens;
-            }
+             if (usage != null)
+             {
+                 assistantMessage.InputTokens = usage.InputTokens;
+                 assistantMessage.OutputTokens = usage.OutputTokens;
+                 assistantMessage.CachedTokens = usage.CachedInputTokens;
+             }
+             // need12：本 iteration 的 HTTP 请求落袋（纯内存，轮末统一写库；失败/取消分支在各自 return 前同样落袋）。
+             CollectUsageRow(usageRows, provider, model, usage, usage != null ? "ok" : "degraded", requestId, sessionId, workspaceId);
 
             try
             {
@@ -552,22 +591,23 @@ public interface IAgentOrchestrator
             });
 
             // (6) 无 ToolCalls 则 TurnCompleted 结束
-            if (completedCalls.Count == 0)
-            {
-                PublishTurnEvent(sessionId, "TurnCompleted", new
-                {
-                    iterations = iteration,
-                    toolExecutions,
-                    protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
-                    inputTokens = usage?.InputTokens ?? 0,
-                    outputTokens = usage?.OutputTokens ?? 0,
-                    cachedTokens = usage?.CachedInputTokens ?? 0,
-                    billedPrompt = turnBilledIn,
-                    billedCompletion = turnBilledOut,
-                    updatedAtUtc = DateTime.UtcNow.ToString("o")
-                });
-                return AgentTurnResult.Completed(iteration, toolExecutions);
-            }
+             if (completedCalls.Count == 0)
+             {
+                 PublishTurnEvent(sessionId, "TurnCompleted", new
+                 {
+                     iterations = iteration,
+                     toolExecutions,
+                     protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
+                     inputTokens = usage?.InputTokens ?? 0,
+                     outputTokens = usage?.OutputTokens ?? 0,
+                     cachedTokens = usage?.CachedInputTokens ?? 0,
+                     billedPrompt = turnBilledIn,
+                     billedCompletion = turnBilledOut,
+                     updatedAtUtc = DateTime.UtcNow.ToString("o")
+                 });
+                 FlushUsageRows(usageRows, sessionId, workspaceId);
+                 return AgentTurnResult.Completed(iteration, toolExecutions);
+             }
 
             // 达到最大迭代仍有工具调用 → 截断暂停（need08：无限模式 effectiveMax<=0 永不进）
             if (effectiveMax > 0 && iteration >= effectiveMax)
@@ -576,11 +616,12 @@ public interface IAgentOrchestrator
                 {
                     var notice = UnifiedChatMessage.Assistant(
                         $"已达到单轮最大迭代次数（{effectiveMax}），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。");
-                    await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, notice, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch { /* ignore */ }
-                PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = iteration, toolExecutions, maxIterations = effectiveMax });
-                return AgentTurnResult.Truncated(iteration, toolExecutions);
+                     await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, notice, CancellationToken.None).ConfigureAwait(false);
+                 }
+                 catch { /* ignore */ }
+                 PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = iteration, toolExecutions, maxIterations = effectiveMax });
+                 FlushUsageRows(usageRows, sessionId, workspaceId);
+                 return AgentTurnResult.Truncated(iteration, toolExecutions);
             }
 
             // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
@@ -648,25 +689,56 @@ public interface IAgentOrchestrator
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                     return AgentTurnResult.Cancelled(iteration, toolExecutions);
                 }
-                PublishTurnEvent(sessionId, "ToolExecutionCompleted", new
-                {
-                    iteration,
-                    callId = call.CallId,
-                    functionName = call.FunctionName,
-                    success = toolResult.Success,
-                    exitCode = toolResult.ExitCode,
-                    durationMs = toolResult.DurationMs,
-                    argsJson = call.ArgumentsJson,
-                    resultText = TruncateForEvent(toolText, 8000),
-                    updatedAtUtc = DateTime.UtcNow.ToString("o")
-                });
+                 PublishTurnEvent(sessionId, "ToolExecutionCompleted", new
+                 {
+                     iteration,
+                     callId = call.CallId,
+                     functionName = call.FunctionName,
+                     success = toolResult.Success,
+                     exitCode = toolResult.ExitCode,
+                     durationMs = toolResult.DurationMs,
+                     argsJson = call.ArgumentsJson,
+                     resultText = TruncateForEvent(toolText, 8000),
+                     fileBytes = toolResult.FileBytes,
+                     updatedAtUtc = DateTime.UtcNow.ToString("o")
+                 });
             }
         }
 
-        // 理论不可达（有限循环内 iteration>=effectiveMax 即返回；无限循环内必 return），兜底截断
-        PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = effectiveMax, toolExecutions, maxIterations = effectiveMax });
-        return AgentTurnResult.Truncated(effectiveMax, toolExecutions);
-    }
+         // 理论不可达（有限循环内 iteration>=effectiveMax 即返回；无限循环内必 return），兜底截断
+         PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = effectiveMax, toolExecutions, maxIterations = effectiveMax });
+         FlushUsageRows(usageRows, sessionId, workspaceId);
+         return AgentTurnResult.Truncated(effectiveMax, toolExecutions);
+     }
+ 
+     private void CollectUsageRow(List<PendingUsageRow> rows, ProviderConfig provider, ModelConfig model, UnifiedTokenUsage? usage, string status, string requestId, string sessionId, string workspaceId)
+     {
+         try
+         {
+             if (rows == null || provider == null || model == null) return;
+             rows.Add(new PendingUsageRow
+             {
+                 ProviderId = provider.Id ?? string.Empty,
+                 ProviderName = provider.Name ?? provider.Id ?? string.Empty,
+                 ModelId = model.Id ?? string.Empty,
+                 ModelDisplay = string.IsNullOrWhiteSpace(model.DisplayName) ? (model.Id ?? string.Empty) : model.DisplayName,
+                 Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
+                 Input = usage?.InputTokens ?? 0,
+                 Output = usage?.OutputTokens ?? 0,
+                 Cached = usage?.CachedInputTokens ?? 0,
+                 Status = string.IsNullOrWhiteSpace(status) ? "ok" : status,
+                 RequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId,
+                 SessionId = sessionId ?? string.Empty,
+                 WorkspaceId = workspaceId ?? string.Empty,
+             });
+         }
+         catch { /* 永不阻塞主链路 */ }
+     }
+ 
+     private void FlushUsageRows(List<PendingUsageRow> rows, string sessionId, string workspaceId)
+     {
+         try { _usageMetrics?.EnqueueFlush(rows, sessionId, workspaceId); } catch { /* 永不抛 */ }
+     }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(
         string? providerId, string? modelId, SessionMetadata session)
@@ -770,11 +842,14 @@ public interface IAgentOrchestrator
         }
     }
 
-    private sealed class PendingToolCall
-    {
-        public string CallId { get; init; } = string.Empty;
-        public string? ItemId { get; set; }
-        public string FunctionName { get; set; } = string.Empty;
-        public System.Text.StringBuilder ArgsBuilder { get; } = new();
-    }
+     private sealed class PendingToolCall
+     {
+         public string CallId { get; init; } = string.Empty;
+         public string? ItemId { get; set; }
+         public string FunctionName { get; set; } = string.Empty;
+         public System.Text.StringBuilder ArgsBuilder { get; } = new();
+         public long ReceivedBytes = 0;
+         public long LastPublishedBytes = -1;
+         public long LastPublishTick = 0;
+     }
 }

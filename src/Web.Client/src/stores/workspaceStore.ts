@@ -225,10 +225,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
 
-        if (activeSessionId.value) {
-          await loadSessionMessages(activeSessionId.value);
-          await refreshBudget();
-        } else {
+         if (activeSessionId.value) {
+           await loadSessionMessages(activeSessionId.value);
+           // 启动/工作区进入：同样做一次孤儿愈合，脏了才重拉
+           if (await healSessionHistory()) await loadSessionMessages(activeSessionId.value);
+           await refreshBudget();
+         } else {
           sessionMessages.value = [];
           budgetStatus.value = null;
         }
@@ -238,12 +240,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function selectSession(sessionId: string): Promise<void> {
-    if (activeSessionId.value === sessionId) return;
-    activeSessionId.value = sessionId;
-    await loadSessionMessages(sessionId);
-    await refreshBudget();
-  }
+   async function selectSession(sessionId: string): Promise<void> {
+     if (activeSessionId.value === sessionId) return;
+     activeSessionId.value = sessionId;
+     await loadSessionMessages(sessionId);
+     // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
+     if (await healSessionHistory()) await loadSessionMessages(sessionId);
+     await refreshBudget();
+   }
 
   async function createSession(
     title?: string,
@@ -542,6 +546,43 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false;
     }
   }
+   // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
+   async function healSessionHistory(): Promise<boolean> {
+     if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+     try {
+       const bridge = getHostBridge();
+       const res = await bridge.healSessionHistory(activeWorkspaceId.value, activeSessionId.value);
+       if (!res.ok || !res.data) return false;
+       const d = res.data;
+       if ((d.syntheticAppended || 0) > 0 || (d.orphanToolsRemoved || 0) > 0) {
+         console.info(`[workspaceStore] history healed: synthetic=${d.syntheticAppended} removedOrphans=${d.orphanToolsRemoved}`);
+         return true;
+       }
+       return false;
+     } catch (err) {
+       console.error('[workspaceStore] healSessionHistory failed:', err);
+       return false;
+     }
+   }
+
+   // 删除单条消息（后端先备份再删行，删后自动愈合；生成中拒绝）。
+   async function deleteMessage(messageId: string): Promise<{ ok: boolean; message?: string; code?: string }> {
+     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+     if (!messageId) return { ok: false, message: '消息不存在' };
+     try {
+       const bridge = getHostBridge();
+       const res = await bridge.deleteSessionMessage(activeWorkspaceId.value, activeSessionId.value, messageId);
+       if (res.ok && res.data) {
+         await loadSessionMessages(activeSessionId.value);
+         await refreshBudget();
+         return { ok: true };
+       }
+       return { ok: false, message: res.message || '删除失败', code: res.code };
+     } catch (err) {
+       console.error('[workspaceStore] deleteMessage failed:', err);
+       return { ok: false, message: String(err) };
+     }
+   }
 
   async function initialize(): Promise<void> {
     await loadWorkspaces();
@@ -585,6 +626,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     togglePinSession,
     deleteSession,
     loadSessionMessages,
+     healSessionHistory,
+     deleteMessage,
     truncateHistory,
     branchFromMessage,
     appendMessage,
