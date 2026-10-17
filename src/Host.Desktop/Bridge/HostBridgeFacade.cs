@@ -60,12 +60,13 @@ namespace Host.Desktop.Bridge;
         ProviderConfigService? providerConfigService = null,
         ILlmGatewayClient? llmGatewayClient = null,
         ISessionRepository? sessionRepository = null,
-        IWorkspaceSessionService? workspaceSessionService = null,
-        ITokenBudgetService? tokenBudgetService = null,
+         IWorkspaceSessionService? workspaceSessionService = null,
+         ITokenBudgetService? tokenBudgetService = null,
          IAgentOrchestrator? agentOrchestrator = null,
          ICompactionService? compactionService = null,
          PromptConfigService? promptConfigService = null,
-         AgentConfigService? agentConfigService = null)
+         AgentConfigService? agentConfigService = null,
+         SkillMemoryService? skillMemoryService = null)
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
@@ -80,6 +81,7 @@ namespace Host.Desktop.Bridge;
          _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
          _agentOrchestrator = agentOrchestrator;
          _compactionService = compactionService;
+         _skillMemoryServiceOpt = skillMemoryService;
     }
 
     /// <summary>

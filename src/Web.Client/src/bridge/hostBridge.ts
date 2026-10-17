@@ -137,14 +137,15 @@ export interface ProxyConnectivityTestResult {
    lost?: boolean;
  }
  
- // need09-03：模型多模态能力位归一化（缺省 false/4/auto；maxImagesPerTurn 0=默认4）
+ // need09-03：模型多模态能力位归一化（缺省 false/4/high；maxImagesPerTurn 0=默认4；显式 auto 保留，缺失/非法回 high）
  export function normalizeVisionFlag(m: Record<string, unknown>): void {
    const r = m as unknown as { supportsVision?: unknown; maxImagesPerTurn?: unknown; visionDetail?: unknown };
    if (typeof r.supportsVision !== 'boolean') r.supportsVision = false;
    if (!Number.isFinite(r.maxImagesPerTurn as number)) r.maxImagesPerTurn = 4;
    r.maxImagesPerTurn = Math.trunc(r.maxImagesPerTurn as number);
    if (r.maxImagesPerTurn === 0) r.maxImagesPerTurn = 4;
-   if (!['auto', 'low', 'high'].includes(String((r.visionDetail as string) || 'auto'))) r.visionDetail = 'auto';
+   if (r.visionDetail == null || r.visionDetail === '') r.visionDetail = 'high';
+  if (!['auto', 'low', 'high'].includes(String(r.visionDetail))) r.visionDetail = 'high';
  }
 
 export interface CustomHeaderEntry {
@@ -394,6 +395,19 @@ export interface ContextBudgetStatusDto {
      success: boolean; errorCode?: string | null; keptMessages: number; removedMessages: number;
      replayText?: string | null; backupFileName?: string | null;
    }
+   // need10：技能与记忆只读管理（查/开关/删除，不含新建与编辑）
+   export type SkillMemoryKind = 'skill' | 'memory';
+   export type SkillMemoryScope = 'global' | 'project';
+   export type SkillMemoryScopeFilter = 'global' | 'project' | 'all';
+   export interface SkillMemoryListItem {
+     name: string; scope: SkillMemoryScope; title: string; summary: string; pin: string;
+     enabled: boolean; priority: number; version: number; estTokens: number; chars: number;
+     hash: string; hasAssets: boolean; updatedAtUtc: string; dirPath: string;
+   }
+   export interface SkillMemoryDetail extends SkillMemoryListItem {
+     bodyPreview: string; truncated: boolean; bodyTotalChars: number;
+   }
+   export interface SkillMemoryOpResult { ok: boolean; bakFileName?: string | null; notice: string; }
 
 export interface HostBridgeApi {
   // Stage 01
@@ -479,6 +493,12 @@ export interface HostBridgeApi {
    getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
    // need07
    truncateSessionHistory: (workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
+   // need10：技能与记忆只读管理（查/开关/删除；无新建与编辑）
+   listSkillMemory: (kind: SkillMemoryKind, scope: SkillMemoryScopeFilter, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryListItem[]>>;
+   getSkillMemoryDetail: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryDetail>>;
+   setSkillMemoryEnabled: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, enabled: boolean, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryOpResult>>;
+   deleteSkillMemory: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<SkillMemoryOpResult>>;
+   openSkillMemoryFolder: (kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) => Promise<BridgeResponse<boolean>>;
    branchSession: (workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) => Promise<BridgeResponse<SessionMetadata>>;
 }
 
@@ -759,7 +779,7 @@ function createBrowserMockBridge(): HostBridgeApi {
              enabled: true,
              supportsVision: true,
              maxImagesPerTurn: 4,
-             visionDetail: 'auto',
+             visionDetail: 'high',
            },
            {
              id: 'o3-mini',
@@ -771,7 +791,7 @@ function createBrowserMockBridge(): HostBridgeApi {
              enabled: true,
              supportsVision: false,
              maxImagesPerTurn: 4,
-             visionDetail: 'auto',
+             visionDetail: 'high',
            },
         ],
       },
@@ -798,7 +818,7 @@ function createBrowserMockBridge(): HostBridgeApi {
              enabled: true,
              supportsVision: false,
              maxImagesPerTurn: 4,
-             visionDetail: 'auto',
+             visionDetail: 'high',
            },
          ],
       },
@@ -1586,6 +1606,38 @@ function createBrowserMockBridge(): HostBridgeApi {
        if (hit) hit.messageCount = prefix.length;
        return { ok: true, data: sess as SessionMetadata };
      },
+     // need10 mock 仅示意，联调以真后端为准
+     async listSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScopeFilter) {
+       const mk = (name: string, sc: SkillMemoryScope, title: string, summary: string, enabled: boolean): SkillMemoryListItem => ({
+         name, scope: sc, title, summary, pin: kind === 'skill' ? 'auto' : 'pinned',
+         enabled, priority: 100, version: 1, estTokens: 42, chars: summary.length,
+         hash: 'mockhash16', hasAssets: false, updatedAtUtc: new Date().toISOString(), dirPath: `C:\\\\HaloAgentData\\\\${kind}\\\\${name}`,
+       });
+       const all: SkillMemoryListItem[] = [
+         mk(kind === 'skill' ? 'demo-skill' : 'demo-memory', 'global', '演示条目', '这是一条 mock 仅示意数据', true),
+         mk(kind === 'skill' ? 'project-helper' : 'project-note', 'project', '项目条目', '随工作区 .haloagent/ 走的示例', false),
+       ];
+       const list = scope === 'all' ? all : all.filter((i) => i.scope === scope);
+       return { ok: true, data: list };
+     },
+     async getSkillMemoryDetail(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string) {
+       const list = await (this as unknown as { listSkillMemory: (k: SkillMemoryKind, s: SkillMemoryScopeFilter) => Promise<{ ok: boolean; data: SkillMemoryListItem[] }> }).listSkillMemory(kind, scope);
+       const hit = list.data.find((i) => i.name === name) || list.data[0];
+       if (!hit) return { ok: false, code: 'SKILL_NOT_FOUND', message: '条目不存在，请刷新' };
+       return { ok: true, data: { ...hit, bodyPreview: `# ${hit.title}\n\n${hit.summary}\n\n正文节选（mock 仅示意）。`, truncated: false, bodyTotalChars: 64 } };
+     },
+     async setSkillMemoryEnabled(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, enabled: boolean) {
+       const kindCn = kind === 'skill' ? '技能' : '记忆';
+       return { ok: true, data: { ok: true, notice: `已${enabled ? '启用' : '停用'} ${kindCn} '${name}'（${scope}）。下一轮对话起生效。` } };
+     },
+     async deleteSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string) {
+       const kindCn = kind === 'skill' ? '技能' : '记忆';
+       const bak = `${name}.deleted-mock.bak`;
+       return { ok: true, data: { ok: true, bakFileName: bak, notice: `已删除${scope} ${kindCn} '${name}'（备份 ${bak}）。下一轮对话起生效。` } };
+     },
+     async openSkillMemoryFolder() {
+       return { ok: true, data: true };
+     },
    };
  }
 
@@ -1916,6 +1968,46 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
        return normalizeBridgePayload<BridgeResponse<SessionMetadata>>(
          await rawBridge.branchSession(workspaceId ?? '', sourceSessionId ?? '', anchorMessageId ?? '', includeAnchor ?? true)
        );
+     },
+     async listSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScopeFilter, workspaceId?: string) {
+       try {
+         if (typeof rawBridge.listSkillMemory !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<SkillMemoryListItem[]>>(
+           await rawBridge.listSkillMemory(kind ?? 'skill', scope ?? 'all', workspaceId ?? '')
+         );
+       } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
+     },
+     async getSkillMemoryDetail(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) {
+       try {
+         if (typeof rawBridge.getSkillMemoryDetail !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<SkillMemoryDetail>>(
+           await rawBridge.getSkillMemoryDetail(kind ?? 'skill', scope ?? 'global', name ?? '', workspaceId ?? '')
+         );
+       } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
+     },
+     async setSkillMemoryEnabled(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, enabled: boolean, workspaceId?: string) {
+       try {
+         if (typeof rawBridge.setSkillMemoryEnabled !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<SkillMemoryOpResult>>(
+           await rawBridge.setSkillMemoryEnabled(kind ?? 'skill', scope ?? 'global', name ?? '', enabled ?? true, workspaceId ?? '')
+         );
+       } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
+     },
+     async deleteSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) {
+       try {
+         if (typeof rawBridge.deleteSkillMemory !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<SkillMemoryOpResult>>(
+           await rawBridge.deleteSkillMemory(kind ?? 'skill', scope ?? 'global', name ?? '', workspaceId ?? '')
+         );
+       } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
+     },
+     async openSkillMemoryFolder(kind: SkillMemoryKind, scope: SkillMemoryScope, name: string, workspaceId?: string) {
+       try {
+         if (typeof rawBridge.openSkillMemoryFolder !== 'function') return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' };
+         return normalizeBridgePayload<BridgeResponse<boolean>>(
+           await rawBridge.openSkillMemoryFolder(kind ?? 'skill', scope ?? 'global', name ?? '', workspaceId ?? '')
+         );
+       } catch { return { ok: false, code: 'SKILL_UNSUPPORTED', message: '技能记忆通道不可用' }; }
      },
   };
 }
