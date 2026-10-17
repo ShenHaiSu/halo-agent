@@ -1,7 +1,7 @@
 <template>
   <div
     class="rounded-md border border-subtle bg-surface overflow-hidden text-xs"
-    data-testid="tool-call-card"
+    :data-testid="isViewImage ? 'tool-card-view_image' : 'tool-call-card'"
     :data-tool="card.functionName"
   >
     <!-- Header -->
@@ -100,6 +100,49 @@
             </n-button>
           </div>
         </div>
+        <!-- (2.5) need09-05: view_image 三态 -->
+        <div v-else-if="isViewImage" class="p-2.5 space-y-1.5">
+          <div v-if="card.status === 'running'" class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">
+            正在读取图片：{{ viewImagePathShort }}
+          </div>
+          <div v-else-if="card.status === 'error'" class="font-mono app-text-small text-rose-400 break-all whitespace-pre-wrap select-text">
+            {{ displayOutput || '读取图片失败' }}
+          </div>
+          <div v-else class="space-y-1.5">
+            <div class="font-mono app-text-small text-emerald-400 break-all">
+              已读取 {{ viewImageName }} ({{ viewImageWH }}, {{ viewImageKB }})
+            </div>
+            <div v-if="viewImages.length" class="flex flex-wrap gap-1.5">
+              <template v-for="img in viewImages" :key="img.imageId">
+                <n-image
+                  v-if="toolThumbOf(img)"
+                  :src="toolThumbOf(img)"
+                  :alt="img.fileName"
+                  width="96"
+                  object-fit="cover"
+                  class="rounded border border-subtle"
+                  :data-testid="`tool-image-${img.imageId}`"
+                />
+                <n-tag v-else size="small" :bordered="true" :title="img.fileName">
+                  {{ img.fileName }}
+                </n-tag>
+              </template>
+            </div>
+            <div class="flex items-center gap-2">
+              <n-button size="tiny" quaternary :data-testid="`tool-open-image-${card.callId}`" @click="handleOpenOrigin">
+                打开原图
+              </n-button>
+              <n-button size="tiny" quaternary @click="handleCopy">
+                <template #icon><Copy class="w-3 h-3" /></template>
+                复制输出
+              </n-button>
+            </div>
+            <div
+              v-if="displayOutput"
+              class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
+            >{{ viewImageTruncated }}</div>
+          </div>
+        </div>
         <div v-else class="p-2.5 space-y-1.5">
           <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
           <div
@@ -128,7 +171,7 @@ import {
   Wrench,
 } from 'lucide-vue-next';
 import type { AgentToolCard } from '@/stores/agentStore';
-import { getHostBridge } from '@/bridge/hostBridge';
+import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 const props = defineProps<{
@@ -149,6 +192,7 @@ function toggle(): void {
 
 const isFileEdit = computed(() => props.card.functionName === 'edit_file' || props.card.functionName === 'write_file');
 const isExec = computed(() => props.card.functionName === 'exec_command');
+const isViewImage = computed(() => props.card.functionName === 'view_image');
 
 const iconComponent = computed(() => {
   switch (props.card.functionName) {
@@ -189,6 +233,7 @@ const summaryText = computed(() => {
     case 'list_dir': return s(a['path'] || a['dir']) ? `浏览 ${s(a['path'] || a['dir'])}` : '浏览目录';
     case 'grep_search': return s(a['pattern'] || a['query']) ? `检索 ${s(a['pattern'] || a['query'])}` : '检索';
     case 'exec_command': return '';
+    case 'view_image': return filePath.value ? `查看 ${filePath.value}` : '查看图片';
     default: return filePath.value;
   }
 });
@@ -230,6 +275,13 @@ const truncatedOutput = computed(() => {
   return out;
 });
 
+/** need09-05：view_image 结果文本与存量一致截断（base64 永不进卡，6000 上限） */
+const viewImageTruncated = computed(() => {
+  const out = displayOutput.value;
+  if (out.length > 6000) return out.slice(0, 6000) + '\n...（输出过长已截断）';
+  return out;
+});
+
 const compactSummary = computed(() => {
   const a = argsObj.value;
   const s = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -240,6 +292,81 @@ const compactSummary = computed(() => {
     default: return `参数：${props.card.argsJson || '{}'}（点击展开）`;
   }
 });
+
+// ---- need09-05 view_image 图片行 ----
+const viewImages = computed<ChatImageRef[]>(() => (Array.isArray(props.card.images) ? props.card.images : []));
+
+const viewImageRawPath = computed(() => {
+  const a = argsObj.value;
+  const v = a['path'] ?? a['file_path'] ?? '';
+  return typeof v === 'string' ? v : '';
+});
+
+const viewImagePathShort = computed(() => {
+  const p = viewImageRawPath.value || '(未知路径)';
+  return p.length > 60 ? '…' + p.slice(p.length - 60) : p;
+});
+
+const viewImageName = computed(() => {
+  const imgs = viewImages.value;
+  if (imgs.length > 0 && imgs[0].fileName) return imgs[0].fileName;
+  const p = viewImageRawPath.value;
+  if (!p) return '(未知图片)';
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : p;
+});
+
+const viewImageWH = computed(() => {
+  const first = viewImages.value.length > 0 ? viewImages.value[0] : null;
+  if (first && first.width > 0 && first.height > 0) return `${first.width}x${first.height}`;
+  return '?x?';
+});
+
+const viewImageKB = computed(() => {
+  const first = viewImages.value.length > 0 ? viewImages.value[0] : null;
+  if (first && first.sizeBytes > 0) return `${(first.sizeBytes / 1024).toFixed(1)}KB`;
+  return '?KB';
+});
+
+const toolThumbCache = ref<Record<string, string>>({});
+const toolThumbPending = new Set<string>();
+
+function toolThumbOf(img: ChatImageRef): string {
+  const hit = toolThumbCache.value[img.imageId];
+  if (hit) return hit;
+  if (!toolThumbPending.has(img.imageId)) {
+    toolThumbPending.add(img.imageId);
+    void (async () => {
+      try {
+        const ws = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
+        const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+        const res = await getHostBridge().getImageThumbnail(ws, sid, img.imageId);
+        if (res.ok && typeof res.data === 'string' && res.data) {
+          toolThumbCache.value = { ...toolThumbCache.value, [img.imageId]: res.data };
+        }
+      } catch {
+        /* 失败显示文件名 chip，不崩时间轴 */
+      } finally {
+        toolThumbPending.delete(img.imageId);
+      }
+    })();
+  }
+  return '';
+}
+
+async function handleOpenOrigin(): Promise<void> {
+  const first = viewImages.value.length > 0 ? viewImages.value[0] : null;
+  const target = (first && first.relPath) || viewImageRawPath.value;
+  if (!target) {
+    message.warning('无可用原图路径');
+    return;
+  }
+  try {
+    await getHostBridge().openPathInExplorer(target);
+  } catch {
+    message.error('打开原图失败');
+  }
+}
 
 async function handleKill(): Promise<void> {
   const sessionId = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';

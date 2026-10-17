@@ -72,19 +72,26 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 writer.WriteEndObject();
             }
 
-            // 5.2 历史与当前消息
+            // 5.2 历史与当前消息（need09-05：含图 user 走 content 数组；无图保持 content:string 零抖动）
+            var mmPlan = MultimodalPlanner.PlanTurn(request);
+            string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            if (mmPlan.Dropped > 0)
+            {
+                try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info("[REQ] reqId=" + request.RequestId + " model=" + request.Model.Id + " imgTotal=" + mmPlan.Total + " imgTruncated=" + mmPlan.Dropped); } catch { }
+            }
+            int mmIndex = -1;
             foreach (var msg in request.Messages)
             {
+                mmIndex++;
+                var kept = mmPlan.Kept[mmIndex].Where(r => !string.IsNullOrWhiteSpace(r.DataUrl)).ToList();
                 writer.WriteStartObject();
                 writer.WriteString("role", msg.Role);
-
                 if (msg.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
                 {
                     // 若有 ToolCalls，content 统一输出有效文本或 ""（兼容严格校验第三方网关）
                     if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
                     {
                         writer.WriteString("content", msg.Content ?? string.Empty);
-
                         writer.WriteStartArray("tool_calls");
                         foreach (var tc in msg.ToolCalls)
                         {
@@ -108,12 +115,54 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 {
                     writer.WriteString("tool_call_id", msg.ToolCallId ?? string.Empty);
                     writer.WriteString("content", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    if (kept.Count > 0)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("role", "user");
+                        writer.WriteStartArray("content");
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "text");
+                        writer.WriteString("text", msg.Content ?? string.Empty);
+                        writer.WriteEndObject();
+                        foreach (var r in kept)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteString("type", "image_url");
+                            writer.WriteStartObject("image_url");
+                            writer.WriteString("url", r.DataUrl!);
+                            writer.WriteString("detail", visionDetail);
+                            writer.WriteEndObject();
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+                    continue;
+                }
+                else if (msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase) && kept.Count > 0)
+                {
+                    writer.WriteStartArray("content");
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "text");
+                    writer.WriteString("text", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    foreach (var r in kept)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "image_url");
+                        writer.WriteStartObject("image_url");
+                        writer.WriteString("url", r.DataUrl!);
+                        writer.WriteString("detail", visionDetail);
+                        writer.WriteEndObject();
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
                 }
                 else
                 {
                     writer.WriteString("content", msg.Content ?? string.Empty);
                 }
-
                 writer.WriteEndObject();
             }
 

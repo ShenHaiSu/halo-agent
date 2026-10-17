@@ -26,18 +26,22 @@ public sealed class ToolResult
 
     /// <summary>超长输出落盘文件绝对路径（未超限为 null）。</summary>
     public string? SpilledFile { get; set; }
-
+    /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
     public static ToolResult Ok(
         string output,
         int exitCode = 0,
         long durationMs = 0,
-        string? spilledFile = null) => new()
+        string? spilledFile = null,
+        List<Host.Desktop.Core.Models.ChatImageRef>? images = null) => new()
         {
             Success = true,
             Output = output ?? string.Empty,
             ExitCode = exitCode,
             DurationMs = durationMs,
             SpilledFile = spilledFile,
+            Images = images,
         };
 
     public static ToolResult Fail(

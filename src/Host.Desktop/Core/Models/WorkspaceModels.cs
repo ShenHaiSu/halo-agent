@@ -96,6 +96,27 @@ public sealed class SessionMetadata
 }
 
 /// <summary>
+/// need09-05：会话内图片引用（messages.jsonl 只存引用不存 base64；字节落盘 attachments/）。
+/// </summary>
+public sealed class ChatImageRef
+{
+    /// <summary>图片唯一 ID（img_ + sha16）。</summary>
+    public string ImageId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    /// <summary>image/jpeg | image/png | image/webp。</summary>
+    public string Mime { get; set; } = string.Empty;
+    /// <summary>会话内相对路径 attachments/日期/imageId_safeName。</summary>
+    public string RelPath { get; set; } = string.Empty;
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public long SizeBytes { get; set; }
+    /// <summary>图片字节 SHA256 hex 前 16 位（去重键）。</summary>
+    public string Sha16 { get; set; } = string.Empty;
+    /// <summary>运行时丢失标记（文件被删）；JsonIgnore 永不落盘，读时重算。</summary>
+    [JsonIgnore]
+    public bool IsMissing { get; set; }
+}
+/// <summary>
 /// 统一消息体（支持 user / assistant / tool / system）
 /// </summary>
 public sealed class UnifiedChatMessage
@@ -110,6 +131,9 @@ public sealed class UnifiedChatMessage
     public long? InputTokens { get; set; }
     public long? OutputTokens { get; set; }
     public long? CachedTokens { get; set; }
+    /// <summary>need09-05：本消息附带的图片引用；null/空 = 纯文本（STJ 缺字段容忍，WhenWritingNull 保证老快照零抖动）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ChatImageRef>? Images { get; set; }
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
 
     public static UnifiedChatMessage System(string content) =>

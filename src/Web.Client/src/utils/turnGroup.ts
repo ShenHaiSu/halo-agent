@@ -1,5 +1,5 @@
 /** need04-04：轮次聚合纯函数（assistant + 后续 tool* 归为一组，不改落盘结构）。 */
-import type { UnifiedChatMessage } from '@/bridge/hostBridge';
+import type { UnifiedChatMessage, ChatImageRef } from '@/bridge/hostBridge';
 
 export interface TurnToolRef { id: string; name: string; }
 export interface TurnGroup {
@@ -20,6 +20,22 @@ function toolRefsOf(msg: UnifiedChatMessage): TurnToolRef[] {
     id: String((tc as { id?: string }).id || ''),
     name: String(tc.function?.name || tc.functionName || tc.name || 'tool'),
   })).filter((t) => t.id);
+}
+
+/** need09-05：消息图片取用（缺字段/null/空 = 纯文本；图片不拆轮，只跟随所属消息） */
+export function imagesOf(msg: UnifiedChatMessage | null | undefined): ChatImageRef[] {
+  if (!msg) return [];
+  const imgs = (msg as UnifiedChatMessage).images;
+  return Array.isArray(imgs) ? imgs : [];
+}
+
+/** need09-05：images 参与归并键——图片只跟随所属消息，不另起轮次；
+ *  归并键 = 归属消息 id + 图片 sha16 指纹（同 assistant+tool 对逻辑不变）。 */
+export function mergeKeyOf(msg: UnifiedChatMessage): string {
+  const base = String(msg.id || '');
+  const imgs = imagesOf(msg);
+  if (imgs.length === 0) return base;
+  return `${base}#img:${imgs.map((i) => i.sha16 || i.imageId).join(',')}`;
 }
 
 export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
@@ -47,7 +63,7 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
       if (cur && (cur.toolCalls.some((t) => t.id === tid) || !tid)) {
         cur.toolMessages.push(msg);
       } else if (cur && tid) {
-        // toolCallId 不命中但紧邻：仍归入最近组（兼容老数据）
+        // toolCallId 不命中但紧邻：仍归入最近组（兼容老数据；图片跟随 tool 消息）
         cur.toolMessages.push(msg);
       } else {
         flush();
@@ -65,4 +81,20 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   }
   flush();
   return groups;
+}
+
+/** need09-05：会话导出 markdown（含图：`![file](relPath)`；丢失：`[图片已丢失：file]`；不嵌 base64） */
+export function exportSessionMarkdown(messages: UnifiedChatMessage[]): string {
+  const lines: string[] = [];
+  for (const msg of messages) {
+    const role = String(msg.role || '').toLowerCase();
+    const head = role === 'user' ? '## 用户' : role === 'assistant' ? '## 助手' : role === 'tool' ? `## 工具${msg.name ? `（${msg.name}）` : ''}` : '## 系统';
+    lines.push(head, '');
+    if (msg.content) lines.push(String(msg.content), '');
+    for (const img of imagesOf(msg)) {
+      if ((img as ChatImageRef).lost) lines.push(`[图片已丢失：${img.fileName}]`, '');
+      else lines.push(`![${img.fileName}](${img.relPath})`, '');
+    }
+  }
+  return lines.join('\n');
 }

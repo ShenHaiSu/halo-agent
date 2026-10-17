@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+ using System.Text;
 using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Network;
@@ -88,12 +89,14 @@ public sealed class SystemPromptBuilder
         WorkspaceInfo ws,
         string? pyOverride = null,
         string? dateOverride = null,
-        string? workspaceIdOverride = null)
+        string? workspaceIdOverride = null,
+        string? skillIndexBlock = null,
+        string? memoryPinnedBlock = null)
     {
         cfg ??= PromptDefaults.CreateDefault();
         if (ws == null) throw new ArgumentNullException(nameof(ws));
         var ctx = CreateContext(ws, pyOverride, dateOverride);
-        var (assembled, blocks, unknownVars) = BuildCore(cfg, ctx);
+        var (assembled, blocks, unknownVars) = BuildCore(cfg, ctx, skillIndexBlock, memoryPinnedBlock);
         bool isDefault = IsDefaultConfig(cfg);
         int total = TokenBudgetService.EstimateTokens(assembled);
         int stable = blocks.Where(b => b.Enabled && b.IsStable).Sum(b => b.EstimatedTokens);
@@ -112,77 +115,232 @@ public sealed class SystemPromptBuilder
         };
     }
 
-    internal static (string assembled, List<PromptBlockPreview> blocks, List<string> unknownVars) BuildCore(
-        PromptConfigDocument cfg, PromptContext ctx)
-    {
-        var blocks = new List<PromptBlockPreview>();
-        var unknown = new List<string>();
-        if (!cfg.EnableHaloPrefix)
-            return (string.Empty, blocks, unknown);
+     // ============ need09-02 稳定装配线（冻结，字节级契约） ============
+     /// <summary>need09-02：Skill L0 索引块标题（冻结；同时是 PrefixCachePredictor 二次切分标记）。</summary>
+     public const string SkillIndexTitle = "## 5. Available Skills (auto-loaded index; read full body on demand via skill_tool)";
+     /// <summary>need09-02：Skill 索引块尾部指南行（冻结）。</summary>
+     public const string SkillIndexFooter = "(Use skill_tool(action=\"get\", scope=\"...\", name=\"...\") to load full body before applying.)";
+     /// <summary>need09-02：Skill 超限截断行格式（冻结，{0}=被省略条数）。</summary>
+     public const string SkillTruncatedLineFormat = "(…and {0} more skills omitted; list via skill_tool)";
+     /// <summary>need09-02：Memory 常驻块标题（冻结；同时是二次切分标记）。</summary>
+     public const string MemoryPinnedTitle = "## 6. Pinned Memory (project overrides global on same name)";
+     /// <summary>need09-02：Memory 超限截断行格式（冻结，{0}=被省略条数）。</summary>
+     public const string MemoryTruncatedLineFormat = "(…and {0} more memories omitted; list via memory_tool)";
+     /// <summary>need09-02：toolGuide 追加的 Skill/Memory/Images 指南 3 行（冻结英文，永不改）。</summary>
+     public const string SkillMemoryGuideSuffix =
+         "- Skills: consult `## 5. Available Skills` index first; load body via `skill_tool` before applying; project scope overrides global on same name.\n" +
+         "- Memory: `## 6. Pinned Memory` is authoritative; use `memory_tool` to list/read archived memory; never invent persistent facts.\n" +
+         "- Images: use `view_image` to inspect workspace images; user-pasted images arrive inline in the latest message.";
+     /// <summary>need09-02：L0 Skill 索引常驻配额（tokens）。</summary>
+     public const int SkillIndexTokenBudget = 1500;
+     /// <summary>need09-02：常驻 Memory 配额（tokens）。</summary>
+     public const int MemoryPinnedTokenBudget = 2000;
+     /// <summary>need09-02：索引 summary 上限（字符数，超限截断+…）。</summary>
+     public const int SkillSummaryMaxChars = 60;
 
-        var ordered = new List<(string id, string text, bool stable, bool enabled)>();
-        string customPlacement = string.Equals(cfg.CustomPlacement, "head", StringComparison.OrdinalIgnoreCase) ? "head" : "tail";
-        string customRendered = string.Empty;
-        bool hasCustom = cfg.EnableCustom && !string.IsNullOrWhiteSpace(cfg.CustomText);
-        if (hasCustom)
-            customRendered = RenderTemplate(cfg.CustomText, ctx, unknown).TrimEnd();
+     /// <summary>need09-02：L0 索引条目（解耦 DTO：只用原始类型，不引用 SkillMemoryService 任何类型）。</summary>
+     public sealed record StableSkillEntry(string Scope, string Name, string Summary, int Priority);
 
-        if (hasCustom && customPlacement == "head")
-            ordered.Add(("custom", customRendered, true, true));
-        if (cfg.EnableIdentity && !string.IsNullOrWhiteSpace(cfg.IdentityText))
-            ordered.Add(("identity", (cfg.IdentityText ?? string.Empty).TrimEnd(), true, true));
-        if (cfg.EnableRuntime)
-        {
-            string rt = RenderTemplate(cfg.RuntimeTemplate ?? string.Empty, ctx, unknown).TrimEnd();
-            if (!string.IsNullOrWhiteSpace(rt)) ordered.Add(("runtime", rt, true, true));
-        }
-        if (cfg.EnableCmdPython && !string.IsNullOrWhiteSpace(cfg.CmdPythonText))
-            ordered.Add(("cmdPython", (cfg.CmdPythonText ?? string.Empty).TrimEnd(), true, true));
-        if (cfg.EnableToolGuide)
-        {
-            string tg = RenderTemplate(cfg.ToolGuideTemplate ?? string.Empty, ctx, unknown).TrimEnd();
-            if (!string.IsNullOrWhiteSpace(tg)) ordered.Add(("toolGuide", tg, true, true));
-        }
-        if (cfg.EnableEphemeral)
-        {
-            string eph = RenderTemplate(cfg.EphemeralTemplate ?? string.Empty, ctx, unknown).TrimEnd();
-            if (!string.IsNullOrWhiteSpace(eph))
-            {
-                if (!eph.Contains(PrefixCachePredictor.EphemeralMarker, StringComparison.Ordinal))
-                    eph = "## 4. Session Ephemeral\n" + eph.TrimStart();
-                ordered.Add(("ephemeral", eph, false, true));
-            }
-        }
-        if (hasCustom && customPlacement == "tail")
-            ordered.Add(("custom", customRendered, false, true));
+     /// <summary>need09-02：常驻记忆条目（解耦 DTO：只用原始类型）。</summary>
+     public sealed record StableMemoryEntry(string Scope, string Name, string Body, int Priority);
 
-        foreach (var (id, text, stable, _) in ordered)
-        {
-            blocks.Add(new PromptBlockPreview
-            {
-                BlockId = id,
-                Enabled = true,
-                RenderedText = text,
-                EstimatedTokens = TokenBudgetService.EstimateTokens(text),
-                IsStable = stable,
-            });
-        }
+     /// <summary>need09-02：块体规范化：\r\n→\n + TrimEnd（幂等；无 \r 输入时与老 TrimEnd 逐字节一致）。</summary>
+     public static string NormalizeBlockBody(string? body)
+         => (body ?? string.Empty).Replace("\r\n", "\n").TrimEnd();
 
-        // 关断块也记录（Enabled=false），满足 T2 断言 Blocks 全 Disabled
-        if (blocks.Count == 0 && cfg.EnableHaloPrefix)
-        {
-            foreach (string id in new[] { "identity", "runtime", "cmdPython", "toolGuide", "ephemeral", "custom" })
-                blocks.Add(new PromptBlockPreview { BlockId = id, Enabled = false, RenderedText = string.Empty, EstimatedTokens = 0, IsStable = !string.Equals(id, "ephemeral", StringComparison.Ordinal) });
-            return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
-        }
-        if (!cfg.EnableHaloPrefix)
-            return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+     /// <summary>need09-02：summary 规范化：Trim + \n→空格 + 超 60 字截断+…（冻结；按 Unicode 标量计数，防代理对切断）。</summary>
+     public static string NormalizeSkillSummary(string? summary, int maxChars = SkillSummaryMaxChars)
+     {
+         string s = (summary ?? string.Empty).Trim().Replace("\n", " ");
+         if (s.Length == 0) return string.Empty;
+         int runes = 0;
+         foreach (var r in s.EnumerateRunes()) runes++;
+         if (runes <= maxChars) return s;
+         return string.Concat(s.EnumerateRunes().Take(maxChars)) + "…";
+     }
 
-        string assembled = ordered.Count == 0
-            ? string.Empty
-            : string.Join("\n\n", ordered.Select(p => p.text.TrimEnd().TrimEnd('\r', '\n'))) + "\n";
-        return (assembled, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
-    }
+     internal static int StableScopeRank(string? scope)
+         => string.Equals(scope?.Trim(), "global", StringComparison.OrdinalIgnoreCase) ? 0
+             : string.Equals(scope?.Trim(), "project", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+
+     /// <summary>
+     /// need09-02：渲染 L0 Skill 索引块（空域返回 string.Empty 由 BuildCore 整块丢弃）。
+     /// 行格式冻结：`- [&lt;scope&gt;] &lt;name&gt; — &lt;summary≤60字&gt;`；排序 scope(global先)→name升序（与 priority 无关）；
+     /// 超限时按 priority 高保留 + name 升序截断并追加冻结截断行，渲染顺序仍保持稳定排序。
+     /// </summary>
+     public static string BuildSkillIndexBlock(IEnumerable<StableSkillEntry>? entries, int tokenBudget = SkillIndexTokenBudget)
+     {
+         var list = (entries ?? Enumerable.Empty<StableSkillEntry>())
+             .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Name))
+             .Select(e => new StableSkillEntry(
+                 string.IsNullOrWhiteSpace(e.Scope) ? "global" : e.Scope.Trim(),
+                 e.Name.Trim(),
+                 NormalizeSkillSummary(e.Summary),
+                 e.Priority))
+             .ToList();
+         if (list.Count == 0) return string.Empty;
+         List<StableSkillEntry> StableOrder(IEnumerable<StableSkillEntry> src)
+             => src.OrderBy(e => StableScopeRank(e.Scope)).ThenBy(e => e.Name, StringComparer.Ordinal).ToList();
+         string RenderRow(StableSkillEntry e) => ("- [" + e.Scope + "] " + e.Name + " — " + e.Summary).TrimEnd();
+         string Render(IReadOnlyList<StableSkillEntry> rows, int omitted)
+         {
+             var lines = new List<string>(rows.Count + 3) { SkillIndexTitle };
+             foreach (var r in rows) lines.Add(RenderRow(r));
+             if (omitted > 0) lines.Add(string.Format(SkillTruncatedLineFormat, omitted));
+             lines.Add(SkillIndexFooter);
+             return string.Join("\n", lines);
+         }
+         var stable = StableOrder(list);
+         if (TokenBudgetService.EstimateTokens(Render(stable, 0)) <= tokenBudget)
+             return Render(stable, 0);
+         var byPriority = list.OrderByDescending(e => e.Priority).ThenBy(e => e.Name, StringComparer.Ordinal).ToList();
+         var kept = new List<StableSkillEntry>();
+         foreach (var e in byPriority)
+         {
+             var trial = new List<StableSkillEntry>(kept) { e };
+             if (TokenBudgetService.EstimateTokens(Render(StableOrder(trial), list.Count - trial.Count)) <= tokenBudget)
+                 kept = trial;
+         }
+         return Render(StableOrder(kept), list.Count - kept.Count);
+     }
+
+     /// <summary>
+     /// need09-02：渲染常驻 Memory 块（空域返回 string.Empty 由 BuildCore 整块丢弃）。
+     /// 同名去重：project 覆盖 global（整条替换）；排序按 name 升序（与 priority 无关）；
+     /// 超限截断同 Skill（高 priority 保留 + 冻结截断行）。
+     /// </summary>
+     public static string BuildMemoryPinnedBlock(IEnumerable<StableMemoryEntry>? entries, int tokenBudget = MemoryPinnedTokenBudget)
+     {
+         var list = (entries ?? Enumerable.Empty<StableMemoryEntry>())
+             .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Name))
+             .Select(e => new StableMemoryEntry(
+                 string.IsNullOrWhiteSpace(e.Scope) ? "global" : e.Scope.Trim(),
+                 e.Name.Trim(),
+                 NormalizeBlockBody(e.Body),
+                 e.Priority))
+             .Where(e => !string.IsNullOrEmpty(e.Body))
+             .ToList();
+         if (list.Count == 0) return string.Empty;
+         var deduped = list.GroupBy(e => e.Name, StringComparer.Ordinal)
+             .Select(g => g
+                 .OrderBy(e => string.Equals(e.Scope, "project", StringComparison.OrdinalIgnoreCase) ? 0
+                     : string.Equals(e.Scope, "global", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
+                 .ThenByDescending(e => e.Priority)
+                 .First())
+             .ToList();
+         List<StableMemoryEntry> StableOrder(IEnumerable<StableMemoryEntry> src)
+             => src.OrderBy(e => e.Name, StringComparer.Ordinal).ToList();
+         string Render(IReadOnlyList<StableMemoryEntry> rows, int omitted)
+         {
+             var lines = new List<string>(rows.Count * 2 + 2) { MemoryPinnedTitle };
+             foreach (var r in rows)
+             {
+                 lines.Add("### [" + r.Scope + "] " + r.Name);
+                 lines.Add(r.Body);
+             }
+             if (omitted > 0) lines.Add(string.Format(MemoryTruncatedLineFormat, omitted));
+             return string.Join("\n", lines);
+         }
+         var stable = StableOrder(deduped);
+         if (TokenBudgetService.EstimateTokens(Render(stable, 0)) <= tokenBudget)
+             return Render(stable, 0);
+         var byPriority = deduped.OrderByDescending(e => e.Priority).ThenBy(e => e.Name, StringComparer.Ordinal).ToList();
+         var kept = new List<StableMemoryEntry>();
+         foreach (var e in byPriority)
+         {
+             var trial = new List<StableMemoryEntry>(kept) { e };
+             if (TokenBudgetService.EstimateTokens(Render(StableOrder(trial), deduped.Count - trial.Count)) <= tokenBudget)
+                 kept = trial;
+         }
+         return Render(StableOrder(kept), deduped.Count - kept.Count);
+     }
+
+     /// <summary>
+     /// need09-02：唯一拼装路径。装配顺序（冻结）：custom(head) → identity → runtime → cmdPython → toolGuide →
+     /// skillIndex → memoryPinned → ephemeral → custom(tail)。skill/memory 为渲染好的 string 块（B 轨道不引用
+     /// SkillMemoryService 类型）；null/空/空白视为空域，整块（含标题）直接消失；缺省即老输出逐字节一致。
+     /// </summary>
+     public static (string assembled, List<PromptBlockPreview> blocks, List<string> unknownVars) BuildCore(
+         PromptConfigDocument cfg, PromptContext ctx, string? skillIndexBlock = null, string? memoryPinnedBlock = null)
+     {
+         var blocks = new List<PromptBlockPreview>();
+         var unknown = new List<string>();
+         if (!cfg.EnableHaloPrefix)
+             return (string.Empty, blocks, unknown);
+
+         var ordered = new List<(string id, string text, bool stable, bool enabled)>();
+         string customPlacement = string.Equals(cfg.CustomPlacement, "head", StringComparison.OrdinalIgnoreCase) ? "head" : "tail";
+         string customRendered = string.Empty;
+         bool hasCustom = cfg.EnableCustom && !string.IsNullOrWhiteSpace(cfg.CustomText);
+         if (hasCustom)
+             customRendered = RenderTemplate(cfg.CustomText, ctx, unknown).TrimEnd();
+
+         if (hasCustom && customPlacement == "head")
+             ordered.Add(("custom", customRendered, true, true));
+         if (cfg.EnableIdentity && !string.IsNullOrWhiteSpace(cfg.IdentityText))
+             ordered.Add(("identity", (cfg.IdentityText ?? string.Empty).TrimEnd(), true, true));
+         if (cfg.EnableRuntime)
+         {
+             string rt = RenderTemplate(cfg.RuntimeTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+             if (!string.IsNullOrWhiteSpace(rt)) ordered.Add(("runtime", rt, true, true));
+         }
+         if (cfg.EnableCmdPython && !string.IsNullOrWhiteSpace(cfg.CmdPythonText))
+             ordered.Add(("cmdPython", (cfg.CmdPythonText ?? string.Empty).TrimEnd(), true, true));
+         if (cfg.EnableToolGuide)
+         {
+             string tg = RenderTemplate(cfg.ToolGuideTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+             if (!string.IsNullOrWhiteSpace(tg))
+             {
+                 tg = NormalizeBlockBody(tg) + "\n" + SkillMemoryGuideSuffix;
+                 ordered.Add(("toolGuide", tg, true, true));
+             }
+         }
+         string skillNorm = NormalizeBlockBody(skillIndexBlock);
+         if (!string.IsNullOrWhiteSpace(skillNorm))
+             ordered.Add(("skillIndex", skillNorm, true, true));
+         string memNorm = NormalizeBlockBody(memoryPinnedBlock);
+         if (!string.IsNullOrWhiteSpace(memNorm))
+             ordered.Add(("memoryPinned", memNorm, true, true));
+         if (cfg.EnableEphemeral)
+         {
+             string eph = RenderTemplate(cfg.EphemeralTemplate ?? string.Empty, ctx, unknown).TrimEnd();
+             if (!string.IsNullOrWhiteSpace(eph))
+             {
+                 if (!eph.Contains(PrefixCachePredictor.EphemeralMarker, StringComparison.Ordinal))
+                     eph = "## 4. Session Ephemeral\n" + eph.TrimStart();
+                 ordered.Add(("ephemeral", eph, false, true));
+             }
+         }
+         if (hasCustom && customPlacement == "tail")
+             ordered.Add(("custom", customRendered, false, true));
+
+         foreach (var (id, text, stable, _) in ordered)
+         {
+             blocks.Add(new PromptBlockPreview
+             {
+                 BlockId = id,
+                 Enabled = true,
+                 RenderedText = text,
+                 EstimatedTokens = TokenBudgetService.EstimateTokens(text),
+                 IsStable = stable,
+             });
+         }
+
+         // 关断块也记录（Enabled=false），满足 T2 断言 Blocks 全 Disabled
+         if (blocks.Count == 0 && cfg.EnableHaloPrefix)
+         {
+             foreach (string id in new[] { "identity", "runtime", "cmdPython", "toolGuide", "skillIndex", "memoryPinned", "ephemeral", "custom" })
+                 blocks.Add(new PromptBlockPreview { BlockId = id, Enabled = false, RenderedText = string.Empty, EstimatedTokens = 0, IsStable = !string.Equals(id, "ephemeral", StringComparison.Ordinal) });
+             return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+         }
+         if (!cfg.EnableHaloPrefix)
+             return (string.Empty, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+
+         string assembled = ordered.Count == 0
+             ? string.Empty
+             : string.Join("\n\n", ordered.Select(p => NormalizeBlockBody(p.text))) + "\n";
+         return (assembled, blocks, unknown.Distinct(StringComparer.Ordinal).ToList());
+     }
 
     private static PromptContext CreateContext(WorkspaceInfo ws, string? pyOverride, string? dateOverride)
     {

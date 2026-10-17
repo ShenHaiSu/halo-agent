@@ -94,16 +94,17 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         var existing = workspaces.FirstOrDefault(w =>
             string.Equals(NormalizePath(w.RootPath), normalizedPath, StringComparison.OrdinalIgnoreCase));
 
-        if (existing != null)
-        {
-            existing.LastOpenedAtUtc = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(customName))
-            {
-                existing.Name = customName.Trim();
-            }
-            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-            return existing;
-        }
+         if (existing != null)
+         {
+             existing.LastOpenedAtUtc = DateTime.UtcNow;
+             if (!string.IsNullOrWhiteSpace(customName))
+             {
+                 existing.Name = customName.Trim();
+             }
+             await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+             TryEnsureProjectSkillMemory(normalizedPath);
+             return existing;
+         }
 
         // 新建工作区
         string name = !string.IsNullOrWhiteSpace(customName)
@@ -129,32 +130,52 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         workspaces.Add(newWorkspace);
         await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
 
-        // 若该工作区下尚无会话，自动初始化首个会话
-        var sessions = await _sessionRepository.LoadSessionsIndexAsync(newWorkspace.Id, ct).ConfigureAwait(false);
-        if (sessions.Count == 0)
-        {
-            await CreateSessionAsync(newWorkspace.Id, "新建会话", ct: ct).ConfigureAwait(false);
-        }
+         // 若该工作区下尚无会话，自动初始化首个会话
+         var sessions = await _sessionRepository.LoadSessionsIndexAsync(newWorkspace.Id, ct).ConfigureAwait(false);
+         if (sessions.Count == 0)
+         {
+             await CreateSessionAsync(newWorkspace.Id, "新建会话", ct: ct).ConfigureAwait(false);
+         }
 
-        return newWorkspace;
-    }
+         // need09-01：新建工作区后建空 .haloagent/skills|memory（失败只 Warn，不阻塞绑定）
+         TryEnsureProjectSkillMemory(normalizedPath);
 
-    public async Task<bool> RemoveWorkspaceAsync(string workspaceId, bool deletePhysicalSessionFolder = true, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(workspaceId)) return false;
-        var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
-        int removed = workspaces.RemoveAll(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
-        if (removed > 0)
-        {
-            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-            if (deletePhysicalSessionFolder)
-            {
-                await _sessionRepository.DeleteWorkspaceDirectoryAsync(workspaceId, ct).ConfigureAwait(false);
-            }
-            return true;
-        }
-        return false;
-    }
+         return newWorkspace;
+     }
+
+     /// <summary>need09-01：AddWorkspace 后自动建 Project 空域；失败只 Warn。容忍 .haloagent 不存在视为空域。</summary>
+     private static void TryEnsureProjectSkillMemory(string normalizedPath)
+     {
+         try
+         {
+             SkillMemoryService.EnsureProjectInitializedStatic(normalizedPath);
+         }
+         catch (Exception ex)
+         {
+             try { HaloLogger.App.Warn($"[Workspace] .haloagent 初始化失败已忽略：{normalizedPath}", ex); } catch { /* 日志失败也不阻塞 */ }
+         }
+     }
+
+     /// <summary>
+     /// need09-01：移除工作区仅解绑 + 可选删会话物理目录；.haloagent/ 归项目所有，随项目文件夹走，永不删除。
+     /// </summary>
+     public async Task<bool> RemoveWorkspaceAsync(string workspaceId, bool deletePhysicalSessionFolder = true, CancellationToken ct = default)
+     {
+         if (string.IsNullOrWhiteSpace(workspaceId)) return false;
+         var workspaces = await _sessionRepository.LoadWorkspacesIndexAsync(ct).ConfigureAwait(false);
+         int removed = workspaces.RemoveAll(w => string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase));
+         if (removed > 0)
+         {
+             await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+             if (deletePhysicalSessionFolder)
+             {
+                 // 注意：仅删数据根下的会话物理目录，不碰工作区 RootPath 下的 .haloagent/。
+                 await _sessionRepository.DeleteWorkspaceDirectoryAsync(workspaceId, ct).ConfigureAwait(false);
+             }
+             return true;
+         }
+         return false;
+     }
 
     public async Task<bool> SetWorkspacePreferenceAsync(string workspaceId, string? providerId, string? modelId, CancellationToken ct = default)
     {

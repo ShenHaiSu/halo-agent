@@ -52,9 +52,9 @@ public sealed class ToolContext
     /// </summary>
     public int? ExecDefaultTimeoutMsOverride { get; set; }
     public int? ExecMaxTimeoutMsOverride { get; set; }
-
     public CancellationToken CancellationToken { get; init; } = CancellationToken.None;
-
+    /// <summary>need09-07：skill/memory 工具默认写域（模型不填 scope 即写 Project，防污染全局）。</summary>
+    public string SkillMemoryScopeDefault { get; init; } = "project";
     /// <summary>
     /// 会话临时目录：&lt;DataRoot&gt;/sessions/&lt;ws&gt;/&lt;sess&gt;/tmp
     /// </summary>

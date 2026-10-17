@@ -130,12 +130,17 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
  
           // need05-02：前缀哈希（整包确定性哈希；稳定即 prompt cache 命中前提）
           string prefixHash = HeaderVariableResolver.ComputeDeterministicHash16(requestPayload);
-          try
-          {
-              string sysHash = HeaderVariableResolver.ComputeDeterministicHash16(request.SystemInstructions ?? string.Empty);
-              Services.PromptLastSentStore.Record(request.HeaderContext.SessionId, new Services.LastSentPromptSnapshot { ReqId = request.RequestId, SessionId = request.HeaderContext.SessionId, WorkspaceId = request.HeaderContext.WorkspaceId, PrefixHash = sysHash, CharLength = (request.SystemInstructions ?? string.Empty).Length, SentAtUtc = DateTime.UtcNow.ToString("o") });
-          }
-          catch { }
+           try
+           {
+               // need09-02：sysHash → stableHash（stable 区）+ fullHash（整包 system 文本）双记；
+               // PrefixHash 恒等于 fullHash，老 Bridge 对比行为不变。
+               string fullSys = request.SystemInstructions ?? string.Empty;
+               var (stablePart, _) = Services.PrefixCachePredictor.SplitSystem(fullSys);
+               string stableHash = HeaderVariableResolver.ComputeDeterministicHash16(stablePart ?? string.Empty);
+               string fullHash = HeaderVariableResolver.ComputeDeterministicHash16(fullSys);
+               Services.PromptLastSentStore.Record(request.HeaderContext.SessionId, new Services.LastSentPromptSnapshot { ReqId = request.RequestId, SessionId = request.HeaderContext.SessionId, WorkspaceId = request.HeaderContext.WorkspaceId, PrefixHash = fullHash, StableHash = stableHash, FullHash = fullHash, CharLength = fullSys.Length, SentAtUtc = DateTime.UtcNow.ToString("o") });
+           }
+           catch { }
           // 记录请求追踪日志
           LogRequestTrace(request, endpointUrl, prefixHash, predictedHit, predictedCached, divergenceBlock);
 
@@ -275,21 +280,61 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
              string headersSummary = GetCustomHeadersSummary(request.Provider, request.HeaderContext);
              // need05-02：[REQ] 追加 prefixHash + msgCount + inputEst（联调 grep reqId 看哈希变化 vs 命中率因果）
              // need05-06：追加 predictedHit/divergence（发送前本地推测，不代表账单口径）
+             // need09-02：追加 skillL0/skillTokens/memPinned/memTokens/imgCount/imgTruncated（只读解析 stable 文本与消息引用）
              int msgCount = request.Messages?.Count ?? 0;
              int inputEst = 0;
+             int imgCount = 0;
+             bool imgTruncated = false;
              if (request.Messages != null)
              {
-                 foreach (var m in request.Messages) inputEst += Services.TokenBudgetService.EstimateMessageTokens(m);
+                 foreach (var m in request.Messages)
+                 {
+                     inputEst += Services.TokenBudgetService.EstimateMessageTokens(m);
+                     var (live, omitted) = Services.TokenBudgetService.CountMessageImages(m);
+                     imgCount += live + omitted;
+                     if (omitted > 0) imgTruncated = true;
+                 }
              }
- 
+             int skillL0 = 0, skillTokens = 0, memPinned = 0, memTokens = 0;
+             try
+             {
+                 var (stableText, _) = Services.PrefixCachePredictor.SplitSystem(request.SystemInstructions);
+                 var (_, skillPart, memPart) = Services.PrefixCachePredictor.SplitStableSystem(stableText);
+                 skillL0 = CountStableIndexRows(skillPart);
+                 skillTokens = Services.TokenBudgetService.EstimateTokens(skillPart);
+                 memPinned = CountStableMemorySections(memPart);
+                 memTokens = Services.TokenBudgetService.EstimateTokens(memPart);
+             }
+             catch { /* 统计永不阻塞主链路 */ }
+
              string predText = predictedHit.HasValue ? $"{predictedHit.Value * 100.0:F1}%" : "-";
-             string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}] | prefixHash={prefixHash ?? "-"} | msgCount={msgCount} | inputEst={inputEst} | predictedHit={predText} (cached~{predictedCached}, div={divergenceBlock ?? "-"})";
+             string line = $"[REQ] reqId={request.RequestId} | session={request.HeaderContext.SessionId} (hash={request.HeaderContext.SessionHash}) | provider={request.Provider.Name} | model={request.Model.Id} | protocol={request.Model.Protocol.ToString().ToUpperInvariant()} | url={endpointUrl} | proxy={proxySummary} | customHeaders=[{headersSummary}] | prefixHash={prefixHash ?? "-"} | msgCount={msgCount} | inputEst={inputEst} | predictedHit={predText} (cached~{predictedCached}, div={divergenceBlock ?? "-"}) | skillL0={skillL0} skillTokens={skillTokens} memPinned={memPinned} memTokens={memTokens} imgCount={imgCount} imgTruncated={imgTruncated}";
              AppendAuditTrace(line);
          }
          catch (Exception ex)
          {
              HaloLogger.App.Warn("写入 LLM Trace 请求审计失败", ex);
          }
+     }
+ 
+     /// <summary>need09-02：统计 skill 索引行数（行首 `- [` 的行）。</summary>
+     private static int CountStableIndexRows(string? skillPart)
+     {
+         if (string.IsNullOrEmpty(skillPart)) return 0;
+         int n = 0;
+         foreach (var line in skillPart.Split('\n'))
+             if (line.TrimStart().StartsWith("- [", StringComparison.Ordinal)) n++;
+         return n;
+     }
+
+     /// <summary>need09-02：统计 pinned memory 节数（行首 `### ` 的行）。</summary>
+     private static int CountStableMemorySections(string? memPart)
+     {
+         if (string.IsNullOrEmpty(memPart)) return 0;
+         int n = 0;
+         foreach (var line in memPart.Split('\n'))
+             if (line.TrimStart().StartsWith("### ", StringComparison.Ordinal)) n++;
+         return n;
      }
  
      private static void RecordPredictionActual(UnifiedLlmRequest request, int inTokens, int cachedTokens)

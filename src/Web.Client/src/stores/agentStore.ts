@@ -7,19 +7,25 @@ import {
 } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useConfigStore } from '@/stores/configStore';
+// need09-06：问询 pending 视为忙（askUserStore 不反向依赖本 store，无循环）
+import { useAskUserStore } from '@/stores/askUserStore';
 
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
-export interface AgentToolCard {
-  callId: string;
-  functionName: string;
-  argsJson: string;
-  status: AgentToolCardStatus;
-  resultText: string;
-  exitCode: number | null;
-  durationMs: number | null;
-  iteration: number;
-}
+ export interface AgentToolCard {
+   callId: string;
+   functionName: string;
+   argsJson: string;
+   status: AgentToolCardStatus;
+   resultText: string;
+   exitCode: number | null;
+   durationMs: number | null;
+   iteration: number;
+   images?: Array<{ imageId: string; fileName: string; mime: string; relPath: string; width: number; height: number; sizeBytes: number; sha16: string; lost?: boolean }>;
+ }
+ 
+ /** need09-04：sendPrompt 可选第二参附件项 */
+ export interface AgentSendAttachment { attId: string; fileName: string; mime: string; base64: string }
 
 export interface AgentTelemetry {
   protocol: string;
@@ -536,48 +542,57 @@ export const useAgentStore = defineStore('agent', () => {
     return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
   }
 
-  async function sendPrompt(text: string): Promise<boolean> {
-    const content = (text || '').trim();
-    const sessionId = activeSessionId.value;
-    if (!content || !sessionId) return false;
-    if (isCompacting(sessionId)) return false; // need05-03：压缩中拒绝发送
-    if (ensureTurn(sessionId).isGenerating) return false;
-
-    const workspaceId = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
-    if (!workspaceId || !sessionId) return false;
-
-    ensureListeners();
-    resetTurnState(sessionId);
-    touchSessionClock(sessionId);
-    const t = ensureTurn(sessionId);
-    t.isGenerating = true;
-    t.streamingActive = true;
-    touch(t);
-
-    try {
-      const bridge = getHostBridge();
-      const providerId = configStore.activeProvider?.id || '';
-      const modelId = configStore.activeModel?.id || '';
-      const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId);
-      if (!res.ok) {
-        t.lastError = res.message || '启动 Agent 推理失败';
-        t.isGenerating = false;
-        t.streamingActive = false;
-        touch(t);
-        return false;
-      }
-      // 乐观回显用户消息，等待 TurnCompleted 后与 jsonl 对账
-      await workspaceStore.loadSessionMessages(sessionId);
-      return true;
-    } catch (err) {
-      console.error('[agentStore] sendPrompt failed:', err);
-      t.lastError = err instanceof Error ? err.message : String(err);
-      t.isGenerating = false;
-      t.streamingActive = false;
-      touch(t);
-      return false;
-    }
-  }
+    /** need09-04：发送图片附件（可选第二参；老调用 sendPrompt(text) 仍为纯文本） */
+    async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
+     const content = (text || '').trim();
+     const sessionId = activeSessionId.value;
+     const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && a.base64) : [];
+     if ((!content && readyFiles.length === 0) || !sessionId) return false;
+     if (isCompacting(sessionId)) return false; // need05-03：压缩中拒绝发送
+     if (ensureTurn(sessionId).isGenerating) return false;
+ 
+     const workspaceId = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
+     if (!workspaceId || !sessionId) return false;
+ 
+     // need09-03/04：超限取最新 N 张（与后端网关一致，取新丢旧；0=默认4）
+     let maxImages = Number(configStore.activeModel?.maxImagesPerTurn);
+     if (!Number.isFinite(maxImages) || maxImages === 0) maxImages = 4;
+     maxImages = Math.max(1, Math.min(16, Math.trunc(maxImages)));
+     const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
+     const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
+ 
+     ensureListeners();
+     resetTurnState(sessionId);
+     touchSessionClock(sessionId);
+     const t = ensureTurn(sessionId);
+     t.isGenerating = true;
+     t.streamingActive = true;
+     touch(t);
+ 
+     try {
+       const bridge = getHostBridge();
+       const providerId = configStore.activeProvider?.id || '';
+       const modelId = configStore.activeModel?.id || '';
+       const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId, attachmentsJson);
+       if (!res.ok) {
+         t.lastError = res.message || '启动 Agent 推理失败';
+         t.isGenerating = false;
+         t.streamingActive = false;
+         touch(t);
+         return false;
+       }
+       // 乐观回显用户消息，等待 TurnCompleted 后与 jsonl 对账
+       await workspaceStore.loadSessionMessages(sessionId);
+       return true;
+     } catch (err) {
+       console.error('[agentStore] sendPrompt failed:', err);
+       t.lastError = err instanceof Error ? err.message : String(err);
+       t.isGenerating = false;
+       t.streamingActive = false;
+       touch(t);
+       return false;
+     }
+   }
 
   async function stopGenerating(targetSessionId?: string): Promise<void> {
     const sessionId = (targetSessionId ?? activeSessionId.value).trim();
@@ -589,6 +604,11 @@ export const useAgentStore = defineStore('agent', () => {
     } catch (err) {
       console.error('[agentStore] stopGenerating failed:', err);
     } finally {
+      // need09-06：问询等待期间停止 = 取消提问 + 取消整轮（后端 ct 联动转 Fail）
+      try {
+        const ask = useAskUserStore();
+        if (ask.hasPending(sessionId)) ask.clearPending(sessionId);
+      } catch { /* ignore */ }
       const t = ensureTurn(sessionId);
       t.isGenerating = false;
       t.streamingActive = false;
@@ -600,7 +620,13 @@ export const useAgentStore = defineStore('agent', () => {
 
   function isBusyForHistory(sessionId: string): boolean {
     const t = getTurn(sessionId);
-    return !!t && (t.isGenerating || t.streamingActive || t.turnNotice.includes('压缩中'));
+    if (!!t && (t.isGenerating || t.streamingActive || t.turnNotice.includes('压缩中'))) return true;
+    // need09-06：问询 pending 视为忙（重放/分支/压缩/新发送一律拒绝，请先回答问题）
+    try {
+      return useAskUserStore().hasPending(sessionId);
+    } catch {
+      return false;
+    }
   }
 
   // need07：重放 user（截断→重载→同文复发，避免双 user）

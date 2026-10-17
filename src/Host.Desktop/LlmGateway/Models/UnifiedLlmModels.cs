@@ -19,6 +19,91 @@ public sealed class UnifiedLlmRequest
     public string SystemInstructions { get; init; } = string.Empty;
     public IReadOnlyList<UnifiedChatMessage> Messages { get; init; } = Array.Empty<UnifiedChatMessage>();
     public IReadOnlyList<UnifiedToolDefinition> Tools { get; init; } = Array.Empty<UnifiedToolDefinition>();
+    /// <summary>need09-05：图片引用 → dataURL 解析器（默认 ImageDataRegistry；单测可注入假数据）。返回 null 表示该图无字节（发送时省略，文本保留）。</summary>
+    [JsonIgnore]
+    public Func<ChatImageRef, string?>? ImageResolver { get; init; }
+}
+/// <summary>need09-03/05：非视觉模型收到含图轮次时由 Adapter 抛出；Orchestrator 捕获后纯文本降级重发一次。</summary>
+public sealed class NonVisionModelException : Exception
+{
+    public NonVisionModelException(string modelId, int imageCount)
+        : base($"模型 '{modelId}' 不支持视觉输入，本轮含 {imageCount} 张图片，已拦截发送。")
+    {
+        ModelId = modelId ?? string.Empty;
+        ImageCount = imageCount;
+    }
+    public string ModelId { get; }
+    public int ImageCount { get; }
+}
+/// <summary>need09-05：图片字节内存注册表（生产由 SessionRepository 读盘回填；单测注入假 dataURL）。</summary>
+public static class ImageDataRegistry
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _map = new(StringComparer.Ordinal);
+    public static void Register(string imageId, string dataUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(imageId) && !string.IsNullOrWhiteSpace(dataUrl)) _map[imageId.Trim()] = dataUrl.Trim();
+    }
+    public static string? Resolve(ChatImageRef? img)
+    {
+        if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
+        return _map.TryGetValue(img.ImageId, out var url) ? url : null;
+    }
+    public static void Clear() => _map.Clear();
+}
+/// <summary>need09-05：adapter 共享的多模态轮次规划结果项。</summary>
+public sealed record ResolvedImage(ChatImageRef Ref, string? DataUrl);
+/// <summary>need09-05：adapter 共享的多模态轮次规划（门控加取最新 N 保 latest 丢最旧加dataURL 解析）。</summary>
+public static class MultimodalPlanner
+{
+    /// <summary>规划本轮图片：非视觉模型含图抛 NonVisionModelException；超 Max 取最新 N 张。返回与 Messages 等长对齐的 kept 列表。</summary>
+    public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(UnifiedLlmRequest request)
+    {
+        var kept = new List<List<ResolvedImage>>();
+        int total = 0;
+        foreach (var msg in request.Messages)
+        {
+            var list = new List<ResolvedImage>();
+            if (msg != null && msg.Images != null)
+            {
+                bool carries = msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase)
+                    || msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
+                if (carries)
+                {
+                    foreach (var img in msg.Images)
+                    {
+                        if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) continue;
+                        total++;
+                        string? url = request.ImageResolver != null ? request.ImageResolver(img) : ImageDataRegistry.Resolve(img);
+                        if (!string.IsNullOrWhiteSpace(url))
+                        {
+                            url = url.Trim();
+                            if (!url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                string mime = string.IsNullOrWhiteSpace(img.Mime) ? "image/jpeg" : img.Mime.Trim();
+                                url = "data:" + mime + ";base64," + url;
+                            }
+                        }
+                        else { url = null; }
+                        list.Add(new ResolvedImage(img, url));
+                    }
+                }
+            }
+            kept.Add(list);
+        }
+        if (total > 0 && !request.Model.SupportsVision) throw new NonVisionModelException(request.Model.Id, total);
+        int max = VisionDefaults.ResolveMaxImages(request.Model.MaxImagesPerTurn);
+        int dropped = 0;
+        if (total > max)
+        {
+            dropped = total - max;
+            int skip = dropped;
+            for (int i = 0; i < kept.Count && skip > 0; i++)
+            {
+                while (kept[i].Count > 0 && skip > 0) { kept[i].RemoveAt(0); skip--; }
+            }
+        }
+        return (kept, dropped, total);
+    }
 }
 
 

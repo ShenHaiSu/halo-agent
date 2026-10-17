@@ -59,7 +59,13 @@
                <AgentBehaviorView />
              </div>
            </n-tab-pane>
-        </n-tabs>
+
+           <n-tab-pane name="skill-memory" tab="技能与记忆">
+             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+               <SkillMemoryView />
+             </div>
+           </n-tab-pane>
+         </n-tabs>
       </div>
      </n-drawer-content>
    </n-drawer>
@@ -74,7 +80,8 @@
  import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
  import PromptSettingsView from './PromptSettingsView.vue';
  import AgentBehaviorView from './AgentBehaviorView.vue';
- export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent';
+ import SkillMemoryView from './SkillMemoryView.vue';
+ export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory';
 
 const props = defineProps<{
   show: boolean;

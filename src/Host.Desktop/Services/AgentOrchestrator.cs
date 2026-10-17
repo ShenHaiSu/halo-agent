@@ -125,6 +125,16 @@ public interface IAgentOrchestrator
 
         // (1) 追加 UserMessage 至 messages.jsonl
         var userMessage = UnifiedChatMessage.User(userText.Trim());
+        // need09-05：取本会话暂存粘贴图（Take 语义，失败 Warn 后文字仍发送；引用随 userMessage 落盘，能力位只影响发送剥离）
+        try
+        {
+            var pendingImgs = HostBridgeFacade.PendingSessionImages.Take(sessionId);
+            if (pendingImgs != null && pendingImgs.Count > 0) userMessage.Images = pendingImgs;
+        }
+        catch (Exception exImgs)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn("[Image] 附件暂存取出失败，已降级为纯文本发送", exImgs);
+        }
         try
         {
             await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, userMessage, cancellationToken).ConfigureAwait(false);
@@ -137,12 +147,45 @@ public interface IAgentOrchestrator
 
         // 解析 Provider / Model（测试无配置时回退默认）
         var (provider, model) = ResolveProviderAndModel(providerId, modelId, session);
+        // need09-01/02/03：轮首快照（Skill/Memory L0 块 + 模型视觉能力；只读一次，写操作下一轮生效；失败回默认不断会话）
+        string? skillIndexBlock = null;
+        string? memoryPinnedBlock = null;
+        int residentStableTokens = 0;
+        bool snapVision = model.SupportsVision;
+        int snapMaxImages = VisionDefaults.ResolveMaxImages(model.MaxImagesPerTurn);
+        try
+        {
+            if (_storageManager != null)
+            {
+                var skillMemory = new SkillMemoryService(_storageManager);
+                var merged = skillMemory.GetMergedForPrompt(workspace.RootPath);
+                var skillEntries = merged.GlobalSkills.Concat(merged.ProjectSkills)
+                    .Where(e => e != null && e.Enabled)
+                    .Select(e => new SystemPromptBuilder.StableSkillEntry(e.Scope, e.Name, e.Summary, e.Priority));
+                skillIndexBlock = SystemPromptBuilder.BuildSkillIndexBlock(skillEntries);
+                if (merged.GlobalSkills.Concat(merged.ProjectSkills).Any(e => e != null && e.Enabled && string.Equals(e.Pin, "full", StringComparison.OrdinalIgnoreCase)))
+                    Infrastructure.Logging.HaloLogger.App.Warn("[Skill] 存在 pin=full 的 Skill，本期仅渲染索引行（正文按需经 skill_tool 拉取）");
+                var memEntries = merged.GlobalMemory.Concat(merged.ProjectMemory)
+                    .Where(e => e != null && e.Enabled && !string.Equals(e.Pin, "archived", StringComparison.OrdinalIgnoreCase))
+                    .Select(e => new SystemPromptBuilder.StableMemoryEntry(e.Scope, e.Name, e.BodyMarkdown, e.Priority));
+                memoryPinnedBlock = SystemPromptBuilder.BuildMemoryPinnedBlock(memEntries);
+                if (!string.IsNullOrEmpty(skillIndexBlock)) residentStableTokens += TokenBudgetService.EstimateTokens(skillIndexBlock);
+                if (!string.IsNullOrEmpty(memoryPinnedBlock)) residentStableTokens += TokenBudgetService.EstimateTokens(memoryPinnedBlock);
+            }
+        }
+        catch (Exception exSnap)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn("[Skill] Skill/Memory 快照失败，已回退空域继续会话", exSnap);
+            skillIndexBlock = null;
+            memoryPinnedBlock = null;
+            residentStableTokens = 0;
+        }
 
          string systemPrompt;
          try
          {
              var promptCfg = _promptConfigService?.GetPromptConfigInternal() ?? PromptDefaults.CreateDefault();
-             var preview = SystemPromptBuilder.BuildPreview(promptCfg, workspace, pyOverride: null, dateOverride: null);
+             var preview = SystemPromptBuilder.BuildPreview(promptCfg, workspace, pyOverride: null, dateOverride: null, skillIndexBlock: skillIndexBlock, memoryPinnedBlock: memoryPinnedBlock);
              systemPrompt = preview.AssembledText;
          }
          catch (OperationCanceledException)
@@ -215,12 +258,43 @@ public interface IAgentOrchestrator
             }
 
             // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
-            List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history);
+            // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
+            List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history, 1024, residentStableTokens);
 
              var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1);
              if (!string.IsNullOrWhiteSpace(systemPrompt)) requestMessages.Add(UnifiedChatMessage.System(systemPrompt));
              requestMessages.AddRange(budgeted);
-
+            // need09-03：非视觉模型含图 → 剥离图片 + 通知 + 纯文本降级（仅一次；历史落盘不受影响，切换模型可恢复）
+            if (!snapVision && requestMessages.Any(m => m.Images != null && m.Images.Count > 0))
+            {
+                int stripped = requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count);
+                foreach (var m in requestMessages) m.Images = null;
+                var notice = UnifiedChatMessage.Assistant($"[图片已忽略] 当前模型 {model.Id} 不支持看图，本轮 {stripped} 张图片已剥离，文字照常发送。");
+                try { await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, notice, cancellationToken).ConfigureAwait(false); }
+                catch { /* 通知落盘失败不中断本轮 */ }
+            }
+            else if (snapVision && snapMaxImages > 0)
+            {
+                // need09-03：超 MaxImagesPerTurn 取最新 N 张（保 latest 丢最旧），前后端网关一致，Adapter 侧仍有兜底
+                int totalImgs = requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count);
+                if (totalImgs > snapMaxImages)
+                {
+                    var keepSet = new HashSet<ChatImageRef>();
+                    for (int ri = requestMessages.Count - 1; ri >= 0 && keepSet.Count < snapMaxImages; ri--)
+                    {
+                        var imgs = requestMessages[ri].Images;
+                        if (imgs == null) continue;
+                        for (int ki = imgs.Count - 1; ki >= 0 && keepSet.Count < snapMaxImages; ki--) keepSet.Add(imgs[ki]);
+                    }
+                    foreach (var m in requestMessages)
+                    {
+                        if (m.Images == null) continue;
+                        var kept = m.Images.Where(r => keepSet.Contains(r)).ToList();
+                        m.Images = kept.Count == 0 ? null : kept;
+                    }
+                    Infrastructure.Logging.HaloLogger.App.Warn($"[Image] 本轮图片 {totalImgs} 张超限（上限 {snapMaxImages}），已保留最新 {snapMaxImages} 张");
+                }
+            }
             string requestId = Guid.NewGuid().ToString("N");
             string sessionHash = !string.IsNullOrWhiteSpace(session.SessionHash)
                 ? session.SessionHash
@@ -237,20 +311,31 @@ public interface IAgentOrchestrator
                 model.Id,
                 requestId);
 
-            var toolDefs = _toolRegistry.GetDefinitions()
-                .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
-                .ToList();
-
-            var request = new UnifiedLlmRequest
-            {
-                RequestId = requestId,
-                Provider = provider,
-                Model = model,
-                HeaderContext = headerContext,
-                SystemInstructions = systemPrompt,
-                Messages = requestMessages,
-                Tools = toolDefs
-            };
+             var toolDefs = _toolRegistry.GetDefinitions()
+                 .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
+                 .ToList();
+             // need11-01：读盘→dataURL 本轮内存缓存（重启/多会话安全，无全局锁；null 也缓存避免重复读丢失文件）
+             var imgCache = new Dictionary<string, string?>(StringComparer.Ordinal);
+             Func<ChatImageRef, string?> imgResolver = img =>
+             {
+                 if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
+                 string key = img.ImageId.Trim();
+                 if (imgCache.TryGetValue(key, out var hit)) return hit;
+                 string? url = ImageAttachmentStore.ResolveDataUrl(dataRoot, workspaceId, sessionId, img);
+                 imgCache[key] = url;
+                 return url;
+             };
+             var request = new UnifiedLlmRequest
+             {
+                 RequestId = requestId,
+                 Provider = provider,
+                 Model = model,
+                 HeaderContext = headerContext,
+                 SystemInstructions = systemPrompt,
+                 Messages = requestMessages,
+                 Tools = toolDefs,
+                 ImageResolver = imgResolver,
+             };
 
             // (5) 流式推理：汇总增量并实时推送
             var textAcc = new System.Text.StringBuilder();
@@ -547,7 +632,12 @@ public interface IAgentOrchestrator
                       + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
                       + HintForTool(call.FunctionName);
 
-                var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
+                 var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
+                 // need11-fix: view_image 等工具返回的 Images 必须挂到 tool 消息上，否则下一轮 PlanTurn 读不到，静默丢图（仅文本上游）。
+                 if (toolResult.Success && toolResult.Images != null && toolResult.Images.Count > 0)
+                 {
+                     toolMessage.Images = new List<Host.Desktop.Core.Models.ChatImageRef>(toolResult.Images);
+                 }
 
                 try
                 {

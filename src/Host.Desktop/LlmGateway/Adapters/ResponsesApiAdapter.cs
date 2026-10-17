@@ -60,10 +60,18 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                 writer.WriteNumber("temperature", request.Model.Temperature.Value);
             }
 
-            // 6. 扁平化多态 input 数组
+            // 6. 扁平化多态 input 数组（need09-05：含图 user 加 input_image；无图与老载荷逐字节一致）
+            var mmPlan = MultimodalPlanner.PlanTurn(request);
+            if (mmPlan.Dropped > 0)
+            {
+                try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info("[REQ] reqId=" + request.RequestId + " model=" + request.Model.Id + " imgTotal=" + mmPlan.Total + " imgTruncated=" + mmPlan.Dropped); } catch { }
+            }
+            int mmIndex = -1;
             writer.WriteStartArray("input");
             foreach (var msg in request.Messages)
             {
+                mmIndex++;
+                var kept = mmPlan.Kept[mmIndex].Where(r => !string.IsNullOrWhiteSpace(r.DataUrl)).ToList();
                 if (msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
                 {
                     writer.WriteStartObject();
@@ -74,6 +82,14 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     writer.WriteString("type", "input_text");
                     writer.WriteString("text", msg.Content ?? string.Empty);
                     writer.WriteEndObject();
+                     foreach (var r in kept)
+                     {
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "input_image");
+                         writer.WriteString("image_url", r.DataUrl!);
+                         writer.WriteString("detail", VisionDefaults.NormalizeDetail(request.Model.VisionDetail));
+                         writer.WriteEndObject();
+                     }
                     writer.WriteEndArray();
                     writer.WriteEndObject();
                 }
@@ -113,6 +129,28 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     writer.WriteString("call_id", msg.ToolCallId ?? string.Empty);
                     writer.WriteString("output", msg.Content ?? string.Empty);
                     writer.WriteEndObject();
+                     if (kept.Count > 0)
+                     {
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "message");
+                         writer.WriteString("role", "user");
+                         writer.WriteStartArray("content");
+                         string toolText = string.IsNullOrWhiteSpace(msg.Content) ? "图片如下：" : msg.Content;
+                         writer.WriteStartObject();
+                         writer.WriteString("type", "input_text");
+                         writer.WriteString("text", toolText);
+                         writer.WriteEndObject();
+                         foreach (var r in kept)
+                         {
+                             writer.WriteStartObject();
+                             writer.WriteString("type", "input_image");
+                             writer.WriteString("image_url", r.DataUrl!);
+                             writer.WriteString("detail", VisionDefaults.NormalizeDetail(request.Model.VisionDetail));
+                             writer.WriteEndObject();
+                         }
+                         writer.WriteEndArray();
+                         writer.WriteEndObject();
+                     }
                 }
                 else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
                 {
