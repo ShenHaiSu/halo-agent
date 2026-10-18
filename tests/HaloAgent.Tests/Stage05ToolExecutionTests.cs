@@ -451,12 +451,12 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
     // ============ 双协议 Schema 与自愈 ============
 
-     [Fact(DisplayName = "S05-注册表: 13工具注册(6标准+4 need09+need14 edit_lines+need15 undo_edit/edit)+chat/resp双协议Schema+未知工具自愈")]
-     public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
-     {
-         var defs = _registry.GetDefinitions();
-         Assert.Equal(13, defs.Count);
-         foreach (string expected in new[] { "exec_command", "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "grep_search", "view_image", "ask_user", "skill_tool", "memory_tool", "undo_edit", "edit" })
+      [Fact(DisplayName = "S05-注册表: 15工具注册(6标准+4 need09+need13 spawn_subagent+need14 edit_lines+need15 undo_edit/edit+need16 goal_tool)+chat/resp双协议Schema+未知工具自愈")]
+      public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
+      {
+          var defs = _registry.GetDefinitions();
+          Assert.Equal(15, defs.Count);
+          foreach (string expected in new[] { "exec_command", "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "grep_search", "view_image", "ask_user", "skill_tool", "memory_tool", "spawn_subagent", "undo_edit", "edit", "goal_tool" })
          {
              Assert.Contains(defs, d => d.Name == expected);
          }
@@ -464,7 +464,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
          string chatJson = _registry.GetChatToolsJson();
          using (JsonDocument chat = JsonDocument.Parse(chatJson))
          {
-             Assert.Equal(13, chat.RootElement.GetArrayLength());
+             Assert.Equal(15, chat.RootElement.GetArrayLength());
              Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
              Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
          }
@@ -472,7 +472,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
          string respJson = _registry.GetResponsesToolsJson();
          using (JsonDocument resp = JsonDocument.Parse(respJson))
          {
-             Assert.Equal(13, resp.RootElement.GetArrayLength());
+             Assert.Equal(15, resp.RootElement.GetArrayLength());
              Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
              Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
          }
