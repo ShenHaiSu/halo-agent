@@ -155,7 +155,10 @@ public sealed class Stage05ToolExecutionTests : IDisposable
             missingCtx);
 
         Assert.False(result.Success);
-        Assert.Contains("Python runtime is not detected", result.Error ?? result.Output);
+        // need17一次性更新：PYTHON_NOT_AVAILABLE 中文冻结文案替代老英文（docs/need17/07 §7.1）。
+        Assert.Equal("PYTHON_NOT_AVAILABLE", result.ErrorCode);
+        Assert.StartsWith("PYTHON_NOT_AVAILABLE", result.Error);
+        Assert.Contains("当前电脑环境中没有检测到或者没有安装python", result.Error);
         Assert.Contains("cmd", result.Error ?? result.Output, StringComparison.OrdinalIgnoreCase);
     }
 

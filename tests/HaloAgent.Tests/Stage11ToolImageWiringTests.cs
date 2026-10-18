@@ -82,7 +82,9 @@ public sealed class Stage11ToolImageWiringTests : IDisposable
         });
 
         var gateway = new CaptureGateway(script);
-        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(), _storageManager);
+        var cfgSvc = new Host.Desktop.Infrastructure.Config.AgentConfigService(_storageManager);
+        cfgSvc.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25, ToolsPreset = "full" }); // need17一次性更新：默认 Coding 预设下 view_image 不在激活集，附图接线改走 Full 预设。
+        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(), _storageManager, agentConfigService: cfgSvc);
         AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "看看 a.png");
 
         Assert.True(result.Success);
@@ -119,11 +121,12 @@ public sealed class Stage11ToolImageWiringTests : IDisposable
             UnifiedStreamEvent.Completed(),
         });
 
-        var gateway = new CaptureGateway(script);
-        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(), _storageManager);
+        var gateway2 = new CaptureGateway(script);
+        var cfgSvc2 = new Host.Desktop.Infrastructure.Config.AgentConfigService(_storageManager);
+        cfgSvc2.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25, ToolsPreset = "full" }); // need17一次性更新：同上，Full 预设。
+        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway2, new ToolRegistry(), _storageManager, agentConfigService: cfgSvc2);
         AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "看看 b.png");
         Assert.True(result.Success);
-
         var messages = await _service.GetSessionMessagesAsync(_workspace.Id, _session.Id);
         var toolMsg = messages.First(m =>
             string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase) &&
