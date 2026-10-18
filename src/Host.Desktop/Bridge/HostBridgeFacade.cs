@@ -50,7 +50,7 @@ namespace Host.Desktop.Bridge;
      public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
      public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
       public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal);
-    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
+    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService, UsageMetricsServiceInternal);
 
     public HostBridgeFacade(
         Form? mainForm,
@@ -720,6 +720,13 @@ namespace Host.Desktop.Bridge;
             _activeSessionTokens[sessionId] = cts;
 
             // 在独立后台线程运行流式消费，不阻塞 Bridge 响应
+            // need12-P1：直连会话同样落袋（source=session；无 workspaceId，WorkspaceId 置空）。
+            var usageRows = new List<PendingUsageRow>();
+            UnifiedTokenUsage? sessionUsage = null;
+            string sessionStatus = "ok";
+            string sessionRequestId = req.RequestId ?? Guid.NewGuid().ToString("N");
+            var sessionTextAcc = new System.Text.StringBuilder();
+            var sessionReasonAcc = new System.Text.StringBuilder();
             _ = Task.Run(async () =>
             {
                 try
@@ -728,6 +735,17 @@ namespace Host.Desktop.Bridge;
                     {
                         var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
                         JsEventDispatcher.Publish("llm:stream-event", dto);
+
+                        if (evt.Kind == UnifiedStreamEventKind.TextDelta && !string.IsNullOrEmpty(evt.TextDelta))
+                            sessionTextAcc.Append(evt.TextDelta);
+                        else if (evt.Kind == UnifiedStreamEventKind.ReasoningDelta && !string.IsNullOrEmpty(evt.TextDelta))
+                            sessionReasonAcc.Append(evt.TextDelta);
+                        else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
+                            sessionUsage = evt.Usage;
+                        else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
+                            sessionStatus = "cancelled";
+                        else if (evt.Kind == UnifiedStreamEventKind.StreamError)
+                            sessionStatus = "error";
 
                         if (evt.Kind == UnifiedStreamEventKind.StreamCompleted ||
                             evt.Kind == UnifiedStreamEventKind.StreamCancelled ||
@@ -739,6 +757,7 @@ namespace Host.Desktop.Bridge;
                 }
                 catch (OperationCanceledException)
                 {
+                    sessionStatus = "cancelled";
                     var cancelDto = new SessionStreamEventDto
                     {
                         SessionId = sessionId,
@@ -748,6 +767,7 @@ namespace Host.Desktop.Bridge;
                 }
                 catch (Exception ex)
                 {
+                    sessionStatus = "error";
                     HaloLogger.App.Error($"[HostBridge] Session {sessionId} 流式推送异常", ex);
                     var errDto = new SessionStreamEventDto
                     {
@@ -760,6 +780,16 @@ namespace Host.Desktop.Bridge;
                 }
                 finally
                 {
+                    try
+                    {
+                        // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本）。
+                        UsageRecorder.CollectAuto(usageRows, req.Provider, req.Model, sessionUsage,
+                            UsageRecorder.EstimateInput(req.Messages, req.SystemInstructions),
+                            UsageRecorder.EstimateOutput(sessionTextAcc, sessionReasonAcc),
+                            sessionStatus, sessionRequestId, sessionId, string.Empty, UsageRecorder.SourceSession);
+                        UsageRecorder.Flush(UsageMetricsServiceInternal, usageRows, sessionId, string.Empty);
+                    }
+                    catch { /* 用量落袋永不影响会话清理 */ }
                     _activeSessionTokens.TryRemove(sessionId, out _);
                     cts.Dispose();
                 }

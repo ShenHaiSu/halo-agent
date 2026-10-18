@@ -255,8 +255,14 @@ public interface IAgentOrchestrator
         // (2) ReAct 循环（need08：effectiveMax<=0 即无限轮次，永不进截断分支）
         for (int iteration = 1; effectiveMax <= 0 || iteration <= effectiveMax; iteration++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
+            try { cancellationToken.ThrowIfCancellationRequested(); }
+            catch (OperationCanceledException)
+            {
+                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                // need12-P0：循环入口即取消，保住前面 iteration 已落袋行。
+                UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
+            }
             List<UnifiedChatMessage> history;
             try
             {
@@ -500,9 +506,15 @@ public interface IAgentOrchestrator
                     }
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                // need12-P0/P2：流内抛取消同样先落袋本轮（有实测用实测，无实测用估算），再保住前面 iteration。
+                UsageRecorder.CollectAuto(usageRows, provider, model, usage,
+                    UsageRecorder.EstimateInput(requestMessages, systemPrompt),
+                    UsageRecorder.EstimateOutput(textAcc, reasoningAcc),
+                    "cancelled", requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
+                UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
             }
 
@@ -521,25 +533,32 @@ public interface IAgentOrchestrator
                     }
                     catch { /* 取消路径下持久化失败不掩盖取消语义 */ }
                 }
-                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                 CollectUsageRow(usageRows, provider, model, usage, "cancelled", requestId, sessionId, workspaceId);
-                 FlushUsageRows(usageRows, sessionId, workspaceId);
-                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
+                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本），保证取消不低估。
+                UsageRecorder.CollectAuto(usageRows, provider, model, usage,
+                    UsageRecorder.EstimateInput(requestMessages, systemPrompt),
+                    UsageRecorder.EstimateOutput(textAcc, reasoningAcc),
+                    "cancelled", requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
+                UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
             }
-
-             if (streamErrorCode != null)
-             {
-                 try
-                 {
-                     var errMsg = UnifiedChatMessage.Assistant($"本次推理遇到错误（{streamErrorCode}）：{streamErrorMessage}");
-                     await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, errMsg, CancellationToken.None).ConfigureAwait(false);
-                 }
-                 catch { /* ignore */ }
-                 PublishTurnEvent(sessionId, "TurnError", new { iteration, errorCode = streamErrorCode, errorMessage = streamErrorMessage });
-                 CollectUsageRow(usageRows, provider, model, usage, "error", requestId, sessionId, workspaceId);
-                 FlushUsageRows(usageRows, sessionId, workspaceId);
-                 return AgentTurnResult.Failed(streamErrorCode, streamErrorMessage ?? string.Empty, iteration, toolExecutions);
-             }
+            if (streamErrorCode != null)
+            {
+                try
+                {
+                    var errMsg = UnifiedChatMessage.Assistant($"本次推理遇到错误（{streamErrorCode}）：{streamErrorMessage}");
+                    await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, errMsg, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch { /* ignore */ }
+                PublishTurnEvent(sessionId, "TurnError", new { iteration, errorCode = streamErrorCode, errorMessage = streamErrorMessage });
+                // need12-P2：错误同样智能落袋（有实测用实测，无实测用估算）。
+                UsageRecorder.CollectAuto(usageRows, provider, model, usage,
+                    UsageRecorder.EstimateInput(requestMessages, systemPrompt),
+                    UsageRecorder.EstimateOutput(textAcc, reasoningAcc),
+                    "error", requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
+                UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                return AgentTurnResult.Failed(streamErrorCode, streamErrorMessage ?? string.Empty, iteration, toolExecutions);
+            }
 
             // 汇总 AssistantMessage 并持久化
             var completedCalls = new List<UnifiedToolCall>();
@@ -564,7 +583,11 @@ public interface IAgentOrchestrator
                  assistantMessage.CachedTokens = usage.CachedInputTokens;
              }
              // need12：本 iteration 的 HTTP 请求落袋（纯内存，轮末统一写库；失败/取消分支在各自 return 前同样落袋）。
-             CollectUsageRow(usageRows, provider, model, usage, usage != null ? "ok" : "degraded", requestId, sessionId, workspaceId);
+             // need12-P2：无 usage 实测时退化为 degraded 估算行（input 全量估算，output 用已产出文本估算）。
+             UsageRecorder.CollectAuto(usageRows, provider, model, usage,
+                 UsageRecorder.EstimateInput(requestMessages, systemPrompt),
+                 UsageRecorder.EstimateOutput(textAcc, reasoningAcc),
+                 usage != null ? "ok" : "degraded", requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
 
             try
             {
@@ -573,10 +596,10 @@ public interface IAgentOrchestrator
             catch (OperationCanceledException)
             {
                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                // need12-P0：assistant 落盘时被取消，本 iteration 已落袋，保住前面行。
+                UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
                 return AgentTurnResult.Cancelled(iteration, toolExecutions);
             }
-
-            // need05-01：inputTokens 仍是末 call 占用（不是 Σ，避免重蹈 04-05 膨胀）；billed* 为本轮多次调用的 Σ。
             PublishTurnEvent(sessionId, "AssistantMessagePersisted", new
             {
                 iteration,
@@ -627,7 +650,14 @@ public interface IAgentOrchestrator
             // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
             foreach (var call in completedCalls)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                try { cancellationToken.ThrowIfCancellationRequested(); }
+                catch (OperationCanceledException)
+                {
+                    PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                    // need12-P0：工具执行前被取消，本 iteration 已落袋，保住前面行。
+                    UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                    return AgentTurnResult.Cancelled(iteration, toolExecutions);
+                }
 
                 PublishTurnEvent(sessionId, "ToolExecutionStarted", new
                 {
@@ -654,9 +684,11 @@ public interface IAgentOrchestrator
                     toolResult = await _toolRegistry.DispatchAsync(dto, toolContext, cancellationToken).ConfigureAwait(false);
                     toolResult ??= ToolResult.Fail($"工具 '{call.FunctionName}' 返回空结果，请重试。");
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException)
                 {
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                    // need12-P0：工具执行中被取消，本 iteration 已落袋，保住前面行。
+                    UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
                     return AgentTurnResult.Cancelled(iteration, toolExecutions);
                 }
                 catch (Exception ex)
@@ -687,6 +719,8 @@ public interface IAgentOrchestrator
                 catch (OperationCanceledException)
                 {
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                    // need12-P0：tool 落盘时被取消，本 iteration 已落袋，保住前面行。
+                    UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
                     return AgentTurnResult.Cancelled(iteration, toolExecutions);
                 }
                  PublishTurnEvent(sessionId, "ToolExecutionCompleted", new
@@ -707,37 +741,19 @@ public interface IAgentOrchestrator
 
          // 理论不可达（有限循环内 iteration>=effectiveMax 即返回；无限循环内必 return），兜底截断
          PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = effectiveMax, toolExecutions, maxIterations = effectiveMax });
-         FlushUsageRows(usageRows, sessionId, workspaceId);
+         UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
          return AgentTurnResult.Truncated(effectiveMax, toolExecutions);
      }
- 
+
      private void CollectUsageRow(List<PendingUsageRow> rows, ProviderConfig provider, ModelConfig model, UnifiedTokenUsage? usage, string status, string requestId, string sessionId, string workspaceId)
      {
-         try
-         {
-             if (rows == null || provider == null || model == null) return;
-             rows.Add(new PendingUsageRow
-             {
-                 ProviderId = provider.Id ?? string.Empty,
-                 ProviderName = provider.Name ?? provider.Id ?? string.Empty,
-                 ModelId = model.Id ?? string.Empty,
-                 ModelDisplay = string.IsNullOrWhiteSpace(model.DisplayName) ? (model.Id ?? string.Empty) : model.DisplayName,
-                 Protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
-                 Input = usage?.InputTokens ?? 0,
-                 Output = usage?.OutputTokens ?? 0,
-                 Cached = usage?.CachedInputTokens ?? 0,
-                 Status = string.IsNullOrWhiteSpace(status) ? "ok" : status,
-                 RequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId,
-                 SessionId = sessionId ?? string.Empty,
-                 WorkspaceId = workspaceId ?? string.Empty,
-             });
-         }
-         catch { /* 永不阻塞主链路 */ }
+         // need12-compat：老入口保留，统一转调 UsageRecorder（source=agent）。
+         UsageRecorder.Collect(rows, provider, model, usage, status, requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
      }
- 
+
      private void FlushUsageRows(List<PendingUsageRow> rows, string sessionId, string workspaceId)
      {
-         try { _usageMetrics?.EnqueueFlush(rows, sessionId, workspaceId); } catch { /* 永不抛 */ }
+         UsageRecorder.Flush(_usageMetrics, rows, sessionId, workspaceId);
      }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(

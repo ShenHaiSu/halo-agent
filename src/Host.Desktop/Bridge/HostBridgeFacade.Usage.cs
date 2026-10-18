@@ -31,6 +31,10 @@ public sealed partial class HostBridgeFacade
                 f.ProviderIds = pids.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             if (root.TryGetProperty("modelKeys", out var mks) && mks.ValueKind == JsonValueKind.Array)
                 f.ModelKeys = mks.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            if (root.TryGetProperty("sources", out var srcs) && srcs.ValueKind == JsonValueKind.Array)
+                f.Sources = srcs.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            if (root.TryGetProperty("estimatedOnly", out var eo) && (eo.ValueKind == JsonValueKind.True || eo.ValueKind == JsonValueKind.False))
+                f.EstimatedOnly = eo.GetBoolean();
         }
         catch
         {

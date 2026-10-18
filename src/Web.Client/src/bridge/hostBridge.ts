@@ -423,15 +423,18 @@ export interface ContextBudgetStatusDto {
       endDate?: string;
       providerIds?: string[];
       modelKeys?: string[];
+      sources?: string[];
+      estimatedOnly?: boolean;
     }
     export interface UsageProviderOption { id: string; name: string }
     export interface UsageModelOption { providerId: string; providerName: string; modelId: string; display: string; key: string; label: string }
-    export interface UsageFilterOptions { providers: UsageProviderOption[]; models: UsageModelOption[] }
+    export interface UsageSourceOption { id: string; name: string }
+    export interface UsageFilterOptions { providers: UsageProviderOption[]; models: UsageModelOption[]; sources?: UsageSourceOption[] }
     export interface UsageOverview { totalRequests: number; sumInput: number; sumOutput: number; sumCached: number; hitRate: number; activeModels: number }
     export interface UsageTrendSeries { key: string; providerName: string; modelId: string; values: number[] }
     export interface UsageTrend { dates: string[]; perModel: UsageTrendSeries[]; hitRates: number[]; totals: number[] }
     export interface UsageProviderShareItem { providerId: string; name: string; value: number; share: number }
-    export interface UsageRowDto { id: number; requestDate: string; requestTime: string; requestDatetime: string; providerName: string; modelId: string; modelDisplay: string; protocol: string; inputTokens: number; outputTokens: number; cachedTokens: number; hitRate: number; status: string }
+    export interface UsageRowDto { id: number; requestDate: string; requestTime: string; requestDatetime: string; providerName: string; modelId: string; modelDisplay: string; protocol: string; inputTokens: number; outputTokens: number; cachedTokens: number; hitRate: number; status: string; source: string; estimated: number }
     export interface UsagePage { total: number; page: number; pageSize: number; rows: UsageRowDto[] }
     export interface UsageDbStatus { dbPath: string; recordCount: number; dbSizeBytes: number; oldestDate?: string | null; newestDate?: string | null }
 export interface HostBridgeApi {

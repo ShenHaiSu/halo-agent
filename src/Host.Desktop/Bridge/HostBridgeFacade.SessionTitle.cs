@@ -7,6 +7,7 @@ using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.LlmGateway.Models;
+using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
@@ -124,6 +125,10 @@ public sealed partial class HostBridgeFacade
             };
 
             var sb = new System.Text.StringBuilder();
+            UnifiedTokenUsage? titleUsage = null;
+            string titleStatus = "ok";
+            string titleFailCode = string.Empty;
+            string titleFailMsg = string.Empty;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             try
             {
@@ -134,23 +139,50 @@ public sealed partial class HostBridgeFacade
                         sb.Append(evt.TextDelta);
                         if (sb.Length > 200) break;
                     }
+                    else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
+                    {
+                        titleUsage = evt.Usage;
+                    }
                     else if (evt.Kind == UnifiedStreamEventKind.StreamCompleted)
                     {
                         break;
                     }
                     else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
                     {
-                        return BridgeResponse<string>.Fail("TITLE_CANCELLED", "标题请求被取消");
+                        titleStatus = "cancelled";
+                        titleFailCode = "TITLE_CANCELLED";
+                        titleFailMsg = "标题请求被取消";
+                        break;
                     }
                     else if (evt.Kind == UnifiedStreamEventKind.StreamError)
                     {
-                        return BridgeResponse<string>.Fail(evt.ErrorCode ?? "TITLE_LLM_ERROR", evt.ErrorMessage ?? "标题请求失败");
+                        titleStatus = "error";
+                        titleFailCode = evt.ErrorCode ?? "TITLE_LLM_ERROR";
+                        titleFailMsg = evt.ErrorMessage ?? "标题请求失败";
+                        break;
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                return BridgeResponse<string>.Fail("TITLE_TIMEOUT", "标题请求超时（20s）");
+                titleStatus = "cancelled";
+                titleFailCode = "TITLE_TIMEOUT";
+                titleFailMsg = "标题请求超时（20s）";
+            }
+            // need12-P1/P2：标题小请求同样落袋（成功/取消/失败都记；无实测用估算）。
+            try
+            {
+                var titleRows = new List<PendingUsageRow>();
+                UsageRecorder.CollectAuto(titleRows, provider, model, titleUsage,
+                    UsageRecorder.EstimateInput(llmRequest.Messages, llmRequest.SystemInstructions),
+                    UsageRecorder.EstimateOutput(sb.ToString()),
+                    titleStatus, requestId, sessId, wsId, UsageRecorder.SourceTitle);
+                UsageRecorder.Flush(UsageMetricsServiceInternal, titleRows, sessId, wsId);
+            }
+            catch { /* 用量落袋永不影响标题主流程 */ }
+            if (titleStatus != "ok")
+            {
+                return BridgeResponse<string>.Fail(titleFailCode, titleFailMsg);
             }
 
             string parsed = ParseSessionTitle(sb.ToString());

@@ -18,6 +18,8 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   const customRange = ref<[string, string] | null>(null);
   const providerIds = ref<string[]>([]);
   const modelKeys = ref<string[]>([]);
+  const sources = ref<string[]>([]);
+  const estimatedOnly = ref<boolean | null>(null);
   const metric = ref<'in' | 'out' | 'total'>('total');
   const page = ref(1);
   const pageSize = ref(10);
@@ -38,9 +40,10 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     }
     if (providerIds.value.length) f.providerIds = [...providerIds.value];
     if (modelKeys.value.length) f.modelKeys = [...modelKeys.value];
+    if (sources.value.length) f.sources = [...sources.value];
+    if (estimatedOnly.value !== null) f.estimatedOnly = estimatedOnly.value;
     return f;
   });
-
   const modelOptions = computed(() => {
     if (!providerIds.value.length) return options.value.models;
     return options.value.models.filter((m) => providerIds.value.includes(m.providerId));
@@ -92,7 +95,7 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   }
 
   return {
-    preset, customRange, providerIds, modelKeys, metric, page, pageSize,
+    preset, customRange, providerIds, modelKeys, sources, estimatedOnly, metric, page, pageSize,
     loading, error, options, overview, trend, share, pageData,
     filter, modelOptions, loadOptions, refresh, setPreset,
   };
