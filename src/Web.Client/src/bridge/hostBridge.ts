@@ -2136,7 +2136,7 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
        try {
          if (typeof rawBridge.queryUsagePage !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
          const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
-         return normalizeBridgePayload<BridgeResponse<UsagePage>>(await rawBridge.queryUsagePage(payload, page ?? 1, pageSize ?? 50));
+         return normalizeBridgePayload<BridgeResponse<UsagePage>>(await rawBridge.queryUsagePage(payload, page ?? 1, pageSize ?? 10));
        } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
      },
      async getUsageDbStatus() {

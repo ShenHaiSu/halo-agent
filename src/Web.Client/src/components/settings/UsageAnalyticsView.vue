@@ -165,7 +165,7 @@
           v-model:page="store.page"
           v-model:page-size="store.pageSize"
           :item-count="store.pageData.total"
-          :page-sizes="[50, 100, 200]"
+          :page-sizes="[10, 50, 100, 200]"
           show-size-picker
           size="small"
           data-testid="usage-pagination"

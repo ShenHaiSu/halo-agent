@@ -20,7 +20,7 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   const modelKeys = ref<string[]>([]);
   const metric = ref<'in' | 'out' | 'total'>('total');
   const page = ref(1);
-  const pageSize = ref(50);
+  const pageSize = ref(10);
 
   const loading = ref(false);
   const error = ref('');
@@ -28,7 +28,7 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   const overview = ref<UsageOverview>({ totalRequests: 0, sumInput: 0, sumOutput: 0, sumCached: 0, hitRate: 0, activeModels: 0 });
   const trend = ref<UsageTrend>({ dates: [], perModel: [], hitRates: [], totals: [] });
   const share = ref<UsageProviderShareItem[]>([]);
-  const pageData = ref<UsagePage>({ total: 0, page: 1, pageSize: 50, rows: [] });
+  const pageData = ref<UsagePage>({ total: 0, page: 1, pageSize: 10, rows: [] });
 
   const filter = computed<UsageFilter>(() => {
     const f: UsageFilter = { preset: preset.value };
