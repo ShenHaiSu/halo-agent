@@ -423,7 +423,7 @@ public interface IAgentOrchestrator
                                      p.ArgsBuilder.Append(evt.TextDelta);
                                      try { p.ReceivedBytes += System.Text.Encoding.UTF8.GetByteCount(evt.TextDelta); }
                                      catch { p.ReceivedBytes = p.ArgsBuilder.Length; }
-                                     bool isFileWrite = p.FunctionName is "write_file" or "edit_file";
+                                    bool isFileWrite = p.FunctionName is "write_file" or "edit_file" or "edit_lines";
                                      long now = Environment.TickCount64;
                                      bool throttleHit = (now - p.LastPublishTick) >= 150 || evt.TextDelta.Length > 4096;
                                      if (isFileWrite ? throttleHit : true)
@@ -792,7 +792,8 @@ public interface IAgentOrchestrator
     {
         return functionName switch
         {
-            "edit_file" => " Hint: Call read_file first to inspect the exact lines before retrying edit_file.",
+            "edit_file" => " Hint: The failure payload lists the nearest line numbers; call read_file on the suggested line, fix the anchor whitespace, or use edit_lines(offset, limit) to edit by line number.",
+            "edit_lines" => " Hint: Check offset/limit against read_file's 1-based line numbers, and pass expected_hash when retrying to avoid overwriting concurrent changes.",
             "write_file" => " Hint: Verify the parent directory exists (list_dir) and check path spelling before retrying.",
             "read_file" => " Hint: Use list_dir to confirm the file exists and check relative path spelling.",
             "exec_command" => " Hint: Prefer runner cmd with standard cmd.exe syntax; avoid PowerShell-only syntax.",

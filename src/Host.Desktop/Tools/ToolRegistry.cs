@@ -6,7 +6,7 @@ using Host.Desktop.Tools.Safety;
 namespace Host.Desktop.Tools;
 
 /// <summary>
-/// 统一工具注册调度中心：注册 10 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool），
+/// 统一工具注册调度中心：注册 11 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool + need14 edit_lines），
 /// DispatchAsync 捕获异常转自愈提示，输出统一过 ToolOutputGuard，
 /// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
 /// 并发安全（无共享可变状态，处理器均为无状态）。
@@ -25,6 +25,7 @@ public sealed class ToolRegistry
             Register(new ReadFileTool());
             Register(new WriteFileTool());
             Register(new EditFileTool());
+            Register(new EditLinesTool());
             Register(new ListDirTool());
             Register(new GrepSearchTool());
             Register(new ViewImageTool());
