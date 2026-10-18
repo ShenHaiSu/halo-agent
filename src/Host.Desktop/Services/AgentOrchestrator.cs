@@ -69,23 +69,31 @@ public interface IAgentOrchestrator
      private readonly ToolRegistry _toolRegistry;
      private readonly StoragePathManager? _storageManager;
      private readonly ProviderConfigService? _providerConfigService;
-     private readonly PromptConfigService? _promptConfigService;
-     private readonly AgentConfigService? _agentConfigService;
-     private readonly UsageMetricsService? _usageMetrics;
-     public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25, AgentConfigService? agentConfigService = null, UsageMetricsService? usageMetrics = null)
-     {
-         _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
-         _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
-         _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
-         _toolRegistry = toolRegistry ?? new ToolRegistry();
-         _storageManager = storageManager;
-         _providerConfigService = providerConfigService;
-         _promptConfigService = promptConfigService;
-         _agentConfigService = agentConfigService;
-         _usageMetrics = usageMetrics ?? (_storageManager != null ? new UsageMetricsService(_storageManager) : null);
-         MaxIterations = maxIterations > 0 ? maxIterations : 25;
-         ResolvedMaxIterations = MaxIterations;
-     }
+    private readonly PromptConfigService? _promptConfigService;
+    private readonly AgentConfigService? _agentConfigService;
+    private readonly UsageMetricsService? _usageMetrics;
+    private readonly SubAgentCoordinator? _coordinator;
+    /// <summary>need13：本实例角色 main|sub（子实例由 Coordinator 构造时传入 sub）。</summary>
+    public string AgentRole { get; }
+    /// <summary>need13：本实例轮首策略快照（子实例构造时传入；主实例每轮刷新）。</summary>
+    public SubPolicySnapshot SubPolicy { get; private set; } = new();
+    public AgentOrchestrator(IWorkspaceSessionService sessionService, ITokenBudgetService budgetService, ILlmGatewayClient gatewayClient, ToolRegistry? toolRegistry = null, StoragePathManager? storageManager = null, ProviderConfigService? providerConfigService = null, PromptConfigService? promptConfigService = null, int maxIterations = 25, AgentConfigService? agentConfigService = null, UsageMetricsService? usageMetrics = null, SubAgentCoordinator? coordinator = null, SubPolicySnapshot? subPolicy = null, string agentRole = "main")
+    {
+        _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
+        _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
+        _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
+        _toolRegistry = toolRegistry ?? new ToolRegistry();
+        _storageManager = storageManager;
+        _providerConfigService = providerConfigService;
+        _promptConfigService = promptConfigService;
+        _agentConfigService = agentConfigService;
+        _usageMetrics = usageMetrics ?? (_storageManager != null ? new UsageMetricsService(_storageManager) : null);
+        _coordinator = coordinator;
+        AgentRole = string.Equals(agentRole, "sub", StringComparison.OrdinalIgnoreCase) ? "sub" : "main";
+        if (subPolicy != null) SubPolicy = subPolicy;
+        MaxIterations = maxIterations > 0 ? maxIterations : 25;
+        ResolvedMaxIterations = MaxIterations;
+    }
      public async Task<AgentTurnResult> RunAgentTurnAsync(string workspaceId, string sessionId, string userText, string? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
      {
          if (cancellationToken.IsCancellationRequested)
@@ -191,11 +199,47 @@ public interface IAgentOrchestrator
         }
 
          string systemPrompt;
+         // need13：轮首策略快照（本轮内所有 spawn/skill/memory 判定共用它；barrier 等待中变更不影响本轮）
+         if (string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+         {
+             // 子实例：构造时已带快照，不再读服务
+         }
+         else if (_agentConfigService != null)
+         {
+             try { SubPolicy = new SubPolicySnapshot(_agentConfigService.GetInternal()); } catch { }
+         }
+         // need13：主 registry 常显 spawn（轮首按快照刷新 description 后缀；关闭仍可见、调用强拒绝）
+         try { if (!string.Equals(AgentRole, "sub", System.StringComparison.OrdinalIgnoreCase)) _toolRegistry.Register(new Host.Desktop.Tools.BuiltIn.SpawnSubAgentTool(SubPolicy.SubAgentEnabled)); } catch { }
+         // need13：Prompt 预声明（主策略块稳定区尾部；子后缀块仅 sub）
+         string subPolicyBlock = SystemPromptBuilder.BuildSubAgentPolicyBlock(
+             SubPolicy.SubAgentEnabled, SubPolicy.SubMaxParallel, SubPolicy.SubMaxIterations,
+             SubPolicy.SubAllowExecCommand, SubPolicy.SubAllowFileWrite,
+             SubPolicy.SubAllowSkillWrite, SubPolicy.SubAllowMemoryWrite);
+         // need16：轮首 Goal 快照（失败回空不断会话；本轮内写入下一轮生效）
+         string? goalBlock = null;
+         try
+         {
+             if (_storageManager != null)
+             {
+                 string mainId = sessionId;
+                 try { if (session != null && !string.IsNullOrWhiteSpace(session.ParentSessionId)) mainId = session.ParentSessionId!; } catch { }
+                 var goalSvc = new GoalService(_storageManager);
+                 var (g, _) = goalSvc.TryLoadGoal(workspaceId, mainId);
+                 goalBlock = SystemPromptBuilder.BuildGoalBlock(g);
+                 if (string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(goalBlock))
+                     goalBlock += "\n（你是子代理：仅可 goal_tool/get 查看，不可写入。）";
+             }
+         }
+         catch { goalBlock = null; }
          try
          {
              var promptCfg = _promptConfigService?.GetPromptConfigInternal() ?? PromptDefaults.CreateDefault();
-             var preview = SystemPromptBuilder.BuildPreview(promptCfg, workspace, pyOverride: null, dateOverride: null, skillIndexBlock: skillIndexBlock, memoryPinnedBlock: memoryPinnedBlock);
+             var preview = SystemPromptBuilder.BuildPreview(promptCfg, workspace, pyOverride: null, dateOverride: null, skillIndexBlock: skillIndexBlock, memoryPinnedBlock: memoryPinnedBlock, goalBlock: goalBlock);
              systemPrompt = preview.AssembledText;
+             if (!string.IsNullOrWhiteSpace(subPolicyBlock))
+                 systemPrompt = string.IsNullOrWhiteSpace(systemPrompt) ? subPolicyBlock + "\n" : systemPrompt + "\n" + subPolicyBlock + "\n";
+             if (string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+                 systemPrompt += "\n" + SystemPromptBuilder.SubAgentSuffixBlock + "\n";
          }
          catch (OperationCanceledException)
          {
@@ -366,7 +410,7 @@ public interface IAgentOrchestrator
             long ttftMark = Environment.TickCount64;
             bool ttftSent = false;
 
-            PublishTurnEvent(sessionId, "IterationStarted", new { iteration, maxIterations = effectiveMax });
+            PublishTurnEvent(sessionId, "IterationStarted", new { iteration, maxIterations = effectiveMax, agentRole = AgentRole, subEnabled = SubPolicy.SubAgentEnabled, subMaxParallel = SubPolicy.SubMaxParallel, subMaxIterations = SubPolicy.SubMaxIterations });
 
             try
             {
@@ -616,6 +660,7 @@ public interface IAgentOrchestrator
             // (6) 无 ToolCalls 则 TurnCompleted 结束
              if (completedCalls.Count == 0)
              {
+                 // need13：主 TurnCompleted 透出子耗 rollup（供顶栏“本轮含子耗”）
                  PublishTurnEvent(sessionId, "TurnCompleted", new
                  {
                      iterations = iteration,
@@ -626,6 +671,7 @@ public interface IAgentOrchestrator
                      cachedTokens = usage?.CachedInputTokens ?? 0,
                      billedPrompt = turnBilledIn,
                      billedCompletion = turnBilledOut,
+                     subAgents = new { count = 0, billedPrompt = 0L, billedCompletion = 0L },
                      updatedAtUtc = DateTime.UtcNow.ToString("o")
                  });
                  FlushUsageRows(usageRows, sessionId, workspaceId);
@@ -648,7 +694,10 @@ public interface IAgentOrchestrator
             }
 
             // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
-            foreach (var call in completedCalls)
+            // need13：spawn 分流（normal 先串行，spawn 走 Coordinator Barrier；等待不消费主 iteration）
+            var spawnCalls = completedCalls.Where(c => string.Equals(c.FunctionName, "spawn_subagent", StringComparison.OrdinalIgnoreCase)).ToList();
+            var normalCalls = completedCalls.Where(c => !string.Equals(c.FunctionName, "spawn_subagent", StringComparison.OrdinalIgnoreCase)).ToList();
+            foreach (var call in normalCalls)
             {
                 try { cancellationToken.ThrowIfCancellationRequested(); }
                 catch (OperationCanceledException)
@@ -680,6 +729,16 @@ public interface IAgentOrchestrator
                         CancellationToken = cancellationToken,
                         ExecDefaultTimeoutMsOverride = cfgExecDefaultMs,
                         ExecMaxTimeoutMsOverride = cfgExecMaxMs,
+                        AgentRole = AgentRole,
+                        ParentSessionId = string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase) ? (session.ParentSessionId ?? string.Empty) : string.Empty,
+                        SubAgentEnabled = SubPolicy.SubAgentEnabled,
+                        SubMaxParallel = SubPolicy.SubMaxParallel,
+                        SubMaxIterations = SubPolicy.SubMaxIterations,
+                        SubAllowExecCommand = SubPolicy.SubAllowExecCommand,
+                        SubAllowFileWrite = SubPolicy.SubAllowFileWrite,
+                        SubAllowSkillWrite = SubPolicy.SubAllowSkillWrite,
+                        SubAllowMemoryWrite = SubPolicy.SubAllowMemoryWrite,
+                        SkillMemoryScopeDefault = string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase) ? "project" : "project",
                     };
                     toolResult = await _toolRegistry.DispatchAsync(dto, toolContext, cancellationToken).ConfigureAwait(false);
                     toolResult ??= ToolResult.Fail($"工具 '{call.FunctionName}' 返回空结果，请重试。");
@@ -739,6 +798,70 @@ public interface IAgentOrchestrator
                      updatedAtUtc = DateTime.UtcNow.ToString("o")
                  });
             }
+            // need13：spawn 分流（主才允许；子调 spawn 由 registry 禁用桩直接拒，不会走到这里——此处为纵深兜底）
+            if (spawnCalls.Count > 0)
+            {
+                if (!string.Equals(AgentRole, "main", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var s in spawnCalls)
+                    {
+                        string fail = "[SUBAGENT_NESTED_DENIED] 子代理内禁止再 spawn（深度=1）。本次已拒绝。请在当前子内串行完成，必要时记入总结交主代理拆分。";
+                        await AppendToolTextAsync(workspaceId, sessionId, s.CallId, "spawn_subagent", fail, cancellationToken).ConfigureAwait(false);
+                        toolExecutions++;
+                    }
+                }
+                else if (!SubPolicy.SubAgentEnabled)
+                {
+                    foreach (var s in spawnCalls)
+                    {
+                        string fail = "[SUBAGENT_DISABLED] 子代理已关闭（设置>智能体行为>子代理>总开关=false）。本次 spawn 已拒绝，未创建子会话。请不要重试 spawn，直接用主代理能力继续，并在回复中告知用户可在设置中重新开启。"
+                            + HintForTool("spawn_subagent", "SUBAGENT_DISABLED");
+                        await AppendToolTextAsync(workspaceId, sessionId, s.CallId, "spawn_subagent", fail, cancellationToken).ConfigureAwait(false);
+                        toolExecutions++;
+                    }
+                }
+                else
+                {
+                    var specs = new List<SpawnCallSpec>();
+                    foreach (var s in spawnCalls)
+                    {
+                        var (spec, vfail, _) = SubAgentCoordinator.ParseSpawnCall(s.CallId, s.ArgumentsJson);
+                        if (spec == null)
+                        {
+                            string fail = (vfail ?? "[SUBAGENT_VALIDATION] spawn 参数非法：task 为空。") + HintForTool("spawn_subagent", "SUBAGENT_VALIDATION");
+                            await AppendToolTextAsync(workspaceId, sessionId, s.CallId, "spawn_subagent", fail, cancellationToken).ConfigureAwait(false);
+                            toolExecutions++;
+                        }
+                        else specs.Add(spec);
+                    }
+                    if (specs.Count > 0)
+                    {
+                        var coord = _coordinator ?? new SubAgentCoordinator(_sessionService, _budgetService, _gatewayClient, _storageManager, _providerConfigService, _promptConfigService, _agentConfigService, _usageMetrics);
+                        var (handles, rejected) = await coord.CreateSubsAsync(workspaceId, sessionId, specs, session.ProviderId ?? string.Empty, session.ModelId ?? string.Empty, SubPolicy, cancellationToken).ConfigureAwait(false);
+                        foreach (var r in rejected)
+                        {
+                            string fail = r.FailText + HintForTool("spawn_subagent", "SUBAGENT_QUOTA_EXCEEDED");
+                            await AppendToolTextAsync(workspaceId, sessionId, r.CallId, "spawn_subagent", fail, cancellationToken).ConfigureAwait(false);
+                            toolExecutions++;
+                        }
+                        PublishTurnEvent(sessionId, "SubAgentsBarrier", new { total = handles.Count, waiting = true });
+                        List<SubAgentResult> results;
+                        try { results = await coord.BarrierAsync(workspaceId, sessionId, handles, rejected, cancellationToken).ConfigureAwait(false); }
+                        catch (OperationCanceledException)
+                        {
+                            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                            UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                            return AgentTurnResult.Cancelled(iteration, toolExecutions);
+                        }
+                        foreach (var res in results)
+                        {
+                            await AppendToolTextAsync(workspaceId, sessionId, res.CallId, "spawn_subagent", res.ToJson(), cancellationToken).ConfigureAwait(false);
+                            toolExecutions++;
+                        }
+                        PublishTurnEvent(sessionId, "SubAgentsBarrierReleased", new { subs = results.Select(x => new { callId = x.CallId, subId = x.SubSessionId, success = x.Success }).ToArray() });
+                    }
+                }
+            }
         }
 
          // 理论不可达（有限循环内 iteration>=effectiveMax 即返回；无限循环内必 return），兜底截断
@@ -753,10 +876,32 @@ public interface IAgentOrchestrator
          UsageRecorder.Collect(rows, provider, model, usage, status, requestId, sessionId, workspaceId, UsageRecorder.SourceAgent);
      }
 
-     private void FlushUsageRows(List<PendingUsageRow> rows, string sessionId, string workspaceId)
-     {
-         UsageRecorder.Flush(_usageMetrics, rows, sessionId, workspaceId);
-     }
+    private void FlushUsageRows(List<PendingUsageRow> rows, string sessionId, string workspaceId)
+    {
+        UsageRecorder.Flush(_usageMetrics, rows, sessionId, workspaceId);
+    }
+
+    /// <summary>need13：spawn 回包落盘助手（Tool(callId, text, "spawn_subagent")）。</summary>
+    private async Task AppendToolTextAsync(string workspaceId, string sessionId, string callId, string toolName, string text, CancellationToken ct)
+    {
+        var toolMessage = UnifiedChatMessage.Tool(callId, text, toolName);
+        try { await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, toolMessage, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { }
+        PublishTurnEvent(sessionId, "ToolExecutionCompleted", new
+        {
+            iteration = 0,
+            callId,
+            functionName = toolName,
+            success = !text.StartsWith("[SUBAGENT_DISABLED]", StringComparison.Ordinal) && !text.StartsWith("[SUBAGENT_QUOTA_EXCEEDED]", StringComparison.Ordinal) && !text.StartsWith("[SUBAGENT_VALIDATION]", StringComparison.Ordinal) && !text.StartsWith("[SUBAGENT_NESTED_DENIED]", StringComparison.Ordinal),
+            exitCode = 0,
+            durationMs = 0L,
+            argsJson = string.Empty,
+            resultText = TruncateForEvent(text, 8000),
+            fileBytes = string.Empty,
+            updatedAtUtc = DateTime.UtcNow.ToString("o")
+        });
+    }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(
         string? providerId, string? modelId, SessionMetadata session)

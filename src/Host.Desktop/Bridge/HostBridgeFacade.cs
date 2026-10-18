@@ -39,6 +39,7 @@ namespace Host.Desktop.Bridge;
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
+    private SubAgentCoordinator? _subCoordinator;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
@@ -49,7 +50,9 @@ namespace Host.Desktop.Bridge;
      public ISessionRepository SessionRepository => _sessionRepository;
      public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
      public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-      public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal);
+      /// <summary>need13：子代理协调器（懒建；与 Orchestrator 双向引用由属性延迟装配）。</summary>
+    public SubAgentCoordinator SubCoordinator => _subCoordinator ??= new SubAgentCoordinator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _storageManager, _providerConfigService, _promptConfigService, _agentConfigService, UsageMetricsServiceInternal);
+    public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal, coordinator: SubCoordinator);
     public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService, UsageMetricsServiceInternal);
 
     public HostBridgeFacade(
@@ -855,6 +858,8 @@ namespace Host.Desktop.Bridge;
                 return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
             }
             string turnKey = "agent:" + sessionId.Trim();
+            // need13：重入先 CancelTree 防旧子泄漏
+            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
             if (_activeSessionTokens.TryRemove(turnKey, out var oldCts))
             {
                 try { oldCts.Cancel(); oldCts.Dispose(); } catch { /* ignore */ }
@@ -909,30 +914,43 @@ namespace Host.Desktop.Bridge;
 
     /// <summary>
     /// 取消正在运行的 Agent ReAct 循环：触发 CancellationTokenSource.Cancel() 并杀子进程（经 ToolContext 传递）。
+    /// need13：升级为级联 CancelTree（先子后主）。
     /// </summary>
     public Task<BridgeResponse<bool>> CancelAgentTurn(string sessionId)
     {
+        return CancelAgentTree(sessionId);
+    }
+
+    /// <summary>need13：级联取消整树（先子 CTS，后主 CTS；主若在 ask_user 阻塞一并解开）。</summary>
+    public Task<BridgeResponse<bool>> CancelAgentTree(string mainSessionId)
+    {
         try
         {
-            if (string.IsNullOrWhiteSpace(sessionId))
+            if (string.IsNullOrWhiteSpace(mainSessionId))
             {
                 return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
             }
 
-            string turnKey = "agent:" + sessionId.Trim();
+            string mainId = mainSessionId.Trim();
+            int subN = 0;
+            try { subN = SubCoordinator.CancelTree(mainId); } catch { }
+            string turnKey = "agent:" + mainId;
+            bool hadMain = false;
             if (_activeSessionTokens.TryRemove(turnKey, out var cts))
             {
                 cts.Cancel();
                 cts.Dispose();
-                HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {sessionId} 的 Agent 推理");
-                return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送取消指令"));
+                hadMain = true;
             }
-
+            try { Host.Desktop.Tools.BuiltIn.AskUserGate.RemoveTimeout(mainId, string.Empty, "cancelled"); } catch { }
+            HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {mainId} 的 Agent 推理（含 {subN} 个子代理）");
+            if (hadMain || subN > 0)
+                return Task.FromResult(BridgeResponse<bool>.Success(true, $"已发送取消指令（含 {subN} 个子代理）"));
             return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在运行的 Agent 任务"));
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"CancelAgentTurn failed for '{sessionId}'", ex);
+            HaloLogger.App.Error($"CancelAgentTurn failed for '{mainSessionId}'", ex);
             return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
@@ -1106,7 +1124,9 @@ namespace Host.Desktop.Bridge;
     {
         try
         {
-            bool ok = await _workspaceSessionService.DeleteSessionAsync(workspaceId, sessionId).ConfigureAwait(false);
+            // need13：删主先 CancelTree 再级联删树（含子盘）
+            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
+            bool ok = await _workspaceSessionService.DeleteSessionTreeAsync(workspaceId, sessionId).ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)

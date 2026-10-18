@@ -33,6 +33,10 @@ public sealed class AskUserTool : IToolHandler
     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
+        // need13：子代理禁止 ask_user（v1 锁定，首行拒，未进 gate）
+        if (string.Equals(context.AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+            return ToolResult.Fail("[SUBAGENT_ASK_DENIED] 子代理禁止 ask_user（v1 锁定）。本次已拒绝，不会弹窗。请按保守默认继续，并在总结中注明假设，交用户在主会话确认。",
+                durationMs: sw.ElapsedMilliseconds);
         try
         {
             string sessionId = (context.SessionId ?? string.Empty).Trim();
@@ -41,7 +45,6 @@ public sealed class AskUserTool : IToolHandler
                 return ToolResult.Fail("ask_user 需要会话上下文（SessionId 为空），无法挂起等待用户。",
                     durationMs: sw.ElapsedMilliseconds);
             }
-
             List<AskUserQuestion>? questions;
             int timeoutSec = AskUserGate.DefaultTimeoutSec;
             try

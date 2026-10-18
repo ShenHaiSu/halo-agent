@@ -13,6 +13,15 @@ public class AgentConfigDocument
     public int ExecDefaultTimeoutMs { get; set; } = AgentDefaults.DefaultTimeoutMs;
     public int ExecMaxTimeoutMs { get; set; } = AgentDefaults.MaxTimeoutMs;
     public int MaxIterations { get; set; } = AgentDefaults.MaxIterations;
+    // need13：子代理（缺字段=老文件，全部回默认，不算损坏）
+    public bool SubAgentEnabled { get; set; } = true;
+    public int SubMaxParallel { get; set; } = 3;
+    public int SubMaxIterations { get; set; } = 15;
+    public bool SubAllowExecCommand { get; set; } = true;
+    public bool SubAllowFileWrite { get; set; } = true;
+    public bool SubAllowSkillWrite { get; set; } = false;
+    public bool SubAllowMemoryWrite { get; set; } = false;
+    public bool SubAllowAskUser { get; set; } = false; // v1 锁定 false
     public string Scope { get; set; } = "global";
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     // 后续杂项扩展位：本期只声明不使用，反序列化宽容忽略未知字段即可
@@ -26,6 +35,12 @@ public static class AgentDefaults
     public const int MaxIterations = 25;
     public const int HardTimeoutCeilMs = 3600000; // 有限值硬顶 1h（01 §6）
     public const int HardIterationsCeil = 500; // 有限值硬顶 500
+    public const int SubMaxParallelDefault = 3;
+    public const int SubMaxParallelCeil = 8;
+    public const int SubMaxIterationsDefault = 15;
+    public const int SubMaxIterationsCeil = 50;
+    public const int SubHardParallelCeil = 8;
+    public const int SubHardIterationsCeil = 100;
 }
 
 public sealed class AgentConfigValidationException : Exception

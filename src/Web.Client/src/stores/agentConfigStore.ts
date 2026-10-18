@@ -78,6 +78,11 @@ export const useAgentConfigStore = defineStore('agentConfig', () => {
   /** 从 AGENT_VALIDATION 消息里猜字段，供视图滚动定位。 */
   function guessField(message: string): string {
     const m = message.toLowerCase();
+    // need13：子代理字段优先（submaxiterations 含 maxiterations 子串，必须先判）
+    if (m.includes('submaxparallel') || message.includes('并发')) return 'subMaxParallel';
+    if (m.includes('submaxiterations') || message.includes('子轮次')) return 'subMaxIterations';
+    if (m.includes('subagentenabled') || message.includes('总开关')) return 'subAgentEnabled';
+    if (m.includes('suballow') || message.includes('权限')) return 'subPerms';
     if (m.includes('maxiterations') || message.includes('轮次')) return 'maxIterations';
     if (m.includes('execmaxtimeoutms') || message.includes('上限')) return 'execMaxTimeoutMs';
     return 'execDefaultTimeoutMs';

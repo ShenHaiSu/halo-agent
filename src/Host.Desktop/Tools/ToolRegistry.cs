@@ -6,7 +6,7 @@ using Host.Desktop.Tools.Safety;
 namespace Host.Desktop.Tools;
 
  /// <summary>
- /// 统一工具注册调度中心：注册 13 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool + need14 edit_lines + need15 undo_edit/edit），
+ /// 统一工具注册调度中心：注册 15 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool + need13 spawn_subagent + need14 edit_lines + need15 undo_edit/edit + need16 goal_tool），
  /// DispatchAsync 捕获异常转自愈提示，输出统一过 ToolOutputGuard，
  /// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
  /// 并发安全（无共享可变状态，处理器均为无状态）。
@@ -32,9 +32,12 @@ public sealed class ToolRegistry
              Register(new AskUserTool());
              Register(new SkillTool());
              Register(new MemoryTool());
-             Register(new MemoryTool());
+             // need13：主 registry 常显 spawn_subagent（可见但可拒；关闭/超限走网关式强拒绝）
+             Register(new SpawnSubAgentTool(enabled: true));
              Register(new UndoEditTool());
              Register(new EditTool());
+             // need16：goal_tool 常显（主写子读，子写走 AgentRole 内鉴权强拒绝）
+             Register(new GoalTool());
          }
      }
 

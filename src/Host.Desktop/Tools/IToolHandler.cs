@@ -52,6 +52,18 @@ public sealed class ToolContext
     /// </summary>
     public int? ExecDefaultTimeoutMsOverride { get; set; }
     public int? ExecMaxTimeoutMsOverride { get; set; }
+    /// <summary>need13：main|sub（默认 main，老调用零改动）。</summary>
+    public string AgentRole { get; init; } = "main";
+    /// <summary>need13：sub 寄宿的主会话（main 为 null）。</summary>
+    public string? ParentSessionId { get; init; }
+    /// <summary>need13：轮首策略快照（见 05 §3，Orchestrator 每轮填一次）。</summary>
+    public bool SubAgentEnabled { get; set; } = true;
+    public int SubMaxParallel { get; set; } = 3;
+    public int SubMaxIterations { get; set; } = 15;
+    public bool SubAllowExecCommand { get; set; } = true;
+    public bool SubAllowFileWrite { get; set; } = true;
+    public bool SubAllowSkillWrite { get; set; } = false;
+    public bool SubAllowMemoryWrite { get; set; } = false;
     public CancellationToken CancellationToken { get; init; } = CancellationToken.None;
     /// <summary>need09-07：skill/memory 工具默认写域（模型不填 scope 即写 Project，防污染全局）。</summary>
     public string SkillMemoryScopeDefault { get; init; } = "project";

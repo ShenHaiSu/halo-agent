@@ -84,19 +84,20 @@ public sealed class SystemPromptBuilder
         return Task.FromResult(assembled);
     }
 
-    public static PromptPreviewDto BuildPreview(
-        PromptConfigDocument cfg,
-        WorkspaceInfo ws,
-        string? pyOverride = null,
-        string? dateOverride = null,
-        string? workspaceIdOverride = null,
-        string? skillIndexBlock = null,
-        string? memoryPinnedBlock = null)
+     public static PromptPreviewDto BuildPreview(
+         PromptConfigDocument cfg,
+         WorkspaceInfo ws,
+         string? pyOverride = null,
+         string? dateOverride = null,
+         string? workspaceIdOverride = null,
+         string? skillIndexBlock = null,
+         string? memoryPinnedBlock = null,
+         string? goalBlock = null)
     {
         cfg ??= PromptDefaults.CreateDefault();
-        if (ws == null) throw new ArgumentNullException(nameof(ws));
-        var ctx = CreateContext(ws, pyOverride, dateOverride);
-        var (assembled, blocks, unknownVars) = BuildCore(cfg, ctx, skillIndexBlock, memoryPinnedBlock);
+         if (ws == null) throw new ArgumentNullException(nameof(ws));
+         var ctx = CreateContext(ws, pyOverride, dateOverride);
+         var (assembled, blocks, unknownVars) = BuildCore(cfg, ctx, skillIndexBlock, memoryPinnedBlock, goalBlock);
         bool isDefault = IsDefaultConfig(cfg);
         int total = TokenBudgetService.EstimateTokens(assembled);
         int stable = blocks.Where(b => b.Enabled && b.IsStable).Sum(b => b.EstimatedTokens);
@@ -124,8 +125,20 @@ public sealed class SystemPromptBuilder
      public const string SkillTruncatedLineFormat = "(…and {0} more skills omitted; list via skill_tool)";
      /// <summary>need09-02：Memory 常驻块标题（冻结；同时是二次切分标记）。</summary>
      public const string MemoryPinnedTitle = "## 6. Pinned Memory (project overrides global on same name)";
-     /// <summary>need09-02：Memory 超限截断行格式（冻结，{0}=被省略条数）。</summary>
-     public const string MemoryTruncatedLineFormat = "(…and {0} more memories omitted; list via memory_tool)";
+    /// <summary>need09-02：Memory 超限截断行格式（冻结，{0}=被省略条数）。</summary>
+    public const string MemoryTruncatedLineFormat = "(…and {0} more memories omitted; list via memory_tool)";
+    /// <summary>need13：主策略块（稳定区尾部，轮首快照渲染，关闭/超限数字动态）。</summary>
+    public static string BuildSubAgentPolicyBlock(bool enabled, int maxParallel, int maxIterations, bool exec, bool file, bool skill, bool memory)
+        => "# 子代理策略（本轮快照）\n"
+         + $"- 可用：{(enabled ? "是" : "否")}（否=设置已关闭，禁止 spawn，若用户问并行请引导去设置开启）\n"
+         + $"- 并发上限：{maxParallel}；子轮次上限：{maxIterations}；子权限：exec={(exec ? "开" : "关")} file={(file ? "开" : "关")} skill写={(skill ? "开" : "关")} memory写={(memory ? "开" : "关")} ask=禁 套娃=禁\n"
+         + "- spawn 时必须把必要背景写进 task（子看不到主历史）；子以正常文本总结汇报，barrier 等全部完成才继续。";
+    /// <summary>need13：子后缀块（仅 sub 追加）。</summary>
+    public const string SubAgentSuffixBlock =
+        "# 子代理约束\n"
+        + "- 你是寄宿于主会话的子代理，会话干净，无主历史。\n"
+        + "- 禁止修改 skill/memory（只有 list/get 可用）；禁止 ask_user（按保守默认继续并在总结注明假设）；禁止再 spawn 子代理。\n"
+        + "- 结束时必须输出一段自然语言总结：结论/变更文件/验证方式/未完成与风险。";
      /// <summary>need09-02：toolGuide 追加的 Skill/Memory/Images 指南 3 行（冻结英文，永不改）。</summary>
      public const string SkillMemoryGuideSuffix =
          "- Skills: consult `## 5. Available Skills` index first; load body via `skill_tool` before applying; project scope overrides global on same name.\n" +
@@ -254,6 +267,28 @@ public sealed class SystemPromptBuilder
          }
          return Render(StableOrder(kept), deduped.Count - kept.Count);
      }
+     /// <summary>need16：渲染 Session Goal 块（空/无内容返回 string.Empty 由 BuildCore 整块丢弃，stable=true）。</summary>
+     public static string BuildGoalBlock(Host.Desktop.Core.Models.SessionGoal? goal)
+     {
+         if (goal == null || !goal.HasContent) return string.Empty;
+         var ms = goal.Milestones ?? new List<Host.Desktop.Core.Models.GoalMilestone>();
+         int total = ms.Count; int done = ms.Count(m => m.Done);
+         var lines = new List<string>();
+         lines.Add("## 5. Session Goal（本轮目标，goal_tool 可改）");
+         if (!string.IsNullOrWhiteSpace(goal.Title)) lines.Add("- 标题：" + goal.Title.Trim());
+         if (!string.IsNullOrWhiteSpace(goal.Description)) lines.Add("- 描述：" + goal.Description.Trim());
+         lines.Add($"- 进度：{goal.Percent}%（{done}/{total} 里程碑）" + (string.IsNullOrWhiteSpace(goal.Note) ? string.Empty : goal.Note.Trim()));
+         int show = 0;
+         foreach (var m in ms)
+         {
+             if (show >= 20) break;
+             lines.Add("- [" + (m.Done ? "x" : " ") + "] " + (m.Title ?? string.Empty).Trim());
+             show++;
+         }
+         if (total > show) lines.Add($"…余{total - show}条");
+         lines.Add("Goal 变更经 goal_tool 下一轮生效；子会话只读。");
+         return string.Join("\n", lines);
+     }
 
      /// <summary>
      /// need09-02：唯一拼装路径。装配顺序（冻结）：custom(head) → identity → runtime → cmdPython → toolGuide →
@@ -261,7 +296,7 @@ public sealed class SystemPromptBuilder
      /// SkillMemoryService 类型）；null/空/空白视为空域，整块（含标题）直接消失；缺省即老输出逐字节一致。
      /// </summary>
      public static (string assembled, List<PromptBlockPreview> blocks, List<string> unknownVars) BuildCore(
-         PromptConfigDocument cfg, PromptContext ctx, string? skillIndexBlock = null, string? memoryPinnedBlock = null)
+         PromptConfigDocument cfg, PromptContext ctx, string? skillIndexBlock = null, string? memoryPinnedBlock = null, string? goalBlock = null)
      {
          var blocks = new List<PromptBlockPreview>();
          var unknown = new List<string>();
@@ -301,6 +336,9 @@ public sealed class SystemPromptBuilder
          string memNorm = NormalizeBlockBody(memoryPinnedBlock);
          if (!string.IsNullOrWhiteSpace(memNorm))
              ordered.Add(("memoryPinned", memNorm, true, true));
+         string goalNorm = NormalizeBlockBody(goalBlock);
+         if (!string.IsNullOrWhiteSpace(goalNorm))
+             ordered.Add(("goal", goalNorm, true, true));
          if (cfg.EnableEphemeral)
          {
              string eph = RenderTemplate(cfg.EphemeralTemplate ?? string.Empty, ctx, unknown).TrimEnd();
