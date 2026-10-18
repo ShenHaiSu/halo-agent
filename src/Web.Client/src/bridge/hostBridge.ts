@@ -1708,9 +1708,10 @@ function createBrowserMockBridge(): HostBridgeApi {
      async getUsageProviderShare() {
        return { ok: true, data: [{ providerId: 'p-openai', name: 'OpenAI', value: 16900, share: 0.68 }, { providerId: 'p-deepseek', name: 'DeepSeek', value: 7900, share: 0.32 }] };
      },
-     async queryUsagePage(_filter: unknown, page: number, pageSize: number) {
-       const rows = Array.from({ length: Math.min(8, pageSize) }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, requestDate: '2026-10-17', requestTime: '10:20:0' + i, requestDatetime: '2026-10-17 10:20:0' + i, providerName: i % 2 ? 'DeepSeek' : 'OpenAI', modelId: i % 2 ? 'deepseek-chat' : 'gpt-4o', modelDisplay: i % 2 ? 'DeepSeek-V3' : 'GPT-4o', protocol: 'chat', inputTokens: 1200 + i * 100, outputTokens: 200 + i * 10, cachedTokens: 800 + i * 60, hitRate: 0.66, status: 'ok' }));
-       return { ok: true, data: { total: 42, page, pageSize, rows } };
+    async queryUsagePage(_filter: UsageFilter | string, page: number, pageSize: number) {
+      void _filter;
+      const rows: UsageRowDto[] = Array.from({ length: Math.min(8, pageSize) }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, requestDate: '2026-10-17', requestTime: '10:20:0' + i, requestDatetime: '2026-10-17 10:20:0' + i, providerName: i % 2 ? 'DeepSeek' : 'OpenAI', modelId: i % 2 ? 'deepseek-chat' : 'gpt-4o', modelDisplay: i % 2 ? 'DeepSeek-V3' : 'GPT-4o', protocol: 'chat', inputTokens: 1200 + i * 100, outputTokens: 200 + i * 10, cachedTokens: 800 + i * 60, hitRate: 0.66, status: 'ok', source: 'main', estimated: 0 }));
+      return { ok: true, data: { total: 42, page, pageSize, rows } };
      },
      async getUsageDbStatus() {
        return { ok: true, data: { dbPath: 'mock-usage.db', recordCount: 42, dbSizeBytes: 49152, oldestDate: '2026-10-11', newestDate: '2026-10-17' } };

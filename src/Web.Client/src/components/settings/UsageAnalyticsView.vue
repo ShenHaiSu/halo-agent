@@ -178,6 +178,7 @@
             </tr>
             <tr v-if="!store.pageData.rows.length">
               <td colspan="9" class="py-4 text-center"><n-empty size="small" description="暂无数据" /></td>
+            </tr>
           </tbody>
         </table>
       </div>
