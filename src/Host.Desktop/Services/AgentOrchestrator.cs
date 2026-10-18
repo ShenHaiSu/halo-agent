@@ -699,11 +699,13 @@ public interface IAgentOrchestrator
 
                 toolExecutions++;
 
-                string toolText = toolResult.Success
-                    ? (string.IsNullOrEmpty(toolResult.Output) ? "(工具执行成功，无输出)" : toolResult.Output)
-                    : $"[Tool Error - {call.FunctionName}]: {toolResult.Error}"
-                      + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
-                      + HintForTool(call.FunctionName);
+                 string errorCode = toolResult.ErrorCode ?? ToolResult.TryExtractCode(toolResult.Error) ?? string.Empty;
+                 string toolText = toolResult.Success
+                     ? (string.IsNullOrEmpty(toolResult.Output) ? "(工具执行成功，无输出)" : toolResult.Output)
+                     : $"[Tool Error - {call.FunctionName}]: {toolResult.Error}"
+                       + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
+                       + HintForTool(call.FunctionName, errorCode)
+                       + BuildNextActionHint(toolResult, call.FunctionName, call.ArgumentsJson, errorCode);
 
                  var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
                  // need11-fix: view_image 等工具返回的 Images 必须挂到 tool 消息上，否则下一轮 PlanTurn 读不到，静默丢图（仅文本上游）。
@@ -801,24 +803,145 @@ public interface IAgentOrchestrator
             ?? provider.Models.FirstOrDefault()
             ?? new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, MaxContextTokens = 128000, MaxOutputTokens = 4096 };
 
-        return (provider, model);
-    }
+         return (provider, model);
+     }
 
-    private static string HintForTool(string functionName)
-    {
-        return functionName switch
-        {
-            "edit_file" => " Hint: The failure payload lists the nearest line numbers; call read_file on the suggested line, fix the anchor whitespace, or use edit_lines(offset, limit) to edit by line number.",
-            "edit_lines" => " Hint: Check offset/limit against read_file's 1-based line numbers, and pass expected_hash when retrying to avoid overwriting concurrent changes.",
-            "write_file" => " Hint: Verify the parent directory exists (list_dir) and check path spelling before retrying.",
-            "read_file" => " Hint: Use list_dir to confirm the file exists and check relative path spelling.",
-            "exec_command" => " Hint: Prefer runner cmd with standard cmd.exe syntax; avoid PowerShell-only syntax.",
-            "list_dir" => " Hint: Verify the directory path is relative to the workspace root.",
-            "grep_search" => " Hint: Check the search pattern and target directory, then retry with a simpler pattern.",
-            _ => " Hint: Check tool arguments and retry."
-        };
-    }
-    private static string TruncateForEvent(string? s, int max)
+     public static string HintForTool(string functionName, string? errorCode = null)
+     {
+         if (!string.IsNullOrEmpty(errorCode))
+         {
+             switch (errorCode)
+             {
+                 case "OLD_STRING_NOT_FOUND":
+                     return " Hint: open read_file at the suggested line and copy-paste the anchor verbatim, or use edit_lines(offset,limit).";
+                 case "ANCHOR_AMBIGUOUS":
+                     return " Hint: lengthen the anchor to include the enclosing function/class name, or use edit_lines.";
+                 case "NEED_CONFIRM_OVERWRITE":
+                     return " Hint: retry write_file with allow_overwrite:true, or use edit_file/edit_lines for partial edits.";
+                 case "MISSING_LIMIT":
+                     return " Hint: set limit = lines to replace (0 = insert).";
+                 case "ANCHOR_TOO_SHORT":
+                     return " Hint: lengthen the anchor to at least 8 non-whitespace chars with 2-5 context lines, or use edit_lines(offset,limit).";
+                 case "EXPECTED_HASH_MISMATCH":
+                     return " Hint: re-read the file with read_file to get the latest hash, then retry.";
+                 case "CONTENT_TOO_LARGE":
+                     return " Hint: split the change into smaller edit_file/edit_lines calls.";
+                 case "OUT_OF_RANGE":
+                 case "NO_CHANGE":
+                 case "EMPTY_NEW_TEXT":
+                 case "REGEX_ZERO_LENGTH":
+                     break;
+             }
+         }
+
+         return functionName switch
+         {
+             "edit_file" => " Hint: The failure payload lists the nearest line numbers; call read_file on the suggested line, fix the anchor whitespace, or use edit_lines(offset, limit) to edit by line number.",
+             "edit_lines" => " Hint: Check offset/limit against read_file's 1-based line numbers, and pass expected_hash when retrying to avoid overwriting concurrent changes.",
+             "write_file" => " Hint: Verify the parent directory exists (list_dir) and check path spelling before retrying.",
+             "read_file" => " Hint: Use list_dir to confirm the file exists and check relative path spelling.",
+             "exec_command" => " Hint: Prefer runner cmd with standard cmd.exe syntax; avoid PowerShell-only syntax.",
+             "list_dir" => " Hint: Verify the directory path is relative to the workspace root.",
+             "grep_search" => " Hint: Check the search pattern and target directory, then retry with a simpler pattern.",
+             _ => " Hint: Check tool arguments and retry."
+         };
+     }
+
+     /// <summary>need15 P2-3：失败负载直接给出下一步调用草稿（纯文本，不自动执行，≤300 字符）。</summary>
+     public static string BuildNextActionHint(ToolResult toolResult, string functionName, string? argumentsJson, string? errorCode = null)
+     {
+         string code = errorCode ?? toolResult.ErrorCode ?? ToolResult.TryExtractCode(toolResult.Error) ?? string.Empty;
+         if (string.IsNullOrEmpty(code))
+         {
+             return string.Empty;
+         }
+
+         try
+         {
+             if (code is "OLD_STRING_NOT_FOUND" or "ANCHOR_AMBIGUOUS")
+             {
+                 string payload = toolResult.ErrorPayloadJson ?? toolResult.Error ?? string.Empty;
+                 int bestLine = 1;
+                 int needleLines = 1;
+                 string path = functionName;
+                 try
+                 {
+                     using var doc = System.Text.Json.JsonDocument.Parse(ExtractJsonObject(payload));
+                     var root = doc.RootElement;
+                     if (root.TryGetProperty("nearest", out var nearest) && nearest.ValueKind == System.Text.Json.JsonValueKind.Array && nearest.GetArrayLength() > 0)
+                     {
+                         bestLine = nearest[0].TryGetProperty("line", out var l) && l.TryGetInt32(out int lv) ? lv : 1;
+                     }
+
+                     if (root.TryGetProperty("old_string_lines", out var nl) && nl.TryGetInt32(out int nlv))
+                     {
+                         needleLines = Math.Max(1, nlv);
+                     }
+
+                     if (root.TryGetProperty("file", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.String)
+                     {
+                         path = f.GetString() ?? path;
+                     }
+                 }
+                 catch
+                 {
+                 }
+
+                 // 回退：从原始参数里取 file_path
+                 if ((path == functionName || string.IsNullOrWhiteSpace(path)) && !string.IsNullOrWhiteSpace(argumentsJson))
+                 {
+                     try
+                     {
+                         using var adoc = System.Text.Json.JsonDocument.Parse(argumentsJson);
+                         if (adoc.RootElement.TryGetProperty("file_path", out var fp) && fp.ValueKind == System.Text.Json.JsonValueKind.String)
+                         {
+                             path = fp.GetString() ?? path;
+                         }
+                     }
+                     catch
+                     {
+                     }
+                 }
+
+                 string draft = "{\"file_path\":\"" + path.Replace("\\", "/").Replace("\"", "\\\"") + "\",\"offset\":" + bestLine + ",\"limit\":" + needleLines + ",\"new_text\":\"<paste full replacement here>\"}";
+                 string hint = "\nNextAction (copy-paste and adjust): edit_lines(" + draft + ")";
+                 return hint.Length > 400 ? hint.Substring(0, 400) : hint;
+             }
+
+             if (code is "NEED_CONFIRM_OVERWRITE")
+             {
+                 return "\nNextAction: retry the SAME write_file call with \"allow_overwrite\":true added.";
+             }
+
+             if (code is "MISSING_LIMIT")
+             {
+                 return "\nNextAction: retry edit_lines with explicit \"limit\" (replace N lines, or 0 to insert).";
+             }
+         }
+         catch
+         {
+         }
+
+         return string.Empty;
+     }
+
+     private static string ExtractJsonObject(string s)
+     {
+         if (string.IsNullOrEmpty(s))
+         {
+             return "{}";
+         }
+
+         int start = s.IndexOf('{');
+         int end = s.LastIndexOf('}');
+         if (start >= 0 && end > start)
+         {
+             return s.Substring(start, end - start + 1);
+         }
+
+         return "{}";
+     }
+     private static string TruncateForEvent(string? s, int max)
     {
         if (string.IsNullOrEmpty(s)) return string.Empty;
         return s.Length > max ? s.Substring(0, max) + "\n...（输出过长已截断）" : s;

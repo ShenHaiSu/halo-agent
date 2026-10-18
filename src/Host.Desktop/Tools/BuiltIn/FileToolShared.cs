@@ -195,8 +195,37 @@ internal static class FileToolShared
             index += needleLf.Length;
         }
 
-        return count;
-    }
+         return count;
+     }
+     /// <summary>need15 P1-3：字节 sha256（64 hex 小写），供 read/write/edit 统一 hash 口径。</summary>
+     internal static string ComputeHash(byte[] payload)
+     {
+         using var sha = System.Security.Cryptography.SHA256.Create();
+         byte[] hash = sha.ComputeHash(payload);
+         var sb = new StringBuilder(hash.Length * 2);
+         foreach (byte b in hash)
+         {
+             sb.Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+         }
+
+         return sb.ToString();
+     }
+
+     /// <summary>need15 P1-3：按落盘字节口径计算文本 hash（含 preamble），与文件字节 sha256 一致。</summary>
+     internal static string ComputeTextHash(string text, DetectedText detected)
+     {
+         byte[] body = detected.Encoding.GetBytes(text);
+         if (detected.Preamble.Length == 0)
+         {
+             return ComputeHash(body);
+         }
+
+         byte[] payload = new byte[detected.Preamble.Length + body.Length];
+         Buffer.BlockCopy(detected.Preamble, 0, payload, 0, detected.Preamble.Length);
+         Buffer.BlockCopy(body, 0, payload, detected.Preamble.Length, body.Length);
+         return ComputeHash(payload);
+     }
+
 
     /// <summary>
     /// 生成单处替换的 Unified Diff（上下文 ±3 行）。

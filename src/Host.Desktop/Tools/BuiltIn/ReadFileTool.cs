@@ -125,11 +125,33 @@ public sealed class ReadFileTool : IToolHandler
                 }
             }
 
-            var sb = new StringBuilder();
-            sb.Append("[Encoding: ").Append(detected.EncodingLabel)
-              .Append(", LineEndings: ").Append(detected.NewLineLabel)
-              .Append(", TotalLines: ").Append(totalLines).Append(']');
+             var sb = new StringBuilder();
+             string fileHash;
+             try
+             {
+                 fileHash = FileToolShared.ComputeHash(File.ReadAllBytes(fullPath));
+             }
+             catch
+             {
+                 fileHash = FileToolShared.ComputeTextHash(detected.Content, detected);
+             }
 
+             const long HashFullLimit = 1_048_576;
+             string hashShown;
+             try
+             {
+                 long size = new FileInfo(fullPath).Length;
+                 hashShown = size > HashFullLimit ? fileHash.Substring(0, 16) + $"... (hash_full:skipped(size={size}))" : fileHash;
+             }
+             catch
+             {
+                 hashShown = fileHash;
+             }
+
+             sb.Append("[Encoding: ").Append(detected.EncodingLabel)
+               .Append(", LineEndings: ").Append(detected.NewLineLabel)
+               .Append(", TotalLines: ").Append(totalLines)
+               .Append(", Hash: ").Append(hashShown).Append(']');
             if (offset > totalLines)
             {
                 sb.AppendLine().Append($"offset {offset} 超出文件总行数 {totalLines}，无内容返回。");

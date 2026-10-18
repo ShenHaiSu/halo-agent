@@ -249,9 +249,10 @@ public sealed class Stage14EditFileToolTests : IDisposable
             new_string = "\t\treturn { ok: true, rows: 1 };",
         });
 
-        Assert.False(miss.Success);
-        string payload = miss.Error ?? string.Empty;
-        using JsonDocument doc = JsonDocument.Parse(payload);
+         Assert.False(miss.Success);
+         Assert.StartsWith("OLD_STRING_NOT_FOUND", miss.Error ?? string.Empty);
+         string payload = ExtractJson(miss.ErrorPayloadJson ?? miss.Error ?? string.Empty);
+         using JsonDocument doc = JsonDocument.Parse(payload);
         JsonElement root = doc.RootElement;
 
         Assert.False(root.GetProperty("ok").GetBoolean());
@@ -482,15 +483,15 @@ public sealed class Stage14EditFileToolTests : IDisposable
         Assert.Contains("@@", once.Output);
         Assert.Equal("line1\nline2-edited\nline3\n", File.ReadAllText(Absolute(fileName), Encoding.UTF8));
 
-        // 2) 多处命中且未开 replace_all：仍报 matched
-        ToolResult ambiguous = await Call("edit_file", new
-        {
-            file_path = fileName,
-            old_string = "line",
-            new_string = "LINE",
-        });
-        Assert.False(ambiguous.Success);
-        Assert.Contains("matched", ambiguous.Error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+         // 2) 多处命中且未开 replace_all：need15 后为 ANCHOR_AMBIGUOUS（含 matched 兼容词）
+         ToolResult ambiguous = await Call("edit_file", new
+         {
+             file_path = fileName,
+             old_string = "line",
+             new_string = "LINE",
+         });
+         Assert.False(ambiguous.Success);
+         Assert.True((ambiguous.Error ?? string.Empty).Contains("ANCHOR_AMBIGUOUS") || (ambiguous.Error ?? string.Empty).Contains("matched", StringComparison.OrdinalIgnoreCase), ambiguous.Error);
 
         // 3) 长锚点 + replace_all：处处替换
         File.WriteAllText(Absolute(fileName), "aaa-keep-1 bbb\r\naaa-keep-1 bbb\r\n", new UTF8Encoding(false));
@@ -532,14 +533,16 @@ public sealed class Stage14EditFileToolTests : IDisposable
             new UTF8Encoding(false));
 
         // regex：按模式批量改写
-        ToolResult regex = await Call("edit_file", new
-        {
-            file_path = fileName,
-            old_string = "int (\\w) = (\\d);",
-            new_string = "int $1 = $2$2;",
-            match_mode = "regex",
-            replace_all = true,
-        });
+         // regex：按模式批量改写（need15 P0-1 后 $ 默认字面，显式 opt-in 才展开）
+         ToolResult regex = await Call("edit_file", new
+         {
+             file_path = fileName,
+             old_string = "int (\\w) = (\\d);",
+             new_string = "int $1 = $2$2;",
+             match_mode = "regex",
+             replace_all = true,
+             regex_expand_groups = true,
+         });
         Assert.True(regex.Success, regex.Error);
         string afterRegex = File.ReadAllText(Absolute(fileName), Encoding.UTF8);
         Assert.Contains("int a = 11;", afterRegex);
@@ -671,7 +674,14 @@ public sealed class Stage14EditFileToolTests : IDisposable
             sb.Append("item").Append(i.ToString("D2")).Append("-payload");
         }
 
-        sb.Append("';\r\n");
-        return sb.ToString();
-    }
-}
+         sb.Append("';\r\n");
+         return sb.ToString();
+     }
+
+     private static string ExtractJson(string s)
+     {
+         int start = s.IndexOf('{');
+         int end = s.LastIndexOf('}');
+         return start >= 0 && end > start ? s.Substring(start, end - start + 1) : s;
+     }
+ }

@@ -73,22 +73,23 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task SystemPrompt_Contains_CmdFirst_And_PowerShellBan()
-    {
-        string prompt = await SystemPromptBuilder.BuildAsync(_workspace, "Python 3.11.9 (C:\\Python311\\python.exe)");
+     [Fact]
+     public async Task SystemPrompt_Contains_CmdFirst_And_PowerShellBan()
+     {
+         string prompt = await SystemPromptBuilder.BuildAsync(_workspace, "Python 3.11.9 (C:\\Python311\\python.exe)");
 
-        Assert.Contains("cmd.exe", prompt);
-        Assert.Contains("FIRST CHOICE", prompt);
-        Assert.Contains("powershell", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("AVOID PowerShell", prompt);
-        Assert.Contains("read_file", prompt);
-        Assert.Contains("edit_file", prompt);
-        Assert.Contains("list_dir", prompt);
-        Assert.Contains("grep_search", prompt);
-        Assert.Contains(_workspace.RootPath, prompt);
-        Assert.Contains(_workspace.Name, prompt);
-    }
+         Assert.Contains("cmd.exe", prompt);
+         Assert.Contains("FIRST CHOICE", prompt);
+         Assert.Contains("powershell", prompt, StringComparison.OrdinalIgnoreCase);
+         Assert.Contains("AVOID PowerShell", prompt);
+         Assert.Contains("read_file", prompt);
+         Assert.Contains("edit_file", prompt);
+         // need15: ToolGuide 已收敛为硬规则（不再逐字列 list_dir/grep_search，通用卡片仍可用）
+         Assert.Contains("NEVER invent", prompt);
+         Assert.Contains("verbatim copy-paste", prompt);
+         Assert.Contains(_workspace.RootPath, prompt);
+         Assert.Contains(_workspace.Name, prompt);
+     }
 
     [Fact]
     public async Task React_NoTools_DirectAnswer_Completes()

@@ -149,7 +149,38 @@ public static class PathSafetyValidator
             return true;
         }
     }
+     /// <summary>need15 P2-2：校验 backup_path 位于 &lt;DataRoot&gt;/backups/ 下，防任意读。</summary>
+     public static (bool Allowed, string? Error, string FullPath) ValidateBackupRead(string dataRoot, string? inputPath)
+     {
+         string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : Path.GetFullPath(dataRoot);
+         string backupsRoot = Path.GetFullPath(Path.Combine(root, "backups")) + Path.DirectorySeparatorChar;
+         string full;
+         try
+         {
+             if (string.IsNullOrWhiteSpace(inputPath))
+             {
+                 return (false, "缺少必需参数 'backup_path'。", string.Empty);
+             }
 
+             full = Path.GetFullPath(inputPath);
+         }
+         catch (Exception ex)
+         {
+             return (false, $"路径格式非法，无法解析为有效路径：{ex.Message}", inputPath ?? string.Empty);
+         }
+
+         if (!full.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
+         {
+             return (false, $"拒绝读取备份目录之外的路径：'{full}'。backup_path 必须位于 <DataRoot>/backups/ 下。", full);
+         }
+
+         if (!File.Exists(full))
+         {
+             return (false, $"备份文件不存在：'{full}'。", full);
+         }
+
+         return (true, null, full);
+     }
     /// <summary>
     /// 计算相对工作区的显示路径（超出工作区则返回绝对路径）。
     /// </summary>

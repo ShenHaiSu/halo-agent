@@ -7,10 +7,11 @@ using Host.Desktop.Tools.Safety;
 namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>
-/// edit_file：need14 宽容匹配替换。
-/// R1 默认 normalized（换行 / Tab / 行尾空格容错，落盘字节风格不变），exact 与历史行为等价，regex 支持正则锚点；
-/// R3 未命中返回结构化诊断（Top-3 相似行 + 空白符可视化 + 可执行建议），一次返回即可定位；
-/// R4 成功回吐硬性 ≤ 2000 字符；R5 短锚点 + replace_all 直接拒绝。
+/// edit_file：need14 宽容匹配替换 + need15 安全加固。
+/// R1 默认 normalized，R3 结构化诊断，R4 回吐≤2000，R5 短锚拦截；
+/// need15 P0-1 regex $ 默认字面（regex_expand_groups 显式开启展开）；
+/// P0-4 模糊多命中 ANCHOR_AMBIGUOUS；P0-5 结构化错误码；P1-2 Schema 收敛 + 短锚拦截；
+/// P1-3 成功回吐 hash；P2-1 dry_run；P2-2 每次覆盖备份。
 /// </summary>
 public sealed class EditFileTool : IToolHandler
 {
@@ -19,6 +20,12 @@ public sealed class EditFileTool : IToolHandler
 
     /// <summary>R5：replace_all 时锚点去空白后的最小长度。</summary>
     internal const int MinAnchorCharsForReplaceAll = 8;
+
+    /// <summary>need15 P1-2：通用短锚拦截阈值（去空白后非空白字符数）。</summary>
+    internal const int MinAnchorNonBlankChars = 4;
+
+    /// <summary>need15 P0-4：replace_all 批量警告阈值（可热调）。</summary>
+    internal static int MaxBulkWarnThreshold = 20;
 
     /// <summary>Tab 展开倍数上限（防呆）。</summary>
     internal const int MaxExpandTabs = 16;
@@ -31,19 +38,19 @@ public sealed class EditFileTool : IToolHandler
         "Replace a text block in an existing file. Default match_mode=normalized tolerates CRLF/LF, Tab/space " +
         "and trailing-space differences while writing back in the file's own byte style. " +
         "A miss returns a structured diagnostic (nearest lines + whitespace visualization + next step). " +
-        "For very large files prefer edit_lines.";
+        "For very large files prefer edit_lines. For regex mode, $ is literal by default. " +
+        "Example: {\"file_path\":\"src/a.ts\",\"old_string\":\"  if (x) {\\n    foo();\\n  }\",\"new_string\":\"  if (x) {\\n    bar();\\n  }\"}";
 
     public ToolDefinition GetDefinition() => new(Name, Description,
         "{\"type\":\"object\",\"properties\":{"
         + "\"file_path\":{\"type\":\"string\",\"description\":\"Target file path.\"},"
-        + "\"old_string\":{\"type\":\"string\",\"description\":\"Existing text block to replace (include 2-5 lines of surrounding context to ensure uniqueness). Matching is tolerant by default.\"},"
-        + "\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text block.\"},"
+        + "\"old_string\":{\"type\":\"string\",\"minLength\":16,\"description\":\"Existing text block to replace (min 16 chars, verbatim copy-paste from read_file including indentation, 2-5 surrounding lines for uniqueness). Matching is tolerant by default.\"},"
+        + "\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text block. For regex mode, $ is literal by default (no group expansion).\"},"
         + "\"replace_all\":{\"type\":\"boolean\",\"description\":\"If true, replace all occurrences. If false (default), old_string must match exactly once.\"},"
         + "\"match_mode\":{\"type\":\"string\",\"enum\":[\"exact\",\"normalized\",\"regex\"],\"description\":\"exact=strict (legacy behaviour); normalized (default)=tolerate EOL/Tab/trailing-space; regex=treat old_string as a .NET regex over the normalized text.\"},"
-        + "\"normalize_eol\":{\"type\":\"boolean\",\"description\":\"Normalize CRLF/CR to LF before matching. Default true.\"},"
-        + "\"expand_tabs\":{\"type\":\"integer\",\"description\":\"Expand Tab to N spaces before matching (0=off). Default 4; matching only, file bytes untouched.\"},"
-        + "\"trim_trailing_space\":{\"type\":\"boolean\",\"description\":\"Ignore per-line trailing spaces/tabs before matching. Default true.\"},"
-        + "\"ignore_leading_whitespace\":{\"type\":\"boolean\",\"description\":\"Ignore per-line leading indentation before matching. Default false.\"}"
+        + "\"regex_expand_groups\":{\"type\":\"boolean\",\"description\":\"Only for match_mode=regex. If true, expand $1/${name} in new_string. Default false (literal write, safe for $ in code).\"},"
+        + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the file bytes; mismatch rejects the edit to avoid concurrent overwrite.\"},"
+        + "\"dry_run\":{\"type\":\"boolean\",\"description\":\"If true, only compute and preview the diff without writing.\"}"
         + "},\"required\":[\"file_path\",\"old_string\",\"new_string\"]}");
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
@@ -51,7 +58,7 @@ public sealed class EditFileTool : IToolHandler
         var sw = Stopwatch.StartNew();
         try
         {
-            // ---------- 参数解析（新参数全部可选，老调用零改动） ----------
+            // ---------- 参数解析（新参数全部可选，老调用零改动；隐藏高级旋钮仍解析） ----------
             string? filePathArg = null;
             string? oldString = null;
             string? newString = null;
@@ -61,6 +68,9 @@ public sealed class EditFileTool : IToolHandler
             int expandTabs = 4;
             bool trimTrailingSpace = true;
             bool ignoreLeadingWhitespace = false;
+            bool regexExpandGroups = false;
+            string? expectedHash = null;
+            bool dryRun = false;
 
             try
             {
@@ -111,6 +121,21 @@ public sealed class EditFileTool : IToolHandler
                 if (root.TryGetProperty("ignore_leading_whitespace", out JsonElement leadEl) && IsBool(leadEl))
                 {
                     ignoreLeadingWhitespace = leadEl.GetBoolean();
+                }
+
+                if (root.TryGetProperty("regex_expand_groups", out JsonElement expEl) && IsBool(expEl))
+                {
+                    regexExpandGroups = expEl.GetBoolean();
+                }
+
+                if (root.TryGetProperty("expected_hash", out JsonElement hashEl) && hashEl.ValueKind == JsonValueKind.String)
+                {
+                    expectedHash = hashEl.GetString();
+                }
+
+                if (root.TryGetProperty("dry_run", out JsonElement dryEl) && IsBool(dryEl))
+                {
+                    dryRun = dryEl.GetBoolean();
                 }
             }
             catch (JsonException ex)
@@ -199,6 +224,19 @@ public sealed class EditFileTool : IToolHandler
                     IgnoreLeadingWhitespace = ignoreLeadingWhitespace,
                 };
 
+            // ---------- need15 P1-2：通用短锚拦截（非 regex） ----------
+            if (matchMode != "regex")
+            {
+                string needleProbe = EditMatchEngine.Normalize(oldString, options).Text;
+                string compactProbe = WhitespaceRun.Replace(needleProbe, string.Empty);
+                if (needleProbe.Length == 0 || compactProbe.Length < MinAnchorNonBlankChars)
+                {
+                    return Task.FromResult(ToolResult.FailCode("ANCHOR_TOO_SHORT",
+                        $"ANCHOR_TOO_SHORT：锚点过短（去空白后仅 {compactProbe.Length} 个字符，需 ≥ {MinAnchorNonBlankChars}）。请加长锚点（含 2-5 行上下文）或改用 edit_lines(offset, limit) 精确按行编辑。",
+                        durationMs: sw.ElapsedMilliseconds));
+                }
+            }
+
             // ---------- R5：高危锚点拦截（`},` + replace_all 污染 183 处的复盘点） ----------
             if (replaceAll && matchMode != "regex")
             {
@@ -208,10 +246,33 @@ public sealed class EditFileTool : IToolHandler
                     var probe = EditMatchEngine.Normalize(raw, options);
                     int occurrences = EditMatchEngine.FindAll(
                         probe.Text, EditMatchEngine.Normalize(oldString, options).Text).Count;
-                    return Task.FromResult(ToolResult.Fail(
+                    return Task.FromResult(ToolResult.FailCode("ANCHOR_TOO_SHORT",
                         $"ANCHOR_TOO_SHORT：锚点去空白后仅 {compact.Length} 个字符且 replace_all=true，本次已拒绝"
                         + $"（文件内命中 {occurrences} 处，若放行会批量污染）。"
                         + "请加长锚点（建议 ≥ 8 个非空白字符，含 2-5 行上下文）或改用 edit_lines(offset, limit) 精确按行编辑。",
+                        durationMs: sw.ElapsedMilliseconds));
+                }
+            }
+
+            // ---------- need15：expected_hash 防并发覆盖 ----------
+            if (!string.IsNullOrWhiteSpace(expectedHash))
+            {
+                string currentHash;
+                try
+                {
+                    currentHash = FileToolShared.ComputeHash(File.ReadAllBytes(fullPath));
+                }
+                catch
+                {
+                    currentHash = FileToolShared.ComputeTextHash(detected.Content, detected);
+                }
+
+                string want = NormalizeHash(expectedHash);
+                if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(ToolResult.FailCode("EXPECTED_HASH_MISMATCH",
+                        $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {currentHash}；期望: {want}）。"
+                        + "请用 read_file 重新确认内容后重试，或不传 expected_hash。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
             }
@@ -244,11 +305,18 @@ public sealed class EditFileTool : IToolHandler
 
                 MatchCollection matches = regex.Matches(regexNorm.Text);
                 matchCount = matches.Count;
-                if (matchCount > 0 && !replaceAll && matchCount > 1)
+                if (matchCount == 0)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        $"Error: old_string matched {matchCount} times. Please include more surrounding context lines or set replace_all: true.",
+                    string diag = BuildNotFoundDiagnostic(relative, raw, oldString, detected, matchMode, options);
+                    return Task.FromResult(ToolResult.FailCode("OLD_STRING_NOT_FOUND",
+                        "OLD_STRING_NOT_FOUND：" + diag, diag,
                         durationMs: sw.ElapsedMilliseconds));
+                }
+
+                if (!replaceAll && matchCount > 1)
+                {
+                    return Task.FromResult(BuildAmbiguousResult(
+                        relative, raw, oldString, detected, matchMode, options, matchCount, sw.ElapsedMilliseconds));
                 }
 
                 foreach (Match m in matches)
@@ -260,14 +328,15 @@ public sealed class EditFileTool : IToolHandler
 
                     if (m.Length == 0)
                     {
-                        return Task.FromResult(ToolResult.Fail(
-                            "regex 命中为空长度（模式不含实际文本），edit_file 无法定位替换区间。请在模式中包含待替换的实际内容。",
+                        return Task.FromResult(ToolResult.FailCode("REGEX_ZERO_LENGTH",
+                            "REGEX_ZERO_LENGTH：regex 命中为空长度（模式不含实际文本），edit_file 无法定位替换区间。请在模式中包含待替换的实际内容。",
                             durationMs: sw.ElapsedMilliseconds));
                     }
 
                     int rawStart = regexNorm.RawStart[m.Index];
                     int rawEnd = regexNorm.RawEnd[m.Index + m.Length - 1];
-                    edits.Add((rawStart, rawEnd, m.Result(newString)));
+                    string replacement = regexExpandGroups ? m.Result(newString) : newString;
+                    edits.Add((rawStart, rawEnd, replacement));
                 }
             }
             else
@@ -276,8 +345,8 @@ public sealed class EditFileTool : IToolHandler
                 string needle = EditMatchEngine.Normalize(oldString, options).Text;
                 if (needle.Length == 0)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        "old_string 归一化后为空（仅含空白或换行），无法定位替换区间。请提供包含实际文本的锚点。",
+                    return Task.FromResult(ToolResult.FailCode("ANCHOR_TOO_SHORT",
+                        "ANCHOR_TOO_SHORT：old_string 归一化后为空（仅含空白或换行），无法定位替换区间。请提供包含实际文本的锚点。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
 
@@ -285,16 +354,16 @@ public sealed class EditFileTool : IToolHandler
                 matchCount = matches.Count;
                 if (matchCount == 0)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        BuildNotFoundDiagnostic(relative, raw, oldString, detected, matchMode, options),
+                    string diag = BuildNotFoundDiagnostic(relative, raw, oldString, detected, matchMode, options);
+                    return Task.FromResult(ToolResult.FailCode("OLD_STRING_NOT_FOUND",
+                        "OLD_STRING_NOT_FOUND：" + diag, diag,
                         durationMs: sw.ElapsedMilliseconds));
                 }
 
                 if (matchCount > 1 && !replaceAll)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        $"Error: old_string matched {matchCount} times. Please include more surrounding context lines or set replace_all: true.",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(BuildAmbiguousResult(
+                        relative, raw, oldString, detected, matchMode, options, matchCount, sw.ElapsedMilliseconds));
                 }
 
                 IEnumerable<EditMatchEngine.MatchSpan> chosen = replaceAll ? matches : matches.Take(1);
@@ -307,8 +376,9 @@ public sealed class EditFileTool : IToolHandler
 
             if (edits.Count == 0)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    BuildNotFoundDiagnostic(relative, raw, oldString, detected, matchMode, options),
+                string diag = BuildNotFoundDiagnostic(relative, raw, oldString, detected, matchMode, options);
+                return Task.FromResult(ToolResult.FailCode("OLD_STRING_NOT_FOUND",
+                    "OLD_STRING_NOT_FOUND：" + diag, diag,
                     durationMs: sw.ElapsedMilliseconds));
             }
 
@@ -322,6 +392,59 @@ public sealed class EditFileTool : IToolHandler
             }
 
             string updatedText = updated.ToString();
+            string newHashPreview = FileToolShared.ComputeTextHash(updatedText, detected);
+
+            var (diff, diffTruncated) = EditDiffBuilder.Build(
+                relative,
+                FileToolShared.NormalizeToLf(raw),
+                FileToolShared.NormalizeToLf(updatedText),
+                EditDiffBuilder.DefaultContextLines,
+                MaxSuccessOutputChars - 320);
+
+            // ---------- P2-1 dry_run：只预览不写盘 ----------
+            if (dryRun)
+            {
+                var preview = new StringBuilder();
+                preview.Append("DRY_RUN：未写盘（命中 ").Append(edits.Count).Append(" 处），下面是预览 diff：\n");
+                if (diff.Length > 0)
+                {
+                    preview.AppendLine("```diff").Append(diff);
+                    if (!diff.EndsWith('\n'))
+                    {
+                        preview.AppendLine();
+                    }
+
+                    preview.AppendLine("```");
+                }
+
+                preview.Append("hash_preview: ").AppendLine(newHashPreview);
+                if (diffTruncated)
+                {
+                    preview.AppendLine("[truncated: true] diff 已按 2000 字符预算截断，完整区间请用 read_file(offset, limit) 查看。");
+                }
+
+                return Task.FromResult(ToolResult.Ok(
+                    ClampOutput(preview.ToString(), MaxSuccessOutputChars),
+                    durationMs: sw.ElapsedMilliseconds));
+            }
+
+            // ---------- P2-2：落盘前备份（阻塞式，无退路不覆盖） ----------
+            string? backupShown = null;
+            try
+            {
+                var (bakPath, _, _) = BackupStore.WriteBackup(fullPath, context.DataRoot, context.WorkspaceId, context.SessionId, "edit_file");
+                if (bakPath != null)
+                {
+                    backupShown = GetBackupDisplay(context.DataRoot, bakPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                return Task.FromResult(ToolResult.Fail(
+                    $"备份失败，写入已中止以防无退路覆盖：{ex.Message}。",
+                    durationMs: sw.ElapsedMilliseconds));
+            }
+
             try
             {
                 FileToolShared.AtomicWriteAllText(fullPath, updatedText, detected.Encoding, detected.Preamble);
@@ -334,17 +457,27 @@ public sealed class EditFileTool : IToolHandler
             }
 
             // ---------- R4：成功回吐截断 ----------
-            var (diff, diffTruncated) = EditDiffBuilder.Build(
-                relative,
-                FileToolShared.NormalizeToLf(raw),
-                FileToolShared.NormalizeToLf(updatedText),
-                EditDiffBuilder.DefaultContextLines,
-                MaxSuccessOutputChars - 320);
-
             var sb = new StringBuilder();
+            if (replaceAll && matchCount >= MaxBulkWarnThreshold)
+            {
+                sb.Append("WARN_BULK_EDITS：本次替换 ").Append(matchCount).Append(" 处，请核对 diff。\n");
+            }
+
             sb.Append("已修改 '").Append(relative).Append("'（替换 ").Append(edits.Count).Append(" 处；Encoding: ")
               .Append(detected.EncodingLabel).Append(", LineEndings: ").Append(detected.NewLineLabel)
-              .Append(", match_mode: ").Append(matchMode).AppendLine("）");
+              .Append(", match_mode: ").Append(matchMode)
+              .Append(", hash: ").Append(newHashPreview);
+            if (backupShown != null)
+            {
+                sb.Append(", backup: ").Append(backupShown);
+            }
+
+            sb.AppendLine("）");
+            if (matchMode == "regex" && !regexExpandGroups && newString.Contains('$'))
+            {
+                sb.AppendLine("LITERAL_DOLLAR_NOTE：new_string 含 $ 已按字面写回（如需 $1 展开请传 regex_expand_groups:true）。");
+            }
+
             if (diff.Length > 0)
             {
                 sb.AppendLine("```diff").Append(diff);
@@ -361,9 +494,18 @@ public sealed class EditFileTool : IToolHandler
                 sb.AppendLine("[truncated: true] diff 已按 2000 字符预算截断，完整区间请用 read_file(offset, limit) 查看。");
             }
 
-            return Task.FromResult(ToolResult.Ok(
+            var ok = ToolResult.Ok(
                 ClampOutput(sb.ToString(), MaxSuccessOutputChars),
-                durationMs: sw.ElapsedMilliseconds));
+                durationMs: sw.ElapsedMilliseconds);
+            try
+            {
+                ok.FileBytes = new FileInfo(fullPath).Length;
+            }
+            catch
+            {
+            }
+
+            return Task.FromResult(ok);
         }
         catch (Exception ex)
         {
@@ -371,10 +513,63 @@ public sealed class EditFileTool : IToolHandler
                 $"edit_file 执行异常：{ex.Message}。请修正参数后重试。",
                 durationMs: sw.ElapsedMilliseconds));
         }
-        finally
+         finally
+         {
+             sw.Stop();
+         }
+     }
+
+     internal static ToolResult BuildAmbiguousResult(
+         string relative, string raw, string oldString,
+         FileToolShared.DetectedText detected, string matchMode,
+         EditMatchEngine.MatchOptions options, int matchCount, long durationMs)
+     {
+         List<EditMatchEngine.NearestCandidate> nearest = EditMatchEngine.FindNearest(raw, oldString, options, 3);
+         string lines = nearest.Count > 0
+             ? string.Join(", ", nearest.Select(n => n.Line))
+             : "（无相近行）";
+         string payload = JsonSerializer.Serialize(new
+         {
+             ok = false,
+             code = "ANCHOR_AMBIGUOUS",
+             file = relative,
+             matched = matchCount,
+             nearest = nearest.Select(n => new { line = n.Line, score = Math.Round(n.Score, 2), preview = n.Preview }),
+         });
+         return ToolResult.FailCode("ANCHOR_AMBIGUOUS",
+             $"ANCHOR_AMBIGUOUS：old_string 命中 {matchCount} 处 matched {matchCount} times（归一化后相同）。已拒绝单处替换以防改错位置。"
+             + $"候选行：[{lines}]（见 nearest）。"
+             + "请加长锚点至包含上下函数名/类名后重试，或改用 edit_lines(offset,limit) 指定行。",
+             payload, durationMs: durationMs);
+     }
+
+    private static string GetBackupDisplay(string dataRoot, string bakAbsPath)
+    {
+        try
         {
-            sw.Stop();
+            string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : Path.GetFullPath(dataRoot);
+            string rel = Path.GetRelativePath(root, bakAbsPath);
+            if (!rel.StartsWith("..", StringComparison.Ordinal))
+            {
+                return rel;
+            }
         }
+        catch
+        {
+        }
+
+        return bakAbsPath;
+    }
+
+    private static string NormalizeHash(string value)
+    {
+        string trimmed = value.Trim();
+        if (trimmed.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed.Substring("sha256:".Length).Trim();
+        }
+
+        return trimmed;
     }
 
     private static bool IsBool(JsonElement el) =>

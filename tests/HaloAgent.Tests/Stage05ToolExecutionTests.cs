@@ -451,31 +451,31 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
     // ============ 双协议 Schema 与自愈 ============
 
-    [Fact(DisplayName = "S05-注册表: 11工具注册(6标准+4 need09+need14 edit_lines)+chat/resp双协议Schema+未知工具自愈")]
-    public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
-    {
-        var defs = _registry.GetDefinitions();
-        Assert.Equal(11, defs.Count);
-        foreach (string expected in new[] { "exec_command", "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "grep_search", "view_image", "ask_user", "skill_tool", "memory_tool" })
-        {
-            Assert.Contains(defs, d => d.Name == expected);
-        }
+     [Fact(DisplayName = "S05-注册表: 13工具注册(6标准+4 need09+need14 edit_lines+need15 undo_edit/edit)+chat/resp双协议Schema+未知工具自愈")]
+     public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
+     {
+         var defs = _registry.GetDefinitions();
+         Assert.Equal(13, defs.Count);
+         foreach (string expected in new[] { "exec_command", "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "grep_search", "view_image", "ask_user", "skill_tool", "memory_tool", "undo_edit", "edit" })
+         {
+             Assert.Contains(defs, d => d.Name == expected);
+         }
 
-        string chatJson = _registry.GetChatToolsJson();
-        using (JsonDocument chat = JsonDocument.Parse(chatJson))
-        {
-            Assert.Equal(11, chat.RootElement.GetArrayLength());
-            Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
-            Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
-        }
+         string chatJson = _registry.GetChatToolsJson();
+         using (JsonDocument chat = JsonDocument.Parse(chatJson))
+         {
+             Assert.Equal(13, chat.RootElement.GetArrayLength());
+             Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
+             Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
+         }
 
-        string respJson = _registry.GetResponsesToolsJson();
-        using (JsonDocument resp = JsonDocument.Parse(respJson))
-        {
-            Assert.Equal(11, resp.RootElement.GetArrayLength());
-            Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
-            Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
-        }
+         string respJson = _registry.GetResponsesToolsJson();
+         using (JsonDocument resp = JsonDocument.Parse(respJson))
+         {
+             Assert.Equal(13, resp.RootElement.GetArrayLength());
+             Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
+             Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
+         }
 
         var unknown = await _registry.DispatchAsync(
             new ToolCallDto("call_x", "no_such_tool", "{}"), _context);

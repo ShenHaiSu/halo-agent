@@ -19,33 +19,36 @@ public sealed class EditLinesTool : IToolHandler
 
     public string Name => "edit_lines";
 
-    public string Description =>
-        "Replace an exact 1-based line range (same numbering as read_file) without any string matching. " +
-        "Immune to CRLF/Tab/indentation/long-line issues: use this for huge files or when edit_file cannot match. " +
-        "The file's own EOL style and encoding are preserved.";
+     public string Description =>
+         "Replace an exact 1-based line range (same numbering as read_file) without any string matching. " +
+         "Immune to CRLF/Tab/indentation/long-line issues: use this for huge files or when edit_file cannot match. " +
+         "The file's own EOL style and encoding are preserved. " +
+         "Example: {\"file_path\":\"src/a.ts\",\"offset\":120,\"limit\":3,\"new_text\":\"new line1\\nnew line2\\nnew line3\"}";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"file_path\":{\"type\":\"string\",\"description\":\"Target file path.\"},"
-        + "\"offset\":{\"type\":\"integer\",\"description\":\"1-based first line to replace (same numbering as read_file).\"},"
-        + "\"limit\":{\"type\":\"integer\",\"description\":\"Number of lines to replace (0 = pure insertion before offset).\"},"
-        + "\"new_text\":{\"type\":\"string\",\"description\":\"Full replacement text; LF newlines are converted to the file's own EOL when writing.\"},"
-        + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the file (or of the covered lines) taken from a previous result; mismatch rejects the edit.\"},"
-        + "\"allow_empty\":{\"type\":\"boolean\",\"description\":\"Required true to write an empty new_text (line deletion) and avoid accidental mass deletion.\"}"
-        + "},\"required\":[\"file_path\",\"offset\",\"new_text\"]}");
+     public ToolDefinition GetDefinition() => new(Name, Description,
+         "{\"type\":\"object\",\"properties\":{"
+         + "\"file_path\":{\"type\":\"string\",\"description\":\"Target file path.\"},"
+         + "\"offset\":{\"type\":\"integer\",\"description\":\"1-based first line to replace (same numbering as read_file).\"},"
+         + "\"limit\":{\"type\":\"integer\",\"description\":\"Number of lines to REPLACE (0 = pure insert before offset). Required.\"},"
+         + "\"new_text\":{\"type\":\"string\",\"description\":\"Full replacement text; LF newlines are converted to the file's own EOL when writing.\"},"
+         + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the file (or of the covered lines) taken from a previous result; mismatch rejects the edit.\"},"
+         + "\"allow_empty\":{\"type\":\"boolean\",\"description\":\"Required true to write an empty new_text (line deletion) and avoid accidental mass deletion.\"},"
+         + "\"dry_run\":{\"type\":\"boolean\",\"description\":\"If true, only compute and preview the diff without writing.\"}"
+         + "},\"required\":[\"file_path\",\"offset\",\"limit\",\"new_text\"]}");
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            string? filePathArg = null;
-            string? newText = null;
-            string? expectedHash = null;
-            int offset = 0;
-            int limit = 0;
-            bool hasLimit = false;
-            bool allowEmpty = false;
+             string? filePathArg = null;
+             string? newText = null;
+             string? expectedHash = null;
+             int offset = 0;
+             int limit = 0;
+             bool hasLimit = false;
+             bool allowEmpty = false;
+             bool dryRun = false;
 
             try
             {
@@ -79,12 +82,17 @@ public sealed class EditLinesTool : IToolHandler
                 {
                     expectedHash = hashEl.GetString();
                 }
+                 if (root.TryGetProperty("allow_empty", out JsonElement emptyEl) &&
+                     (emptyEl.ValueKind == JsonValueKind.True || emptyEl.ValueKind == JsonValueKind.False))
+                 {
+                     allowEmpty = emptyEl.GetBoolean();
+                 }
 
-                if (root.TryGetProperty("allow_empty", out JsonElement emptyEl) &&
-                    (emptyEl.ValueKind == JsonValueKind.True || emptyEl.ValueKind == JsonValueKind.False))
-                {
-                    allowEmpty = emptyEl.GetBoolean();
-                }
+                 if (root.TryGetProperty("dry_run", out JsonElement dryEl) &&
+                     (dryEl.ValueKind == JsonValueKind.True || dryEl.ValueKind == JsonValueKind.False))
+                 {
+                     dryRun = dryEl.GetBoolean();
+                 }
             }
             catch (JsonException ex)
             {
@@ -105,11 +113,12 @@ public sealed class EditLinesTool : IToolHandler
                     durationMs: sw.ElapsedMilliseconds));
             }
 
-            if (!hasLimit)
-            {
-                limit = 1;
-            }
-
+             if (!hasLimit)
+             {
+                 return Task.FromResult(ToolResult.FailCode("MISSING_LIMIT",
+                     "MISSING_LIMIT：缺少必需参数 'limit'（替换 N 行传 N，纯插入传 0）。请先用 read_file 确认行号。",
+                     durationMs: sw.ElapsedMilliseconds));
+             }
             if (limit < 0)
             {
                 return Task.FromResult(ToolResult.Fail(
@@ -197,13 +206,16 @@ public sealed class EditLinesTool : IToolHandler
                 }
             }
 
-            if (offset > totalLines + 1)
-            {
-                return Task.FromResult(ToolResult.Fail(
-                    $"OUT_OF_RANGE：offset={offset} 超出文件末行（共 {totalLines} 行，最大可插入位置 {totalLines + 1}）。"
-                    + "行号口径与 read_file 一致（1-based）。",
-                    durationMs: sw.ElapsedMilliseconds));
-            }
+             if (offset > totalLines + 1)
+             {
+                 int readFileLines = raw.Split('\n').Length;
+                 string extra = readFileLines != totalLines
+                     ? $"（read_file 口径总行数 {readFileLines}，edit_lines 物理行 {totalLines}）。请以 read_file 显示的行号为准。"
+                     : "行号口径与 read_file 一致（1-based）。";
+                 return Task.FromResult(ToolResult.Fail(
+                     $"OUT_OF_RANGE：offset={offset} 超出文件末行（共 {totalLines} 行，最大可插入位置 {totalLines + 1}）。{extra}",
+                     durationMs: sw.ElapsedMilliseconds));
+             }
 
             int startIdx = offset - 1;
             int endIdx = Math.Min(startIdx + limit, totalLines);
@@ -265,64 +277,124 @@ public sealed class EditLinesTool : IToolHandler
                 rebuilt.Append(newLines[i]);
             }
 
-            if (newLineCount > 0 && (needTrailingEol || newTextEndsWithEol))
-            {
-                rebuilt.Append(eol);
-            }
+             if (newLineCount > 0 && (needTrailingEol || newTextEndsWithEol))
+             {
+                 rebuilt.Append(eol);
+             }
 
-            rebuilt.Append(tail);
-            string updatedText = rebuilt.ToString();
+             rebuilt.Append(tail);
+             string updatedText = rebuilt.ToString();
 
-            if (string.Equals(updatedText, raw, StringComparison.Ordinal))
-            {
-                return Task.FromResult(ToolResult.Fail(
-                    $"NO_CHANGE：line {offset}..{offset + Math.Max(replacedLines, 1) - 1} 的新文本与现有内容完全一致，未做写入。",
-                    durationMs: sw.ElapsedMilliseconds));
-            }
+             if (string.Equals(updatedText, raw, StringComparison.Ordinal))
+             {
+                 return Task.FromResult(ToolResult.Fail(
+                     $"NO_CHANGE：line {offset}..{offset + Math.Max(replacedLines, 1) - 1} 的新文本与现有内容完全一致，未做写入。",
+                     durationMs: sw.ElapsedMilliseconds));
+             }
 
-            try
-            {
-                FileToolShared.AtomicWriteAllText(fullPath, updatedText, detected.Encoding, detected.Preamble);
-            }
-            catch (Exception ex)
-            {
-                return Task.FromResult(ToolResult.Fail($"文件写回失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds));
-            }
+             string newHash = HashText(updatedText, detected);
+             var (diff, diffTruncated) = EditDiffBuilder.Build(
+                 relative,
+                 FileToolShared.NormalizeToLf(raw),
+                 FileToolShared.NormalizeToLf(updatedText),
+                 EditDiffBuilder.DefaultContextLines,
+                 MaxSuccessOutputChars - 380);
 
-            string newHash = HashText(updatedText, detected);
-            var (diff, diffTruncated) = EditDiffBuilder.Build(
-                relative,
-                FileToolShared.NormalizeToLf(raw),
-                FileToolShared.NormalizeToLf(updatedText),
-                EditDiffBuilder.DefaultContextLines,
-                MaxSuccessOutputChars - 380);
+             // ---------- P2-1 dry_run：只预览不写盘 ----------
+             if (dryRun)
+             {
+                 var preview = new StringBuilder();
+                 preview.Append("DRY_RUN：line ").Append(offset).Append("..").Append(offset + Math.Max(replacedLines, 1) - 1)
+                     .Append(" → ").Append(newLineCount).Append(" 行（未写盘）").AppendLine();
+                 if (diff.Length > 0)
+                 {
+                     preview.AppendLine("```diff").Append(diff);
+                     if (!diff.EndsWith('\n'))
+                     {
+                         preview.AppendLine();
+                     }
 
-            var sb = new StringBuilder();
-            sb.Append("已按行号修改 '").Append(relative).Append("'（line ")
-              .Append(offset).Append("..").Append(offset + Math.Max(replacedLines, 1) - 1)
-              .Append(" → ").Append(newLineCount).Append(" 行；Encoding: ").Append(detected.EncodingLabel)
-              .Append(", LineEndings: ").Append(detected.NewLineLabel)
-              .Append(", hash: ").Append(newHash).AppendLine("）");
+                     preview.AppendLine("```");
+                 }
 
-            if (diff.Length > 0)
-            {
-                sb.AppendLine("```diff").Append(diff);
-                if (!diff.EndsWith('\n'))
-                {
-                    sb.AppendLine();
-                }
+                 preview.Append("hash_preview: ").AppendLine(newHash);
+                 if (diffTruncated)
+                 {
+                     preview.AppendLine("[truncated: true] diff 已按 2000 字符预算截断，完整区间请用 read_file(offset, limit) 查看。");
+                 }
 
-                sb.AppendLine("```");
-            }
+                 return Task.FromResult(ToolResult.Ok(
+                     EditFileTool.ClampOutput(preview.ToString(), MaxSuccessOutputChars),
+                     durationMs: sw.ElapsedMilliseconds));
+             }
 
-            if (diffTruncated)
-            {
-                sb.AppendLine("[truncated: true] diff 已按 2000 字符预算截断，完整区间请用 read_file(offset, limit) 查看。");
-            }
+             // ---------- P2-2：落盘前备份 ----------
+             string? backupShown = null;
+             try
+             {
+                 var (bakPath, _, _) = BackupStore.WriteBackup(fullPath, context.DataRoot, context.WorkspaceId, context.SessionId, "edit_lines");
+                 if (bakPath != null)
+                 {
+                     backupShown = GetBackupDisplay(context.DataRoot, bakPath);
+                 }
+             }
+             catch (Exception ex)
+             {
+                 return Task.FromResult(ToolResult.Fail(
+                     $"备份失败，写入已中止以防无退路覆盖：{ex.Message}。",
+                     durationMs: sw.ElapsedMilliseconds));
+             }
 
-            return Task.FromResult(ToolResult.Ok(
-                EditFileTool.ClampOutput(sb.ToString(), MaxSuccessOutputChars),
-                durationMs: sw.ElapsedMilliseconds));
+             try
+             {
+                 FileToolShared.AtomicWriteAllText(fullPath, updatedText, detected.Encoding, detected.Preamble);
+             }
+             catch (Exception ex)
+             {
+                 return Task.FromResult(ToolResult.Fail($"文件写回失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds));
+             }
+
+             var sb = new StringBuilder();
+             sb.Append("已按行号修改 '").Append(relative).Append("'（line ")
+               .Append(offset).Append("..").Append(offset + Math.Max(replacedLines, 1) - 1)
+               .Append(" → ").Append(newLineCount).Append(" 行；Encoding: ").Append(detected.EncodingLabel)
+               .Append(", LineEndings: ").Append(detected.NewLineLabel)
+               .Append(", hash: ").Append(newHash);
+             if (backupShown != null)
+             {
+                 sb.Append(", backup: ").Append(backupShown);
+             }
+
+             sb.AppendLine("）");
+
+             if (diff.Length > 0)
+             {
+                 sb.AppendLine("```diff").Append(diff);
+                 if (!diff.EndsWith('\n'))
+                 {
+                     sb.AppendLine();
+                 }
+
+                 sb.AppendLine("```");
+             }
+
+             if (diffTruncated)
+             {
+                 sb.AppendLine("[truncated: true] diff 已按 2000 字符预算截断，完整区间请用 read_file(offset, limit) 查看。");
+             }
+
+             var ok = ToolResult.Ok(
+                 EditFileTool.ClampOutput(sb.ToString(), MaxSuccessOutputChars),
+                 durationMs: sw.ElapsedMilliseconds);
+             try
+             {
+                 ok.FileBytes = new FileInfo(fullPath).Length;
+             }
+             catch
+             {
+             }
+
+             return Task.FromResult(ok);
         }
         catch (Exception ex)
         {
@@ -389,18 +461,7 @@ public sealed class EditLinesTool : IToolHandler
     private static bool EndsWithEol(string text) =>
         text.Length > 0 && (text[text.Length - 1] == '\n' || text[text.Length - 1] == '\r');
 
-    internal static string ComputeHash(byte[] payload)
-    {
-        using var sha = SHA256.Create();
-        byte[] hash = sha.ComputeHash(payload);
-        var sb = new StringBuilder(hash.Length * 2);
-        foreach (byte b in hash)
-        {
-            sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
-        }
-
-        return sb.ToString();
-    }
+     internal static string ComputeHash(byte[] payload) => FileToolShared.ComputeHash(payload);
 
     /// <summary>整文件字节 sha256（expected_hash 的主口径，与磁盘字节完全一致）。</summary>
     private static string HashFileBytes(string fullPath, FileToolShared.DetectedText detected)
@@ -416,20 +477,26 @@ public sealed class EditLinesTool : IToolHandler
         }
     }
 
-    /// <summary>按原编码（含 BOM）计算写出后文本的字节 hash，与 HashFileBytes 口径一致。</summary>
-    private static string HashText(string text, FileToolShared.DetectedText detected)
-    {
-        byte[] body = detected.Encoding.GetBytes(text);
-        if (detected.Preamble.Length == 0)
-        {
-            return ComputeHash(body);
-        }
+     /// <summary>按原编码（含 BOM）计算写出后文本的字节 hash，与 HashFileBytes 口径一致。</summary>
+     internal static string HashText(string text, FileToolShared.DetectedText detected) => FileToolShared.ComputeTextHash(text, detected);
 
-        byte[] payload = new byte[detected.Preamble.Length + body.Length];
-        Buffer.BlockCopy(detected.Preamble, 0, payload, 0, detected.Preamble.Length);
-        Buffer.BlockCopy(body, 0, payload, detected.Preamble.Length, body.Length);
-        return ComputeHash(payload);
-    }
+     private static string GetBackupDisplay(string dataRoot, string bakAbsPath)
+     {
+         try
+         {
+             string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : Path.GetFullPath(dataRoot);
+             string rel = Path.GetRelativePath(root, bakAbsPath);
+             if (!rel.StartsWith("..", StringComparison.Ordinal))
+             {
+                 return rel;
+             }
+         }
+         catch
+         {
+         }
+
+         return bakAbsPath;
+     }
 
     private static string NormalizeHash(string value)
     {
@@ -439,6 +506,6 @@ public sealed class EditLinesTool : IToolHandler
             trimmed = trimmed.Substring("sha256:".Length).Trim();
         }
 
-        return trimmed;
-    }
-}
+         return trimmed;
+     }
+ }

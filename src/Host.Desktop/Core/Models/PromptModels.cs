@@ -46,12 +46,16 @@ public static class PromptDefaults
         "2. **SECOND CHOICE (`runner: \"python\"`)**: When you need complex text processing, regex transformations, JSON/XML manipulation, or multi-step data calculation that is awkward in `cmd.exe`, use `runner: \"python\"` to run inline Python code or `.py` scripts.\n" +
         "3. **AVOID PowerShell**: Do NOT invoke `powershell` or `pwsh` unless the user explicitly asks you to debug a `.ps1` script.";
 
-    public static readonly string ToolGuideTemplate =
-        "## 3. Standard Tool Usage Guidelines\n" +
-        "- Before modifying an existing file, ALWAYS read the relevant section first using `read_file`.\n" +
-        "- For targeted modifications to existing files, prefer `edit_file` (providing enough surrounding lines in `old_string` for a unique match) instead of overwriting the entire file with `write_file`.\n" +
-        "- Use `list_dir` and `grep_search` to explore the workspace efficiently rather than spawning unnecessary shell processes.\n" +
-        "- All relative paths passed to tools resolve against the Active Workspace Root Path (`{{WorkspaceRoot}}`).";
+     public static readonly string ToolGuideTemplate =
+         "## 3. Standard Tool Usage Guidelines\n" +
+         "- Before modifying ANY file, ALWAYS read the exact section with `read_file` first. NEVER invent `old_string` from memory.\n" +
+         "- `old_string` MUST be a verbatim copy-paste from the latest `read_file` output (including indentation). Add 2-5 surrounding lines to make it unique.\n" +
+         "- For partial edits: prefer `edit_file` (string anchor) for ≤50 lines; prefer `edit_lines(offset,limit)` for huge files, CRLF/Tab files, or after any `OLD_STRING_NOT_FOUND`.\n" +
+         "- NEVER use `write_file` for partial edits. `write_file` overwrites the WHOLE file and requires `allow_overwrite:true`; truncated content will be rejected.\n" +
+         "- `edit_lines` requires explicit `limit` (lines to replace; 0 = insert). Line numbers are 1-based, identical to `read_file`.\n" +
+         "- If `edit_file` reports `OLD_STRING_NOT_FOUND` or `ANCHOR_AMBIGUOUS`, do NOT retry the same anchor. Follow the `hint` (use the suggested `edit_lines` line range).\n" +
+         "- All relative paths resolve against `{{WorkspaceRoot}}`.\n" +
+         "- For risky/large edits, call with `dry_run:true` first to preview the diff, then repeat without it.";
 
     public static readonly string EphemeralTemplate =
         "## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n" +

@@ -5,35 +5,38 @@ using Host.Desktop.Tools.Safety;
 
 namespace Host.Desktop.Tools;
 
-/// <summary>
-/// 统一工具注册调度中心：注册 11 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool + need14 edit_lines），
-/// DispatchAsync 捕获异常转自愈提示，输出统一过 ToolOutputGuard，
-/// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
-/// 并发安全（无共享可变状态，处理器均为无状态）。
-/// </summary>
+ /// <summary>
+ /// 统一工具注册调度中心：注册 13 个标准基础工具（6 存量 + view_image/ask_user/skill_tool/memory_tool + need14 edit_lines + need15 undo_edit/edit），
+ /// DispatchAsync 捕获异常转自愈提示，输出统一过 ToolOutputGuard，
+ /// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
+ /// 并发安全（无共享可变状态，处理器均为无状态）。
+ /// </summary>
 public sealed class ToolRegistry
 {
     private readonly Dictionary<string, IToolHandler> _handlers =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _registerLock = new();
 
-    public ToolRegistry(bool registerBuiltIns = true)
-    {
-        if (registerBuiltIns)
-        {
-            Register(new ExecCommandTool());
-            Register(new ReadFileTool());
-            Register(new WriteFileTool());
-            Register(new EditFileTool());
-            Register(new EditLinesTool());
-            Register(new ListDirTool());
-            Register(new GrepSearchTool());
-            Register(new ViewImageTool());
-            Register(new AskUserTool());
-            Register(new SkillTool());
-            Register(new MemoryTool());
-        }
-    }
+     public ToolRegistry(bool registerBuiltIns = true)
+     {
+         if (registerBuiltIns)
+         {
+             Register(new ExecCommandTool());
+             Register(new ReadFileTool());
+             Register(new WriteFileTool());
+             Register(new EditFileTool());
+             Register(new EditLinesTool());
+             Register(new ListDirTool());
+             Register(new GrepSearchTool());
+             Register(new ViewImageTool());
+             Register(new AskUserTool());
+             Register(new SkillTool());
+             Register(new MemoryTool());
+             Register(new MemoryTool());
+             Register(new UndoEditTool());
+             Register(new EditTool());
+         }
+     }
 
     /// <summary>
     /// 注册工具处理器（同名覆盖）。

@@ -1,10 +1,15 @@
+using System.Text.RegularExpressions;
+
 namespace Host.Desktop.Tools;
 
 /// <summary>
 /// 工具执行结果信封。
+/// need15 P0-5：结构化错误码（ErrorCode + ErrorPayloadJson），老消费方无感（null 忽略）。
 /// </summary>
 public sealed class ToolResult
 {
+    private static readonly Regex CodePrefix = new(@"^([A-Z_]{2,})[:：]", RegexOptions.Compiled);
+
     public ToolResult()
     {
     }
@@ -32,6 +37,15 @@ public sealed class ToolResult
      /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
      [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
      public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
+
+    /// <summary>need15 P0-5：结构化错误码（如 OLD_STRING_NOT_FOUND），成功时为 null。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorCode { get; set; }
+
+    /// <summary>need15 P0-5：失配时的 nearest/hint JSON（即 BuildNotFoundDiagnostic 产物），成功时为 null。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ErrorPayloadJson { get; set; }
+
     public static ToolResult Ok(
         string output,
         int exitCode = 0,
@@ -52,7 +66,9 @@ public sealed class ToolResult
         string? output = null,
         int exitCode = -1,
         long durationMs = 0,
-        string? spilledFile = null) => new()
+        string? spilledFile = null)
+    {
+        var r = new ToolResult
         {
             Success = false,
             Output = output ?? string.Empty,
@@ -61,4 +77,51 @@ public sealed class ToolResult
             DurationMs = durationMs,
             SpilledFile = spilledFile,
         };
+        r.ErrorCode = TryExtractCode(r.Error);
+        return r;
+    }
+
+    /// <summary>
+    /// need15 P0-5：带结构化错误码的失败工厂。P0 新增分支必须走此方法。
+    /// message 可带或不带码前缀；最终 Error 首 token 必为 CODE：。
+    /// </summary>
+    public static ToolResult FailCode(
+        string code,
+        string message,
+        string? payloadJson = null,
+        string? output = null,
+        int exitCode = -1,
+        long durationMs = 0,
+        string? spilledFile = null)
+    {
+        string msg = message ?? string.Empty;
+        string prefix1 = code + "：";
+        string prefix2 = code + ":";
+        string error = msg.StartsWith(prefix1, StringComparison.Ordinal) || msg.StartsWith(prefix2, StringComparison.Ordinal)
+            ? msg
+            : $"{code}：{msg}";
+        return new ToolResult
+        {
+            Success = false,
+            Output = output ?? string.Empty,
+            Error = error,
+            ExitCode = exitCode,
+            DurationMs = durationMs,
+            SpilledFile = spilledFile,
+            ErrorCode = code,
+            ErrorPayloadJson = payloadJson,
+        };
+    }
+
+    /// <summary>从 Error 首 token 提取错误码（全大写下划线 + 中/英文冒号）。</summary>
+    public static string? TryExtractCode(string? error)
+    {
+        if (string.IsNullOrEmpty(error))
+        {
+            return null;
+        }
+
+        var m = CodePrefix.Match(error);
+        return m.Success ? m.Groups[1].Value : null;
+    }
 }
