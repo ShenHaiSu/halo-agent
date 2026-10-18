@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -19,22 +20,26 @@ public sealed class EditLinesTool : IToolHandler
 
     public string Name => "edit_lines";
 
+     // NEED17 PromptBrief: Line-range edit without matching
      public string Description =>
          "Replace an exact 1-based line range (same numbering as read_file) without any string matching. " +
          "Immune to CRLF/Tab/indentation/long-line issues: use this for huge files or when edit_file cannot match. " +
          "The file's own EOL style and encoding are preserved. " +
          "Example: {\"file_path\":\"src/a.ts\",\"offset\":120,\"limit\":3,\"new_text\":\"new line1\\nnew line2\\nnew line3\"}";
 
-     public ToolDefinition GetDefinition() => new(Name, Description,
-         "{\"type\":\"object\",\"properties\":{"
-         + "\"file_path\":{\"type\":\"string\",\"description\":\"Target file path.\"},"
-         + "\"offset\":{\"type\":\"integer\",\"description\":\"1-based first line to replace (same numbering as read_file).\"},"
-         + "\"limit\":{\"type\":\"integer\",\"description\":\"Number of lines to REPLACE (0 = pure insert before offset). Required.\"},"
-         + "\"new_text\":{\"type\":\"string\",\"description\":\"Full replacement text; LF newlines are converted to the file's own EOL when writing.\"},"
-         + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the file (or of the covered lines) taken from a previous result; mismatch rejects the edit.\"},"
-         + "\"allow_empty\":{\"type\":\"boolean\",\"description\":\"Required true to write an empty new_text (line deletion) and avoid accidental mass deletion.\"},"
-         + "\"dry_run\":{\"type\":\"boolean\",\"description\":\"If true, only compute and preview the diff without writing.\"}"
-         + "},\"required\":[\"file_path\",\"offset\",\"limit\",\"new_text\"]}");
+     public ToolDefinition GetDefinition()
+     {
+         string schema = new ToolSchemaBuilder()
+             .AddString("file_path", "Target file path.", required: true)
+             .AddInteger("offset", "1-based first line to replace, identical to read_file.", required: true, minimum: 1)
+             .AddInteger("limit", "Lines to REPLACE; 0 = insert before offset. Required (missing limit keeps MISSING_LIMIT business message).", required: true, minimum: 0)
+             .AddString("new_text", "Full replacement text; LF newlines converted to file EOL; empty needs allow_empty:true.", required: true)
+             .AddString("expected_hash", "Optional sha256 of the file (or of the covered lines) taken from a previous result; mismatch rejects the edit.")
+             .AddBoolean("allow_empty", "Required true to write an empty new_text (line deletion) and avoid accidental mass deletion.")
+             .AddBoolean("dry_run", "If true, only compute and preview the diff without writing.")
+             .Build();
+         return new(Name, Description, schema);
+     }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

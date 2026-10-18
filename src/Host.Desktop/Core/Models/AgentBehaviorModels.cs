@@ -22,10 +22,25 @@ public class AgentConfigDocument
     public bool SubAllowSkillWrite { get; set; } = false;
     public bool SubAllowMemoryWrite { get; set; } = false;
     public bool SubAllowAskUser { get; set; } = false; // v1 锁定 false
+    // need17-01：网关 strict 发送模式（Prefer 默认；Require 联调用；Off 回滚开关）。
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StrictToolsMode StrictToolsMode { get; set; } = StrictToolsMode.Prefer;
+    // need17-01：工具激活集（preset/allowlist/denylist，互斥规则见 ToolPreset；null/空=默认 Coding）。
+    public string? ToolsPreset { get; set; }
+    public List<string>? ToolsAllowlist { get; set; }
+    public List<string>? ToolsDenylist { get; set; }
     public string Scope { get; set; } = "global";
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     // 后续杂项扩展位：本期只声明不使用，反序列化宽容忽略未知字段即可
     // public Dictionary<string, JsonElement>? Extensions { get; set; }
+}
+
+/// <summary>need17-01：网关 strict 发送模式。Prefer=发送并在 400 提及 strict 时去 strict 重发一次（默认）；Require=联调用；Off=回滚。</summary>
+public enum StrictToolsMode
+{
+    Prefer = 0,
+    Require = 1,
+    Off = 2,
 }
 
 public static class AgentDefaults

@@ -261,9 +261,14 @@ public interface IAgentOrchestrator
          // need12：轮内用量行收集（每次 HTTP 请求一行，轮末单事务批量写库）。
          var usageRows = new List<PendingUsageRow>();
         // need08：轮首快照（追加 user 之后、循环之前，只读一次；保存不中断本轮，下一轮生效）
+        // need17-01/联调：工具激活配置 + strict 模式同样轮首快照（本轮冻结；description 声明与 Dispatch 执行同源）。
         int effectiveMax = MaxIterations;
         int cfgExecDefaultMs = AgentDefaults.DefaultTimeoutMs;
         int cfgExecMaxMs = AgentDefaults.MaxTimeoutMs;
+        string? cfgToolsPreset = null;
+        System.Collections.Generic.List<string>? cfgToolsAllow = null;
+        System.Collections.Generic.List<string>? cfgToolsDeny = null;
+        bool cfgClosedWorld = true;
         try
         {
             if (_agentConfigService != null)
@@ -271,6 +276,10 @@ public interface IAgentOrchestrator
                 var cfg = _agentConfigService.GetInternal();
                 cfgExecDefaultMs = cfg.ExecDefaultTimeoutMs;
                 cfgExecMaxMs = cfg.ExecMaxTimeoutMs;
+                cfgToolsPreset = cfg.ToolsPreset;
+                cfgToolsAllow = cfg.ToolsAllowlist;
+                cfgToolsDeny = cfg.ToolsDenylist;
+                cfgClosedWorld = cfg.StrictToolsMode != Host.Desktop.Core.Models.StrictToolsMode.Off;
                 if (cfg.MaxIterations == 0)
                 {
                     effectiveMax = 0; // 无限轮次
@@ -296,6 +305,15 @@ public interface IAgentOrchestrator
         {
             Infrastructure.Logging.HaloLogger.App.Warn($"[Agent] infinite iterations for session {sessionId}，仅取消/模型停手可结束");
         }
+        // need17-01/联调：本轮激活集轮首计算一次、本轮冻结（声明与执行同源；失败回退全量 Direct）。
+        System.Collections.Generic.HashSet<string> turnActiveSet;
+        try
+        {
+            var toolsCfgDoc = new Host.Desktop.Core.Models.AgentConfigDocument { ToolsPreset = cfgToolsPreset, ToolsAllowlist = cfgToolsAllow, ToolsDenylist = cfgToolsDeny };
+            var resolved = Host.Desktop.Tools.ToolPreset.ResolveActiveSet(_toolRegistry.ToolNames, toolsCfgDoc);
+            turnActiveSet = new System.Collections.Generic.HashSet<string>(resolved, System.StringComparer.OrdinalIgnoreCase);
+        }
+        catch { turnActiveSet = new System.Collections.Generic.HashSet<string>(_toolRegistry.ToolNames, System.StringComparer.OrdinalIgnoreCase); }
         // (2) ReAct 循环（need08：effectiveMax<=0 即无限轮次，永不进截断分支）
         for (int iteration = 1; effectiveMax <= 0 || iteration <= effectiveMax; iteration++)
         {
@@ -372,7 +390,8 @@ public interface IAgentOrchestrator
                 model.Id,
                 requestId);
 
-             var toolDefs = _toolRegistry.GetDefinitions()
+             // need17-01/联调：声明走本轮冻结集（与执行同源；用户 preset 生效，不再是写死的 Coding）。
+             var toolDefs = _toolRegistry.GetActiveDefinitions(turnActiveSet)
                  .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
                  .ToList();
              // need11-01：读盘→dataURL 本轮内存缓存（重启/多会话安全，无全局锁；null 也缓存避免重复读丢失文件）
@@ -405,6 +424,7 @@ public interface IAgentOrchestrator
             var toolOrder = new List<string>();
             UnifiedTokenUsage? usage = null;
             bool streamCancelled = false;
+            bool streamTruncated = false; // NEED17-06 §6.4
             string? streamErrorCode = null;
             string? streamErrorMessage = null;
             long ttftMark = Environment.TickCount64;
@@ -535,6 +555,9 @@ public interface IAgentOrchestrator
                             break;
                         case UnifiedStreamEventKind.StreamCancelled:
                             streamCancelled = true;
+                            break;
+                        case UnifiedStreamEventKind.StreamTruncated: // NEED17-06 §6.4
+                            streamTruncated = true;
                             break;
                         case UnifiedStreamEventKind.StreamError:
                             streamErrorCode = evt.ErrorCode ?? "STREAM_ERROR";
@@ -693,6 +716,17 @@ public interface IAgentOrchestrator
                  return AgentTurnResult.Truncated(iteration, toolExecutions);
             }
 
+            // NEED17-06 §6.4：截断回复保护（只加保护，不加并行；该轮不计 toolExecutions）
+            if (streamTruncated && completedCalls.Count > 0)
+            {
+                foreach (var call in completedCalls)
+                {
+                    string discarded = $"[Tool Discarded - {call.FunctionName}]: 调用未执行：回复因输出长度被截断，参数可能不完整。请用完整参数重发（可缩小单次改动）。";
+                    await AppendToolTextAsync(workspaceId, sessionId, call.CallId, call.FunctionName, discarded, cancellationToken).ConfigureAwait(false);
+                    PublishTurnEvent(sessionId, "ToolExecutionCompleted", new { iteration, callId = call.CallId, functionName = call.FunctionName, success = false, exitCode = -1, durationMs = 0L, argsJson = call.ArgumentsJson, resultText = TruncateForEvent(discarded, 8000), updatedAtUtc = DateTime.UtcNow.ToString("o") });
+                }
+                continue; // 进入下一 iteration（模型见丢弃通知后重发完整参数）
+            }
             // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
             // need13：spawn 分流（normal 先串行，spawn 走 Coordinator Barrier；等待不消费主 iteration）
             var spawnCalls = completedCalls.Where(c => string.Equals(c.FunctionName, "spawn_subagent", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -740,7 +774,8 @@ public interface IAgentOrchestrator
                         SubAllowMemoryWrite = SubPolicy.SubAllowMemoryWrite,
                         SkillMemoryScopeDefault = string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase) ? "project" : "project",
                     };
-                    toolResult = await _toolRegistry.DispatchAsync(dto, toolContext, cancellationToken).ConfigureAwait(false);
+                    // need17-01/02/联调：执行走本轮冻结集 + strict 闭合开关（与声明同源；Off 回滚时未知字段降级 warning）。
+                    toolResult = await _toolRegistry.DispatchAsync(dto, toolContext, turnActiveSet, cancellationToken, cfgClosedWorld).ConfigureAwait(false);
                     toolResult ??= ToolResult.Fail($"工具 '{call.FunctionName}' 返回空结果，请重试。");
                 }
                 catch (OperationCanceledException)
@@ -963,14 +998,29 @@ public interface IAgentOrchestrator
                      return " Hint: lengthen the anchor to include the enclosing function/class name, or use edit_lines.";
                  case "NEED_CONFIRM_OVERWRITE":
                      return " Hint: retry write_file with allow_overwrite:true, or use edit_file/edit_lines for partial edits.";
-                 case "MISSING_LIMIT":
-                     return " Hint: set limit = lines to replace (0 = insert).";
-                 case "ANCHOR_TOO_SHORT":
-                     return " Hint: lengthen the anchor to at least 8 non-whitespace chars with 2-5 context lines, or use edit_lines(offset,limit).";
-                 case "EXPECTED_HASH_MISMATCH":
-                     return " Hint: re-read the file with read_file to get the latest hash, then retry.";
-                 case "CONTENT_TOO_LARGE":
-                     return " Hint: split the change into smaller edit_file/edit_lines calls.";
+                case "MISSING_LIMIT":
+                    return " Hint: set limit = lines to replace (0 = insert).";
+                case "ANCHOR_TOO_SHORT":
+                    return " Hint: lengthen the anchor to at least 8 non-whitespace chars with 2-5 context lines, or use edit_lines(offset,limit).";
+                case "EXPECTED_HASH_MISMATCH":
+                    return " Hint: re-read the file with read_file to get the latest hash, then retry.";
+                case "CONTENT_TOO_LARGE":
+                    return " Hint: split the change into smaller edit_file/edit_lines calls.";
+                // NEED17-06 §6.3 + 02 码表：新增结构码 Hint（一句英文，拼在 tool 消息尾）。
+                case "MISSING_REQUIRED_PARAM":
+                    return " Hint: re-issue the same call with the missing field added; do not change other fields.";
+                case "TYPE_MISMATCH":
+                case "ENUM_VIOLATION":
+                case "CONSTRAINT_VIOLATION":
+                case "UNKNOWN_ARGUMENT":
+                    return " Hint: fix the named field per schema (type/enum/limit) and retry; see the received-args echo.";
+                case "TOOL_NOT_ENABLED":
+                    return " Hint: the tool is not in this turn's preset; use an active tool or ask for Full preset.";
+                case "INVALID_JSON_ARGUMENTS":
+                    return " Hint: resend with complete JSON (no truncation); keep strings escaped.";
+                // NEED17-07 §7.1：全仓库唯一中文 Hint（逐字）。07 快照/Gate 落子后保持文案不变。
+                case "PYTHON_NOT_AVAILABLE":
+                    return " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
                  case "OUT_OF_RANGE":
                  case "NO_CHANGE":
                  case "EMPTY_NEW_TEXT":
@@ -1053,6 +1103,14 @@ public interface IAgentOrchestrator
                  return hint.Length > 400 ? hint.Substring(0, 400) : hint;
              }
 
+            // NEED17-06 §6.3：MISSING_REQUIRED_PARAM 最小补全草稿（{缺失字段:"<fill>"} ≤300 字符，纯文本不执行）。
+            if (code is "MISSING_REQUIRED_PARAM")
+            {
+                string draft = BuildMissingFieldDraft(toolResult, argumentsJson);
+                if (!string.IsNullOrEmpty(draft))
+                    return "\nNextAction (fill and resend): " + draft;
+            }
+
              if (code is "NEED_CONFIRM_OVERWRITE")
              {
                  return "\nNextAction: retry the SAME write_file call with \"allow_overwrite\":true added.";
@@ -1069,6 +1127,51 @@ public interface IAgentOrchestrator
 
          return string.Empty;
      }
+
+    /// <summary>need17-06 §6.3：缺失字段补全草稿（{缺失字段:"<fill>"}，≤300 字符，纯文本不执行）。字段来源：payload missing[]/field → Error 引号 → 通用占位。</summary>
+    private static string BuildMissingFieldDraft(ToolResult toolResult, string? argumentsJson)
+    {
+        var fields = new List<string>();
+        try
+        {
+            string payload = toolResult?.ErrorPayloadJson ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(payload))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(ExtractJsonObject(payload));
+                var root = doc.RootElement;
+                if (root.TryGetProperty("missing", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var e in m.EnumerateArray())
+                        if (e.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString()))
+                            fields.Add(e.GetString()!);
+                }
+                else if (root.TryGetProperty("field", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(f.GetString()))
+                {
+                    fields.Add(f.GetString()!);
+                }
+            }
+        }
+        catch { /* 解析失败则走回退 */ }
+        if (fields.Count == 0)
+        {
+            try
+            {
+                string err = toolResult?.Error ?? string.Empty;
+                int q1 = err.IndexOf('\'');
+                int q2 = q1 >= 0 ? err.IndexOf('\'', q1 + 1) : -1;
+                if (q1 >= 0 && q2 > q1 + 1)
+                {
+                    string cand = err.Substring(q1 + 1, q2 - q1 - 1).Trim();
+                    if (cand.Length > 0 && cand.Length <= 64) fields.Add(cand);
+                }
+            }
+            catch { /* ignore */ }
+        }
+        if (fields.Count == 0) return "{\"missing-field\":\"<fill>\"}";
+        string draft = "{" + string.Join(",", fields.Take(5).Select(n => "\"" + n.Replace("\\", "/").Replace("\"", "\\\"") + "\":\"<fill>\"")) + "}";
+        return draft.Length > 300 ? draft.Substring(0, 300) : draft;
+    }
 
      private static string ExtractJsonObject(string s)
      {

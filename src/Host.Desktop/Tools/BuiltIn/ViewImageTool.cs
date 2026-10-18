@@ -4,6 +4,7 @@ using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -18,16 +19,21 @@ public sealed class ViewImageTool : IToolHandler
 
     public string Name => "view_image";
 
+    // NEED17 PromptBrief: Read an image file into the conversation
     public string Description =>
         "Read an image file (jpg/png/webp, max 8MB) from the workspace into the conversation. " +
         "Use path relative to workspace root or an absolute path. " +
-        "Returns a short text summary plus the image reference for the model to see.";
+        "Returns a short text summary plus the image reference for the model to see. " +
+        "Workspace image only. Non-image files fail fast. On non-vision models the image is stripped and text continues (see notice).";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"path\":{\"type\":\"string\",\"description\":\"Image path relative to workspace root, or an absolute file path. Required.\"},"
-        + "\"detail\":{\"type\":\"string\",\"description\":\"Image detail level: auto|low|high. Defaults to high.\"}"
-        + "},\"required\":[\"path\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("file_path", "Image path relative to workspace root, or an absolute file path. Required (alias 'path' accepted via compat shim).", required: true)
+            .AddString("detail", "Image detail level: auto|low|high. Defaults to high.")
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
@@ -41,22 +47,25 @@ public sealed class ViewImageTool : IToolHandler
                 using JsonDocument doc = JsonDocument.Parse(
                     string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
                 JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("path", out JsonElement pEl) && pEl.ValueKind == JsonValueKind.String)
-                    pathArg = pEl.GetString();
+                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                    pathArg = fpEl.GetString();
+                // NEED17 compat: alias 'path' accepted (02 shim搬运; handler双读不断老调用).
+                if (string.IsNullOrWhiteSpace(pathArg) && root.TryGetProperty("path", out JsonElement pEl2) && pEl2.ValueKind == JsonValueKind.String)
+                    pathArg = pEl2.GetString();
                 if (root.TryGetProperty("detail", out JsonElement dEl) && dEl.ValueKind == JsonValueKind.String)
                     detail = dEl.GetString() ?? "high";
             }
             catch (JsonException ex)
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。正确示例：{{\"path\": \"assets/a.png\", \"detail\": \"high\"}}。",
+                    $"参数 JSON 解析失败：{ex.Message}。正确示例：{{\"file_path\": \"assets/a.png\", \"detail\": \"high\"}}。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
             if (string.IsNullOrWhiteSpace(pathArg))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    "缺少必需参数 'path'。请传入工作区相对路径（如 assets/a.png）或绝对路径。",
+                    "缺少必需参数 'file_path'（兼容别名 'path'）。请传入工作区相对路径（如 assets/a.png）或绝对路径。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 

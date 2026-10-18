@@ -2,6 +2,7 @@ using System.Text;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Tools.BuiltIn;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools;
 
@@ -92,6 +93,29 @@ public sealed class ToolRegistry
         }
     }
 
+    /// need17-01/联调：导出激活工具定义。Hidden/Disabled 永不声明（01 冻结：edit 可执行、可转调，但不声明）；
+    /// active==null 视为全部 Direct。Orchestrator 在轮首计算 activeSet、本轮冻结后传入。
+    /// </summary>
+    public IReadOnlyList<ToolDefinition> GetActiveDefinitions(ISet<string>? active)
+    {
+        var all = GetDefinitions();
+        HashSet<string>? activeSet = active != null
+            ? new HashSet<string>(active.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase)
+            : null;
+        return all.Where(d =>
+        {
+            if (d == null || d.Exposure != ToolExposure.Direct)
+            {
+                return false;
+            }
+            if (activeSet != null)
+            {
+                return activeSet.Contains(d.Name);
+            }
+            return true;
+        }).OrderBy(d => d.Name, StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>
     /// 导出 Chat Completions (chat) 协议 tools JSON 数组字符串。
     /// </summary>
@@ -136,11 +160,28 @@ public sealed class ToolRegistry
 
     /// <summary>
     /// 调度执行：未知工具与异常统一转为自然语言自愈提示，成功输出统一过 ToolOutputGuard。
+    /// need17-02：老签名保留（activeTools=null=不做激活过滤，仅中央校验；老调用零改动）。
+    /// </summary>
+    public Task<ToolResult> DispatchAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default)
+    {
+        return DispatchAsync(call, context, activeTools: null, ct);
+    }
+
+    /// <summary>
+    /// need17-01/02/联调：带激活集的调度执行。
+    /// 查 handler（找不到→UNKNOWN_TOOL；Disabled/不在激活集→TOOL_NOT_ENABLED）
+    /// → ToolCallValidator.Validate（失败直接返回，不进 ExecuteAsync，不计时；closedWorld=false 即 Strict Off 回滚，未知字段降级 warning）
+    /// → 成功用归一化参数执行；warnings 拼到结果尾并回填 ValidatedWarnings。
     /// </summary>
     public async Task<ToolResult> DispatchAsync(
         ToolCallDto call,
         ToolContext context,
-        CancellationToken ct = default)
+        ISet<string>? activeTools,
+        CancellationToken ct = default,
+        bool closedWorld = true)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         string toolName = call?.Name?.Trim() ?? string.Empty;
@@ -161,16 +202,67 @@ public sealed class ToolRegistry
                 available = string.Join("、", _handlers.Keys);
             }
 
-            return ToolResult.Fail(
+            return ToolResult.FailCode(
+                "UNKNOWN_TOOL",
                 $"未知工具 '{toolName}'。可用工具：{available}。请修正工具名后重试。",
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new { tool = toolName }),
                 durationMs: sw.ElapsedMilliseconds);
+        }
+
+        // need17-01：Disabled 预留拒绝（need17 不启用，仅通道）。
+        ToolExposure exposure = ToolExposure.Direct;
+        try
+        {
+            exposure = handler.GetDefinition()?.Exposure ?? ToolExposure.Direct;
+        }
+        catch (Exception)
+        {
+            exposure = ToolExposure.Direct;
+        }
+        if (exposure == ToolExposure.Disabled)
+        {
+            sw.Stop();
+            return ToolResult.FailCode(
+                "TOOL_NOT_ENABLED",
+                $"工具 '{toolName}' 已被禁用（Exposure=Disabled）。请改用其他工具后重试。",
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new { tool = toolName }),
+                durationMs: sw.ElapsedMilliseconds);
+        }
+
+        // need17-01：激活集过滤（activeTools==null=不过滤，老调用零改动；Hidden 工具被显式点名仍可执行）。
+        if (activeTools != null && !activeTools.Any(n => string.Equals(n, toolName, StringComparison.OrdinalIgnoreCase)))
+        {
+            sw.Stop();
+            string available = string.Join("、", activeTools.OrderBy(n => n, StringComparer.Ordinal));
+            return ToolResult.FailCode(
+                "TOOL_NOT_ENABLED",
+                $"工具 '{toolName}' 存在但未在本轮启用。本轮可用工具：{available}。请切换 toolsPreset 或在 toolsAllowlist 中点名该工具后重试。",
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new { tool = toolName }),
+                durationMs: sw.ElapsedMilliseconds);
+        }
+        // need17-02：中央校验（失败不进 ExecuteAsync，不计时）。
+        var validation = ToolCallValidator.Validate(toolName, call?.ArgumentsJson, closedWorld);
+        if (!validation.Success)
+        {
+            sw.Stop();
+            return ToolResult.FailCode(
+                validation.Code ?? "INVALID_JSON_ARGUMENTS",
+                validation.Message ?? "参数校验失败。",
+                payloadJson: validation.PayloadJson,
+                durationMs: sw.ElapsedMilliseconds);
+        }
+
+        ToolCallDto execCall = call!;
+        if (!string.Equals(validation.NormalizedJson, call?.ArgumentsJson, StringComparison.Ordinal))
+        {
+            execCall = new ToolCallDto(call!.Id, call!.Name, validation.NormalizedJson);
         }
 
         ToolResult result;
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, context.CancellationToken);
-            result = await handler.ExecuteAsync(call!, context, linkedCts.Token).ConfigureAwait(false);
+            result = await handler.ExecuteAsync(execCall, context, linkedCts.Token).ConfigureAwait(false);
             result ??= ToolResult.Fail($"工具 '{toolName}' 返回空结果，请重试。");
         }
         catch (OperationCanceledException)
@@ -206,6 +298,21 @@ public sealed class ToolRegistry
         catch (Exception)
         {
             // 守卫自身永不破坏调用结果
+        }
+
+        // need17-02：warnings 拼到结果尾（仅提示，不判失败；守卫预算不变，warnings 在守卫之后追加）。
+        if (validation.Warnings.Count > 0)
+        {
+            result.ValidatedWarnings = new List<string>(validation.Warnings);
+            string tail = string.Join("\n", validation.Warnings.Select(w => "Warning: " + w));
+            if (result.Success)
+            {
+                result.Output = string.IsNullOrEmpty(result.Output) ? tail : result.Output + "\n" + tail;
+            }
+            else
+            {
+                result.Error = string.IsNullOrEmpty(result.Error) ? tail : result.Error + "\n" + tail;
+            }
         }
 
         if (result.DurationMs <= 0)

@@ -175,6 +175,21 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
                 response = await SendRequestAsync(client, request, endpointUrl, requestPayload, ct).ConfigureAwait(false);
             }
 
+            // need17-01 Prefer：payload 含 strict 且网关 400 明确提及 strict/unknown keyword 时，
+            // 去 strict 重发一次并 Warn（仅一次，不循环；Require/Off 由配置层控制是否发送）。
+            if (response.StatusCode == HttpStatusCode.BadRequest &&
+                requestPayload.Contains("\"strict\""))
+            {
+                string peekBody = await PeekErrorBodyAsync(response, ct).ConfigureAwait(false);
+                if (IsStrictRejection(peekBody))
+                {
+                    HaloLogger.App.Warn($"[LlmGateway] Provider [{request.Provider.Name}] 不支持 strict 工具声明（400 提及 strict），已去 strict 重发一次");
+                    requestPayload = StripStrictFromPayload(requestPayload);
+                    response.Dispose();
+                    response = await SendRequestAsync(client, request, endpointUrl, requestPayload, ct).ConfigureAwait(false);
+                }
+            }
+
             finalStatusCode = (int)response.StatusCode;
 
             if (!response.IsSuccessStatusCode)
@@ -244,6 +259,59 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
         finally
         {
             response?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// need17-01 Prefer：判断 400 错误体是否为 strict 关键字拒绝（单测可直接覆盖）。
+    /// 命中条件：提及 strict（unknown keyword/unsupported parameter 等第三方网关文案）。
+    /// </summary>
+    internal static bool IsStrictRejection(string? errorBody)
+    {
+        if (string.IsNullOrEmpty(errorBody))
+        {
+            return false;
+        }
+        return errorBody!.IndexOf("strict", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// need17-01 Prefer：从请求 payload 中剥离全部 "strict":true|false 声明（单测可直接覆盖）。
+    /// 兼容行内/行尾两种逗号位置；剥离后做一次 JSON 结构兜底（失败则原样返回，避免发坏包）。
+    /// </summary>
+    internal static string StripStrictFromPayload(string payload)
+    {
+        if (string.IsNullOrEmpty(payload) || !payload.Contains("\"strict\""))
+        {
+            return payload;
+        }
+        try
+        {
+            string s = System.Text.RegularExpressions.Regex.Replace(
+                payload, @",\s*""strict""\s*:\s*(true|false)", string.Empty);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s, @"""strict""\s*:\s*(true|false)\s*,", string.Empty);
+            s = s.Replace("{,", "{").Replace("[,", "[");
+            // 兜底：剥离后必须仍是合法 JSON，否则返回原 payload。
+            using var doc = System.Text.Json.JsonDocument.Parse(s);
+            return s;
+        }
+        catch
+        {
+            return payload;
+        }
+    }
+
+    private static async Task<string> PeekErrorBodyAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            string body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return body.Length > 2048 ? body[..2048] : body;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

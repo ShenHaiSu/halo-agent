@@ -1,4 +1,5 @@
-using System.Text.Json;
+ using Host.Desktop.Tools.Validation;
+ using System.Text.Json;
 using Host.Desktop.Bridge;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Storage;
@@ -15,20 +16,27 @@ public sealed class GoalTool : IToolHandler
         _serviceFactory = serviceFactory;
     }
 
+    // NEED17-05 §5.1: Exposure=Direct（子只读鉴权不动；激活集裁剪由基础组 01 落子）。
     public string Name => "goal_tool";
+    public const string Need17Exposure = "Direct";
+    // NEED17-05 §5.3: 供 06 动态装配的 PromptBrief/PromptRules（ToolDefinition 字段待基础组 01 扩展，此处先以常量承载，装配表见 SystemPromptBuilder）。
+    public const string PromptBrief = "Read or update the session goal";
+    public static readonly string[] PromptRules = { "Writes take effect next turn; sub sessions are read-only." };
 
     public string Description => "Manage the main-session goal: actions get/set/update/progress/add_milestone/complete_milestone/clear. Sub-agents: get only. "
-        + "(子会话内仅 get 可用，写动作将被拒绝。)";
+        + "(子会话内仅 get 可用，写动作将被拒绝。) "
+        + "Writes take effect next turn; sub sessions are read-only.";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"action\":{\"type\":\"string\",\"description\":\"get|set|update/progress/add_milestone/complete_milestone/clear. Default get.\"},"
-        + "\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},"
-        + "\"milestones\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},"
-        + "\"milestone\":{\"type\":\"string\",\"description\":\"id or title for complete_milestone\"},"
-        + "\"percent\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100},"
-        + "\"note\":{\"type\":\"string\"}"
-        + "},\"required\":[\"action\"]}");
+     public ToolDefinition GetDefinition() => new(Name, Description,
+         new ToolSchemaBuilder()
+             .AddString("action", "get|set. Required. Sub-agents: get only.", required: true, enumValues: new[] { "get", "set" })
+             .AddString("title", string.Empty)
+             .AddString("description", string.Empty)
+             .AddArray("milestones", string.Empty, itemsType: "string")
+             .AddString("milestone", "id or title for complete_milestone")
+             .AddInteger("percent", string.Empty, minimum: 0, maximum: 100)
+             .AddString("note", string.Empty)
+             .Build());
 
      public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

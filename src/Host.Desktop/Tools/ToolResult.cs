@@ -46,6 +46,10 @@ public sealed class ToolResult
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? ErrorPayloadJson { get; set; }
 
+    /// <summary>need17-02：中央校验 warnings（ALIASED_PARAM/DEFAULTED_PARAM/COERCED_TYPE 等，仅提示不判失败；老消费方无感）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ValidatedWarnings { get; set; }
+
     public static ToolResult Ok(
         string output,
         int exitCode = 0,

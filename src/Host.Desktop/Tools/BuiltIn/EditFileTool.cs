@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -34,24 +35,30 @@ public sealed class EditFileTool : IToolHandler
 
     public string Name => "edit_file";
 
+    // NEED17 PromptBrief: Anchor-based partial edit
+    // NEED17 PromptRules: old_string must be verbatim copy-paste from read_file; multiple anchors need multiple calls; merge adjacent edits.
     public string Description =>
         "Replace a text block in an existing file. Default match_mode=normalized tolerates CRLF/LF, Tab/space " +
         "and trailing-space differences while writing back in the file's own byte style. " +
         "A miss returns a structured diagnostic (nearest lines + whitespace visualization + next step). " +
         "For very large files prefer edit_lines. For regex mode, $ is literal by default. " +
+        "For single-file small edits (multi-anchor in one call is not supported; use multiple calls or edit_lines). Large refactors use write_file. " +
         "Example: {\"file_path\":\"src/a.ts\",\"old_string\":\"  if (x) {\\n    foo();\\n  }\",\"new_string\":\"  if (x) {\\n    bar();\\n  }\"}";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"file_path\":{\"type\":\"string\",\"description\":\"Target file path.\"},"
-        + "\"old_string\":{\"type\":\"string\",\"minLength\":16,\"description\":\"Existing text block to replace (min 16 chars, verbatim copy-paste from read_file including indentation, 2-5 surrounding lines for uniqueness). Matching is tolerant by default.\"},"
-        + "\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text block. For regex mode, $ is literal by default (no group expansion).\"},"
-        + "\"replace_all\":{\"type\":\"boolean\",\"description\":\"If true, replace all occurrences. If false (default), old_string must match exactly once.\"},"
-        + "\"match_mode\":{\"type\":\"string\",\"enum\":[\"exact\",\"normalized\",\"regex\"],\"description\":\"exact=strict (legacy behaviour); normalized (default)=tolerate EOL/Tab/trailing-space; regex=treat old_string as a .NET regex over the normalized text.\"},"
-        + "\"regex_expand_groups\":{\"type\":\"boolean\",\"description\":\"Only for match_mode=regex. If true, expand $1/${name} in new_string. Default false (literal write, safe for $ in code).\"},"
-        + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the file bytes; mismatch rejects the edit to avoid concurrent overwrite.\"},"
-        + "\"dry_run\":{\"type\":\"boolean\",\"description\":\"If true, only compute and preview the diff without writing.\"}"
-        + "},\"required\":[\"file_path\",\"old_string\",\"new_string\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("file_path", "Target file path.", required: true)
+            .AddString("old_string", "Verbatim copy-paste from read_file (2-5 context lines for uniqueness). Min 16 chars.", required: true, minLength: 16)
+            .AddString("new_string", "Replacement text. $ is literal unless regex_expand_groups:true.", required: true)
+            .AddBoolean("replace_all", "If true, replace all occurrences. If false (default), old_string must match exactly once.", defaultValue: false)
+            .AddString("match_mode", "exact=strict (legacy behaviour); normalized (default)=tolerate EOL/Tab/trailing-space; regex=treat old_string as a .NET regex over the normalized text.", enumValues: new string[] { "normalized", "exact", "regex" }, defaultValue: "normalized")
+            .AddBoolean("regex_expand_groups", "Only for match_mode=regex. If true, expand $1/${name} in new_string. Default false (literal write, safe for $ in code).")
+            .AddString("expected_hash", "Optional sha256 of the file bytes; mismatch rejects the edit to avoid concurrent overwrite.")
+            .AddBoolean("dry_run", "If true, only compute and preview the diff without writing.")
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

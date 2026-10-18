@@ -130,6 +130,19 @@ public sealed class AgentConfigService
                     current.SubAllowMemoryWrite = false;
                     current.SubAllowAskUser = false;
                     break;
+                // need17：strict/tools 按项恢复
+                case "stricttoolsmode":
+                case "strict":
+                case "strict-tools":
+                    current.StrictToolsMode = Host.Desktop.Core.Models.StrictToolsMode.Prefer;
+                    break;
+                case "toolspreset":
+                case "tools":
+                case "toolpreset":
+                    current.ToolsPreset = null;
+                    current.ToolsAllowlist = null;
+                    current.ToolsDenylist = null;
+                    break;
                 default:
                     throw new AgentConfigValidationException("field", $"未知恢复项：{field.Trim()}");
             }
@@ -237,6 +250,11 @@ public sealed class AgentConfigService
             SubAllowSkillWrite = incoming.SubAllowSkillWrite,
             SubAllowMemoryWrite = incoming.SubAllowMemoryWrite,
             SubAllowAskUser = incoming.SubAllowAskUser,
+            // need17：新字段透传（老文件缺失→默认；非法值读时回默认、存时拒绝，见下）。
+            StrictToolsMode = incoming.StrictToolsMode,
+            ToolsPreset = string.IsNullOrWhiteSpace(incoming.ToolsPreset) ? null : incoming.ToolsPreset.Trim(),
+            ToolsAllowlist = incoming.ToolsAllowlist == null ? null : incoming.ToolsAllowlist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
+            ToolsDenylist = incoming.ToolsDenylist == null ? null : incoming.ToolsDenylist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
             Scope = "global",
             UpdatedAtUtc = incoming.UpdatedAtUtc == default ? DateTime.UtcNow : incoming.UpdatedAtUtc,
         };
@@ -278,6 +296,18 @@ public sealed class AgentConfigService
             doc.SubAllowAskUser = false;
             HaloLogger.App.Warn("[Agent] subAllowAskUser=true 已归一为 false（v1 锁定子禁问）");
         }
+        // need17-01：strict/tools 校验（读时非法回默认由 LoadInternal 兜底；存时抛错阻断）。
+        if (!Enum.IsDefined(typeof(Host.Desktop.Core.Models.StrictToolsMode), doc.StrictToolsMode))
+        {
+            if (forSave)
+            {
+                throw new AgentConfigValidationException("strictToolsMode",
+                    $"网关 strict 模式非法：{(int)doc.StrictToolsMode}（可选值：Prefer | Require | Off）。请修正 agent.json 后重试。");
+            }
+            doc.StrictToolsMode = Host.Desktop.Core.Models.StrictToolsMode.Prefer;
+        }
+        // need17-01：preset/allowlist/denylist 互斥校验（非法抛错；读时由 LoadInternal 回默认，存时阻断）。
+        Host.Desktop.Tools.ToolPreset.ValidateOrThrow(doc.ToolsPreset, doc.ToolsAllowlist, doc.ToolsDenylist);
         doc.Scope = "global"; doc.Version = 1;
         return doc;
     }

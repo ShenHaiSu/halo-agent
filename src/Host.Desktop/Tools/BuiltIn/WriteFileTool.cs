@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -20,20 +21,25 @@ public sealed class WriteFileTool : IToolHandler
 
     public string Name => "write_file";
 
+    // NEED17 PromptBrief: Create or fully overwrite a file
+    // NEED17 PromptRules: write_file for new/full rewrite only.
     public string Description =>
         "Create a new file, or fully overwrite an existing file ONLY when allow_overwrite:true is passed. " +
         "For partial edits prefer edit_file/edit_lines. Overwrites are backed up. " +
         "Example: {\"file_path\":\"src/new.ts\",\"content\":\"export const x = 1;\\n\"} (new file)";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"file_path\":{\"type\":\"string\",\"description\":\"Relative path from workspace root or absolute file path.\"},"
-        + "\"content\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Full text content to write to the file. For existing files >250KB use edit_* instead; truncated content will be rejected. For existing files you must also pass allow_overwrite:true.\"},"
-        + "\"allow_overwrite\":{\"type\":\"boolean\",\"description\":\"Required true to overwrite an existing file. Default false.\"},"
-        + "\"expected_hash\":{\"type\":\"string\",\"description\":\"Optional sha256 of the existing file bytes; mismatch rejects the overwrite.\"},"
-        + "\"max_bytes\":{\"type\":\"integer\",\"description\":\"Optional override of the size cap (bytes). Must not exceed 1000000.\"},"
-        + "\"dry_run\":{\"type\":\"boolean\",\"description\":\"If true, only validate and preview without writing.\"}"
-        + "},\"required\":[\"file_path\",\"content\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("file_path", "Relative path from workspace root or absolute file path.", required: true)
+            .AddString("content", "Full file content (not a patch). Existing files >250KB must use edit_* instead; truncated content is rejected. Overwriting an existing file requires allow_overwrite:true.", required: true, minLength: 1)
+            .AddBoolean("allow_overwrite", "Required true to overwrite an existing file.", defaultValue: false)
+            .AddString("expected_hash", "Optional sha256 of the existing file bytes; mismatch rejects the overwrite.")
+            .AddInteger("max_bytes", "Optional override of the size cap (bytes). Must not exceed 1000000 (HardMaxWriteBytes).", maximum: 1000000)
+            .AddBoolean("dry_run", "If true, only validate and preview without writing.")
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

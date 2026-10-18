@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -13,16 +14,21 @@ public sealed class UndoEditTool : IToolHandler
 {
     public string Name => "undo_edit";
 
+    // NEED17 PromptBrief: Restore a file from backup
     public string Description =>
         "Restore a file from a backup created by edit_file/edit_lines/write_file. " +
+        "Restores the most recent backup of file_path made by edit_*/write_file. Use after a bad edit instead of hand-reverting. " +
         "backup_path must be under <DataRoot>/backups/. The current file is backed up again before restore. " +
         "Example: {\"backup_path\":\"backups/ws/sess/20260101-120000-000_abcdef12_notes.txt.bak\"}";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"backup_path\":{\"type\":\"string\",\"description\":\"Backup file path (under <DataRoot>/backups/).\"},"
-        + "\"restore_to\":{\"type\":\"string\",\"description\":\"Optional target file path. Defaults to the original src recorded in the .meta.json.\"}"
-        + "},\"required\":[\"backup_path\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("backup_path", "Backup file path (under <DataRoot>/backups/).", required: true)
+            .AddString("restore_to", "Optional target file path. Defaults to the original src recorded in the .meta.json.")
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

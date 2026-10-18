@@ -201,6 +201,7 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
 
         var functionCallItems = new Dictionary<string, RespFunctionCallState>(StringComparer.Ordinal);
         bool streamCompletedEmitted = false;
+        bool respIncomplete = false; // NEED17-06联调：response.status=incomplete 或 max_output_tokens 时截断保护（与 chat length 对齐）。
 
         await foreach (var frame in SseStreamReader.ReadFramesAsync(responseStream, ct).ConfigureAwait(false))
         {
@@ -212,15 +213,21 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
             string data = frame.Data.Trim();
             if (data.Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
             {
+                int doneClosed = 0;
                 foreach (var state in functionCallItems.Values)
                 {
                     if (state.StartedEmitted && !state.CompletedEmitted)
                     {
                         yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, state.ArgumentsBuilder.ToString(), state.ItemId);
                         state.CompletedEmitted = true;
+                        doneClosed++;
                     }
                 }
-
+                // NEED17-06联调：截断回复保护（与 chat length 对齐；该轮 Orchestrator 侧丢弃零执行）。
+                if (respIncomplete && doneClosed > 0)
+                {
+                    yield return UnifiedStreamEvent.Truncated(functionCallItems.Count);
+                }
                 if (!streamCompletedEmitted)
                 {
                     yield return UnifiedStreamEvent.Completed();
@@ -398,11 +405,23 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
 
                             yield return UnifiedStreamEvent.Tokens(inTokens, outTokens, cachedTokens, totalTokens);
                         }
-
+                        // NEED17-06联调：response.status=incomplete 或 incomplete_details.reason=max_output_tokens → 截断保护。
+                        if (root.TryGetProperty("response", out var stElem) && stElem.ValueKind == JsonValueKind.Object)
+                        {
+                            string? status = stElem.TryGetProperty("status", out var stVal) ? stVal.GetString() : null;
+                            string? reason = stElem.TryGetProperty("incomplete_details", out var ind) && ind.ValueKind == JsonValueKind.Object && ind.TryGetProperty("reason", out var rsn) ? rsn.GetString() : null;
+                            if (string.Equals(status, "incomplete", StringComparison.OrdinalIgnoreCase) || string.Equals(reason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
+                            {
+                                respIncomplete = true;
+                            }
+                        }
                         yield return UnifiedStreamEvent.Completed();
                         streamCompletedEmitted = true;
                         break;
-
+                    case "response.incomplete":
+                        // NEED17-06联调：服务端显式截断事件；工具调用由兜底闭合后补 Truncated（见 [DONE]/文末兜底）。
+                        respIncomplete = true;
+                        break;
                     case "response.failed":
                     case "error":
                         {
@@ -424,13 +443,20 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
         }
 
         // 兜底闭合未完成的工具调用
+        int tailClosed = 0;
         foreach (var state in functionCallItems.Values)
         {
             if (state.StartedEmitted && !state.CompletedEmitted)
             {
                 yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, state.ArgumentsBuilder.ToString(), state.ItemId);
                 state.CompletedEmitted = true;
+                tailClosed++;
             }
+        }
+        // NEED17-06联调：截断回复保护（与 chat length 对齐）。
+        if (respIncomplete && tailClosed > 0)
+        {
+            yield return UnifiedStreamEvent.Truncated(functionCallItems.Count);
         }
 
         if (!streamCompletedEmitted)

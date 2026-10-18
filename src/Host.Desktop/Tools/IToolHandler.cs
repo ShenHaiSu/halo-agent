@@ -45,6 +45,10 @@ public sealed class ToolContext
     /// 测试/上层注入的 Python 探测覆盖（为空则走真实探测）。
     /// </summary>
     public Func<CommandRunnerProbe.ProbeResult>? PythonProbeOverride { get; init; }
+    /// <summary>
+    /// need17-07：Python 可用性快照覆盖（单测/子代理注入；生产为 null→读静态快照）。
+    /// </summary>
+    public Host.Desktop.Tools.Process.PythonAvailabilitySnapshot? PythonAvailabilityOverride { get; init; }
 
     /// <summary>
     /// need08：命令超时配置快照（null=读服务/常量回退，保证老单测行为不变）。

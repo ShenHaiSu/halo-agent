@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -15,16 +16,22 @@ public sealed class ReadFileTool : IToolHandler
 
     public string Name => "read_file";
 
+    // NEED17 PromptBrief: Read file content with 1-based paging
+    // NEED17 PromptRules: Use read_file to view files, not cat/type via exec_command.
     public string Description =>
         "Read a text file from the workspace with 1-based line numbers. " +
-        "Supports pagination via offset and limit for large files.";
+        "Supports pagination via offset and limit for large files. " +
+        "Returns 1-based line numbers. Large outputs are truncated (head+tail) with the full text spilled to a log file you can page with offset/limit.";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"file_path\":{\"type\":\"string\",\"description\":\"Relative path from workspace root or absolute file path.\"},"
-        + "\"offset\":{\"type\":\"integer\",\"description\":\"1-based starting line number. Defaults to 1.\"},"
-        + "\"limit\":{\"type\":\"integer\",\"description\":\"Maximum number of lines to read. Defaults to 500, max 2000.\"}"
-        + "},\"required\":[\"file_path\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("file_path", "Relative path from workspace root or absolute file path. Use list_dir first if unsure.", required: true)
+            .AddInteger("offset", "1-based first line. Out-of-range returns an error with total lines.", minimum: 1, defaultValue: 1)
+            .AddInteger("limit", "Max lines to return. Capped at 2000; more lines need next offset. Text beyond the tool output budget is truncated and spilled to a file (see guide).", minimum: 1, maximum: 2000, defaultValue: 500)
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

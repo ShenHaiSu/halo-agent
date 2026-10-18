@@ -70,7 +70,12 @@ internal static class Program
          }
          HaloLogger.App.Info(
              $"HaloAgent starting. OS={Environment.OSVersion}, TLS={ServicePointManager.SecurityProtocol}, DataRoot={storageManager.CurrentDataRoot}, Bootstrap={storageManager.BootstrapFilePath}");
-
+        // need17-07：Python 可用性后台快照（不阻塞 UI/网关启动；失败只记日志）
+        _ = Task.Run(() =>
+        {
+            try { Host.Desktop.Tools.Process.PythonAvailabilitySnapshot.Refresh(); }
+            catch (Exception ex) { Host.Desktop.Infrastructure.Logging.HaloLogger.App.Error("Python availability snapshot refresh failed", ex); }
+        });
         // 4. 配置 CefSettings（CachePath 指向用户配置的 DataRoot\cef-cache）
         var settings = new CefSettings
         {
