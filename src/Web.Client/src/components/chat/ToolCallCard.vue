@@ -188,6 +188,7 @@ import {
  import type { AgentToolCard } from '@/stores/agentStore';
  import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
  import { useWorkspaceStore } from '@/stores/workspaceStore';
+ import { useSubSessionStore } from '@/stores/subSessionStore';
  import { formatSmartBytes } from '@/utils/formatSmartBytes';
 
 const props = defineProps<{
@@ -431,17 +432,16 @@ async function handleKill(): Promise<void> {
    } catch { /* ignore */ }
    return '';
  });
- async function openSub() {
-   if (!subId.value) return;
-   try {
-     const { useSubSessionStore } = await import('@/stores/subSessionStore');
-     const s = useSubSessionStore();
-     const wsId = workspaceStore.activeWorkspaceId || '';
-     const parent = workspaceStore.activeSessionId || '';
-     if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
-   } catch { /* ignore */ }
- }
- </script>
+  async function openSub() {
+    if (!subId.value) return;
+    try {
+      const s = useSubSessionStore();
+      const wsId = workspaceStore.activeWorkspaceId || '';
+      const parent = workspaceStore.activeSessionId || '';
+      if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
+    } catch { /* ignore */ }
+  }
+  </script>
  
  <style scoped>
  .bytes-dot { width: 7px; height: 7px; border-radius: 9999px; flex-shrink: 0; }

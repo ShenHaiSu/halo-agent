@@ -113,6 +113,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
    type ComposerImageMime,
  } from '@/utils/composerModel';
 import { acceptImageFile, collectImageFiles, extractPaste, firstHtmlImgSrc } from '@/utils/clipboardImage';
+import { useSubSessionStore } from '@/stores/subSessionStore';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
@@ -142,18 +143,17 @@ const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceSto
  const subWaiting = computed(() => agentStore.subAgents?.waiting === true);
  const subDone = computed(() => agentStore.subAgents?.done ?? 0);
  const subTotal = computed(() => agentStore.subAgents?.total ?? 0);
- async function openFirstSub() {
-   try {
-     const { useSubSessionStore } = await import('@/stores/subSessionStore');
-     const s = useSubSessionStore();
-     const wsId = workspaceStore.activeWorkspaceId || '';
-     const parent = workspaceStore.activeSessionId || '';
-     if (!wsId || !parent) return;
-     await s.refreshList(wsId, parent);
-     const first = s.subs[0];
-     if (first) await s.enterSub(wsId, parent, first.id);
-   } catch { /* ignore */ }
- }
+  async function openFirstSub() {
+    try {
+      const s = useSubSessionStore();
+      const wsId = workspaceStore.activeWorkspaceId || '';
+      const parent = workspaceStore.activeSessionId || '';
+      if (!wsId || !parent) return;
+      await s.refreshList(wsId, parent);
+      const first = s.subs[0];
+      if (first) await s.enterSub(wsId, parent, first.id);
+    } catch { /* ignore */ }
+  }
 
  const attachmentList = computed<ComposerAttachment[]>(() => { void draftVer.value; return Object.values(draft.attachments); });
 
