@@ -5,6 +5,7 @@ using CefSharp.WinForms;
 using Host.Desktop.Bridge;
 using Host.Desktop.Handlers;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Infrastructure.Process;
 using Host.Desktop.Infrastructure.Storage;
 
 namespace Host.Desktop;
@@ -256,6 +257,24 @@ public sealed class MainForm : Form
                 BeginInvoke(new Action(Close));
             }
         }
+    }
+
+    // need18-04 L2 接收端：第二实例广播 WM_SHOWME 时还原+置顶（不改构造签名）
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == NativeWindowActivator.WM_SHOWME)
+        {
+            try
+            {
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                TopMost = true; TopMost = false; // 闪置顶一次，抢回任务栏焦点
+                Activate();
+                HaloLogger.App.Info("MainForm activated by second-instance WM_SHOWME.");
+            }
+            catch { /* 关闭期吞掉 */ }
+            return;
+        }
+        base.WndProc(ref m);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
