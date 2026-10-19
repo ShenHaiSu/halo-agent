@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-3" data-testid="usage-tab">
-    <!-- 筛选条 -->
-    <div class="flex flex-wrap items-center gap-2">
+    <!-- 筛选条：容器层面收敛 n-select 宽度，避免换行后被 width:100% 拉满独占一行 -->
+    <div class="flex flex-wrap items-center gap-2 usage-filter-bar">
       <n-button-group>
         <n-button
           v-for="p in USAGE_PRESETS"
@@ -31,7 +31,7 @@
         placeholder="Provider"
         :options="providerOptions"
         data-testid="usage-provider-select"
-        style="min-width: 160px; max-width: 240px;"
+        style="width: 160px;"
         @update:value="onScopeChange"
       />
       <n-select
@@ -44,7 +44,7 @@
         placeholder="Model"
         :options="modelOptions"
         data-testid="usage-model-select"
-        style="min-width: 180px; max-width: 280px;"
+        style="width: 180px;"
         @update:value="onScopeChange"
       />
       <n-select
@@ -55,7 +55,7 @@
         placeholder="来源"
         :options="sourceOptions"
         data-testid="usage-source-select"
-        style="min-width: 140px; max-width: 200px;"
+        style="width: 140px;"
         @update:value="onScopeChange"
       />
       <n-select
@@ -64,7 +64,7 @@
         placeholder="实测/估算"
         :options="estimatedOptions"
         data-testid="usage-estimated-select"
-        style="min-width: 110px;"
+        style="width: 110px;"
         @update:value="onEstimatedChange"
       />
       <n-button size="small" type="primary" ghost data-testid="usage-query-btn" :loading="store.loading" @click="store.refresh()">查询</n-button>
@@ -481,3 +481,11 @@ onBeforeUnmount(() => {
 
 defineExpose({ refresh: () => store.refresh(), resize: () => renderAll() });
 </script>
+
+<style scoped>
+/* 筛选条收敛：n-select 根默认 width:100%，换行掉单后会被拉满独占一行；flex:none 锁死为固定宽 */
+.usage-filter-bar :deep(.n-select),
+.usage-filter-bar :deep(.n-date-picker) {
+  flex: none;
+}
+</style>
