@@ -19,6 +19,10 @@ public sealed class PendingUsageRow
     public string RequestId { get; set; } = string.Empty;
     public string SessionId { get; set; } = string.Empty;
     public string WorkspaceId { get; set; } = string.Empty;
+    /// <summary>need12-P2：请求来源 agent|session|compact|title（老库回填 agent）。</summary>
+    public string Source { get; set; } = "agent";
+    /// <summary>need12-P2：1=本地估算（无网关实测），0=网关实测。</summary>
+    public int Estimated { get; set; }
 }
 
 /// <summary>need12：用量过滤器（前后端同构，preset 由后端换算为闭区间）。</summary>
@@ -29,6 +33,10 @@ public sealed class UsageFilter
     public string? EndDate { get; set; }
     public List<string>? ProviderIds { get; set; }
     public List<string>? ModelKeys { get; set; }
+    /// <summary>need12-P2：来源筛选 agent|session|compact|title（空=全部）。</summary>
+    public List<string>? Sources { get; set; }
+    /// <summary>need12-P2：是否只看估算行（null=全部，true=仅估算，false=仅实测）。</summary>
+    public bool? EstimatedOnly { get; set; }
 }
 
 public sealed class UsageOverviewDto
@@ -80,6 +88,10 @@ public sealed class UsageRowDto
     public long CachedTokens { get; set; }
     public double HitRate { get; set; }
     public string Status { get; set; } = string.Empty;
+    /// <summary>need12-P2：请求来源 agent|session|compact|title。</summary>
+    public string Source { get; set; } = string.Empty;
+    /// <summary>need12-P2：1=本地估算，0=网关实测。</summary>
+    public int Estimated { get; set; }
 }
 
 /// <summary>
@@ -139,6 +151,8 @@ CREATE TABLE IF NOT EXISTS llm_usage_records (
   cached_tokens INTEGER NOT NULL DEFAULT 0,
   hit_rate REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'ok',
+  source TEXT NOT NULL DEFAULT 'agent',
+  estimated INTEGER NOT NULL DEFAULT 0,
   request_id TEXT NOT NULL DEFAULT '',
   session_id TEXT NOT NULL DEFAULT '',
   workspace_id TEXT NOT NULL DEFAULT '',
@@ -152,6 +166,28 @@ CREATE INDEX IF NOT EXISTS ix_llm_usage_dt ON llm_usage_records(request_datetime
 CREATE INDEX IF NOT EXISTS ix_llm_usage_date ON llm_usage_records(request_date);
 CREATE INDEX IF NOT EXISTS ix_llm_usage_pm ON llm_usage_records(provider_id, model_id);";
             cmd.ExecuteNonQuery();
+            // need12-P2：老库平滑迁移（列缺失才加；失败只 Warn 不影响对话）
+            try
+            {
+                using var mig = conn.CreateCommand();
+                mig.CommandText = "ALTER TABLE llm_usage_records ADD COLUMN source TEXT NOT NULL DEFAULT 'agent';";
+                mig.ExecuteNonQuery();
+            }
+            catch { /* 列已存在则忽略 */ }
+            try
+            {
+                using var mig2 = conn.CreateCommand();
+                mig2.CommandText = "ALTER TABLE llm_usage_records ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0;";
+                mig2.ExecuteNonQuery();
+            }
+            catch { /* 列已存在则忽略 */ }
+            try
+            {
+                using var idx = conn.CreateCommand();
+                idx.CommandText = "CREATE INDEX IF NOT EXISTS ix_llm_usage_source ON llm_usage_records(source);";
+                idx.ExecuteNonQuery();
+            }
+            catch { /* 索引失败忽略 */ }
             using var prag = conn.CreateCommand();
             prag.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;";
             prag.ExecuteNonQuery();
@@ -198,6 +234,8 @@ CREATE INDEX IF NOT EXISTS ix_llm_usage_pm ON llm_usage_records(provider_id, mod
                 RequestId = string.IsNullOrWhiteSpace(r.RequestId) ? Guid.NewGuid().ToString("N") : r.RequestId,
                 SessionId = string.IsNullOrWhiteSpace(r.SessionId) ? (sessionId ?? string.Empty) : r.SessionId,
                 WorkspaceId = string.IsNullOrWhiteSpace(r.WorkspaceId) ? (workspaceId ?? string.Empty) : r.WorkspaceId,
+                Source = UsageRecorder.NormalizeSource(r.Source, UsageRecorder.SourceAgent),
+                Estimated = r.Estimated != 0 ? 1 : 0,
             }).ToList();
             _queue.Enqueue(snapshot);
             _signal.Set();
@@ -241,8 +279,8 @@ CREATE INDEX IF NOT EXISTS ix_llm_usage_pm ON llm_usage_records(provider_id, mod
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = @"INSERT OR IGNORE INTO llm_usage_records
-(provider_id,provider_name,model_id,model_display,protocol,input_tokens,output_tokens,cached_tokens,hit_rate,status,request_id,session_id,workspace_id,request_date,request_time,request_datetime,created_utc)
-VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
+(provider_id,provider_name,model_id,model_display,protocol,input_tokens,output_tokens,cached_tokens,hit_rate,status,source,estimated,request_id,session_id,workspace_id,request_date,request_time,request_datetime,created_utc)
+VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$src,$est,$r,$sess,$ws,$d,$t,$dt,$u);";
         var pp = cmd.CreateParameter(); pp.ParameterName = "$p"; cmd.Parameters.Add(pp);
         var ppn = cmd.CreateParameter(); ppn.ParameterName = "$pn"; cmd.Parameters.Add(ppn);
         var pm = cmd.CreateParameter(); pm.ParameterName = "$m"; cmd.Parameters.Add(pm);
@@ -253,6 +291,8 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
         var pc = cmd.CreateParameter(); pc.ParameterName = "$c"; cmd.Parameters.Add(pc);
         var ph = cmd.CreateParameter(); ph.ParameterName = "$h"; cmd.Parameters.Add(ph);
         var ps = cmd.CreateParameter(); ps.ParameterName = "$s"; cmd.Parameters.Add(ps);
+        var psrc = cmd.CreateParameter(); psrc.ParameterName = "$src"; cmd.Parameters.Add(psrc);
+        var pest = cmd.CreateParameter(); pest.ParameterName = "$est"; cmd.Parameters.Add(pest);
         var pr = cmd.CreateParameter(); pr.ParameterName = "$r"; cmd.Parameters.Add(pr);
         var pse = cmd.CreateParameter(); pse.ParameterName = "$sess"; cmd.Parameters.Add(pse);
         var pws = cmd.CreateParameter(); pws.ParameterName = "$ws"; cmd.Parameters.Add(pws);
@@ -266,7 +306,8 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
             pp.Value = r.ProviderId; ppn.Value = r.ProviderName; pm.Value = r.ModelId;
             pmd.Value = r.ModelDisplay; ppr.Value = r.Protocol;
             pi.Value = r.Input; po.Value = r.Output; pc.Value = r.Cached; ph.Value = hit;
-            ps.Value = r.Status; pr.Value = r.RequestId; pse.Value = r.SessionId; pws.Value = r.WorkspaceId;
+            ps.Value = r.Status; psrc.Value = UsageRecorder.NormalizeSource(r.Source, UsageRecorder.SourceAgent); pest.Value = r.Estimated != 0 ? 1 : 0;
+            pr.Value = r.RequestId; pse.Value = r.SessionId; pws.Value = r.WorkspaceId;
             pd.Value = d; pt.Value = t; pdt.Value = dt; pu.Value = utc;
             cmd.ExecuteNonQuery();
         }
@@ -341,6 +382,21 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
             }
             if (orParts.Count > 0) conds.Add("(" + string.Join(" OR ", orParts) + ")");
         }
+        // need12-P2：来源筛选（非法值忽略，空=全部）；估算筛选（null=全部）。
+        var srcs = (f?.Sources ?? new List<string>()).Where(x => UsageRecorder.IsValidSource(x)).Select(x => x.Trim().ToLowerInvariant()).Distinct().ToList();
+        if (srcs.Count > 0)
+        {
+            var names = new List<string>();
+            for (int i = 0; i < srcs.Count; i++)
+            {
+                string n = "$src" + i;
+                names.Add(n);
+                var p = cmd.CreateParameter(); p.ParameterName = n; p.Value = srcs[i]; cmd.Parameters.Add(p);
+            }
+            conds.Add($"source IN ({string.Join(",", names)})");
+        }
+        if (f?.EstimatedOnly == true) conds.Add("estimated = 1");
+        else if (f?.EstimatedOnly == false) conds.Add("estimated = 0");
     }
 
     private string BuildWhere(UsageFilter f, SqliteCommand cmd, (string Start, string End) range)
@@ -391,7 +447,15 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
                 });
             }
         }
-        return new { providers, models };
+        // need12-P2：来源固定枚举（前端下拉用，不随库空而空）。
+        var sources = new List<object>
+        {
+            new { id = "agent", name = "Agent 对话" },
+            new { id = "session", name = "直连会话" },
+            new { id = "compact", name = "上下文压缩" },
+            new { id = "title", name = "标题生成" },
+        };
+        return new { providers, models, sources };
     }
 
     public UsageOverviewDto GetOverview(UsageFilter f)
@@ -530,7 +594,7 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
             string where = BuildWhere(f, c, range);
             var po = c.CreateParameter(); po.ParameterName = "$lim"; po.Value = pageSize; c.Parameters.Add(po);
             var pf = c.CreateParameter(); pf.ParameterName = "$off"; pf.Value = (page - 1) * pageSize; c.Parameters.Add(pf);
-            c.CommandText = $"SELECT id, request_date, request_time, request_datetime, provider_name, model_id, model_display, protocol, input_tokens, output_tokens, cached_tokens, hit_rate, status FROM llm_usage_records WHERE {where} ORDER BY request_datetime DESC, id DESC LIMIT $lim OFFSET $off;";
+            c.CommandText = $"SELECT id, request_date, request_time, request_datetime, provider_name, model_id, model_display, protocol, input_tokens, output_tokens, cached_tokens, hit_rate, status, source, estimated FROM llm_usage_records WHERE {where} ORDER BY request_datetime DESC, id DESC LIMIT $lim OFFSET $off;";
             using var r = c.ExecuteReader();
             while (r.Read())
             {
@@ -549,6 +613,8 @@ VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$r,$sess,$ws,$d,$t,$dt,$u);";
                     CachedTokens = r.GetInt64(10),
                     HitRate = r.IsDBNull(11) ? 0 : r.GetDouble(11),
                     Status = r.IsDBNull(12) ? "" : r.GetString(12),
+                    Source = r.IsDBNull(13) ? "agent" : r.GetString(13),
+                    Estimated = r.IsDBNull(14) ? 0 : r.GetInt32(14),
                 });
             }
         }

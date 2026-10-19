@@ -75,4 +75,4 @@ echo.
 echo [OK] Done. Test binary is in .\%DIST_DIR%\ ^(%RUNTIME%^).
 echo      Example: .\%DIST_DIR%\Host.Desktop.exe
 endlocal
-exit /b 0
+pause

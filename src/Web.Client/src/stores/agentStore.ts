@@ -94,6 +94,8 @@ export interface AgentTurnState {
   turnNotice: string;
   lastError: string;
   updatedAt: number;
+  /** need13：主会话子进度（瞬态，不持久化） */
+  subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
 }
 
 let turnStartMarks: Record<string, number> = {};
@@ -125,6 +127,7 @@ function emptyTurnState(sessionId: string, fallbackProtocol = 'chat'): AgentTurn
     turnNotice: '',
     lastError: '',
     updatedAt: Date.now(),
+    subAgents: { total: 0, done: 0, waiting: false, items: [] },
   };
 }
 
@@ -232,6 +235,8 @@ export const useAgentStore = defineStore('agent', () => {
 
   // need04-03：本轮已在流式卡中存在的 callId，持久区 tool 灰块隐藏（只藏显示不删数据）
   const hiddenToolCallIds = computed<Set<string>>(() => new Set(activeTurn.value.toolCards.map((c) => c.callId).filter(Boolean)));
+  // need13：主会话子进度别名（模板直接用 activeTurn.subAgents 亦可，此处供 PromptComposer 便捷绑定）
+  const subAgents = computed(() => activeTurn.value.subAgents);
 
   const runningSessionIds = computed<string[]>(() =>
     Object.values(turns.value)
@@ -475,6 +480,9 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
         t.isGenerating = false;
         t.streamingActive = false;
+        // need13：完成即解除子等待
+        t.subAgents.waiting = false;
+        t.subAgents.done = t.subAgents.total;
         touch(t);
         touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
         void finishTurn(sid);
@@ -519,6 +527,8 @@ export const useAgentStore = defineStore('agent', () => {
         t.isGenerating = false;
         t.streamingActive = false;
         t.turnNotice = '已停止生成。';
+        // need13：取消掐断整树，子等待态同步解除
+        t.subAgents.waiting = false;
         touch(t);
         void finishTurn(sid);
         break;
@@ -528,6 +538,8 @@ export const useAgentStore = defineStore('agent', () => {
         t.isGenerating = false;
         t.streamingActive = false;
         t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '推理失败';
+        // need13：错误即解除子等待
+        t.subAgents.waiting = false;
         touch(t);
         void finishTurn(sid);
         void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
@@ -535,6 +547,59 @@ export const useAgentStore = defineStore('agent', () => {
       }
       default:
         break;
+    }
+    // need13：子代理聚合事件（agent:sub-event 由桥接层转发为 turn-event，kind 保持 SubAgentProgress）
+    if (kind === 'SubAgentsStarted' || kind === 'SubAgentProgress' || kind === 'SubAgentsBarrier' || kind === 'SubAgentsBarrierReleased' || kind === 'agent:sub-event') {
+      handleSubEvent(sid, kind, payload);
+    }
+  }
+
+  /** need13：子进度聚合（主桶隔离；subId 事件不污染主时间线，只更新 items） */
+  function handleSubEvent(sid: string, kind: string, payload: Record<string, unknown> | null | undefined) {
+    const t = ensureTurn(sid);
+    const p = payload ?? {};
+    if (kind === 'SubAgentsStarted') {
+      const subs = Array.isArray(p['subs']) ? (p['subs'] as Array<Record<string, unknown>>) : [];
+      t.subAgents.total = typeof p['total'] === 'number' ? (p['total'] as number) : subs.length;
+      t.subAgents.waiting = true;
+      for (const s of subs) {
+        const subId = String(s['subId'] ?? '');
+        if (subId && !t.subAgents.items.some((i) => i.subId === subId)) {
+          t.subAgents.items.push({ subId, label: String(s['label'] ?? ''), status: 'running' });
+        }
+      }
+      touch(t);
+      return;
+    }
+    if (kind === 'SubAgentProgress' || kind === 'agent:sub-event') {
+      const subId = String(p['subId'] ?? '');
+      const status = String(p['status'] ?? 'running');
+      if (subId) {
+        const ex = t.subAgents.items.find((i) => i.subId === subId);
+        if (ex) ex.status = status;
+        else t.subAgents.items.push({ subId, label: String(p['label'] ?? ''), status });
+      }
+      t.subAgents.done = t.subAgents.items.filter((i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled').length;
+      touch(t);
+      return;
+    }
+    if (kind === 'SubAgentsBarrier') {
+      t.subAgents.waiting = true;
+      if (typeof p['total'] === 'number') t.subAgents.total = p['total'] as number;
+      touch(t);
+      return;
+    }
+    if (kind === 'SubAgentsBarrierReleased') {
+      t.subAgents.waiting = false;
+      const subs = Array.isArray(p['subs']) ? (p['subs'] as Array<Record<string, unknown>>) : [];
+      for (const s of subs) {
+        const subId = String(s['subId'] ?? s['callId'] ?? '');
+        const ex = t.subAgents.items.find((i) => i.subId === subId);
+        if (ex) ex.status = (s['success'] as boolean) ? 'succeeded' : 'failed';
+      }
+      t.subAgents.done = t.subAgents.total || t.subAgents.items.length;
+      touch(t);
+      return;
     }
   }
 
@@ -767,6 +832,7 @@ export const useAgentStore = defineStore('agent', () => {
     hasStreamingContent,
     hasActiveTurn,
     hiddenToolCallIds,
+    subAgents,
     dirtyPersisted,
     lastTurnSnapshot,
     handleTurnEvent,

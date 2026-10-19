@@ -93,6 +93,18 @@ public sealed class SessionMetadata
     public bool IsPinned { get; set; }
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    /// <summary>need13：父会话 ID（null/空 = Main；非空 = 寄宿于该主的子会话）。</summary>
+    public string? ParentSessionId { get; set; }
+    /// <summary>need13：main|sub（缺省 main，老数据兼容）。</summary>
+    public string AgentRole { get; set; } = "main";
+    /// <summary>need13：spawn 时 label（≤20 字，索引用）。</summary>
+    public string? SubLabel { get; set; }
+    /// <summary>need13：pending|running|succeeded|failed|cancelled（诊断用，内存+落盘双写）。</summary>
+    public string? SubStatus { get; set; }
+    /// <summary>need13：由主轮哪次 tool_call 创建（callId，链路追踪）。</summary>
+    public string? CreatedByCallId { get; set; }
+    /// <summary>need13：task 截断 2000 字（索引用，全文不存 meta）。</summary>
+    public string? TaskPrompt { get; set; }
 }
 
 /// <summary>

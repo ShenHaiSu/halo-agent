@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -20,16 +21,22 @@ public sealed class ListDirTool : IToolHandler
 
     public string Name => "list_dir";
 
+    // NEED17 PromptBrief: List directory contents
     public string Description =>
         "List directory structure in the workspace with file sizes. " +
-        "Supports recursion depth control; noisy directories (.git, node_modules, bin, obj, ...) are auto-excluded.";
+        "Supports recursion depth control; noisy directories (.git, node_modules, bin, obj, ...) are auto-excluded. " +
+        "Directories end with /. Empty dir returns an empty marker, not an error. " +
+        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"path\":{\"type\":\"string\",\"description\":\"Relative directory path from workspace root or absolute path. Defaults to \\\".\\\".\"},"
-        + "\"recursive\":{\"type\":\"boolean\",\"description\":\"Recurse into subdirectories. Defaults to false.\"},"
-        + "\"max_depth\":{\"type\":\"integer\",\"description\":\"Maximum recursion depth. Defaults to 2.\"}"
-        + "}}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("path", "Relative directory path from workspace root or absolute path. Defaults to \".\".", defaultValue: ".")
+            .AddBoolean("recursive", "Recurse into subdirectories. Defaults to false.", defaultValue: false)
+            .AddInteger("max_depth", "Maximum recursion depth (1-10). Defaults to 2.", minimum: 1, maximum: 10, defaultValue: 2)
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {

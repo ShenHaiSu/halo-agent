@@ -544,6 +544,23 @@ public static class SkillToolShared
                     durationMs: sw.ElapsedMilliseconds);
             if (!allowAll && scopeResolved == "all") scopeResolved = "project";
 
+            // need13：子写 skill/memory 鉴权（读 list/get 放行；写 create/update/delete/enable/disable 按快照拦截）
+            bool isSubWrite = !string.Equals(action, "list", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(action, "get", StringComparison.OrdinalIgnoreCase);
+            if (isSubWrite && string.Equals(context.AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+            {
+                bool allowed = isSkill ? context.SubAllowSkillWrite : context.SubAllowMemoryWrite;
+                if (!allowed)
+                    return ToolResult.Fail(
+                        $"[PERMISSION_DENIED:{(isSkill ? "skill_tool" : "memory_tool")}:write] 子代理禁止写 {(isSkill ? "skill" : "memory")}（设置>智能体行为>子代理>{(isSkill ? "skill" : "memory")}写=false）。list/get 可用，本次 {action} 已拒绝。请改用只读查询，或记入总结交主代理修改。",
+                        durationMs: sw.ElapsedMilliseconds);
+                // 子写 global 域同样拒绝（即使开关开了，见 03 §3.3）
+                if (string.Equals(scopeResolved, "global", StringComparison.OrdinalIgnoreCase))
+                    return ToolResult.Fail(
+                        $"[PERMISSION_DENIED:{(isSkill ? "skill_tool" : "memory_tool")}:write] 子代理禁止写全局 {(isSkill ? "skill" : "memory")}（scope=global）。本次 {action} 已拒绝。请改用 project 域或记入总结交主代理修改。",
+                        durationMs: sw.ElapsedMilliseconds);
+            }
+
             switch (action)
             {
                 case "list":

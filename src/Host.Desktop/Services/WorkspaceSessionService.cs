@@ -24,6 +24,13 @@ public interface IWorkspaceSessionService
 
     Task<List<SessionMetadata>> GetSessionsByWorkspaceAsync(string workspaceId, CancellationToken ct = default);
     Task<SessionMetadata> CreateSessionAsync(string workspaceId, string? title = null, string? providerId = null, string? modelId = null, CancellationToken ct = default);
+    /// <summary>need13：建子会话（扁平寄宿；老 CreateSessionAsync 委托此方法 parent=null）。</summary>
+    Task<SessionMetadata> CreateSubSessionAsync(string workspaceId, string? title, string? providerId, string? modelId, string? parentSessionId, string agentRole, string? subLabel, string? createdByCallId, string? taskPrompt, CancellationToken ct = default);
+    /// <summary>need13：查主下全部子（创建时间正序）。</summary>
+    Task<List<SessionMetadata>> GetSubSessionsAsync(string workspaceId, string parentSessionId, CancellationToken ct = default);
+    Task<SessionMetadata?> GetSubSessionAsync(string workspaceId, string parentSessionId, string subSessionId, CancellationToken ct = default);
+    /// <summary>need13：级联删树（先取消由 Bridge 层调 CancelTree，再删子盘+主盘）。</summary>
+    Task<bool> DeleteSessionTreeAsync(string workspaceId, string sessionId, CancellationToken ct = default);
     Task<SessionMetadata?> GetSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
     Task<List<UnifiedChatMessage>> GetSessionMessagesAsync(string workspaceId, string sessionId, CancellationToken ct = default);
      Task<bool> AppendSessionMessageAsync(string workspaceId, string sessionId, UnifiedChatMessage message, CancellationToken ct = default);
@@ -208,16 +215,32 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
     {
         if (string.IsNullOrWhiteSpace(workspaceId)) return new List<SessionMetadata>();
         var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
-        return sessions.OrderByDescending(s => s.IsPinned)
+        return sessions.Where(s => !string.Equals(s.AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+                       .OrderByDescending(s => s.IsPinned)
                        .ThenByDescending(s => s.UpdatedAtUtc)
                        .ToList();
     }
 
-    public async Task<SessionMetadata> CreateSessionAsync(
+    public Task<SessionMetadata> CreateSessionAsync(
         string workspaceId,
         string? title = null,
         string? providerId = null,
         string? modelId = null,
+        CancellationToken ct = default)
+        => CreateSubSessionAsync(workspaceId, title, providerId, modelId,
+            parentSessionId: null, agentRole: "main", subLabel: null, createdByCallId: null, taskPrompt: null, ct);
+
+    /// <summary>need13：建子会话（扁平寄宿 sessions/&lt;ws&gt;/&lt;subId&gt;；父子只靠 index ParentSessionId）。</summary>
+    public async Task<SessionMetadata> CreateSubSessionAsync(
+        string workspaceId,
+        string? title,
+        string? providerId,
+        string? modelId,
+        string? parentSessionId,
+        string agentRole,
+        string? subLabel,
+        string? createdByCallId,
+        string? taskPrompt,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(workspaceId))
@@ -225,15 +248,35 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             throw new ArgumentException("Workspace ID cannot be empty.", nameof(workspaceId));
         }
 
+        string role = string.Equals(agentRole, "sub", StringComparison.OrdinalIgnoreCase) ? "sub" : "main";
+        bool isSub = string.Equals(role, "sub", StringComparison.Ordinal);
         string sessionId = $"sess_{DateTime.UtcNow:yyyyMMdd}_{Guid.NewGuid():N}"[..22];
         string sessionHash = HeaderVariableResolver.ComputeDeterministicHash16($"{workspaceId}:{sessionId}");
+
+        string label = (subLabel ?? string.Empty).Trim();
+        if (label.Length > 20) label = label[..20];
+        string task = taskPrompt ?? string.Empty;
+        string taskIdx = task.Length > 2000 ? task[..2000] : task;
+        string resolvedTitle;
+        if (isSub)
+        {
+            string seed = !string.IsNullOrWhiteSpace(label) ? label
+                : (task.Length > 12 ? task[..12] : task);
+            seed = seed.Trim();
+            if (string.IsNullOrWhiteSpace(seed)) seed = sessionId;
+            resolvedTitle = "sub: " + seed;
+        }
+        else
+        {
+            resolvedTitle = string.IsNullOrWhiteSpace(title) ? "新建会话" : title.Trim();
+        }
 
         var meta = new SessionMetadata
         {
             Id = sessionId,
             WorkspaceId = workspaceId,
             SessionHash = sessionHash,
-            Title = string.IsNullOrWhiteSpace(title) ? "新建会话" : title.Trim(),
+            Title = resolvedTitle,
             ProviderId = providerId,
             ModelId = modelId,
             MessageCount = 0,
@@ -242,8 +285,15 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             TotalCachedTokens = 0,
             IsPinned = false,
             CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
+            UpdatedAtUtc = DateTime.UtcNow,
+            ParentSessionId = isSub ? parentSessionId : null,
+            AgentRole = role,
+            SubLabel = isSub ? (string.IsNullOrWhiteSpace(label) ? null : label) : null,
+            SubStatus = isSub ? "pending" : null,
+            CreatedByCallId = isSub ? createdByCallId : null,
+            TaskPrompt = isSub ? (string.IsNullOrEmpty(taskIdx) ? null : taskIdx) : null,
         };
+        if (isSub) meta.TitleLocked = true;
 
         // 1. 保存 meta.json
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
@@ -253,7 +303,47 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
         sessions.Insert(0, meta);
         await _sessionRepository.SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
 
+        try { Infrastructure.Logging.HaloLogger.App.Info($"[SubAgent] created sub={sessionId} parent={parentSessionId} label={label} call={createdByCallId}"); } catch { }
         return meta;
+    }
+
+    /// <summary>need13：查主下全部子（创建时间正序）。</summary>
+    public async Task<List<SessionMetadata>> GetSubSessionsAsync(string workspaceId, string parentSessionId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(parentSessionId))
+            return new List<SessionMetadata>();
+        var sessions = await _sessionRepository.LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+        return sessions.Where(s => string.Equals(s.ParentSessionId, parentSessionId, StringComparison.OrdinalIgnoreCase))
+                       .OrderBy(s => s.CreatedAtUtc)
+                       .ToList();
+    }
+
+    public async Task<SessionMetadata?> GetSubSessionAsync(string workspaceId, string parentSessionId, string subSessionId, CancellationToken ct = default)
+    {
+        var meta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, subSessionId, ct).ConfigureAwait(false);
+        if (meta == null) return null;
+        if (!string.Equals(meta.ParentSessionId, parentSessionId, StringComparison.OrdinalIgnoreCase)) return null;
+        return meta;
+    }
+
+    /// <summary>need13：级联删树（先删子盘再删主盘；取消由 Bridge 层先调 CancelTree）。</summary>
+    public async Task<bool> DeleteSessionTreeAsync(string workspaceId, string sessionId, CancellationToken ct = default)
+    {
+        try
+        {
+            var subs = await GetSubSessionsAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+            foreach (var sub in subs)
+            {
+                try { await _sessionRepository.DeleteSessionAsync(workspaceId, sub.Id, ct).ConfigureAwait(false); } catch { }
+            }
+            bool ok = await _sessionRepository.DeleteSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+            try { Infrastructure.Logging.HaloLogger.App.Info($"[SubAgent] delete-tree parent={sessionId} subs={subs.Count}"); } catch { }
+            return ok;
+        }
+        catch
+        {
+            return await _sessionRepository.DeleteSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        }
     }
 
     public Task<SessionMetadata?> GetSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default)
@@ -306,7 +396,9 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
             meta.UpdatedAtUtc = DateTime.UtcNow;
 
             // need03-03 T1：首条 user 且未冻结时取第一句话前 5 字（与前端 instantTitleFromUserText 同语义，surrogate 安全）
-            if (string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) &&
+            // need13：子会话标题已锁定（sub: label），跳过自动精炼
+            if (!string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase) &&
                 !meta.TitleLocked &&
                 (string.IsNullOrWhiteSpace(meta.Title) || meta.Title == "新建会话" || meta.Title == "初始会话"))
             {
@@ -484,9 +576,10 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
              while (t < messages.Count && string.Equals(messages[t].Role, "tool", StringComparison.OrdinalIgnoreCase)) t++;
              end = t - 1;
          }
-         var prefix = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
-         string title = string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话" ? "新建会话" : srcMeta.Title + "·分支";
-         var created = await CreateSessionAsync(workspaceId, title, srcMeta.ProviderId, srcMeta.ModelId, ct).ConfigureAwait(false);
+          var prefix = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
+          string title = string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话" ? "新建会话" : srcMeta.Title + "·分支";
+          // need13：分支永远是新 main，不继承父子链（CreateSessionAsync 委托 parent=null 即 main）
+          var created = await CreateSessionAsync(workspaceId, title, srcMeta.ProviderId, srcMeta.ModelId, ct).ConfigureAwait(false);
          var cloned = prefix.Select(m => new UnifiedChatMessage
          {
              Role = m.Role, Content = m.Content, ReasoningContent = m.ReasoningContent,

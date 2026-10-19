@@ -87,7 +87,8 @@ public sealed class Stage06PromptTests : IDisposable
         var preview = SystemPromptBuilder.BuildPreview(cfg, _workspace, "py", "2026-01-01");
         Assert.DoesNotContain("CRITICAL RULE", preview.AssembledText);
         Assert.DoesNotContain("runner:", preview.AssembledText);
-        Assert.DoesNotContain("powershell", preview.AssembledText, StringComparison.OrdinalIgnoreCase);
+        // need17一次性更新：ToolGuide 仍含 "Never PowerShell unless asked"（06 §6.1），powershell 词不再证明 cmdPython 块残留；改断 cmdPython 块标识。
+        Assert.DoesNotContain("cmdPython", preview.AssembledText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("## 1.", preview.AssembledText);
         Assert.Contains("## 3.", preview.AssembledText);
     }

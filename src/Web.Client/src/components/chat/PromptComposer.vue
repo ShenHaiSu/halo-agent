@@ -11,13 +11,18 @@
       <div v-if="askMasked" class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary">
         等待回答问题…（输入框已遮罩，提交后恢复）
       </div>
+      <!-- need13：子代理 barrier 等待条（输入禁用，取消可掐断整树；取消按钮文案不变，底层已走 CancelTree） -->
+       <div v-if="subWaiting" class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary" data-testid="composer-sub-waiting">
+         子代理执行中（{{ subDone }}/{{ subTotal }}），取消可掐断整树 <button data-testid="composer-sub-open" class="text-accent hover:underline" @click="openFirstSub">查看子进度（{{ subDone }}/{{ subTotal }}）</button>
+       </div>
       <div
         ref="editorRef"
         class="composer-editor"
-        contenteditable="true"
+        :contenteditable="!askMasked && !subWaiting"
         data-testid="composer-rich-input"
         aria-label="任务指令输入框，支持粘贴图片"
-        :class="askMasked ? 'masked' : ''"
+        :class="(askMasked || subWaiting) ? 'masked' : ''"
+        :data-placeholder="subWaiting ? `子代理执行中（${subDone}/${subTotal}），取消可掐断整树` : undefined"
         @input="onEditorInput"
         @paste="onPaste"
         @keydown="onKeydown"
@@ -46,7 +51,7 @@
           secondary
           size="small"
           data-testid="composer-add-image"
-          :disabled="!canSend || agentStore.isGenerating || askMasked"
+          :disabled="!canSend || agentStore.isGenerating || askMasked || subWaiting"
           @click="openPicker"
         >
           🖼 添加图片
@@ -133,6 +138,22 @@ interface SavedDraft { text: string; images: Array<{ fileName: string; mime: Com
 const savedDrafts: Record<string, SavedDraft> = {};
 
 const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id));
+// need13：子代理等待态（barrier 等待中输入禁用，取消可掐断整树）
+ const subWaiting = computed(() => agentStore.subAgents?.waiting === true);
+ const subDone = computed(() => agentStore.subAgents?.done ?? 0);
+ const subTotal = computed(() => agentStore.subAgents?.total ?? 0);
+ async function openFirstSub() {
+   try {
+     const { useSubSessionStore } = await import('@/stores/subSessionStore');
+     const s = useSubSessionStore();
+     const wsId = workspaceStore.activeWorkspaceId || '';
+     const parent = workspaceStore.activeSessionId || '';
+     if (!wsId || !parent) return;
+     await s.refreshList(wsId, parent);
+     const first = s.subs[0];
+     if (first) await s.enterSub(wsId, parent, first.id);
+   } catch { /* ignore */ }
+ }
 
  const attachmentList = computed<ComposerAttachment[]>(() => { void draftVer.value; return Object.values(draft.attachments); });
 

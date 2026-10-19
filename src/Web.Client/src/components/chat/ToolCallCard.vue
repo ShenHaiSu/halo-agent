@@ -155,15 +155,18 @@
             >{{ viewImageTruncated }}</div>
           </div>
         </div>
-        <div v-else class="p-2.5 space-y-1.5">
-          <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
-          <div
-            v-if="displayOutput"
-            class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
-          >{{ truncatedOutput }}</div>
-        </div>
-      </div>
-    </n-collapse-transition>
+         <div v-else class="p-2.5 space-y-1.5">
+           <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
+           <div
+             v-if="displayOutput"
+             class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
+           >{{ truncatedOutput }}</div>
+            <div v-if="isSpawn" class="pt-1">
+              <n-button size="small" type="primary" ghost data-testid="toolcard-open-sub" :disabled="!subId" @click="openSub">{{ subId ? '查看子会话 →' : '执行中…' }}</n-button>
+            </div>
+          </div>
+       </div>
+     </n-collapse-transition>
   </div>
 </template>
 
@@ -411,14 +414,33 @@ async function handleKill(): Promise<void> {
   }
 }
 
-async function handleCopy(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(displayOutput.value);
-    message.success('已复制终端输出');
-  } catch {
-    message.info('复制失败，请手动选择文本');
-  }
-}
+ async function handleCopy(): Promise<void> {
+   try {
+     await navigator.clipboard.writeText(displayOutput.value);
+     message.success('已复制终端输出');
+   } catch {
+     message.info('复制失败，请手动选择文本');
+   }
+ }
+ const isSpawn = computed(() => props.card.functionName === 'spawn_subagent');
+ const subId = computed(() => {
+   try {
+     const out = displayOutput.value || '';
+     const m = out.match(/"subSessionId"\s*:\s*"([^"]+)"/) || out.match(/subSessionId[:=]\s*([A-Za-z0-9_\-]+)/) || out.match(/(sess_[A-Za-z0-9_\-]+)/);
+     if (m && m[1]) return m[1];
+   } catch { /* ignore */ }
+   return '';
+ });
+ async function openSub() {
+   if (!subId.value) return;
+   try {
+     const { useSubSessionStore } = await import('@/stores/subSessionStore');
+     const s = useSubSessionStore();
+     const wsId = workspaceStore.activeWorkspaceId || '';
+     const parent = workspaceStore.activeSessionId || '';
+     if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
+   } catch { /* ignore */ }
+ }
  </script>
  
  <style scoped>

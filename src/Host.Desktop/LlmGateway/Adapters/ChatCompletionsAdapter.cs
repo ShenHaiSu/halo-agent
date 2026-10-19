@@ -395,6 +395,19 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                                 }
                             }
                         }
+                        // NEED17-06 §6.4：length → 先按现状闭合 ToolDone，再追加 StreamTruncated（含已收 toolCall 数）
+                        else if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foreach (var state in toolCallStates.Values)
+                            {
+                                if (state.StartedEventEmitted && !state.CompletedEventEmitted)
+                                {
+                                    yield return UnifiedStreamEvent.ToolDone(state.CallId, state.FunctionName, state.ArgumentsBuilder.ToString());
+                                    state.CompletedEventEmitted = true;
+                                }
+                            }
+                            yield return UnifiedStreamEvent.Truncated(toolCallStates.Count);
+                        }
                     }
                 }
             }

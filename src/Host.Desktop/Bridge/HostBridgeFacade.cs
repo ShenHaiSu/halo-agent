@@ -39,6 +39,7 @@ namespace Host.Desktop.Bridge;
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
+    private SubAgentCoordinator? _subCoordinator;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
@@ -49,8 +50,10 @@ namespace Host.Desktop.Bridge;
      public ISessionRepository SessionRepository => _sessionRepository;
      public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
      public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-      public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal);
-    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService);
+      /// <summary>need13：子代理协调器（懒建；与 Orchestrator 双向引用由属性延迟装配）。</summary>
+    public SubAgentCoordinator SubCoordinator => _subCoordinator ??= new SubAgentCoordinator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _storageManager, _providerConfigService, _promptConfigService, _agentConfigService, UsageMetricsServiceInternal);
+    public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal, coordinator: SubCoordinator);
+    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService, UsageMetricsServiceInternal);
 
     public HostBridgeFacade(
         Form? mainForm,
@@ -720,6 +723,13 @@ namespace Host.Desktop.Bridge;
             _activeSessionTokens[sessionId] = cts;
 
             // 在独立后台线程运行流式消费，不阻塞 Bridge 响应
+            // need12-P1：直连会话同样落袋（source=session；无 workspaceId，WorkspaceId 置空）。
+            var usageRows = new List<PendingUsageRow>();
+            UnifiedTokenUsage? sessionUsage = null;
+            string sessionStatus = "ok";
+            string sessionRequestId = req.RequestId ?? Guid.NewGuid().ToString("N");
+            var sessionTextAcc = new System.Text.StringBuilder();
+            var sessionReasonAcc = new System.Text.StringBuilder();
             _ = Task.Run(async () =>
             {
                 try
@@ -728,6 +738,17 @@ namespace Host.Desktop.Bridge;
                     {
                         var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
                         JsEventDispatcher.Publish("llm:stream-event", dto);
+
+                        if (evt.Kind == UnifiedStreamEventKind.TextDelta && !string.IsNullOrEmpty(evt.TextDelta))
+                            sessionTextAcc.Append(evt.TextDelta);
+                        else if (evt.Kind == UnifiedStreamEventKind.ReasoningDelta && !string.IsNullOrEmpty(evt.TextDelta))
+                            sessionReasonAcc.Append(evt.TextDelta);
+                        else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
+                            sessionUsage = evt.Usage;
+                        else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
+                            sessionStatus = "cancelled";
+                        else if (evt.Kind == UnifiedStreamEventKind.StreamError)
+                            sessionStatus = "error";
 
                         if (evt.Kind == UnifiedStreamEventKind.StreamCompleted ||
                             evt.Kind == UnifiedStreamEventKind.StreamCancelled ||
@@ -739,6 +760,7 @@ namespace Host.Desktop.Bridge;
                 }
                 catch (OperationCanceledException)
                 {
+                    sessionStatus = "cancelled";
                     var cancelDto = new SessionStreamEventDto
                     {
                         SessionId = sessionId,
@@ -748,6 +770,7 @@ namespace Host.Desktop.Bridge;
                 }
                 catch (Exception ex)
                 {
+                    sessionStatus = "error";
                     HaloLogger.App.Error($"[HostBridge] Session {sessionId} 流式推送异常", ex);
                     var errDto = new SessionStreamEventDto
                     {
@@ -760,6 +783,16 @@ namespace Host.Desktop.Bridge;
                 }
                 finally
                 {
+                    try
+                    {
+                        // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本）。
+                        UsageRecorder.CollectAuto(usageRows, req.Provider, req.Model, sessionUsage,
+                            UsageRecorder.EstimateInput(req.Messages, req.SystemInstructions),
+                            UsageRecorder.EstimateOutput(sessionTextAcc, sessionReasonAcc),
+                            sessionStatus, sessionRequestId, sessionId, string.Empty, UsageRecorder.SourceSession);
+                        UsageRecorder.Flush(UsageMetricsServiceInternal, usageRows, sessionId, string.Empty);
+                    }
+                    catch { /* 用量落袋永不影响会话清理 */ }
                     _activeSessionTokens.TryRemove(sessionId, out _);
                     cts.Dispose();
                 }
@@ -825,6 +858,8 @@ namespace Host.Desktop.Bridge;
                 return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
             }
             string turnKey = "agent:" + sessionId.Trim();
+            // need13：重入先 CancelTree 防旧子泄漏
+            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
             if (_activeSessionTokens.TryRemove(turnKey, out var oldCts))
             {
                 try { oldCts.Cancel(); oldCts.Dispose(); } catch { /* ignore */ }
@@ -879,30 +914,43 @@ namespace Host.Desktop.Bridge;
 
     /// <summary>
     /// 取消正在运行的 Agent ReAct 循环：触发 CancellationTokenSource.Cancel() 并杀子进程（经 ToolContext 传递）。
+    /// need13：升级为级联 CancelTree（先子后主）。
     /// </summary>
     public Task<BridgeResponse<bool>> CancelAgentTurn(string sessionId)
     {
+        return CancelAgentTree(sessionId);
+    }
+
+    /// <summary>need13：级联取消整树（先子 CTS，后主 CTS；主若在 ask_user 阻塞一并解开）。</summary>
+    public Task<BridgeResponse<bool>> CancelAgentTree(string mainSessionId)
+    {
         try
         {
-            if (string.IsNullOrWhiteSpace(sessionId))
+            if (string.IsNullOrWhiteSpace(mainSessionId))
             {
                 return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
             }
 
-            string turnKey = "agent:" + sessionId.Trim();
+            string mainId = mainSessionId.Trim();
+            int subN = 0;
+            try { subN = SubCoordinator.CancelTree(mainId); } catch { }
+            string turnKey = "agent:" + mainId;
+            bool hadMain = false;
             if (_activeSessionTokens.TryRemove(turnKey, out var cts))
             {
                 cts.Cancel();
                 cts.Dispose();
-                HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {sessionId} 的 Agent 推理");
-                return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送取消指令"));
+                hadMain = true;
             }
-
+            try { Host.Desktop.Tools.BuiltIn.AskUserGate.RemoveTimeout(mainId, string.Empty, "cancelled"); } catch { }
+            HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {mainId} 的 Agent 推理（含 {subN} 个子代理）");
+            if (hadMain || subN > 0)
+                return Task.FromResult(BridgeResponse<bool>.Success(true, $"已发送取消指令（含 {subN} 个子代理）"));
             return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在运行的 Agent 任务"));
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"CancelAgentTurn failed for '{sessionId}'", ex);
+            HaloLogger.App.Error($"CancelAgentTurn failed for '{mainSessionId}'", ex);
             return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
@@ -1076,7 +1124,9 @@ namespace Host.Desktop.Bridge;
     {
         try
         {
-            bool ok = await _workspaceSessionService.DeleteSessionAsync(workspaceId, sessionId).ConfigureAwait(false);
+            // need13：删主先 CancelTree 再级联删树（含子盘）
+            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
+            bool ok = await _workspaceSessionService.DeleteSessionTreeAsync(workspaceId, sessionId).ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)

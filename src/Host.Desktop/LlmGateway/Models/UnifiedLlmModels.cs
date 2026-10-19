@@ -145,10 +145,10 @@ public enum UnifiedStreamEventKind
     ToolCallCompleted,   // 单个工具调用参数接收完毕
     UsageUpdated,        // Token 消耗统计（含 Prompt Cache 命中统计）
     StreamCompleted,     // 整轮响应完成
+    StreamTruncated,     // NEED17-06：finish_reason=length（回复因输出长度被截断，tool args 可能不完整）
     StreamCancelled,     // 用户主动取消中途生成
     StreamError          // 协议层或网络层错误
 }
-
 /// <summary>
 /// 统一流式事件载荷
 /// </summary>
@@ -189,7 +189,9 @@ public sealed record UnifiedStreamEvent(
 
     public static UnifiedStreamEvent Completed() =>
         new(UnifiedStreamEventKind.StreamCompleted);
-
+    public static UnifiedStreamEvent Truncated(int toolCalls) =>
+        new(UnifiedStreamEventKind.StreamTruncated, ErrorCode: "STREAM_TRUNCATED",
+            ErrorMessage: toolCalls.ToString(System.Globalization.CultureInfo.InvariantCulture));
     public static UnifiedStreamEvent Cancelled() =>
         new(UnifiedStreamEventKind.StreamCancelled);
 

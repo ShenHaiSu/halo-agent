@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-3" data-testid="usage-tab">
-    <!-- 筛选条 -->
-    <div class="flex flex-wrap items-center gap-2">
+    <!-- 筛选条：容器层面收敛 n-select 宽度，避免换行后被 width:100% 拉满独占一行 -->
+    <div class="flex flex-wrap items-center gap-2 usage-filter-bar">
       <n-button-group>
         <n-button
           v-for="p in USAGE_PRESETS"
@@ -31,7 +31,7 @@
         placeholder="Provider"
         :options="providerOptions"
         data-testid="usage-provider-select"
-        style="min-width: 160px; max-width: 240px;"
+        style="width: 160px;"
         @update:value="onScopeChange"
       />
       <n-select
@@ -44,8 +44,28 @@
         placeholder="Model"
         :options="modelOptions"
         data-testid="usage-model-select"
-        style="min-width: 180px; max-width: 280px;"
+        style="width: 180px;"
         @update:value="onScopeChange"
+      />
+      <n-select
+        v-model:value="store.sources"
+        multiple
+        clearable
+        size="small"
+        placeholder="来源"
+        :options="sourceOptions"
+        data-testid="usage-source-select"
+        style="width: 140px;"
+        @update:value="onScopeChange"
+      />
+      <n-select
+        v-model:value="estimatedFilter"
+        size="small"
+        placeholder="实测/估算"
+        :options="estimatedOptions"
+        data-testid="usage-estimated-select"
+        style="width: 110px;"
+        @update:value="onEstimatedChange"
       />
       <n-button size="small" type="primary" ghost data-testid="usage-query-btn" :loading="store.loading" @click="store.refresh()">查询</n-button>
       <div class="flex items-center gap-1.5 shrink-0 pl-1" data-testid="usage-mask-provider-block">
@@ -135,6 +155,7 @@
               <th class="py-1 pr-2 font-medium text-right">输出</th>
               <th class="py-1 pr-2 font-medium text-right">命中缓存</th>
               <th class="py-1 pr-2 font-medium">命中率</th>
+              <th class="py-1 pr-2 font-medium">来源</th>
               <th class="py-1 font-medium">状态</th>
             </tr>
           </thead>
@@ -152,10 +173,11 @@
                   <span class="font-mono">{{ (r.hitRate * 100).toFixed(1) }}%</span>
                 </span>
               </td>
+              <td class="py-1 pr-2 font-mono text-secondary">{{ sourceLabel(r.source) }}<span v-if="r.estimated === 1" class="ml-1 rounded border border-subtle px-1" title="无网关实测，本地估算">估算</span></td>
               <td class="py-1 font-mono text-secondary">{{ r.status }}</td>
             </tr>
             <tr v-if="!store.pageData.rows.length">
-              <td colspan="8" class="py-4 text-center"><n-empty size="small" description="暂无数据" /></td>
+              <td colspan="9" class="py-4 text-center"><n-empty size="small" description="暂无数据" /></td>
             </tr>
           </tbody>
         </table>
@@ -165,7 +187,7 @@
           v-model:page="store.page"
           v-model:page-size="store.pageSize"
           :item-count="store.pageData.total"
-          :page-sizes="[50, 100, 200]"
+          :page-sizes="[10, 50, 100, 200]"
           show-size-picker
           size="small"
           data-testid="usage-pagination"
@@ -207,8 +229,24 @@ const dbStatus = ref<UsageDbStatus | null>(null);
 
 const providerOptions = computed(() => store.options.providers.map((p) => ({ label: displayProviderName(p.id, p.name, masked.value), value: p.id, realName: p.name })));
 const modelOptions = computed(() => store.modelOptions.map((m) => ({ label: displayProviderModel(m.providerId, m.providerName, m.modelId, masked.value), value: m.key, realName: m.label })));
+const sourceOptions = computed(() => (store.options.sources ?? []).map((s) => ({ label: sourceLabel(s.id), value: s.id })));
+const estimatedOptions = [{ label: '全部', value: 'all' }, { label: '仅实测', value: 'measured' }, { label: '仅估算', value: 'estimated' }];
+const estimatedFilter = ref<'all' | 'measured' | 'estimated'>('all');
 const hasTrendData = computed(() => store.trend.dates.length > 0 && store.trend.perModel.length > 0);
-
+function sourceLabel(s: string): string {
+  const v = (s || '').trim().toLowerCase();
+  if (v === 'agent') return 'Agent 对话';
+  if (v === 'session') return '直连会话';
+  if (v === 'compact') return '上下文压缩';
+  if (v === 'title') return '标题生成';
+  return s || '-';
+}
+function onEstimatedChange(v: 'all' | 'measured' | 'estimated'): void {
+  estimatedFilter.value = v;
+  store.estimatedOnly = v === 'all' ? null : v === 'estimated';
+  store.page = 1;
+  void store.refresh();
+}
 /** 下拉搜索：模糊开启时，代号和真名都能搜到（防“搜 Open 搜不到 O***”） */
 function filterProviderOption(pattern: string, option: unknown): boolean {
   const o = option as { label?: string; realName?: string };
@@ -238,7 +276,6 @@ function onMaskProviderChange(val: boolean): void {
   privacy.setMaskProviderName(val);
   renderAll();
 }
-
 function fmtInt(n: number): string {
   const v = Number.isFinite(n) ? Math.floor(n) : 0;
   return v.toLocaleString('en-US');
@@ -444,3 +481,11 @@ onBeforeUnmount(() => {
 
 defineExpose({ refresh: () => store.refresh(), resize: () => renderAll() });
 </script>
+
+<style scoped>
+/* 筛选条收敛：n-select 根默认 width:100%，换行掉单后会被拉满独占一行；flex:none 锁死为固定宽 */
+.usage-filter-bar :deep(.n-select),
+.usage-filter-bar :deep(.n-date-picker) {
+  flex: none;
+}
+</style>

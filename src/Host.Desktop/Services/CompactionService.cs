@@ -68,17 +68,20 @@ public sealed class CompactionService : ICompactionService
     private readonly ITokenBudgetService _budgetService;
     private readonly ILlmGatewayClient _gatewayClient;
     private readonly ProviderConfigService? _providerConfigService;
+    private readonly UsageMetricsService? _usageMetrics;
 
     public CompactionService(
         IWorkspaceSessionService sessionService,
         ITokenBudgetService budgetService,
         ILlmGatewayClient gatewayClient,
-        ProviderConfigService? providerConfigService = null)
+        ProviderConfigService? providerConfigService = null,
+        UsageMetricsService? usageMetrics = null)
     {
         _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
         _budgetService = budgetService ?? throw new ArgumentNullException(nameof(budgetService));
         _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
         _providerConfigService = providerConfigService;
+        _usageMetrics = usageMetrics;
     }
 
     public async Task<CompactionResult> CompactAsync(
@@ -189,28 +192,56 @@ public sealed class CompactionService : ICompactionService
         };
 
         var summaryAcc = new StringBuilder();
+        UnifiedTokenUsage? compactUsage = null;
+        string compactStatus = "ok";
+        string compactError = string.Empty;
         try
         {
             await foreach (var evt in _gatewayClient.StreamAsync(request, ct).ConfigureAwait(false))
             {
                 if (evt.Kind == UnifiedStreamEventKind.TextDelta && !string.IsNullOrEmpty(evt.TextDelta))
                     summaryAcc.Append(evt.TextDelta);
+                else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
+                    compactUsage = evt.Usage;
                 else if (evt.Kind == UnifiedStreamEventKind.StreamError)
-                    return CompactionResult.Fail("COMPACT_LLM_ERROR", evt.ErrorMessage ?? "摘要模型调用失败");
+                {
+                    compactStatus = "error";
+                    compactError = evt.ErrorMessage ?? "摘要模型调用失败";
+                    break;
+                }
                 else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
-                    return CompactionResult.Fail("COMPACT_CANCELLED", "压缩被取消");
+                {
+                    compactStatus = "cancelled";
+                    compactError = "压缩被取消";
+                    break;
+                }
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            return CompactionResult.Fail("COMPACT_CANCELLED", "压缩被取消");
+            compactStatus = "cancelled";
+            compactError = "压缩被取消";
         }
         catch (Exception ex)
         {
-            return CompactionResult.Fail("COMPACT_LLM_ERROR", ex.Message);
+            compactStatus = "error";
+            compactError = ex.Message;
         }
-
-        // 5. 空回复 → 失败（不动盘）
+        // need12-P1/P2：压缩请求同样落袋（成功/取消/失败都记；有实测用实测，无实测用估算）。
+        try
+        {
+            var compactRows = new List<PendingUsageRow>();
+            UsageRecorder.CollectAuto(compactRows, provider, model, compactUsage,
+                UsageRecorder.EstimateInput(request.Messages, request.SystemInstructions),
+                UsageRecorder.EstimateOutput(summaryAcc.ToString()),
+                compactStatus, request.RequestId, sessionId, workspaceId, UsageRecorder.SourceCompact);
+            UsageRecorder.Flush(_usageMetrics, compactRows, sessionId, workspaceId);
+        }
+        catch { /* 用量落袋永不影响压缩主流程 */ }
+        if (compactStatus == "cancelled")
+            return CompactionResult.Fail("COMPACT_CANCELLED", string.IsNullOrEmpty(compactError) ? "压缩被取消" : compactError);
+        if (compactStatus == "error")
+            return CompactionResult.Fail("COMPACT_LLM_ERROR", string.IsNullOrEmpty(compactError) ? "摘要模型调用失败" : compactError);
         string summary = summaryAcc.ToString().Trim();
         if (string.IsNullOrWhiteSpace(summary))
             return CompactionResult.Fail("COMPACT_EMPTY", "摘要模型返回为空");

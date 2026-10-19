@@ -5,15 +5,21 @@
   >
     <!-- 左侧：工作区 / 会话 路径指示 -->
     <div class="flex items-center gap-2 min-w-0">
-      <div class="flex items-center gap-1.5 text-xs text-primary font-medium min-w-0">
-        <span class="text-secondary truncate max-w-[140px]" :title="activeWorkspace?.name">
-          {{ activeWorkspace?.name || 'Halo' }}
-        </span>
-        <span class="text-secondary/60">/</span>
-        <span class="truncate max-w-[200px]" :title="activeSession?.title">
-          {{ activeSession?.title || '未选择会话' }}
-        </span>
-      </div>
+       <div class="flex items-center gap-1.5 text-xs text-primary font-medium min-w-0">
+         <span class="text-secondary truncate max-w-[140px]" :title="activeWorkspace?.name">
+           {{ activeWorkspace?.name || 'Halo' }}
+         </span>
+         <span class="text-secondary/60">/</span>
+         <button class="truncate max-w-[200px]" :class="{ link: subStore.mode === 'sub' }" :title="activeSession?.title" @click="onCrumbMain">
+           {{ activeSession?.title || '未选择会话' }}
+         </button>
+         <template v-if="subStore.mode === 'sub'"> <span class="text-secondary/60">/</span>
+           <n-dropdown :options="subOptions" trigger="click" @select="onSelectSub" data-testid="topbar-sub-dropdown">
+             <span data-testid="topbar-sub-crumb" class="truncate max-w-[200px] cursor-pointer">{{ subStore.activeSubLabel }}({{ subStore.shortId }}) ▾</span>
+           </n-dropdown>
+           <n-button size="tiny" data-testid="topbar-back-main" @click="onBackMain">← 返回主会话</n-button>
+         </template>
+       </div>
     </div>
 
     <!-- 右侧：模型与协议选择器 + 上下文水位仪 + 设置与主题 -->
@@ -201,24 +207,28 @@ import {
   Sun,
   Moon,
 } from 'lucide-vue-next';
-import { useAppearanceStore } from '@/stores/appearanceStore';
-import { useConfigStore } from '@/stores/configStore';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useAgentStore } from '@/stores/agentStore';
-import type { ModelConfig } from '@/bridge/hostBridge';
+ import { useAppearanceStore } from '@/stores/appearanceStore';
+ import { useConfigStore } from '@/stores/configStore';
+ import { useWorkspaceStore } from '@/stores/workspaceStore';
+ import { useAgentStore } from '@/stores/agentStore';
+ import { useSubSessionStore } from '@/stores/subSessionStore';
+ import type { ModelConfig } from '@/bridge/hostBridge';
 
 const emit = defineEmits<{
   (e: 'openSettings'): void;
 }>();
-
-const message = useMessage();
-const appearanceStore = useAppearanceStore();
-const configStore = useConfigStore();
-const workspaceStore = useWorkspaceStore();
-const agentStore = useAgentStore();
-
-const { activeWorkspace, activeSession, budgetStatus } = storeToRefs(workspaceStore);
-const { providersDoc, activeProvider, activeModel } = storeToRefs(configStore);
+ const message = useMessage();
+ const appearanceStore = useAppearanceStore();
+ const configStore = useConfigStore();
+ const workspaceStore = useWorkspaceStore();
+ const agentStore = useAgentStore();
+ const subStore = useSubSessionStore();
+ const { activeWorkspace, activeSession, budgetStatus } = storeToRefs(workspaceStore);
+ const { providersDoc, activeProvider, activeModel } = storeToRefs(configStore);
+ const subOptions = computed(() => subStore.subs.map((s) => ({ label: `${(s.subLabel || s.title || '').slice(0, 12)}(${String(s.id).slice(-6)})`, key: s.id })));
+ function onBackMain() { subStore.exitSub(); }
+ function onCrumbMain() { if (subStore.mode === 'sub') subStore.exitSub(); }
+ function onSelectSub(key: string) { const wsId = workspaceStore.activeWorkspaceId || ''; const parent = workspaceStore.activeSessionId || ''; if (wsId && parent && key) void subStore.enterSub(wsId, parent, key); }
 
 function formatTokens(count: number): string {
   if (count >= 1000) {

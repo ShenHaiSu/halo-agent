@@ -312,6 +312,13 @@ export interface SessionMetadata {
   isPinned: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
+  // need13：父子寄宿（老数据缺字段即 main）
+  parentSessionId?: string | null;
+  agentRole?: string;
+  subLabel?: string | null;
+  subStatus?: string | null;
+  createdByCallId?: string | null;
+  taskPrompt?: string | null;
 }
 
  export interface UnifiedChatMessage {
@@ -376,10 +383,22 @@ export interface ContextBudgetStatusDto {
     updatedAtUtc: string; isDefault?: boolean; fallbackReason?: string | null;
   }
   // need08：智能体行为配置（config/agent.json；超时毫秒，0=无限）
+  // need13：+ 子代理 7 字段（缺字段=老文件，读回默认）
   export interface AgentConfigDocument {
     version: number; execDefaultTimeoutMs: number; execMaxTimeoutMs: number; maxIterations: number;
+    subAgentEnabled: boolean; subMaxParallel: number; subMaxIterations: number;
+    subAllowExecCommand: boolean; subAllowFileWrite: boolean;
+    subAllowSkillWrite: boolean; subAllowMemoryWrite: boolean; subAllowAskUser: boolean;
     scope: string; updatedAtUtc: string; isDefault?: boolean; fallbackReason?: string | null;
   }
+  // need13：子代理运行时 DTO（与后端 SubRuntimeInfo 同构）
+  export interface SubRuntimeItem { subId: string; label: string; status: string; iteration: number; tool: string; elapsedMs: number }
+  export interface SubPolicyDto { enabled: boolean; maxParallel: number; maxIterations: number; exec: boolean; file: boolean; skill: boolean; memory: boolean }
+  export interface SubRejectionInfo { code: string; atUtc: string; callId: string }
+   export interface SubRuntimeInfo { subs: SubRuntimeItem[]; policy: SubPolicyDto; lastRejection?: SubRejectionInfo | null; recentRejections?: SubRejectionInfo[] }
+   export interface GoalMilestoneDto { id: string; title: string; done: boolean }
+   export interface SessionGoalDto { title: string; description: string; milestones: GoalMilestoneDto[]; percent: number; note: string; updatedAtUtc: string }
+   export interface SubSessionDetailDto { subId: string; parentSessionId: string; label: string; status: string; taskPrompt?: string | null; createdByCallId?: string | null; messageCount: number; iterations: number; toolExecutions: number; inputTokens: number; outputTokens: number; cachedTokens: number; billedPrompt: number; billedCompletion: number; errorCode?: string | null; errorMessage?: string | null; createdAtUtc: string; updatedAtUtc: string }
   export interface PromptBlockPreview { blockId: string; enabled: boolean; renderedText: string; estimatedTokens: number; isStable: boolean; }
   export interface PromptPreviewDto {
     assembledText: string; blocks: PromptBlockPreview[]; totalEstimatedTokens: number; stableEstimatedTokens: number;
@@ -423,15 +442,18 @@ export interface ContextBudgetStatusDto {
       endDate?: string;
       providerIds?: string[];
       modelKeys?: string[];
+      sources?: string[];
+      estimatedOnly?: boolean;
     }
     export interface UsageProviderOption { id: string; name: string }
     export interface UsageModelOption { providerId: string; providerName: string; modelId: string; display: string; key: string; label: string }
-    export interface UsageFilterOptions { providers: UsageProviderOption[]; models: UsageModelOption[] }
+    export interface UsageSourceOption { id: string; name: string }
+    export interface UsageFilterOptions { providers: UsageProviderOption[]; models: UsageModelOption[]; sources?: UsageSourceOption[] }
     export interface UsageOverview { totalRequests: number; sumInput: number; sumOutput: number; sumCached: number; hitRate: number; activeModels: number }
     export interface UsageTrendSeries { key: string; providerName: string; modelId: string; values: number[] }
     export interface UsageTrend { dates: string[]; perModel: UsageTrendSeries[]; hitRates: number[]; totals: number[] }
     export interface UsageProviderShareItem { providerId: string; name: string; value: number; share: number }
-    export interface UsageRowDto { id: number; requestDate: string; requestTime: string; requestDatetime: string; providerName: string; modelId: string; modelDisplay: string; protocol: string; inputTokens: number; outputTokens: number; cachedTokens: number; hitRate: number; status: string }
+    export interface UsageRowDto { id: number; requestDate: string; requestTime: string; requestDatetime: string; providerName: string; modelId: string; modelDisplay: string; protocol: string; inputTokens: number; outputTokens: number; cachedTokens: number; hitRate: number; status: string; source: string; estimated: number }
     export interface UsagePage { total: number; page: number; pageSize: number; rows: UsageRowDto[] }
     export interface UsageDbStatus { dbPath: string; recordCount: number; dbSizeBytes: number; oldestDate?: string | null; newestDate?: string | null }
 export interface HostBridgeApi {
@@ -517,6 +539,17 @@ export interface HostBridgeApi {
    getAgentConfig: () => Promise<BridgeResponse<AgentConfigDocument>>;
    saveAgentConfig: (config: AgentConfigDocument | string) => Promise<BridgeResponse<AgentConfigDocument>>;
    resetAgentConfig: (field?: string) => Promise<BridgeResponse<AgentConfigDocument>>;
+   // need13：子代理桥接
+   getSubSessions: (ws: string, parent: string) => Promise<BridgeResponse<SessionMetadata[]>>;
+   cancelSubAgent: (ws: string, sub: string) => Promise<BridgeResponse<boolean>>;
+   cancelAgentTree: (main: string) => Promise<BridgeResponse<boolean>>;
+    getSubRuntime: (ws: string, parent: string) => Promise<BridgeResponse<SubRuntimeInfo>>;
+   // need16：Goal + 子会话详情
+   getGoal: (ws: string, sess: string) => Promise<BridgeResponse<SessionGoalDto>>;
+   saveGoal: (ws: string, sess: string, goalJson: string) => Promise<BridgeResponse<SessionGoalDto>>;
+   clearGoal: (ws: string, sess: string) => Promise<BridgeResponse<boolean>>;
+   getSubSessionDetail: (ws: string, sub: string) => Promise<BridgeResponse<SubSessionDetailDto>>;
+   getSubSessionMessages: (ws: string, sub: string, limit?: number, beforeMessageId?: string) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
    getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
    // need07
    truncateSessionHistory: (workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
@@ -872,11 +905,15 @@ function createBrowserMockBridge(): HostBridgeApi {
      scope: 'global', updatedAtUtc: new Date().toISOString(),
    };
    let mockPromptConfig: PromptConfigDocument = { ...mockPromptDefaults };
-   // need08 mock 仅示意，联调以真后端为准
-   const mockAgentDefaults: AgentConfigDocument = {
-     version: 1, execDefaultTimeoutMs: 30000, execMaxTimeoutMs: 300000, maxIterations: 25,
-     scope: 'global', updatedAtUtc: new Date().toISOString(),
-   };
+    // need08 mock 仅示意，联调以真后端为准
+    // need13 mock 仅示意，联调以真后端为准
+    const mockAgentDefaults: AgentConfigDocument = {
+      version: 1, execDefaultTimeoutMs: 30000, execMaxTimeoutMs: 300000, maxIterations: 25,
+      subAgentEnabled: true, subMaxParallel: 3, subMaxIterations: 15,
+      subAllowExecCommand: true, subAllowFileWrite: true,
+      subAllowSkillWrite: false, subAllowMemoryWrite: false, subAllowAskUser: false,
+      scope: 'global', updatedAtUtc: new Date().toISOString(),
+    };
    let mockAgentConfig: AgentConfigDocument = { ...mockAgentDefaults };
    const estimateMockTokens = (t: string): number => {
      if (!t) return 0;
@@ -1582,19 +1619,23 @@ function createBrowserMockBridge(): HostBridgeApi {
        mockAgentConfig = { ...parsed, updatedAtUtc: new Date().toISOString() };
        return { ok: true, message: '智能体行为配置已保存，下一轮对话起生效 (Mock)', data: { ...mockAgentConfig } };
      },
-     async resetAgentConfig(field?: string) {
-       const id = (field || '').trim().toLowerCase();
-       if (!id || id === 'all' || id === 'default') { mockAgentConfig = { ...mockAgentDefaults }; }
-       else if (['defaulttimeout', 'execdefaulttimeoutms', 'default', 'default-timeout', 'default_timeout'].includes(id)) { mockAgentConfig.execDefaultTimeoutMs = mockAgentDefaults.execDefaultTimeoutMs; }
-       else if (['maxtimeout', 'execmaxtimeoutms', 'max', 'max-timeout', 'max_timeout'].includes(id)) { mockAgentConfig.execMaxTimeoutMs = mockAgentDefaults.execMaxTimeoutMs; }
-       else if (['iterations', 'maxiterations', 'rounds', 'max-iterations', 'max_iterations'].includes(id)) { mockAgentConfig.maxIterations = mockAgentDefaults.maxIterations; }
-       else { return { ok: false, code: 'AGENT_VALIDATION', message: `字段 [field]：未知恢复项：${field}` }; }
-       mockAgentConfig.updatedAtUtc = new Date().toISOString();
-       return { ok: true, message: '已恢复默认 (Mock)', data: { ...mockAgentConfig } };
-     },
-     async previewPrompt(workspaceId: string) {
-       return { ok: true, data: buildMockPreview(mockPromptConfig, workspaceId) };
-     },
+      async resetAgentConfig(field?: string) {
+        const id = (field || '').trim().toLowerCase();
+        if (!id || id === 'all' || id === 'default') { mockAgentConfig = { ...mockAgentDefaults }; }
+        else if (['defaulttimeout', 'execdefaulttimeoutms', 'default', 'default-timeout', 'default_timeout'].includes(id)) { mockAgentConfig.execDefaultTimeoutMs = mockAgentDefaults.execDefaultTimeoutMs; }
+        else if (['maxtimeout', 'execmaxtimeoutms', 'max', 'max-timeout', 'max_timeout'].includes(id)) { mockAgentConfig.execMaxTimeoutMs = mockAgentDefaults.execMaxTimeoutMs; }
+        else if (['iterations', 'maxiterations', 'rounds', 'max-iterations', 'max_iterations'].includes(id)) { mockAgentConfig.maxIterations = mockAgentDefaults.maxIterations; }
+        else if (['subenabled', 'subagentenabled', 'sub-enabled'].includes(id)) { mockAgentConfig.subAgentEnabled = mockAgentDefaults.subAgentEnabled; }
+        else if (['subparallel', 'submaxparallel', 'sub-parallel'].includes(id)) { mockAgentConfig.subMaxParallel = mockAgentDefaults.subMaxParallel; }
+        else if (['subiterations', 'submaxiterations', 'sub-iterations'].includes(id)) { mockAgentConfig.subMaxIterations = mockAgentDefaults.subMaxIterations; }
+        else if (['subperms', 'sub-perms', 'subpermissions'].includes(id)) { mockAgentConfig.subAllowExecCommand = true; mockAgentConfig.subAllowFileWrite = true; mockAgentConfig.subAllowSkillWrite = false; mockAgentConfig.subAllowMemoryWrite = false; mockAgentConfig.subAllowAskUser = false; }
+        else { return { ok: false, code: 'AGENT_VALIDATION', message: `字段 [field]：未知恢复项：${field}` }; }
+        mockAgentConfig.updatedAtUtc = new Date().toISOString();
+        return { ok: true, message: '已恢复默认 (Mock)', data: { ...mockAgentConfig } };
+      },
+      async previewPrompt(workspaceId: string) {
+        return { ok: true, data: buildMockPreview(mockPromptConfig, workspaceId) };
+      },
      async getPromptDiagnostics(workspaceId: string, sessionId?: string) {
        const currentPreview = buildMockPreview(mockPromptConfig, workspaceId);
        return {
@@ -1652,14 +1693,38 @@ function createBrowserMockBridge(): HostBridgeApi {
      async healSessionHistory(_workspaceId: string, sessionId: string) {
        return { ok: true, data: { success: true, syntheticAppended: 0, orphanToolsRemoved: 0, keptMessages: (mockMessages[sessionId] || []).length, backupFileName: null } };
      },
-     async deleteSessionMessage(_workspaceId: string, sessionId: string, messageId: string) {
-       const msgs = mockMessages[sessionId] || [];
-       const idx = msgs.findIndex((m) => String(m.id) === String(messageId));
-       if (idx < 0) return { ok: false, code: 'MESSAGE_NOT_FOUND', message: '消息不存在' };
-       const kept = msgs.filter((_, i) => i !== idx);
-       mockMessages[sessionId] = kept;
-       return { ok: true, data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' } };
-     },
+      async deleteSessionMessage(_workspaceId: string, sessionId: string, messageId: string) {
+        const msgs = mockMessages[sessionId] || [];
+        const idx = msgs.findIndex((m) => String(m.id) === String(messageId));
+        if (idx < 0) return { ok: false, code: 'MESSAGE_NOT_FOUND', message: '消息不存在' };
+        const kept = msgs.filter((_, i) => i !== idx);
+        mockMessages[sessionId] = kept;
+        return { ok: true, data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' } };
+      },
+      // need13 mock 仅示意，联调以真后端为准
+      async getSubSessions(_ws: string, _parent: string) {
+        return { ok: true, data: [] as SessionMetadata[] };
+      },
+      async cancelSubAgent(_ws: string, _sub: string) {
+        return { ok: true, data: false };
+      },
+      async cancelAgentTree(_main: string) {
+        return { ok: true, data: false };
+      },
+      async getSubRuntime(_ws: string, _parent: string) {
+        return { ok: true, data: { subs: [], policy: { enabled: mockAgentConfig.subAgentEnabled, maxParallel: mockAgentConfig.subMaxParallel, maxIterations: mockAgentConfig.subMaxIterations, exec: mockAgentConfig.subAllowExecCommand, file: mockAgentConfig.subAllowFileWrite, skill: mockAgentConfig.subAllowSkillWrite, memory: mockAgentConfig.subAllowMemoryWrite }, lastRejection: null } };
+      },
+       async getGoal() {
+         return { ok: true, data: { title: '', description: '', milestones: [], percent: 0, note: '', updatedAtUtc: new Date().toISOString() } };
+       },
+       async saveGoal(_ws: string, _sess: string, goalJson: string) {
+         try { const p = JSON.parse(goalJson); return { ok: true, data: { title: p.title || '', description: p.description || '', milestones: p.milestones || [], percent: p.percent || 0, note: p.note || '', updatedAtUtc: new Date().toISOString() } }; } catch { return { ok: true, data: { title: '', description: '', milestones: [], percent: 0, note: '', updatedAtUtc: new Date().toISOString() } }; }
+       },
+       async clearGoal() { return { ok: true, data: true }; },
+       async getSubSessionDetail(_ws: string, sub: string) {
+         return { ok: true, data: { subId: sub, parentSessionId: _ws, label: 'mock-sub', status: 'succeeded', taskPrompt: 'mock task', createdByCallId: null, messageCount: 0, iterations: 0, toolExecutions: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, billedPrompt: 0, billedCompletion: 0, createdAtUtc: new Date().toISOString(), updatedAtUtc: new Date().toISOString() } };
+       },
+       async getSubSessionMessages() { return { ok: true, data: [] }; },
      // need10 mock 仅示意，联调以真后端为准
      async listSkillMemory(kind: SkillMemoryKind, scope: SkillMemoryScopeFilter) {
        const mk = (name: string, sc: SkillMemoryScope, title: string, summary: string, enabled: boolean): SkillMemoryListItem => ({
@@ -1705,9 +1770,10 @@ function createBrowserMockBridge(): HostBridgeApi {
      async getUsageProviderShare() {
        return { ok: true, data: [{ providerId: 'p-openai', name: 'OpenAI', value: 16900, share: 0.68 }, { providerId: 'p-deepseek', name: 'DeepSeek', value: 7900, share: 0.32 }] };
      },
-     async queryUsagePage(_filter: unknown, page: number, pageSize: number) {
-       const rows = Array.from({ length: Math.min(8, pageSize) }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, requestDate: '2026-10-17', requestTime: '10:20:0' + i, requestDatetime: '2026-10-17 10:20:0' + i, providerName: i % 2 ? 'DeepSeek' : 'OpenAI', modelId: i % 2 ? 'deepseek-chat' : 'gpt-4o', modelDisplay: i % 2 ? 'DeepSeek-V3' : 'GPT-4o', protocol: 'chat', inputTokens: 1200 + i * 100, outputTokens: 200 + i * 10, cachedTokens: 800 + i * 60, hitRate: 0.66, status: 'ok' }));
-       return { ok: true, data: { total: 42, page, pageSize, rows } };
+    async queryUsagePage(_filter: UsageFilter | string, page: number, pageSize: number) {
+      void _filter;
+      const rows: UsageRowDto[] = Array.from({ length: Math.min(8, pageSize) }, (_, i) => ({ id: (page - 1) * pageSize + i + 1, requestDate: '2026-10-17', requestTime: '10:20:0' + i, requestDatetime: '2026-10-17 10:20:0' + i, providerName: i % 2 ? 'DeepSeek' : 'OpenAI', modelId: i % 2 ? 'deepseek-chat' : 'gpt-4o', modelDisplay: i % 2 ? 'DeepSeek-V3' : 'GPT-4o', protocol: 'chat', inputTokens: 1200 + i * 100, outputTokens: 200 + i * 10, cachedTokens: 800 + i * 60, hitRate: 0.66, status: 'ok', source: 'main', estimated: 0 }));
+      return { ok: true, data: { total: 42, page, pageSize, rows } };
      },
      async getUsageDbStatus() {
        return { ok: true, data: { dbPath: 'mock-usage.db', recordCount: 42, dbSizeBytes: 49152, oldestDate: '2026-10-11', newestDate: '2026-10-17' } };
@@ -2034,9 +2100,64 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
        const payload = sanitizeAgentConfigForSave(config);
        return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.saveAgentConfig(payload));
      },
-     async resetAgentConfig(field?: string) {
-       return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.resetAgentConfig(field ?? ''));
-     },
+      async resetAgentConfig(field?: string) {
+        return normalizeBridgePayload<BridgeResponse<AgentConfigDocument>>(await rawBridge.resetAgentConfig(field ?? ''));
+      },
+      // need13：子代理直通（老后端缺方法时降级空态，不炸面板）
+      async getSubSessions(ws: string, parent: string) {
+        try {
+          if (typeof rawBridge.getSubSessions !== 'function') return { ok: true, data: [] as SessionMetadata[] };
+          return normalizeBridgePayload<BridgeResponse<SessionMetadata[]>>(await rawBridge.getSubSessions(ws ?? '', parent ?? ''));
+        } catch { return { ok: true, data: [] as SessionMetadata[] }; }
+      },
+      async cancelSubAgent(ws: string, sub: string) {
+        try {
+          if (typeof rawBridge.cancelSubAgent !== 'function') return { ok: false, code: 'SUB_UNSUPPORTED', message: '子代理通道不可用' };
+          return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelSubAgent(ws ?? '', sub ?? ''));
+        } catch { return { ok: false, code: 'SUB_UNSUPPORTED', message: '子代理通道不可用' }; }
+      },
+      async cancelAgentTree(main: string) {
+        try {
+          if (typeof rawBridge.cancelAgentTree !== 'function') return rawBridge.cancelAgentTurn(main ?? '');
+          return normalizeBridgePayload<BridgeResponse<boolean>>(await rawBridge.cancelAgentTree(main ?? ''));
+        } catch { return { ok: false, code: 'SUB_UNSUPPORTED', message: '子代理通道不可用' }; }
+      },
+      async getSubRuntime(ws: string, parent: string) {
+        try {
+          if (typeof rawBridge.getSubRuntime !== 'function') return { ok: true, data: { subs: [], policy: { enabled: true, maxParallel: 3, maxIterations: 15, exec: true, file: true, skill: false, memory: false }, lastRejection: null } as SubRuntimeInfo };
+          return normalizeBridgePayload<BridgeResponse<SubRuntimeInfo>>(await rawBridge.getSubRuntime(ws ?? '', parent ?? ''));
+        } catch { return { ok: true, data: { subs: [], policy: { enabled: true, maxParallel: 3, maxIterations: 15, exec: true, file: true, skill: false, memory: false }, lastRejection: null } as SubRuntimeInfo }; }
+      },
+       async getGoal(ws: string, sess: string) {
+         try {
+           if (typeof (rawBridge as unknown as Record<string, unknown>).getGoal !== 'function') return { ok: true, data: { title: '', description: '', milestones: [], percent: 0, note: '', updatedAtUtc: new Date().toISOString() } as SessionGoalDto };
+           return normalizeBridgePayload<BridgeResponse<SessionGoalDto>>(await (rawBridge as unknown as { getGoal: (a: string, b: string) => Promise<BridgeResponse<SessionGoalDto>> }).getGoal(ws ?? '', sess ?? ''));
+         } catch { return { ok: true, data: { title: '', description: '', milestones: [], percent: 0, note: '', updatedAtUtc: new Date().toISOString() } as SessionGoalDto }; }
+       },
+       async saveGoal(ws: string, sess: string, goalJson: string) {
+         try {
+           if (typeof (rawBridge as unknown as Record<string, unknown>).saveGoal !== 'function') return { ok: true, data: { title: '', description: '', milestones: [], percent: 0, note: '', updatedAtUtc: new Date().toISOString() } as SessionGoalDto };
+           return normalizeBridgePayload<BridgeResponse<SessionGoalDto>>(await (rawBridge as unknown as { saveGoal: (a: string, b: string, c: string) => Promise<BridgeResponse<SessionGoalDto>> }).saveGoal(ws ?? '', sess ?? '', goalJson ?? ''));
+         } catch (e) { return { ok: false, code: 'GOAL_SAVE_ERROR', message: String(e) }; }
+       },
+       async clearGoal(ws: string, sess: string) {
+         try {
+           if (typeof (rawBridge as unknown as Record<string, unknown>).clearGoal !== 'function') return { ok: true, data: true };
+           return normalizeBridgePayload<BridgeResponse<boolean>>(await (rawBridge as unknown as { clearGoal: (a: string, b: string) => Promise<BridgeResponse<boolean>> }).clearGoal(ws ?? '', sess ?? ''));
+         } catch (e) { return { ok: false, code: 'GOAL_CLEAR_ERROR', message: String(e) }; }
+       },
+       async getSubSessionDetail(ws: string, sub: string) {
+         try {
+           if (typeof (rawBridge as unknown as Record<string, unknown>).getSubSessionDetail !== 'function') return { ok: false, code: 'SUB_NOT_FOUND', message: '子会话不存在' };
+           return normalizeBridgePayload<BridgeResponse<SubSessionDetailDto>>(await (rawBridge as unknown as { getSubSessionDetail: (a: string, b: string) => Promise<BridgeResponse<SubSessionDetailDto>> }).getSubSessionDetail(ws ?? '', sub ?? ''));
+         } catch (e) { return { ok: false, code: 'SUB_LIST_ERROR', message: String(e) }; }
+       },
+       async getSubSessionMessages(ws: string, sub: string, limit?: number, beforeMessageId?: string) {
+         try {
+           if (typeof (rawBridge as unknown as Record<string, unknown>).getSubSessionMessages !== 'function') return { ok: true, data: [] as UnifiedChatMessage[] };
+           return normalizeBridgePayload<BridgeResponse<UnifiedChatMessage[]>>(await (rawBridge as unknown as { getSubSessionMessages: (a: string, b: string, c?: number, d?: string) => Promise<BridgeResponse<UnifiedChatMessage[]>> }).getSubSessionMessages(ws ?? '', sub ?? '', limit, beforeMessageId ?? ''));
+         } catch { return { ok: true, data: [] as UnifiedChatMessage[] }; }
+       },
      async previewPrompt(workspaceId: string) {
        return normalizeBridgePayload<BridgeResponse<PromptPreviewDto>>(await rawBridge.previewPrompt(workspaceId ?? ''));
      },
@@ -2136,7 +2257,7 @@ function wrapNativeHostBridge(rawBridge: any): HostBridgeApi {
        try {
          if (typeof rawBridge.queryUsagePage !== 'function') return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' };
          const payload = typeof filter === 'string' ? filter : JSON.stringify(filter ?? {});
-         return normalizeBridgePayload<BridgeResponse<UsagePage>>(await rawBridge.queryUsagePage(payload, page ?? 1, pageSize ?? 50));
+         return normalizeBridgePayload<BridgeResponse<UsagePage>>(await rawBridge.queryUsagePage(payload, page ?? 1, pageSize ?? 10));
        } catch { return { ok: false, code: 'USAGE_UNSUPPORTED', message: '用量通道不可用' }; }
      },
      async getUsageDbStatus() {

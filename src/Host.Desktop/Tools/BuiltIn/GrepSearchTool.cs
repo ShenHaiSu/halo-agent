@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Host.Desktop.Tools.Process;
 using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -24,16 +25,22 @@ public sealed class GrepSearchTool : IToolHandler
 
     public string Name => "grep_search";
 
+    // NEED17 PromptBrief: Search file contents with regex
     public string Description =>
         "Search file contents in the workspace with a regular expression. " +
-        "Returns up to 100 matches as relative_path:line_number: matched_line.";
+        "Returns up to 100 matches as relative_path:line_number: matched_line. " +
+        "Directories .git/node_modules/bin/obj/dist are skipped. Long lines cut at 300 chars; use read_file for the full line. " +
+        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"pattern\":{\"type\":\"string\",\"description\":\"Regular expression to search for.\"},"
-        + "\"path\":{\"type\":\"string\",\"description\":\"Optional subdirectory or file to search in. Defaults to workspace root.\"},"
-        + "\"include_glob\":{\"type\":\"string\",\"description\":\"Optional file filter like \\\"*.cs\\\" (multiple patterns separated by ';').\"}"
-        + "},\"required\":[\"pattern\"]}");
+    public ToolDefinition GetDefinition()
+    {
+        string schema = new ToolSchemaBuilder()
+            .AddString("pattern", "Regular expression to search. Returns relative_path:line_number:matched_line, up to 100 matches. Empty result is normal (no match), not an error.", required: true)
+            .AddString("path", "Optional subdirectory or file to search in. Defaults to workspace root. Directories .git/node_modules/bin/obj/dist are skipped.")
+            .AddString("include_glob", "Optional file filter like \"*.cs\" (multiple patterns separated by ';', e.g. *.cs;*.ts).")
+            .Build();
+        return new(Name, Description, schema);
+    }
 
     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
@@ -56,6 +63,12 @@ public sealed class GrepSearchTool : IToolHandler
                 if (root.TryGetProperty("path", out JsonElement pEl) && pEl.ValueKind == JsonValueKind.String)
                 {
                     pathArg = pEl.GetString();
+                }
+
+                // NEED17 compat: alias 'file_path'→'path' (02 shim搬运; handler双读不断老调用).
+                if (string.IsNullOrWhiteSpace(pathArg) && root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                {
+                    pathArg = fpEl.GetString();
                 }
 
                 if (root.TryGetProperty("include_glob", out JsonElement gEl) && gEl.ValueKind == JsonValueKind.String)

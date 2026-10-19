@@ -3,7 +3,7 @@ using Host.Desktop.Infrastructure.Logging;
 
 namespace Host.Desktop.Bridge;
 
-/// <summary>need07：历史右键（截断/分支）Bridge 入口。</summary>
+/// <summary>need07：历史右键（截断/分支）Bridge 入口。need16：子会话只读守卫。</summary>
 public sealed partial class HostBridgeFacade
 {
     private bool IsHistoryBusy(string sessionId)
@@ -14,11 +14,23 @@ public sealed partial class HostBridgeFacade
             || _activeSessionTokens.ContainsKey("compact:" + sid);
     }
 
+    private async Task<bool> IsSubSessionAsync(string workspaceId, string sessionId)
+    {
+        try
+        {
+            var meta = await _workspaceSessionService.GetSessionAsync(workspaceId, sessionId).ConfigureAwait(false);
+            return IsSubReadOnly(meta);
+        }
+        catch { return false; }
+    }
+
     public async Task<BridgeResponse<HistoryTruncateResult>> TruncateSessionHistory(
         string workspaceId, string sessionId, string anchorMessageId, bool removeAnchor)
     {
         try
         {
+            if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
+                return BridgeResponse<HistoryTruncateResult>.Fail("SUB_READONLY", "子会话历史只读，不可截断");
             if (IsHistoryBusy(sessionId))
                 return BridgeResponse<HistoryTruncateResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
             var result = await _workspaceSessionService.TruncateSessionHistoryAsync(
@@ -39,6 +51,8 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            if (await IsSubSessionAsync(workspaceId, sourceSessionId).ConfigureAwait(false))
+                return BridgeResponse<SessionMetadata>.Fail("SUB_READONLY", "子会话历史只读，不可分支");
             if (IsHistoryBusy(sourceSessionId))
                 return BridgeResponse<SessionMetadata>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
             var created = await _workspaceSessionService.BranchSessionAsync(
@@ -79,6 +93,8 @@ public sealed partial class HostBridgeFacade
      {
          try
          {
+             if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
+                 return BridgeResponse<HistoryDeleteResult>.Fail("SUB_READONLY", "子会话历史只读，不可删除");
              if (IsHistoryBusy(sessionId))
                  return BridgeResponse<HistoryDeleteResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
              var result = await _workspaceSessionService.DeleteSessionMessageAsync(

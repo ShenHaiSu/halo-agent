@@ -105,6 +105,44 @@ public sealed class AgentConfigService
                 case "max_iterations":
                     current.MaxIterations = AgentDefaults.MaxIterations;
                     break;
+                // need13：子代理按项恢复
+                case "subenabled":
+                case "subagentenabled":
+                case "sub-enabled":
+                    current.SubAgentEnabled = true;
+                    break;
+                case "subparallel":
+                case "submaxparallel":
+                case "sub-parallel":
+                    current.SubMaxParallel = AgentDefaults.SubMaxParallelDefault;
+                    break;
+                case "subiterations":
+                case "submaxiterations":
+                case "sub-iterations":
+                    current.SubMaxIterations = AgentDefaults.SubMaxIterationsDefault;
+                    break;
+                case "subperms":
+                case "sub-perms":
+                case "subpermissions":
+                    current.SubAllowExecCommand = true;
+                    current.SubAllowFileWrite = true;
+                    current.SubAllowSkillWrite = false;
+                    current.SubAllowMemoryWrite = false;
+                    current.SubAllowAskUser = false;
+                    break;
+                // need17：strict/tools 按项恢复
+                case "stricttoolsmode":
+                case "strict":
+                case "strict-tools":
+                    current.StrictToolsMode = Host.Desktop.Core.Models.StrictToolsMode.Prefer;
+                    break;
+                case "toolspreset":
+                case "tools":
+                case "toolpreset":
+                    current.ToolsPreset = null;
+                    current.ToolsAllowlist = null;
+                    current.ToolsDenylist = null;
+                    break;
                 default:
                     throw new AgentConfigValidationException("field", $"未知恢复项：{field.Trim()}");
             }
@@ -176,6 +214,14 @@ public sealed class AgentConfigService
         ExecDefaultTimeoutMs = AgentDefaults.DefaultTimeoutMs,
         ExecMaxTimeoutMs = AgentDefaults.MaxTimeoutMs,
         MaxIterations = AgentDefaults.MaxIterations,
+        SubAgentEnabled = true,
+        SubMaxParallel = AgentDefaults.SubMaxParallelDefault,
+        SubMaxIterations = AgentDefaults.SubMaxIterationsDefault,
+        SubAllowExecCommand = true,
+        SubAllowFileWrite = true,
+        SubAllowSkillWrite = false,
+        SubAllowMemoryWrite = false,
+        SubAllowAskUser = false,
         Scope = "global",
         UpdatedAtUtc = DateTime.UtcNow,
     };
@@ -195,6 +241,20 @@ public sealed class AgentConfigService
             ExecDefaultTimeoutMs = incoming.ExecDefaultTimeoutMs,
             ExecMaxTimeoutMs = incoming.ExecMaxTimeoutMs,
             MaxIterations = incoming.MaxIterations,
+            SubAgentEnabled = incoming.SubAgentEnabled,
+            // need13：老文件缺字段反序列化为 0 → 读时回默认（不算损坏）；保存时 0 保持走校验拒绝
+            SubMaxParallel = incoming.SubMaxParallel == 0 && !forSave ? AgentDefaults.SubMaxParallelDefault : incoming.SubMaxParallel,
+            SubMaxIterations = incoming.SubMaxIterations == 0 && !forSave ? AgentDefaults.SubMaxIterationsDefault : incoming.SubMaxIterations,
+            SubAllowExecCommand = incoming.SubAllowExecCommand,
+            SubAllowFileWrite = incoming.SubAllowFileWrite,
+            SubAllowSkillWrite = incoming.SubAllowSkillWrite,
+            SubAllowMemoryWrite = incoming.SubAllowMemoryWrite,
+            SubAllowAskUser = incoming.SubAllowAskUser,
+            // need17：新字段透传（老文件缺失→默认；非法值读时回默认、存时拒绝，见下）。
+            StrictToolsMode = incoming.StrictToolsMode,
+            ToolsPreset = string.IsNullOrWhiteSpace(incoming.ToolsPreset) ? null : incoming.ToolsPreset.Trim(),
+            ToolsAllowlist = incoming.ToolsAllowlist == null ? null : incoming.ToolsAllowlist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
+            ToolsDenylist = incoming.ToolsDenylist == null ? null : incoming.ToolsDenylist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
             Scope = "global",
             UpdatedAtUtc = incoming.UpdatedAtUtc == default ? DateTime.UtcNow : incoming.UpdatedAtUtc,
         };
@@ -219,6 +279,36 @@ public sealed class AgentConfigService
             throw new AgentConfigValidationException("execDefaultTimeoutMs",
                 $"默认超时不得大于上限（默认 {doc.ExecDefaultTimeoutMs} > 上限 {doc.ExecMaxTimeoutMs}），请调大上限或调小默认");
         }
+        // need13：子代理校验（老文件缺字段已在上回默认；此处只判显式超限）
+        if (doc.SubMaxParallel < 1 || doc.SubMaxParallel > AgentDefaults.SubHardParallelCeil)
+        {
+            throw new AgentConfigValidationException("subMaxParallel",
+                $"子代理并发非法：{doc.SubMaxParallel}（允许 1..{AgentDefaults.SubHardParallelCeil}）");
+        }
+        if (doc.SubMaxIterations < 1 || doc.SubMaxIterations > AgentDefaults.SubHardIterationsCeil)
+        {
+            throw new AgentConfigValidationException("subMaxIterations",
+                $"子代理轮次非法：{doc.SubMaxIterations}（允许 1..{AgentDefaults.SubHardIterationsCeil}）");
+        }
+        // v1 锁定：true 归一为 false + Warn（不抛错，保证手改不炸会话）
+        if (doc.SubAllowAskUser)
+        {
+            doc.SubAllowAskUser = false;
+            HaloLogger.App.Warn("[Agent] subAllowAskUser=true 已归一为 false（v1 锁定子禁问）");
+        }
+        // need17-01：strict/tools 校验（读时非法回默认由 LoadInternal 兜底；存时抛错阻断）。
+        if (!Enum.IsDefined(typeof(Host.Desktop.Core.Models.StrictToolsMode), doc.StrictToolsMode))
+        {
+            if (forSave)
+            {
+                throw new AgentConfigValidationException("strictToolsMode",
+                    $"网关 strict 模式非法：{(int)doc.StrictToolsMode}（可选值：Prefer | Require | Off）。请修正 agent.json 后重试。");
+            }
+            doc.StrictToolsMode = Host.Desktop.Core.Models.StrictToolsMode.Prefer;
+        }
+        // need17-01：preset/allowlist/denylist 互斥校验（非法抛错；读时由 LoadInternal 回默认，存时阻断）。
+        Host.Desktop.Tools.ToolPreset.ValidateOrThrow(doc.ToolsPreset, doc.ToolsAllowlist, doc.ToolsDenylist);
+        doc.Scope = "global"; doc.Version = 1;
         return doc;
     }
 }

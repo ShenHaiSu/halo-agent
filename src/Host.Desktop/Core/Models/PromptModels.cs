@@ -39,19 +39,27 @@ public static class PromptDefaults
         "- Active Workspace Root Path: {{WorkspaceRoot}}\n" +
         "- Default Command Shell: `cmd.exe` (Windows Command Prompt)";
 
+    // NEED17-07 预留拼接点：CmdPythonText 文案冻结不动；无 Python 时的条件 warning 行由 07 在 BuildCore 渲染后追加（见 SystemPromptBuilder）。
     public static readonly string CmdPythonText =
         "## 2. Command Execution Strategy (CRITICAL RULE)\n" +
         "Because PowerShell versions vary drastically between Windows 7 (PowerShell 2.0) and Windows 10/11 (PowerShell 5.1+), you MUST follow this strict execution priority when using `exec_command`:\n" +
         "1. **FIRST CHOICE (`runner: \"cmd\"`)**: Always default to standard Windows `cmd.exe` commands (`dir`, `type`, `findstr`, `copy`, `move`, `del`, `mkdir`, `where`, `tasklist`, `dotnet`, `node`, `git`, etc.) for shell operations and project builds.\n" +
         "2. **SECOND CHOICE (`runner: \"python\"`)**: When you need complex text processing, regex transformations, JSON/XML manipulation, or multi-step data calculation that is awkward in `cmd.exe`, use `runner: \"python\"` to run inline Python code or `.py` scripts.\n" +
         "3. **AVOID PowerShell**: Do NOT invoke `powershell` or `pwsh` unless the user explicitly asks you to debug a `.ps1` script.";
-
-    public static readonly string ToolGuideTemplate =
-        "## 3. Standard Tool Usage Guidelines\n" +
-        "- Before modifying an existing file, ALWAYS read the relevant section first using `read_file`.\n" +
-        "- For targeted modifications to existing files, prefer `edit_file` (providing enough surrounding lines in `old_string` for a unique match) instead of overwriting the entire file with `write_file`.\n" +
-        "- Use `list_dir` and `grep_search` to explore the workspace efficiently rather than spawning unnecessary shell processes.\n" +
-        "- All relative paths passed to tools resolve against the Active Workspace Root Path (`{{WorkspaceRoot}}`).";
+    /// <summary>need17-06 §6.1：ToolGuideTemplate 冻结英文（逐字，12 行；{{WorkspaceRoot}} 保留变量）。只教选型与红线，不教调用语法。</summary>
+     public static readonly string ToolGuideTemplate =
+         "## 3. Standard Tool Usage Guidelines\n" +
+         "- Before modifying ANY file, ALWAYS read the exact section with `read_file` first. NEVER invent `old_string` from memory.\n" +
+         "- `old_string` MUST be a verbatim copy-paste from the latest `read_file` output (including indentation). Add 2-5 surrounding lines to make it unique.\n" +
+         "- Small partial edit with a clear anchor: `edit_file`. Huge/CRLF/Tab files, or after any `OLD_STRING_NOT_FOUND`/`ANCHOR_AMBIGUOUS`: `edit_lines(offset,limit)`.\n" +
+         "- NEVER use `write_file` for partial edits. `write_file` creates new files or fully overwrites (requires `allow_overwrite:true`); truncated content is rejected.\n" +
+         "- `edit_lines` requires explicit `limit` (lines to REPLACE; 0 = insert before offset). Line numbers are 1-based, identical to `read_file`.\n" +
+         "- If `edit_file` reports `OLD_STRING_NOT_FOUND` or `ANCHOR_AMBIGUOUS`, do NOT retry the same anchor. Follow the `hint` (use the suggested `edit_lines` line range).\n" +
+         "- Locate first: `list_dir` for structure, `grep_search` for content. Do NOT `cat/type` files via `exec_command` to view them.\n" +
+         "- `exec_command` runs in the workspace root (stdout+stderr merged, tail kept). Prefer `cmd`; `python` only for text processing/calculation. Never PowerShell unless asked.\n" +
+         "- Large outputs are truncated (head+tail) with full text spilled to a log file path in the result. Page with `read_file(offset,limit)` or narrow `grep_search`; never re-run a broad dump.\n" +
+         "- All relative paths resolve against `{{WorkspaceRoot}}`.\n" +
+         "- For risky/large edits, call with `dry_run:true` first to preview the diff, then repeat without it.";
 
     public static readonly string EphemeralTemplate =
         "## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n" +

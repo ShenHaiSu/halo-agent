@@ -71,3 +71,10 @@ Thumbs.db
 
 # HaloAgent local state (skills/memory indexes, session cache)
 .haloagent/
+
+# Project docs — process docs are local-only, don't version them.
+# needXX / develop / toolDocs 属于过程文档，落地完即删，不进版本历史。
+/docs/*
+!/docs/CEFSHARP_ARCHITECTURE_STANDARD.md
+!/docs/pitfalls/
+!/docs/pitfalls/**

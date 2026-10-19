@@ -13,10 +13,34 @@ public class AgentConfigDocument
     public int ExecDefaultTimeoutMs { get; set; } = AgentDefaults.DefaultTimeoutMs;
     public int ExecMaxTimeoutMs { get; set; } = AgentDefaults.MaxTimeoutMs;
     public int MaxIterations { get; set; } = AgentDefaults.MaxIterations;
+    // need13：子代理（缺字段=老文件，全部回默认，不算损坏）
+    public bool SubAgentEnabled { get; set; } = true;
+    public int SubMaxParallel { get; set; } = 3;
+    public int SubMaxIterations { get; set; } = 15;
+    public bool SubAllowExecCommand { get; set; } = true;
+    public bool SubAllowFileWrite { get; set; } = true;
+    public bool SubAllowSkillWrite { get; set; } = false;
+    public bool SubAllowMemoryWrite { get; set; } = false;
+    public bool SubAllowAskUser { get; set; } = false; // v1 锁定 false
+    // need17-01：网关 strict 发送模式（Prefer 默认；Require 联调用；Off 回滚开关）。
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StrictToolsMode StrictToolsMode { get; set; } = StrictToolsMode.Prefer;
+    // need17-01：工具激活集（preset/allowlist/denylist，互斥规则见 ToolPreset；null/空=默认 Coding）。
+    public string? ToolsPreset { get; set; }
+    public List<string>? ToolsAllowlist { get; set; }
+    public List<string>? ToolsDenylist { get; set; }
     public string Scope { get; set; } = "global";
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     // 后续杂项扩展位：本期只声明不使用，反序列化宽容忽略未知字段即可
     // public Dictionary<string, JsonElement>? Extensions { get; set; }
+}
+
+/// <summary>need17-01：网关 strict 发送模式。Prefer=发送并在 400 提及 strict 时去 strict 重发一次（默认）；Require=联调用；Off=回滚。</summary>
+public enum StrictToolsMode
+{
+    Prefer = 0,
+    Require = 1,
+    Off = 2,
 }
 
 public static class AgentDefaults
@@ -26,6 +50,12 @@ public static class AgentDefaults
     public const int MaxIterations = 25;
     public const int HardTimeoutCeilMs = 3600000; // 有限值硬顶 1h（01 §6）
     public const int HardIterationsCeil = 500; // 有限值硬顶 500
+    public const int SubMaxParallelDefault = 3;
+    public const int SubMaxParallelCeil = 8;
+    public const int SubMaxIterationsDefault = 15;
+    public const int SubMaxIterationsCeil = 50;
+    public const int SubHardParallelCeil = 8;
+    public const int SubHardIterationsCeil = 100;
 }
 
 public sealed class AgentConfigValidationException : Exception

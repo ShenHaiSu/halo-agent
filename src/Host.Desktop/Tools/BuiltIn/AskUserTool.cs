@@ -1,7 +1,8 @@
-using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
-using Host.Desktop.Infrastructure.Logging;
+ using System.Diagnostics;
+ using System.Text;
+ using System.Text.Json;
+ using Host.Desktop.Infrastructure.Logging;
+ using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -17,22 +18,32 @@ public sealed class AskUserTool : IToolHandler
 
     public string Name => "ask_user";
 
+    // NEED17-05 §5.1: Exposure=Direct（编码任务默认不打扰；激活集/preset 裁剪由基础组 01 落子，本文件只定声明）。
+    public const string Need17Exposure = "Direct";
+    // NEED17-05 §5.3: 供 06 动态装配的 PromptBrief/PromptRules（ToolDefinition 字段待基础组 01 扩展，此处先以常量承载，装配表见 SystemPromptBuilder）。
+    public const string PromptBrief = "Ask the user a blocking question";
+    public static readonly string[] PromptRules = { "Ask only when blocked; never for progress updates." };
+
     public string Description =>
-        "Ask the user blocking questions (1-4) with optional single/multi-choice options. " +
+        "Ask the user blocking questions (1-4) with optional single-choice or multi-choice options. " +
         "The turn pauses until the user answers in the UI, times out, or cancels. " +
-        "Use when a decision genuinely needs the user; otherwise proceed with sensible defaults.";
+        "Use when a choice blocks progress (destructive ops, ambiguous requirements). Do not use for status reports.";
 
     public ToolDefinition GetDefinition() => new(Name, Description,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"questions\":{\"type\":\"array\",\"description\":\"1-4 questions. Each: {id, question, options?[{label, description?}], multiSelect?, allowCustom?, default?}. Empty options means open question.\","
-        + "\"items\":{\"type\":\"object\"}},"
-        + "\"question\":{\"type\":\"object\",\"description\":\"Singular alias of a single question.\"},"
-        + "\"timeoutSec\":{\"type\":\"integer\",\"description\":\"Wait timeout seconds, 1-3600. Defaults to 300.\"}"
-        + "},\"required\":[]} ");
+         new ToolSchemaBuilder()
+             .AddString("question", "The blocking question to ask. Required, non-empty. Use when a choice blocks progress (destructive ops, ambiguous requirements). Do not use for status reports.", required: true, minLength: 1)
+             .AddArray("questions", "1-4 questions. Each: {id, question, options?[{label, description?}], multiSelect?, allowCustom?, default?}. Empty options means open question.", itemsType: "object")
+             .AddString("questionsYaml", "Minimal-YAML shortcut for questions (same shape as questions).")
+             .AddInteger("timeoutSec", "Wait timeout seconds, 1-3600. Defaults to 300.", minimum: 1, maximum: 3600)
+             .Build());
 
     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
+        // need13：子代理禁止 ask_user（v1 锁定，首行拒，未进 gate）
+        if (string.Equals(context.AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
+            return ToolResult.Fail("[SUBAGENT_ASK_DENIED] 子代理禁止 ask_user（v1 锁定）。本次已拒绝，不会弹窗。请按保守默认继续，并在总结中注明假设，交用户在主会话确认。",
+                durationMs: sw.ElapsedMilliseconds);
         try
         {
             string sessionId = (context.SessionId ?? string.Empty).Trim();
@@ -41,7 +52,6 @@ public sealed class AskUserTool : IToolHandler
                 return ToolResult.Fail("ask_user 需要会话上下文（SessionId 为空），无法挂起等待用户。",
                     durationMs: sw.ElapsedMilliseconds);
             }
-
             List<AskUserQuestion>? questions;
             int timeoutSec = AskUserGate.DefaultTimeoutSec;
             try
@@ -160,8 +170,19 @@ public sealed class AskUserTool : IToolHandler
             }
             throw new AskUserParseException("questions 必须是数组或 YAML 字符串。失败自愈模板：{\"questions\":[{\"id\":\"q1\",\"question\":\"你的问题\",\"options\":[]}]}");
         }
-        if (root.TryGetProperty("question", out var single) && single.ValueKind == JsonValueKind.Object)
-            return (new List<AskUserQuestion> { ParseQuestion(single, 1) }, timeout);
+        // NEED17-05 §5.2: Schema 主推 string question（required/minLength:1）；object 别名保留兼容（执行语义不变）。
+        if (root.TryGetProperty("question", out var single))
+        {
+            if (single.ValueKind == JsonValueKind.String)
+            {
+                string text = (single.GetString() ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(text))
+                    throw new AskUserParseException("question 不能为空（minLength:1）。请给出具体的阻塞问题后再提问；仅汇报进度时不要调用 ask_user。");
+                return (new List<AskUserQuestion> { new AskUserQuestion { Id = "q1", Question = text } }, timeout);
+            }
+            if (single.ValueKind == JsonValueKind.Object)
+                return (new List<AskUserQuestion> { ParseQuestion(single, 1) }, timeout);
+        }
         if (root.TryGetProperty("questionsYaml", out var yEl) && yEl.ValueKind == JsonValueKind.String)
             return (MiniYamlParser.ParseQuestions(yEl.GetString() ?? string.Empty), timeout);
 

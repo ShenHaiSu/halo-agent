@@ -18,9 +18,11 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   const customRange = ref<[string, string] | null>(null);
   const providerIds = ref<string[]>([]);
   const modelKeys = ref<string[]>([]);
+  const sources = ref<string[]>([]);
+  const estimatedOnly = ref<boolean | null>(null);
   const metric = ref<'in' | 'out' | 'total'>('total');
   const page = ref(1);
-  const pageSize = ref(50);
+  const pageSize = ref(10);
 
   const loading = ref(false);
   const error = ref('');
@@ -28,7 +30,7 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   const overview = ref<UsageOverview>({ totalRequests: 0, sumInput: 0, sumOutput: 0, sumCached: 0, hitRate: 0, activeModels: 0 });
   const trend = ref<UsageTrend>({ dates: [], perModel: [], hitRates: [], totals: [] });
   const share = ref<UsageProviderShareItem[]>([]);
-  const pageData = ref<UsagePage>({ total: 0, page: 1, pageSize: 50, rows: [] });
+  const pageData = ref<UsagePage>({ total: 0, page: 1, pageSize: 10, rows: [] });
 
   const filter = computed<UsageFilter>(() => {
     const f: UsageFilter = { preset: preset.value };
@@ -38,9 +40,10 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     }
     if (providerIds.value.length) f.providerIds = [...providerIds.value];
     if (modelKeys.value.length) f.modelKeys = [...modelKeys.value];
+    if (sources.value.length) f.sources = [...sources.value];
+    if (estimatedOnly.value !== null) f.estimatedOnly = estimatedOnly.value;
     return f;
   });
-
   const modelOptions = computed(() => {
     if (!providerIds.value.length) return options.value.models;
     return options.value.models.filter((m) => providerIds.value.includes(m.providerId));
@@ -92,7 +95,7 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   }
 
   return {
-    preset, customRange, providerIds, modelKeys, metric, page, pageSize,
+    preset, customRange, providerIds, modelKeys, sources, estimatedOnly, metric, page, pageSize,
     loading, error, options, overview, trend, share, pageData,
     filter, modelOptions, loadOptions, refresh, setPreset,
   };

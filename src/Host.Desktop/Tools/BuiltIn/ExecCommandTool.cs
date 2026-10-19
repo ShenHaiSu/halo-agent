@@ -25,15 +25,24 @@ public sealed class ExecCommandTool : IToolHandler
         "IMPORTANT FOR WIN7/WIN10/WIN11 COMPATIBILITY: Always prefer 'cmd' (default Windows Command Prompt) " +
         "for shell operations, file management, and build commands. " +
         "Secondarily prefer 'python' ('py') for complex text processing, calculation, or scripting. " +
-        "Avoid PowerShell because PowerShell versions differ drastically across Windows 7 (PS 2.0) and Windows 10/11.";
+        "Avoid PowerShell because PowerShell versions differ drastically across Windows 7 (PS 2.0) and Windows 10/11. " +
+        "Output keeps the TAIL (last lines) on truncation; full text beyond the budget is spilled to a log file. " +
+        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
-    public ToolDefinition GetDefinition() => new(Name, Description,
+    public ToolDefinition GetDefinition()
+    {
+        string desc = Description;
+        const string NoPyNote = " (注意：当前环境未检测到 Python，runner:'python' 不可用，请使用 'cmd')";
+        string runnerNote = PythonAvailabilitySnapshot.Current.Found ? string.Empty : NoPyNote;
+        if (runnerNote.Length > 0) { desc += NoPyNote; }
+        return new ToolDefinition(Name, desc,
         "{\"type\":\"object\",\"properties\":{"
-        + "\"command\":{\"type\":\"string\",\"description\":\"The command line to execute (when runner is 'cmd') or the Python code/script arguments to execute (when runner is 'python').\"},"
-        + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"description\":\"Execution runtime. Defaults to 'cmd' (recommended primary choice). Use 'python' as the secondary choice for Python inline scripts (-c) or script execution.\"},"
-        + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional working directory relative to the current workspace root, or an absolute path. Defaults to the current workspace root.\"},"
-        + "\"timeout_ms\":{\"type\":\"integer\",\"description\":\"Optional timeout in milliseconds. 0 = infinite wait (cancellable by user). If omitted defaults to server config (default 30000). Positive values are capped by server max (default 300000, 0 = no cap).\"}"
-        + "},\"required\":[\"command\"]}");
+        + "\"command\":{\"type\":\"string\",\"description\":\"Full command line (runner cmd) or Python code/script args (runner python). Runs in workspace root; stdout+stderr merged.\"},"
+        + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"default\":\"cmd\",\"description\":\"cmd first. python for text processing. No PowerShell." + runnerNote + "\"},"
+        + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional dir relative to workspace root. Defaults to workspace root. Missing dir fails fast.\"},"
+        + "\"timeout_ms\":{\"type\":\"integer\",\"minimum\":0,\"default\":30000,\"maximum\":300000,\"description\":\"Optional timeout in ms. 0 = infinite. Defaults 30000. Capped 300000.\"}"
+        + "},\"required\":[\"command\"],\"additionalProperties\":false}");
+    }
 
     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
@@ -125,13 +134,16 @@ public sealed class ExecCommandTool : IToolHandler
             }
             else
             {
+                if (PythonAvailabilityGate.ShouldReject(runner, context.PythonAvailabilityOverride))
+                {
+                    return PythonAvailabilityGate.Fail(sw.ElapsedMilliseconds);
+                }
                 CommandRunnerProbe.ProbeResult probe = context.PythonProbeOverride != null
                     ? context.PythonProbeOverride()
                     : CommandRunnerProbe.ProbePython(configuredPath: context.ConfiguredPythonPath);
-
                 if (!probe.Found || string.IsNullOrWhiteSpace(probe.ExePath))
                 {
-                    return ToolResult.Fail(PythonMissingMessage, durationMs: sw.ElapsedMilliseconds);
+                    return PythonAvailabilityGate.Fail(sw.ElapsedMilliseconds);
                 }
 
                 string pythonArgs;
