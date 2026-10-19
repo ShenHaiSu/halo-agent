@@ -73,7 +73,7 @@ public sealed class UndoEditTool : IToolHandler
                 return Task.FromResult(ToolResult.Fail(error!, durationMs: sw.ElapsedMilliseconds));
             }
 
-            string targetPath;
+            string? targetPath;
             if (!string.IsNullOrWhiteSpace(restoreToArg))
             {
                 string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)

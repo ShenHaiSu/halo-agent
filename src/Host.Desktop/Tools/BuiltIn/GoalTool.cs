@@ -38,7 +38,7 @@ public sealed class GoalTool : IToolHandler
              .AddString("note", string.Empty)
              .Build());
 
-     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+      public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -61,7 +61,7 @@ public sealed class GoalTool : IToolHandler
              if (isSub && act != "get")
              {
                  sw.Stop();
-                 return ToolResult.Fail("[GOAL_DENIED] 子代理仅可 goal_tool/get 查看父目标，不可写入。本次已拒绝，请在总结中引用目标文本交主代理修改。", durationMs: sw.ElapsedMilliseconds);
+                  return Task.FromResult(ToolResult.Fail("[GOAL_DENIED] 子代理仅可 goal_tool/get 查看父目标，不可写入。本次已拒绝，请在总结中引用目标文本交主代理修改。", durationMs: sw.ElapsedMilliseconds));
              }
              var svc = _serviceFactory != null
                  ? _serviceFactory(ws, sess)
@@ -75,7 +75,7 @@ public sealed class GoalTool : IToolHandler
             if (act == "get")
             {
                 string note = loaded.corrupted ? "[目标文件损坏，已视为空，可重置] " : string.Empty;
-                return ToolResult.Ok(note + SlimJson(cur), durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Ok(note + SlimJson(cur), durationMs: sw.ElapsedMilliseconds));
             }
 
             try
@@ -84,19 +84,19 @@ public sealed class GoalTool : IToolHandler
                 var saved = svc.SaveGoal(ws, sess, next, "main");
                 try { JsEventDispatcher.Publish("goal:updated", new { sessionId = sess, goal = SlimObj(saved) }); } catch { }
                 sw.Stop();
-                return ToolResult.Ok(SlimJson(saved), durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Ok(SlimJson(saved), durationMs: sw.ElapsedMilliseconds));
             }
             catch (Services.GoalValidationException gex)
             {
                 sw.Stop();
                 string prefix = gex.Code == "GOAL_MILESTONE_MISSING" ? "[GOAL_MILESTONE_MISSING] " : "[GOAL_VALIDATION] ";
-                return ToolResult.Fail(prefix + gex.Message, durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Fail(prefix + gex.Message, durationMs: sw.ElapsedMilliseconds));
             }
         }
         catch (Exception ex)
         {
             sw.Stop();
-            return ToolResult.Fail("[GOAL_VALIDATION] goal_tool 执行失败：" + ex.Message, durationMs: sw.ElapsedMilliseconds);
+            return Task.FromResult(ToolResult.Fail("[GOAL_VALIDATION] goal_tool 执行失败：" + ex.Message, durationMs: sw.ElapsedMilliseconds));
         }
     }
 

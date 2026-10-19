@@ -115,7 +115,6 @@ public interface IAgentOrchestrator
          {
              workspace = await _sessionService.GetWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
              session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
-             session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -375,7 +374,7 @@ public interface IAgentOrchestrator
                 }
             }
             string requestId = Guid.NewGuid().ToString("N");
-            string sessionHash = !string.IsNullOrWhiteSpace(session.SessionHash)
+            string sessionHash = !string.IsNullOrWhiteSpace(session!.SessionHash)
                 ? session.SessionHash
                 : HeaderVariableResolver.ComputeSessionHash(workspaceId, sessionId);
 

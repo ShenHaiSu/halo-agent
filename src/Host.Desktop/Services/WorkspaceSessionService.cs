@@ -649,10 +649,10 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
                      if (!string.Equals((t.Role ?? string.Empty).ToLowerInvariant(), "tool", StringComparison.Ordinal)) break;
                      if (!string.IsNullOrWhiteSpace(t.ToolCallId)) covered.Add(t.ToolCallId!);
                  }
-                 var uncovered = calls
-                     .Where(c => !covered.Contains(c.CallId))
-                     .Select(c => (c.CallId, c.FunctionName))
-                     .ToList();
+                  var uncovered = calls
+                      .Where(c => !covered.Contains(c.CallId))
+                      .Select(c => (c.CallId, (string?)c.FunctionName))
+                      .ToList();
                  if (uncovered.Count > 0) uncoveredByAssistant[i] = uncovered;
              }
              else if (string.Equals(role, "tool", StringComparison.Ordinal))
