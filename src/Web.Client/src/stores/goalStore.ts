@@ -33,12 +33,15 @@ export const useGoalStore = defineStore('goal', () => {
     try { localStorage.setItem('halo-goal-panel-pos', JSON.stringify(pos.value)); } catch { /* ignore */ }
   }
 
+  let loadSeq = 0;
   async function load(ws: string, sess: string) {
     if (!ws || !sess) { goal.value = null; return; }
+    const seq = ++loadSeq;
     loading.value = true;
     try {
       const bridge = getHostBridge();
       const res = await bridge.getGoal(ws, sess);
+      if (seq !== loadSeq) return; // need19：丢弃过期响应
       if (res.ok && res.data) {
         goal.value = res.data;
         corrupted.value = !!res.message && res.message.includes('损坏');
@@ -51,7 +54,10 @@ export const useGoalStore = defineStore('goal', () => {
           panel.value = 'collapsed';
         }
       }
-    } finally { loading.value = false; }
+    } catch {
+      if (seq !== loadSeq) return; // need19：过期失败不覆盖
+      goal.value = null; // need19：失败兜底为空，面板显示失败态
+    } finally { if (seq === loadSeq) loading.value = false; }
   }
 
   async function save(ws: string, sess: string, draft: SessionGoalDto) {
@@ -88,7 +94,10 @@ export const useGoalStore = defineStore('goal', () => {
     }
   }
 
+  let watchBound = false;
   function watchSession() {
+    if (watchBound) return; // need19：幂等，唯一挂载点在 RightRailDrawer
+    watchBound = true;
     const ws = useWorkspaceStore();
     watch(() => [ws.activeWorkspaceId, ws.activeSessionId] as const, ([nws, nsess]) => {
       if (nws && nsess) void load(nws, nsess);

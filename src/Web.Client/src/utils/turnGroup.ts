@@ -38,6 +38,43 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
   return `${base}#img:${imgs.map((i) => i.sha16 || i.imageId).join(',')}`;
 }
 
+/** need19：时间轴条目（主时间轴与目录共用；key 即锚点 key）。 */
+export interface TimelineEntry {
+  key: string;
+  kind: 'user' | 'system' | 'turn';
+  msg?: UnifiedChatMessage;
+  group?: TurnGroup;
+}
+
+/**
+ * need19：由 messages + 可见 turn 组构造时间轴条目。
+ * 与 MessageTimeline.vue 原内联 timelineItems 逻辑逐项一致（纯抽取，不改语义）。
+ */
+export function buildTimelineEntries(messages: UnifiedChatMessage[], groups: TurnGroup[]): TimelineEntry[] {
+  const items: TimelineEntry[] = [];
+  const groupsByAssistant = new Map<string, TurnGroup>();
+  for (const g of groups) {
+    if (g.assistantId) groupsByAssistant.set(g.assistantId, g);
+    else if (g.toolMessages.length) {
+      items.push({ key: g.key, kind: 'turn', group: g });
+    }
+  }
+  const emitted = new Set<string>();
+  for (const msg of messages) {
+    const role = String(msg.role || '').toLowerCase();
+    if (role === 'user') items.push({ key: `u-${msg.id}`, kind: 'user', msg });
+    else if (role !== 'assistant' && role !== 'tool') items.push({ key: `s-${msg.id}`, kind: 'system', msg });
+    else if (role === 'assistant') {
+      const g = groupsByAssistant.get(String(msg.id));
+      if (g && !emitted.has(g.key)) { emitted.add(g.key); items.push({ key: g.key, kind: 'turn', group: g }); }
+    }
+  }
+  for (const g of groups) {
+    if (g.assistantId && !emitted.has(g.key)) items.push({ key: g.key, kind: 'turn', group: g });
+  }
+  return items;
+}
+
 export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   const groups: TurnGroup[] = [];
   let cur: TurnGroup | null = null;
