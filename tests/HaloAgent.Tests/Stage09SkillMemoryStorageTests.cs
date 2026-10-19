@@ -172,7 +172,7 @@ public sealed class Stage09SkillMemoryStorageTests : IDisposable
     {
         _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Skill, "asset-ok", "# T\nbody");
         string abs = _skills.ResolveAssetPath(SkillMemoryScope.Global, SkillMemoryKind.Skill, "asset-ok", "assets/run.py", null);
-        Assert.True(abs.StartsWith(Path.GetFullPath(Path.Combine(_storage.GlobalSkillsDirectory, "asset-ok")), StringComparison.OrdinalIgnoreCase));
+        Assert.StartsWith(Path.GetFullPath(Path.Combine(_storage.GlobalSkillsDirectory, "asset-ok")), abs, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("run.py", abs);
     }
 

@@ -137,7 +137,7 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     }
 
     [Fact(DisplayName = "P2_3: 三类码回包自动带 NextAction 草稿")]
-    public async Task P2_3_NextAction_Emitted()
+    public void P2_3_NextAction_Emitted()
     {
         var notFound = ToolResult.FailCode("OLD_STRING_NOT_FOUND", "OLD_STRING_NOT_FOUND：{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}", "{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}");
         string h1 = AgentOrchestrator.BuildNextActionHint(notFound, "edit_file", "{\"file_path\":\"a.txt\"}", "OLD_STRING_NOT_FOUND");

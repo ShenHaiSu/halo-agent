@@ -164,7 +164,7 @@ public sealed class Stage16SubDetailTests
         var d = await bridge.DeleteSessionMessage(ws.Id, sub.Id, "x");
         Assert.False(d.Ok); Assert.Equal("SUB_READONLY", d.Code);
         var msgs = await svc.GetSessionMessagesAsync(ws.Id, sub.Id);
-        Assert.Equal(1, msgs.Count);
+        Assert.Single(msgs);
         // 详情 + 分页
         var det = await bridge.GetSubSessionDetail(ws.Id, sub.Id);
         Assert.True(det.Ok);
