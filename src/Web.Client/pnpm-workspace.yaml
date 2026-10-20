@@ -2,7 +2,6 @@ packages:
   - '.'
 storeDir: ../../.pnpm-store
 packageImportMethod: copy
-verifyDepsBeforeRun: false
 onlyBuiltDependencies:
   - esbuild
   - vue-demi

@@ -68,7 +68,7 @@ import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@/composables/useTimelineNav';
-import { buildTurnGroups, buildTimelineEntries, type TimelineEntry } from '@/utils/turnGroup';
+import type { TimelineEntry } from '@/utils/turnGroup';
 import { buildTimelineItems } from '@/composables/useTimelineGroups';
 import { buildHistoryToc, type TocItem } from '@/utils/historyToc';
 import HistoryBubble from './HistoryBubble.vue';
@@ -82,7 +82,7 @@ const ui = useUiStore();
 const message = useMessage();
 const nav = useTimelineNav();
 
-const { sessionMessages, loadingMessages, activeSessionId } = storeToRefs(ws);
+const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
@@ -107,19 +107,8 @@ const entries = computed<TimelineEntry[]>(() => {
     const simple = buildTimelineItems(sub.messages || []);
     return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
   }
-  const groups = buildTurnGroups(sessionMessages.value || []);
-  const hidden = agent.hiddenToolCallIds as unknown as Set<string> | string[];
-  const hiddenSet = hidden instanceof Set ? hidden : new Set([...(hidden as string[])]);
-  let visible = groups;
-  if (hiddenSet.size > 0) {
-    visible = [];
-    for (const g of groups) {
-      const kept = g.toolMessages.filter((m) => !hiddenSet.has(String((m as unknown as { toolCallId?: string }).toolCallId || '')));
-      if (!g.content && !g.reasoning && kept.length === 0) continue;
-      visible.push({ ...g, toolMessages: kept });
-    }
-  }
-  return buildTimelineEntries(sessionMessages.value || [], visible);
+  // need22-P2 F1：主会话归并只在 agentStore 算一次，与 Timeline 共享同一结果（不再各自 buildTurnGroups/去重）
+  return agent.activeTimelineEntries;
 });
 
 const tocItems = computed<TocItem[]>(() =>

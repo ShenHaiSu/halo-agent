@@ -11,7 +11,9 @@
       </div>
 
       <!-- 持久化时间线：user/system 顶层 + 轮次归并容器 -->
-      <template v-for="item in timelineItems" :key="item.key">
+      <!-- need22-P3 G1：虚拟列表占位（视口±5turn外只占位不挂载；min-height估计+IntersectionObserver校准） -->
+      <div v-if="vWindow.topSpacerHeight > 0" ref="vTopPhRef" data-edge="top" data-testid="vlist-placeholder-top" :style="{ minHeight: vWindow.topSpacerHeight + 'px' }" />
+      <template v-for="item in vVisibleItems" :key="item.key">
         <!-- User -->
         <div v-if="item.kind === 'user'" class="flex justify-end" :ref="setAnchor(item.key)">
           <div
@@ -79,6 +81,7 @@
           </div>
         </div>
       </template>
+      <div v-if="vWindow.bottomSpacerHeight > 0" ref="vBottomPhRef" data-edge="bottom" data-testid="vlist-placeholder-bottom" :style="{ minHeight: vWindow.bottomSpacerHeight + 'px' }" />
 
       <!-- need04-03：一轮一容器（流式期间唯一容器，顺序恒为 思考→工具→正文） -->
       <div v-if="agentStore.hasActiveTurn" data-testid="active-turn-container" class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0">
@@ -93,8 +96,9 @@
         </div>
         <div
           v-if="agentStore.streamingText"
-          class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
-          v-html="renderMarkdown(agentStore.streamingText)"
+          class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
+          style="white-space:pre-wrap;"
+          v-html="renderStreamingText(agentStore.streamingText)"
           @click="onMarkdownLinkClick"
         />
         <div v-else-if="agentStore.streamingActive && agentStore.isGenerating" class="flex items-center gap-2 text-xs text-secondary">
@@ -107,9 +111,17 @@
       <n-alert v-if="agentStore.turnNotice" type="info" :show-icon="false" class="text-xs">
         {{ agentStore.turnNotice }}
       </n-alert>
-      <n-alert v-if="agentStore.lastError" type="error" class="text-xs">
+      <n-alert v-if="agentStore.lastError" type="error" class="text-xs" data-testid="turn-error-alert">
         {{ agentStore.lastError }}
       </n-alert>
+      <div v-if="agentStore.activeTurn.lastErrorInfo?.retry" class="flex items-center gap-2">
+        <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="onRetryTurn">
+          重试本轮
+        </n-button>
+        <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="onDismissError">
+          忽略
+        </n-button>
+      </div>
 
       <!-- Telemetry footer（本轮快照语义：IN=总量快照，OUT=本轮生成） -->
       <div
@@ -150,10 +162,11 @@ import ToolCallCard from '@/components/chat/ToolCallCard.vue';
 import MessageContextMenu from '@/components/chat/MessageContextMenu.vue';
 import { copyTextToClipboard, type HistoryTarget } from '@/utils/historyAnchor';
  import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@/bridge/hostBridge';
- import { buildTurnGroups, buildTimelineEntries, imagesOf, type TimelineEntry, type TurnGroup } from '@/utils/turnGroup';
-import { useTimelineNav } from '@/composables/useTimelineNav';
-import { useUiStore } from '@/stores/uiStore';
-import type { ComponentPublicInstance } from 'vue';
+ import { blockHash, imagesOf, type TimelineEntry, type TurnGroup } from '@/utils/turnGroup';
+ import { useVirtualTurns, VLIST_BUFFER } from '@/composables/useTimelineGroups';
+ import { useTimelineNav } from '@/composables/useTimelineNav';
+ import { useUiStore } from '@/stores/uiStore';
+ import type { ComponentPublicInstance } from 'vue';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
@@ -184,30 +197,34 @@ function toggleTurn(key: string): void {
   expandedTurns[key] = !isTurnExpanded(key);
 }
 
-// need04-03：持久 tool 灰块与流式卡去重（同 callId 本轮隐藏持久侧）
-const allTurnGroups = computed<TurnGroup[]>(() => buildTurnGroups(persistedMessages.value));
-const visibleTurnGroups = computed<TurnGroup[]>(() => {
-  const hidden = new Set<string>((agentStore.hiddenToolCallIds as unknown as Set<string> | string[]) instanceof Set
-    ? [...(agentStore.hiddenToolCallIds as unknown as Set<string>)]
-    : [...(agentStore.hiddenToolCallIds as unknown as string[])]);
-  if (hidden.size === 0) return allTurnGroups.value;
-  const out: TurnGroup[] = [];
-  for (const g of allTurnGroups.value) {
-    const kept = g.toolMessages.filter((m) => !hidden.has(String((m as unknown as { toolCallId?: string }).toolCallId || '')));
-    if (!g.content && !g.reasoning && kept.length === 0) continue;
-    out.push({ ...g, toolMessages: kept });
-  }
-  return out;
-});
+// need22-P2 F1：单真相源——归并只在 agentStore 算一次（computed 缓存），本组件只读共享结果。
+// sessionMessages 为持久投影，turns 流式卡为瞬态真相；callId 去重收敛在 store 内，不再各自计算。
+// need22-P5 J6：allTurnGroups/visibleTurnGroups 已收敛到 agentStore.activeTimelineEntries（下），本组件不再各自计算。
 
 // 按 jsonl 顺序：user/system 顶层直渲，assistant+tool 聚合为 turn（顺序与落盘一致）
-// need19：下沉为 buildTimelineEntries 纯函数（与目录共用，保证条目一一对应）
-type TimelineItem = TimelineEntry;
-const timelineItems = computed<TimelineItem[]>(() => buildTimelineEntries(persistedMessages.value, visibleTurnGroups.value));
+ type TimelineItem = TimelineEntry;
+ const timelineItems = computed<TimelineItem[]>(() => agentStore.activeTimelineEntries);
+ // need22-P3 G1：虚拟列表——只挂载视口±buffer（上下各5turn），其余占位（min-height+IntersectionObserver校准）。
+ // 折叠默认态不变（expandedTurns 默认收缩），data-testid/row-id/kind 选择器不变。
+ const vlist = useVirtualTurns(timelineItems, { buffer: VLIST_BUFFER });
+ const vVisibleItems = computed<TimelineItem[]>(() => vlist.visibleItems.value.map((r) => r.item as TimelineItem));
+ const vWindow = vlist.windowRange;
+ const vTopPhRef = ref<HTMLElement | null>(null);
+ const vBottomPhRef = ref<HTMLElement | null>(null);
+ let vlistUnobserve: (() => void) | null = null;
+ function rebindVListObserver(): void {
+   try { vlistUnobserve?.(); } catch (e) { console.warn('[vlist] unobserve failed:', e); }
+   vlistUnobserve = null;
+   void nextTick(() => {
+     try {
+       vlistUnobserve = vlist.observePlaceholders(vTopPhRef.value, vBottomPhRef.value);
+     } catch (e) { console.warn('[vlist] observe failed:', e); }
+   });
+ }
 
-function toolKeyOf(m: UnifiedChatMessage): string {
-  return String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
-}
+ function toolKeyOf(m: UnifiedChatMessage): string {
+   return String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
+ }
 
 /** need04-04：持久 tool 消息 → ToolCallCard 富展示（参数从同组 assistant.toolCalls 同 id 取）。 */
 function toCard(m: UnifiedChatMessage, group: TurnGroup): AgentToolCard {
@@ -284,33 +301,51 @@ function turnDuration(_g: TurnGroup): string {
   return '';
 }
 
-const md: MarkdownIt = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-  highlight: (code: string, lang: string): string => {
-    try {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value;
-      }
-      return hljs.highlightAuto(code).value;
-    } catch {
-      return '';
-    }
-  },
-});
+ const md: MarkdownIt = new MarkdownIt({
+   html: false,
+   linkify: true,
+   breaks: true,
+   // need22-P3 G1：hljs 只跑终态且只 highlight(lang)（语言已知时）；未知语言直接转义，不做 highlightAuto 全量猜测。
+   highlight: (code: string, lang: string): string => {
+     try {
+       if (lang && hljs.getLanguage(lang)) {
+         return hljs.highlight(code, { language: lang }).value;
+       }
+       return escapeHtml(code);
+     } catch (e) {
+       console.warn('[markdown] highlight failed:', e);
+       return escapeHtml(code);
+     }
+   },
+ });
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function renderMarkdown(content: string): string {
-  try {
-    return md.render(content || '');
-  } catch {
-    return `<pre>${escapeHtml(content || '')}</pre>`;
-  }
-}
+ function escapeHtml(s: string): string {
+   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+ }
+ // need22-P3 G1：markdown 两档——流式期纯文本（pre-wrap，不调 md.render）；终态一次 md.render 并按 blockHash 缓存。
+ const mdRenderCache = new Map<string, string>();
+ const MD_CACHE_MAX = 200;
+ function renderMarkdown(content: string): string {
+   const key = blockHash(content || '');
+   const hit = mdRenderCache.get(key);
+   if (hit !== undefined) return hit;
+   let html: string;
+   try {
+     html = md.render(content || '');
+   } catch (e) {
+     console.warn('[markdown] render failed:', e);
+     html = `<pre>${escapeHtml(content || '')}</pre>`;
+   }
+   mdRenderCache.set(key, html);
+   if (mdRenderCache.size > MD_CACHE_MAX) {
+     const oldest = mdRenderCache.keys().next();
+     if (!oldest.done) mdRenderCache.delete(oldest.value);
+   }
+   return html;
+ }
+ function renderStreamingText(content: string): string {
+   return escapeHtml(content || '');
+ }
  // 链接永不进 CEF 主帧：渲染侧强制外链属性（漏网时走 popup→系统浏览器），点击侧委托后端系统打开。
  const defaultLinkOpenRender = md.renderer.rules.link_open;
  md.renderer.rules.link_open = (tokens, idx, options, env, self): string => {
@@ -415,6 +450,13 @@ async function onMenuBranch(): Promise<void> {
      },
    });
  }
+// need22-P2 F5：失败重试（保留的流式卡 + 原文重发）/ 忽略（清错误态，卡片保留由下一轮覆盖）
+async function onRetryTurn(): Promise<void> {
+  try { await agentStore.retryLastTurn(); } catch (err) { console.warn('[timeline] retry failed:', err); }
+}
+function onDismissError(): void {
+  try { agentStore.clearLastError(); } catch { /* ignore */ }
+}
 function bindMenuGlobalClose(): void {
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', closeMenu);
@@ -500,12 +542,13 @@ watch(
     void nextTick(() => scheduleScrollTimelineToBottom());
   }
 );
-watch(
-  () => timelineItems.value.length,
-  () => {
-    void nextTick(() => scheduleScrollTimelineToBottom());
-  }
-);
+ watch(
+   () => timelineItems.value.length,
+   () => {
+     void nextTick(() => scheduleScrollTimelineToBottom());
+     rebindVListObserver();
+   }
+ );
 watch(
   () => workspaceStore.loadingMessages,
   (loading) => {
@@ -516,25 +559,25 @@ watch(
 watch(
   () => timelineItems.value.map((i) => i.key),
   (keys) => { try { nav.setOrder(keys); } catch { /* ignore */ } },
-  { immediate: true }
-);
-onMounted(() => {
-  void nextTick(() => scheduleScrollTimelineToBottom());
-  bindMenuGlobalClose();
-  try {
-    nav.setContainer(scrollContainerRef.value);
-    nav.setOrder(timelineItems.value.map((i) => i.key));
-  } catch { /* ignore */ }
-  bindUserScrollUnlock();
-});
-onUnmounted(() => {
-  if (scrollBottomRaf) cancelAnimationFrame(scrollBottomRaf);
-  if (scrollBottomTimer !== null) window.clearTimeout(scrollBottomTimer);
-  scrollBottomRaf = 0;
-  scrollBottomTimer = null;
-  try { nav.clear(); nav.setContainer(null); } catch { /* ignore */ }
-  unbindUserScrollUnlock();
-});
+   { immediate: true }
+ );
+ onMounted(() => {
+   void nextTick(() => scheduleScrollTimelineToBottom());
+   bindMenuGlobalClose();
+   try {
+     nav.setContainer(scrollContainerRef.value);
+     nav.setOrder(timelineItems.value.map((i) => i.key));
+   } catch (e) { console.warn('[timeline] nav init failed:', e); }
+   bindUserScrollUnlock();
+   rebindVListObserver();
+ });
+ onUnmounted(() => {
+  cancelScheduledScrollToBottom();
+   try { vlistUnobserve?.(); } catch (e) { console.warn('[vlist] unobserve failed:', e); }
+   vlistUnobserve = null;
+   try { nav.clear(); nav.setContainer(null); } catch (e) { console.warn('[timeline] nav clear failed:', e); }
+   unbindUserScrollUnlock();
+ });
 void truncateToolText;
 </script>
 

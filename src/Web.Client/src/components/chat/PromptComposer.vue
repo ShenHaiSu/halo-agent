@@ -98,13 +98,16 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
  import { useConfigStore } from '@/stores/configStore';
  import {
    cleanupObjectUrls,
+   compressImageIfNeeded,
    createEmptyDraft,
+   createPreviewUrl,
    genAttId,
    insertImage,
    isEmpty,
    MAX_IMAGE_BYTES,
    MAX_PASTE_TEXT,
    removeAttachment,
+   revokePreviewUrl,
    safeFileName,
    toSendPayload,
    type AttachmentSource,
@@ -113,6 +116,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
    type ComposerImageMime,
  } from '@/utils/composerModel';
 import { acceptImageFile, collectImageFiles, extractPaste, firstHtmlImgSrc } from '@/utils/clipboardImage';
+import { formatSmartBytesShort } from '@/utils/formatSmartBytes';
 import { useSubSessionStore } from '@/stores/subSessionStore';
 
 const workspaceStore = useWorkspaceStore();
@@ -352,51 +356,70 @@ function insertPillAtCaret(att: ComposerAttachment): void {
 }
 
 // ---------- 附件入口 ----------
-function addFile(f: File, source: AttachmentSource): void {
-  const chk = acceptImageFile(f);
-  if (!chk.ok) {
-    message.error(chk.reason || '仅支持 jpg/png/webp，请转换后发送');
-    return;
-  }
-  const mime = chk.mime as ComposerImageMime;
-  const attId = genAttId();
-  const fileName = safeFileName(f.name || `pasted-${Date.now()}.png`);
-  const oversize = f.size > MAX_IMAGE_BYTES;
-  const att: ComposerAttachment = {
-    attId,
-    fileName,
-    mime,
-    sizeBytes: f.size,
-    objectUrl: URL.createObjectURL(f),
-    file: f,
-    source,
-    status: oversize ? 'oversize' : 'ready',
-    error: oversize ? `单张超过 8MB（${(f.size / 1024 / 1024).toFixed(1)}MB），发送时自动跳过` : undefined,
-  };
-  draft.attachments[attId] = att;
-  setDraft(insertImage(draft, attId));
-  insertPillAtCaret(att);
-  if (oversize) message.warning('图片超过 8MB，发送时将自动跳过（文字仍发送）');
-  // 宽高异步回填，失败忽略
-  try {
-    const probe = new Image();
-     probe.onload = () => {
+ // need22-P3 G3：缩略图 LRU20 张 + URL.createObjectURL 预览（发送才转码，revoke 释放）；>5MB canvas.toBlob 压缩再预览。
+ function addFile(f: File, source: AttachmentSource): void {
+   const chk = acceptImageFile(f);
+   if (!chk.ok) {
+     message.error(chk.reason || '仅支持 jpg/png/webp，请转换后发送');
+     return;
+   }
+   const mime = chk.mime as ComposerImageMime;
+   const attId = genAttId();
+   const fileName = safeFileName(f.name || `pasted-${Date.now()}.png`);
+   const oversize = f.size > MAX_IMAGE_BYTES;
+   // 发送用原文件（发送才转码）；预览用 objectURL，大图先压缩再预览
+   const att: ComposerAttachment = {
+     attId,
+     fileName,
+     mime,
+     sizeBytes: f.size,
+     objectUrl: createPreviewUrl(f),
+     file: f,
+     source,
+     status: oversize ? 'oversize' : 'ready',
+     error: oversize ? `单张超过 8MB（${formatSmartBytesShort(f.size)}），发送时自动跳过` : undefined,
+   };
+   draft.attachments[attId] = att;
+   setDraft(insertImage(draft, attId));
+   insertPillAtCaret(att);
+   if (oversize) message.warning('图片超过 8MB，发送时将自动跳过（文字仍发送）');
+   // >5MB：压缩后再预览（替换 objectURL，原文件保留用于发送转码）
+   void compressImageIfNeeded(f).then((smaller) => {
+     try {
+       if (smaller === f) return;
        const hit = draft.attachments[attId];
-       if (hit) {
-         hit.width = probe.naturalWidth;
-         hit.height = probe.naturalHeight;
-       }
-     };
-    probe.onerror = () => { /* 读不到即 undefined，不阻塞 */ };
-    probe.src = att.objectUrl;
-  } catch { /* ignore */ }
-}
+       if (!hit) return;
+       revokePreviewUrl(hit.objectUrl);
+       hit.objectUrl = createPreviewUrl(smaller);
+       const probe = new Image();
+       probe.onload = () => {
+         const h2 = draft.attachments[attId];
+         if (h2) { h2.width = probe.naturalWidth; h2.height = probe.naturalHeight; }
+       };
+       probe.onerror = () => { /* 读不到即 undefined，不阻塞 */ };
+       probe.src = hit.objectUrl;
+     } catch (e) { console.warn('[composer] compressed preview failed:', e); }
+   });
+   // 宽高异步回填，失败忽略
+   try {
+     const probe = new Image();
+      probe.onload = () => {
+        const hit = draft.attachments[attId];
+        if (hit) {
+          hit.width = probe.naturalWidth;
+          hit.height = probe.naturalHeight;
+        }
+      };
+     probe.onerror = () => { /* 读不到即 undefined，不阻塞 */ };
+     probe.src = att.objectUrl;
+   } catch (e) { console.warn('[composer] probe failed:', e); }
+ }
 
 function removeImage(attId: string): void {
   const hit = draft.attachments[attId];
-  try {
-    if (hit && hit.objectUrl) URL.revokeObjectURL(hit.objectUrl);
-  } catch { /* ignore */ }
+   try {
+     if (hit && hit.objectUrl) revokePreviewUrl(hit.objectUrl);
+   } catch (e) { console.warn('[composer] revoke failed:', e); }
   setDraft(removeAttachment(draft, attId));
   try {
     const editor = editorRef.value;
@@ -778,6 +801,8 @@ onMounted(() => {
     } catch { /* ignore */ }
   };
   unsubs.push(haloEventBus.on<{ sessionId?: string }>('agent:ask-user-resolved', unmask));
+  // need22-P2 F6：问询收起（只关问询窗）同样解罩，输入可用、可继续浏览历史
+  unsubs.push(haloEventBus.on<{ sessionId?: string }>('agent:ask-user-dismissed', unmask));
   unsubs.push(
     haloEventBus.on<{ sessionId?: string }>('agent:turn-event', (payload) => {
       try {

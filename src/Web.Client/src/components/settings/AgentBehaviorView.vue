@@ -27,7 +27,6 @@ import { useAgentConfigStore } from '@/stores/agentConfigStore';
 import { getHostBridge, type SubRuntimeInfo, type SessionGoalDto } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useGoalStore } from '@/stores/goalStore';
-import { useSubSessionStore } from '@/stores/subSessionStore';
 import AgentTimeoutCard from './agent/cards/AgentTimeoutCard.vue';
 import AgentIterationsCard from './agent/cards/AgentIterationsCard.vue';
 import GoalSummaryCard from './agent/cards/GoalSummaryCard.vue';

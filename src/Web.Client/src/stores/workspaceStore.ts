@@ -1,5 +1,5 @@
   import { defineStore } from 'pinia';
-  import { ref, computed } from 'vue';
+  import { ref, computed, watch } from 'vue';
   import {
     getHostBridge,
     haloEventBus,
@@ -9,6 +9,7 @@
     type ContextBudgetStatusDto,
   } from '@/bridge/hostBridge';
   import { useConfigStore } from '@/stores/configStore';
+  import { useSessionStore } from '@/stores/sessionStore';
   import { isBadTime } from '@/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
 
@@ -20,9 +21,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const sessions = ref<SessionMetadata[]>([]);
   const activeSessionId = ref<string>('');
-
+  // need22-P2 F1：activeSessionId 唯一真相=sessionStore；本 ref 为兼容镜像，任何写入同步过去。
+  const sessionStore = useSessionStore();
+  watch(activeSessionId, (sid) => { sessionStore.syncActive(sid || ''); }, { flush: 'sync' });
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
   const budgetStatus = ref<ContextBudgetStatusDto | null>(null);
+  // need22-P3 G6：budget 失败显式角标（顶栏⚠），统一 {code,message}
+  const budgetError = ref<{ code: string; message: string } | null>(null);
 
   const searchQuery = ref<string>('');
   const loading = ref<boolean>(false);
@@ -241,12 +246,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
    async function selectSession(sessionId: string): Promise<void> {
-     if (activeSessionId.value === sessionId) return;
-     activeSessionId.value = sessionId;
-     await loadSessionMessages(sessionId);
+     const sid = (sessionId || '').trim();
+     if (!sid) return;
+     if (activeSessionId.value === sid && useSessionStore().activeSessionId === sid) return;
+     // need22-P2 F3：递增 epoch + 换发 AbortController；旧 epoch 响应全部丢弃
+     const sessionStore = useSessionStore();
+     const { epoch, signal } = sessionStore.beginSelect(sid);
+     activeSessionId.value = sid;
+     await loadSessionMessages(sid, { signal, epoch });
      // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
-     if (await healSessionHistory()) await loadSessionMessages(sessionId);
-     await refreshBudget();
+     if (await healSessionHistory({ signal, epoch })) await loadSessionMessages(sid, { signal, epoch });
+     await refreshBudget({ signal, epoch });
    }
 
   async function createSession(
@@ -339,21 +349,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false;
   }
 
-  async function loadSessionMessages(sessionId: string): Promise<void> {
+  async function loadSessionMessages(sessionId: string, opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
       return;
     }
+    // need22-P2 F3：无显式 epoch 时按进入时 epoch 快照；旧 epoch 响应丢弃不覆盖视图
+    const sessionStore = useSessionStore();
+    const epoch = opts?.epoch ?? sessionStore.epoch;
+    const signal = opts?.signal ?? null;
+    const sid = (sessionId || '').trim();
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
-      const res = await bridge.getSessionMessages(activeWorkspaceId.value, sessionId);
+      const res = await bridge.getSessionMessages(activeWorkspaceId.value, sid);
+      if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
+        sessionStore.discardStale(`loadSessionMessages(${sid.slice(-6)})`);
+        return;
+      }
       if (res.ok && res.data) {
         sessionMessages.value = res.data;
       } else {
         sessionMessages.value = [];
       }
     } catch (err) {
+      if (!sessionStore.isCurrent(epoch, signal)) {
+        sessionStore.discardStale(`loadSessionMessages-error(${sid.slice(-6)})`);
+        return;
+      }
       console.error('[workspaceStore] loadSessionMessages failed:', err);
       sessionMessages.value = [];
     } finally {
@@ -490,21 +513,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return '';
   }
 
-  async function refreshBudget(): Promise<void> {
+  async function refreshBudget(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
     if (!activeWorkspaceId.value || !activeSessionId.value) {
       budgetStatus.value = null;
       return;
     }
+    // need22-P2 F3：快照 sid+epoch；旧 epoch 的预算回包不覆盖当前顶栏
+    const sessionStore = useSessionStore();
+    const epoch = opts?.epoch ?? sessionStore.epoch;
+    const signal = opts?.signal ?? null;
+    const sid = activeSessionId.value;
     try {
       const bridge = getHostBridge();
       const pId = configStore.activeProvider?.id || '';
       const mId = configStore.activeModel?.id || '';
-      const res = await bridge.getContextBudget(pId, mId, activeWorkspaceId.value, activeSessionId.value);
+      const res = await bridge.getContextBudget(pId, mId, activeWorkspaceId.value, sid);
+      if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
+        sessionStore.discardStale(`refreshBudget(${sid.slice(-6)})`);
+        return;
+      }
       if (res.ok && res.data) {
         budgetStatus.value = res.data;
+        budgetError.value = null;
+      } else if (!res.ok) {
+        budgetError.value = { code: res.code || 'BUDGET_FAILED', message: res.message || '预算刷新失败' };
+        console.warn('[workspaceStore] refreshBudget failed:', budgetError.value);
       }
     } catch (err) {
-      console.error('[workspaceStore] refreshBudget failed:', err);
+      budgetError.value = { code: 'BUDGET_FAILED', message: err instanceof Error ? err.message : String(err) };
+      console.warn('[workspaceStore] refreshBudget failed:', budgetError.value);
     }
   }
 
@@ -547,11 +584,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
    // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
-   async function healSessionHistory(): Promise<boolean> {
+   async function healSessionHistory(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<boolean> {
      if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+     const sessionStore = useSessionStore();
+     const epoch = opts?.epoch ?? sessionStore.epoch;
+     const signal = opts?.signal ?? null;
+     const sid = activeSessionId.value;
      try {
        const bridge = getHostBridge();
-       const res = await bridge.healSessionHistory(activeWorkspaceId.value, activeSessionId.value);
+       const res = await bridge.healSessionHistory(activeWorkspaceId.value, sid);
+       if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
+         sessionStore.discardStale(`healSessionHistory(${sid.slice(-6)})`);
+         return false;
+       }
        if (!res.ok || !res.data) return false;
        const d = res.data;
        if ((d.syntheticAppended || 0) > 0 || (d.orphanToolsRemoved || 0) > 0) {
@@ -604,6 +649,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSession,
     sessionMessages,
     budgetStatus,
+    budgetError,
     searchQuery,
     loading,
     loadingMessages,

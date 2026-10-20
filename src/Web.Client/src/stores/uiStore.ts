@@ -12,7 +12,8 @@ const STORAGE_KEY = 'halo.ui.rightRail.v1';
 const MIN_W = 320;
 const MAX_W = 720;
 
-interface Persisted {
+/** need22-P5 J7：持久化 UI 偏好类型（对外导出供调试/复用，行为不变）。 */
+export interface Persisted {
   tab: RightRailTab;
   width: number;
   hintShown: boolean;

@@ -4,11 +4,14 @@ import {
   getHostBridge,
   haloEventBus,
   type SessionStreamEventDto,
+  type UnifiedChatMessage,
 } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useSessionStore } from '@/stores/sessionStore';
 import { useConfigStore } from '@/stores/configStore';
 // need09-06：问询 pending 视为忙（askUserStore 不反向依赖本 store，无循环）
 import { useAskUserStore } from '@/stores/askUserStore';
+import { buildTurnGroups, buildTimelineEntries, type TurnGroup, type TimelineEntry } from '@/utils/turnGroup';
 
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
@@ -93,6 +96,12 @@ export interface AgentTurnState {
   telemetry: AgentTelemetry;
   turnNotice: string;
   lastError: string;
+  /** need22-P2 F5：结构化错误（code/message/retry），lastError 字符串保留兼容模板 */
+  lastErrorInfo: { code: string; message: string; retry: boolean } | null;
+  /** need22-P2 F2：本轮 requestId（uuid，去重键；空=无进行中轮） */
+  requestId: string;
+  /** need22-P2 F5：失败重试用原文（成功/新发后清空） */
+  lastPrompt: string;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -126,6 +135,9 @@ function emptyTurnState(sessionId: string, fallbackProtocol = 'chat'): AgentTurn
     telemetry: emptyTelemetry(fallbackProtocol),
     turnNotice: '',
     lastError: '',
+    lastErrorInfo: null,
+    requestId: '',
+    lastPrompt: '',
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
   };
@@ -145,16 +157,20 @@ function truncateText(s: string, max = 6000): string {
 export const useAgentStore = defineStore('agent', () => {
   const workspaceStore = useWorkspaceStore();
   const configStore = useConfigStore();
+  // need22-P2 F1：activeSessionId 唯一真相=sessionStore；workspace 仅为兼容镜像，只读。
+  const sessionStore = useSessionStore();
 
   const turns = ref<Record<string, AgentTurnState>>({});
   // need04-03/04：本轮去重与归并快照
   const dirtyPersisted = ref<Record<string, boolean>>({});
   const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number }>>({});
+  // need22-P2 F2：已见 requestId（后端回显去重；有界防涨）
+  const seenRequestIds = ref<Record<string, number>>({});
 
   let listenersBound = false;
 
   const activeSessionId = computed(() => {
-    return workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+    return sessionStore.activeSessionId || workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
   });
 
   const activeKey = computed(() => {
@@ -233,7 +249,25 @@ export const useAgentStore = defineStore('agent', () => {
     return t.streamingActive || t.streamingText.length > 0 || t.streamingReasoning.length > 0 || t.toolCards.length > 0;
   });
 
-  // need04-03：本轮已在流式卡中存在的 callId，持久区 tool 灰块隐藏（只藏显示不删数据）
+  // need22-P2 F1：单真相源归并 getter（全应用只算一次，computed 缓存；Timeline 与目录共享）。
+  // turns 为唯一真相：流式卡（瞬态）+ sessionMessages（持久投影）在此归并；组件只读此处。
+  function persistedOf(): UnifiedChatMessage[] {
+    return workspaceStore.sessionMessages || [];
+  }
+  const activeTurnGroups = computed<TurnGroup[]>(() => buildTurnGroups(persistedOf()));
+  const visibleTurnGroups = computed<TurnGroup[]>(() => {
+    const hidden = new Set(activeTurn.value.toolCards.map((c) => c.callId).filter(Boolean));
+    if (hidden.size === 0) return activeTurnGroups.value;
+    const out: TurnGroup[] = [];
+    for (const g of activeTurnGroups.value) {
+      const kept = g.toolMessages.filter((m) => !hidden.has(String((m as unknown as { toolCallId?: string }).toolCallId || '')));
+      if (!g.content && !g.reasoning && kept.length === 0) continue;
+      out.push({ ...g, toolMessages: kept });
+    }
+    return out;
+  });
+  const activeTimelineEntries = computed<TimelineEntry[]>(() => buildTimelineEntries(persistedOf(), visibleTurnGroups.value));
+  // 兼容别名：旧 hiddenToolCallIds 引用统一走 store 内归并（F1 后不再散落各组件计算）
   const hiddenToolCallIds = computed<Set<string>>(() => new Set(activeTurn.value.toolCards.map((c) => c.callId).filter(Boolean)));
   // need13：主会话子进度别名（模板直接用 activeTurn.subAgents 亦可，此处供 PromptComposer 便捷绑定）
   const subAgents = computed(() => activeTurn.value.subAgents);
@@ -253,6 +287,31 @@ export const useAgentStore = defineStore('agent', () => {
       const fn = (ws as unknown as { touchSessionTime?: (sid: string, iso?: string) => void }).touchSessionTime;
       if (typeof fn === 'function') fn.call(ws, sessionId, iso);
     } catch { /* 时间刷新永不阻断主链路 */ }
+  }
+
+  /** need22-P2 F2：uuid（crypto 优先，降级 Math.random）。 */
+  function newRequestId(): string {
+    try {
+      const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+      if (c && typeof c.randomUUID === 'function') return c.randomUUID().replace(/-/g, '');
+    } catch { /* fall through */ }
+    return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  }
+
+  function toast(kind: 'info' | 'success' | 'warning' | 'error', text: string): void {
+    try {
+      (window as unknown as { $message?: Record<string, (s: string) => void> }).$message?.[kind]?.(text);
+    } catch { /* 无消息通道时静默 */ }
+  }
+
+  function markSeenRequest(reqId: string): void {
+    const id = (reqId || '').trim();
+    if (!id) return;
+    seenRequestIds.value[id] = Date.now();
+    const keys = Object.keys(seenRequestIds.value);
+    if (keys.length > 500) {
+      for (const k of keys.slice(0, keys.length - 500)) delete seenRequestIds.value[k];
+    }
   }
 
   function touch(t: AgentTurnState): void {
@@ -307,6 +366,15 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.cachedTokens = evt.usage.cachedInputTokens || 0;
         t.telemetry.liveEst = 0; // need05-01：Usage 到账切真实，≈ 消失
         touch(t);
+      } else if (evt.kind === 'StreamError') {
+        // need22-P3 G6：StreamError 落 turnNotice + lastError{code,message,retry} + 重试（不断流式卡）
+        t.isGenerating = false;
+        t.streamingActive = false;
+        t.lastError = evt.errorMessage || evt.errorCode || '流式中断';
+        t.lastErrorInfo = { code: evt.errorCode || 'STREAM_ERROR', message: t.lastError, retry: true };
+        t.turnNotice = `流式中断：${t.lastError}（可点“重试本轮”）`;
+        touch(t);
+        toast('error', t.lastError);
       }
     });
 
@@ -509,6 +577,9 @@ export const useAgentStore = defineStore('agent', () => {
         t.isGenerating = false;
         t.streamingActive = false;
         t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '压缩失败';
+        // need22-P2 F5：结构化错误（可重试=false，压缩失败走按钮重发）
+        t.lastErrorInfo = { code: str(payload['errorCode']) || 'COMPACT_FAILED', message: t.lastError, retry: false };
+        toast('error', t.lastError);
         touch(t);
         break;
       }
@@ -538,10 +609,15 @@ export const useAgentStore = defineStore('agent', () => {
         t.isGenerating = false;
         t.streamingActive = false;
         t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '推理失败';
+        // need22-P2 F5：结构化错误+保留流式卡（finishTurn(keepOnFailure) 不清容器）+重试
+        t.lastErrorInfo = { code: str(payload['errorCode']) || 'TURN_ERROR', message: t.lastError, retry: true };
+        // need22-P3 G6：TurnError 同落 turnNotice（模板已有 turnNotice + 重试按钮）
+        t.turnNotice = `推理失败：${t.lastError}（可点“重试本轮”）`;
         // need13：错误即解除子等待
         t.subAgents.waiting = false;
         touch(t);
-        void finishTurn(sid);
+        toast('error', t.lastError);
+        void finishTurn(sid, { keepOnFailure: true });
         void workspaceStore.generateTitleAfterFirstRound(sid).catch(() => undefined);
         break;
       }
@@ -621,30 +697,36 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  async function finishTurn(targetSessionId?: string): Promise<void> {
+  async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean }): Promise<void> {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
-    if (sid) {
-      const t = ensureTurn(sid);
-      // need04-04：轮末快照（03 管清，04 管快照）：供时间轴无缝占位，随后被持久 turnGroups 替换
-      try {
-        lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
-        haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
-      } catch { /* 快照失败不阻断收尾 */ }
-      if (dirtyPersisted.value[sid]) {
-        await refreshAfterTool(sid, 'finish');
-        dirtyPersisted.value[sid] = false;
-      } else {
-        await refreshAfterTool(sid, 'finish');
-      }
-      // need04-01：轮末轻量对账一次（每轮至多1次 getSessions，KB 级）
-      try { await (workspaceStore as unknown as { reconcileSessionTimes?: () => Promise<void> }).reconcileSessionTimes?.(); } catch { /* 忽略 */ }
-      // 清流式容器（工具卡移交快照后清空，消除轮末双影）
-      t.toolCards = [];
-      t.streamingText = '';
-      t.streamingReasoning = '';
-      t.streamingActive = false;
-      touch(t);
+    if (!sid) return;
+    const t = ensureTurn(sid);
+    // need04-04：轮末快照（03 管清，04 管快照）：供时间轴无缝占位，随后被持久 turnGroups 替换
+    try {
+      lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
+      haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
+    } catch { /* 快照失败不阻断收尾 */ }
+    if (dirtyPersisted.value[sid]) {
+      await refreshAfterTool(sid, 'finish');
+      dirtyPersisted.value[sid] = false;
+    } else {
+      await refreshAfterTool(sid, 'finish');
     }
+    // need04-01：轮末轻量对账一次（每轮至多1次 getSessions，KB 级）
+    try { await (workspaceStore as unknown as { reconcileSessionTimes?: () => Promise<void> }).reconcileSessionTimes?.(); } catch { /* 忽略 */ }
+    // need22-P2 F2：轮终 requestId 清零（旧轮结束，新发不再被判重入）
+    t.requestId = '';
+    // need22-P2 F5：失败保留流式卡（不清容器，留错误 toast+重试按钮）；成功/取消才清
+    if (opts?.keepOnFailure && t.lastErrorInfo?.retry) {
+      touch(t);
+      return;
+    }
+    // 清流式容器（工具卡移交快照后清空，消除轮末双影）
+    t.toolCards = [];
+    t.streamingText = '';
+    t.streamingReasoning = '';
+    t.streamingActive = false;
+    touch(t);
   }
 
   function isCompacting(sessionId: string): boolean {
@@ -652,42 +734,77 @@ export const useAgentStore = defineStore('agent', () => {
     return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
   }
 
-    /** need09-04：发送图片附件（可选第二参；老调用 sendPrompt(text) 仍为纯文本） */
+    /** need22-P2 F2：幂等发送。生成 requestId=uuid 透传后端；连点第二发返回既有 requestId+toast，不起新轮。 */
     async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
      const content = (text || '').trim();
      const sessionId = activeSessionId.value;
      const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && a.base64) : [];
      if ((!content && readyFiles.length === 0) || !sessionId) return false;
-     if (isCompacting(sessionId)) return false; // need05-03：压缩中拒绝发送
-     if (ensureTurn(sessionId).isGenerating) return false;
- 
-     const workspaceId = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
-     if (!workspaceId || !sessionId) return false;
- 
-     // need09-03/04：超限取最新 N 张（与后端网关一致，取新丢旧；0=默认4）
-     let maxImages = Number(configStore.activeModel?.maxImagesPerTurn);
-     if (!Number.isFinite(maxImages) || maxImages === 0) maxImages = 4;
-     maxImages = Math.max(1, Math.min(16, Math.trunc(maxImages)));
+     if (isCompacting(sessionId)) { toast('warning', '压缩中，新一轮请稍候'); return false; } // need05-03：压缩中拒绝发送
+     const cur = ensureTurn(sessionId);
+     if (cur.isGenerating) {
+       // 连点/重入：直接返回既有 requestId + toast，不起新轮（后端同时回 TURN_IN_PROGRESS 双保险）
+       toast('warning', `上一轮仍在进行中（requestId=${cur.requestId || 'unknown'}），本发已忽略`);
+       return false;
+     }
+    const prevRequestId = cur.requestId || '';
+    const prevPrompt = cur.lastPrompt || '';
+
+    const workspaceId = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
+    if (!workspaceId || !sessionId) return false;
+
+    // need09-03/04：超限取最新 N 张（与后端网关一致，取新丢旧；0=默认4）
+    let maxImages = Number(configStore.activeModel?.maxImagesPerTurn);
+    if (!Number.isFinite(maxImages) || maxImages === 0) maxImages = 4;
+    maxImages = Math.max(1, Math.min(16, Math.trunc(maxImages)));
      const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
      const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
- 
+
      ensureListeners();
      resetTurnState(sessionId);
      touchSessionClock(sessionId);
      const t = ensureTurn(sessionId);
+     const requestId = newRequestId();
+     t.requestId = requestId;
+     markSeenRequest(requestId);
      t.isGenerating = true;
      t.streamingActive = true;
+     t.lastErrorInfo = null;
+     t.lastPrompt = content;
      touch(t);
- 
+
      try {
        const bridge = getHostBridge();
        const providerId = configStore.activeProvider?.id || '';
        const modelId = configStore.activeModel?.id || '';
-       const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId, attachmentsJson);
+       const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId, attachmentsJson, requestId);
        if (!res.ok) {
+        if (res.code === 'TURN_IN_PROGRESS') {
+          // 后端重入拒绝：旧轮不受影响，恢复旧 requestId/原文继续跟旧轮
+          t.requestId = prevRequestId;
+          t.lastPrompt = prevPrompt || t.lastPrompt;
+          t.lastError = res.message || '上一轮仍在进行中';
+          t.lastErrorInfo = { code: 'TURN_IN_PROGRESS', message: t.lastError, retry: false };
+          toast('warning', t.lastError);
+          touch(t);
+          return false;
+        }
+         if (res.code === 'COMPACTING') {
+           t.lastError = res.message || '该会话正在压缩上下文';
+           t.lastErrorInfo = { code: 'COMPACTING', message: t.lastError, retry: false };
+           t.isGenerating = false;
+           t.streamingActive = false;
+           t.requestId = '';
+           toast('warning', t.lastError);
+           touch(t);
+           return false;
+         }
          t.lastError = res.message || '启动 Agent 推理失败';
+         t.lastErrorInfo = { code: res.code || 'AGENT_START_ERROR', message: t.lastError, retry: true };
          t.isGenerating = false;
          t.streamingActive = false;
+         t.requestId = '';
+         toast('error', t.lastError);
          touch(t);
          return false;
        }
@@ -697,35 +814,90 @@ export const useAgentStore = defineStore('agent', () => {
      } catch (err) {
        console.error('[agentStore] sendPrompt failed:', err);
        t.lastError = err instanceof Error ? err.message : String(err);
+       t.lastErrorInfo = { code: 'SEND_FAILED', message: t.lastError, retry: true };
        t.isGenerating = false;
        t.streamingActive = false;
+       t.requestId = '';
+       toast('error', t.lastError);
        touch(t);
-       return false;
-     }
-   }
+      return false;
+    }
+  }
 
   async function stopGenerating(targetSessionId?: string): Promise<void> {
     const sessionId = (targetSessionId ?? activeSessionId.value).trim();
     if (!sessionId) return;
     if (isCompacting(sessionId)) return; // need05-03：压缩中不可中断，中断按钮无效
+    // need22-P2 F5：等后端 TurnCancelled 事件后再清本地（超时 5s 降级清 + 告警）
+    const cancelled = waitTurnCancelled(sessionId, 5000);
     try {
       const bridge = getHostBridge();
       await bridge.cancelAgentTurn(sessionId);
     } catch (err) {
       console.error('[agentStore] stopGenerating failed:', err);
-    } finally {
-      // need09-06：问询等待期间停止 = 取消提问 + 取消整轮（后端 ct 联动转 Fail）
-      try {
-        const ask = useAskUserStore();
-        if (ask.hasPending(sessionId)) ask.clearPending(sessionId);
-      } catch { /* ignore */ }
-      const t = ensureTurn(sessionId);
-      t.isGenerating = false;
-      t.streamingActive = false;
-      t.turnNotice = '已停止生成。';
-      touch(t);
-      await refreshAfterTool(sessionId);
     }
+    const got = await cancelled;
+    if (!got) {
+      console.warn('[agentStore] stopGenerating: TurnCancelled 超时 5s，降级本地清理');
+      toast('warning', '取消指令已发送，但后端确认超时，已本地清理');
+    }
+    // need09-06：问询等待期间停止 = 取消提问 + 取消整轮（后端 ct 联动转 Fail）
+    try {
+      const ask = useAskUserStore();
+      if (ask.hasPending(sessionId)) ask.clearPending(sessionId);
+    } catch { /* ignore */ }
+    const t = ensureTurn(sessionId);
+    t.isGenerating = false;
+    t.streamingActive = false;
+    t.requestId = '';
+    t.turnNotice = '已停止生成。';
+    touch(t);
+    await refreshAfterTool(sessionId);
+  }
+
+  /** 等指定会话 TurnCancelled 事件；超时回 false（不抛）。 */
+  function waitTurnCancelled(sessionId: string, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (v: boolean): void => {
+        if (done) return;
+        done = true;
+        try { unsub(); } catch { /* ignore */ }
+        resolve(v);
+      };
+      const timer = window.setTimeout(() => finish(false), Math.max(500, timeoutMs));
+      void timer;
+      const unsub = haloEventBus.on<TurnEventPayload>('agent:turn-event', (evt) => {
+        try {
+          if (!evt || evt.kind !== 'TurnCancelled') return;
+          if (String(evt.sessionId || '').trim() !== sessionId) return;
+          finish(true);
+        } catch { /* ignore */ }
+      });
+    });
+  }
+
+  /** need22-P2 F5：失败重试（用 lastPrompt 原文重发；成功清错误态）。 */
+  async function retryLastTurn(targetSessionId?: string): Promise<boolean> {
+    const sid = (targetSessionId ?? activeSessionId.value).trim();
+    if (!sid) return false;
+    const t = ensureTurn(sid);
+    if (t.isGenerating) return false;
+    const text = (t.lastPrompt || '').trim();
+    if (!text) return false;
+    t.lastError = '';
+    t.lastErrorInfo = null;
+    touch(t);
+    return sendPrompt(text);
+  }
+
+  function clearLastError(targetSessionId?: string): void {
+    const sid = (targetSessionId ?? activeSessionId.value).trim();
+    if (!sid) return;
+    const t = ensureTurn(sid);
+    t.lastError = '';
+    t.lastErrorInfo = null;
+    touch(t);
   }
 
   function isBusyForHistory(sessionId: string): boolean {
@@ -819,6 +991,14 @@ export const useAgentStore = defineStore('agent', () => {
     subscribe,
     pauseTurn,
     resumeTurn,
+    // need22-P2 F1：单真相源归并（只算一次，Timeline 与目录共享）
+    activeTurnGroups,
+    visibleTurnGroups,
+    activeTimelineEntries,
+    // need22-P2 F2/F5
+    seenRequestIds,
+    retryLastTurn,
+    clearLastError,
     // 兼容旧模板/旧调用
     streamingText,
     streamingReasoning,

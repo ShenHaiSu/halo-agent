@@ -120,6 +120,41 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   return groups;
 }
 
+/** need22-P3 G1：增量归并——仅末 turn 重算，其余复用引用（依赖行表 rowId=msg.id 稳定）。
+ * 历史删改（消息减少/末 assistant 落在旧前缀内且后缀非纯 tool）时全量回退，保证正确性。 */
+export function buildTurnGroupsIncremental(prevGroups: TurnGroup[], prevMsgCount: number, messages: UnifiedChatMessage[]): { groups: TurnGroup[]; msgCount: number } {
+  const full = (): { groups: TurnGroup[]; msgCount: number } => ({ groups: buildTurnGroups(messages), msgCount: messages.length });
+  if (!prevGroups.length || prevMsgCount <= 0 || messages.length < prevMsgCount) return full();
+  let lastAsstIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() === 'assistant') { lastAsstIdx = i; break; }
+  }
+  if (lastAsstIdx < 0) return full();
+  if (lastAsstIdx < prevMsgCount) {
+    let onlyTools = true;
+    for (let i = prevMsgCount; i < messages.length; i++) {
+      if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() !== 'tool') { onlyTools = false; break; }
+    }
+    if (!onlyTools) return full();
+  }
+  const lastAsstId = String(messages[lastAsstIdx].id || '');
+  const keepEnd = prevGroups.findIndex((g) => g.assistantId === lastAsstId);
+  const kept = keepEnd < 0 ? [] : prevGroups.slice(0, keepEnd);
+  const tail = buildTurnGroups(messages.slice(lastAsstIdx));
+  return { groups: [...kept, ...tail], msgCount: messages.length };
+}
+
+/** need22-P3 G1：blockHash（终态 md.render 缓存键；FNV-1a 32bit hex + 长度）。 */
+export function blockHash(s: string): string {
+  let h = 0x811c9dc5;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0') + ':' + str.length;
+}
+
 /** need09-05：会话导出 markdown（含图：`![file](relPath)`；丢失：`[图片已丢失：file]`；不嵌 base64） */
 export function exportSessionMarkdown(messages: UnifiedChatMessage[]): string {
   const lines: string[] = [];

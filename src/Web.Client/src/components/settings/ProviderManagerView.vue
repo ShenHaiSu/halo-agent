@@ -633,21 +633,6 @@ function normalizeVisionFields(mdl: ModelConfig): void {
   if (!['auto', 'low', 'high'].includes(String(m['visionDetail']))) m['visionDetail'] = 'high';
 }
 
-function ensureVisionDefaults(mdl: ModelConfig): void {
-  normalizeVisionFields(mdl);
-}
-
-function clampMaxImages(mdl: ModelConfig): void {
-  const m = mdl as unknown as Record<string, unknown>;
-  if (!Number.isFinite(m['maxImagesPerTurn'] as number)) {
-    m['maxImagesPerTurn'] = 4;
-    return;
-  }
-  let v = Math.trunc(m['maxImagesPerTurn'] as number);
-  if (v < 0) v = 0;
-  if (v > 16) v = 16;
-  m['maxImagesPerTurn'] = v;
-}
 
 function normalizeAllVisionFields(): void {
   if (!editingProvider.value) return;

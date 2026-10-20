@@ -258,6 +258,7 @@ import {
   History,
 } from 'lucide-vue-next';
 import { useSystemStore } from '@/stores/systemStore';
+import { formatSmartBytesShort } from '@/utils/formatSmartBytes';
 
 const systemStore = useSystemStore();
 const message = useMessage();
@@ -306,12 +307,9 @@ const displayedLogChannels = computed(() => {
     },
   ];
 });
-
+// need22-P5 J7：字节格式化收敛到 utils/formatSmartBytes（短格式；0/负/NaN→'0 B' 与原语义一致）。
 function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return formatSmartBytesShort(bytes);
 }
 
 async function handleChangeStoragePath() {

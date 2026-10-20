@@ -44,6 +44,7 @@
             class="flex items-center gap-2 px-2.5 py-1 rounded bg-surface hover:bg-elevated border border-subtle transition-colors cursor-pointer text-xs"
             data-testid="context-quota-meter-badge"
           >
+            <span v-if="budgetWarnText" data-testid="budget-warn-badge" class="text-amber-500 font-bold" :title="budgetWarnText" @click.stop="onBudgetWarnClick">⚠</span>
             <n-progress
               type="circle"
               :percentage="progressPercentage"
@@ -166,6 +167,29 @@
         </div>
       </n-popover>
 
+      <!-- need22-P2 F4：非当前会话问询 badge（红点+计数，点击跳回归属会话） -->
+      <n-badge
+        v-if="askBadgeCount > 0"
+        :value="askBadgeCount"
+        :max="9"
+        data-testid="ask-pending-badge"
+        @click="onJumpToAsk"
+      >
+        <n-button
+          quaternary
+          size="small"
+          class="!px-2"
+          title="有会话在等待你的回答，点击跳回"
+        >
+          <template #icon>
+            <span class="relative inline-flex">
+              <MessageCircleQuestion class="w-4 h-4 text-rose-500" />
+              <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 border border-white" />
+            </span>
+          </template>
+        </n-button>
+      </n-badge>
+
       <!-- 3. 主题切换 -->
       <n-button
         quaternary
@@ -206,11 +230,13 @@ import {
   Settings,
   Sun,
   Moon,
+  MessageCircleQuestion,
 } from 'lucide-vue-next';
  import { useAppearanceStore } from '@/stores/appearanceStore';
  import { useConfigStore } from '@/stores/configStore';
  import { useWorkspaceStore } from '@/stores/workspaceStore';
  import { useAgentStore } from '@/stores/agentStore';
+ import { useAskUserStore } from '@/stores/askUserStore';
  import { useSubSessionStore } from '@/stores/subSessionStore';
  import type { ModelConfig } from '@/bridge/hostBridge';
 
@@ -223,7 +249,16 @@ const emit = defineEmits<{
  const workspaceStore = useWorkspaceStore();
  const agentStore = useAgentStore();
  const subStore = useSubSessionStore();
- const { activeWorkspace, activeSession, budgetStatus } = storeToRefs(workspaceStore);
+ const { activeWorkspace, activeSession, budgetStatus, budgetError } = storeToRefs(workspaceStore);
+ // need22-P3 G6：budget/refreshAll 失败顶栏⚠角标（统一 {code,message}，点击重试）
+ const budgetWarnText = computed(() => {
+   const b = budgetError.value;
+   if (b) return `预算刷新失败 [${b.code}]：${b.message}（点击重试）`;
+   return '';
+ });
+ function onBudgetWarnClick(): void {
+   try { void workspaceStore.refreshBudget(); } catch (e) { console.warn('[topbar] budget retry failed:', e); }
+ }
  const { providersDoc, activeProvider, activeModel } = storeToRefs(configStore);
  const subOptions = computed(() => subStore.subs.map((s) => ({ label: `${(s.subLabel || s.title || '').slice(0, 12)}(${String(s.id).slice(-6)})`, key: s.id })));
  function onBackMain() { subStore.exitSub(); }
@@ -403,6 +438,25 @@ async function handleSelectModel(value: string): Promise<void> {
     await workspaceStore.refreshBudget();
     message.success(`已切换模型: ${modelId}`);
   }
+}
+
+// need22-P2 F4：后台问询 badge（非当前会话 pending 计数；点击跳回第一个归属会话）
+const askUserStore = useAskUserStore();
+const askBadgeCount = computed(() => {
+  try {
+    const cur = workspaceStore.activeSessionId || '';
+    return askUserStore.foreignPendings(cur).length;
+  } catch { return 0; }
+});
+async function onJumpToAsk(): Promise<void> {
+  try {
+    const cur = workspaceStore.activeSessionId || '';
+    const foreign = askUserStore.foreignPendings(cur);
+    const target = foreign[0]?.sessionId || askUserStore.modalSessionId || '';
+    if (!target) return;
+    if (target !== cur) await workspaceStore.selectSession(target);
+    askUserStore.openModal(target);
+  } catch { /* ignore */ }
 }
 
 async function copySessionHash(): Promise<void> {
