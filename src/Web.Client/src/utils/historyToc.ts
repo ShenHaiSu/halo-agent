@@ -21,15 +21,16 @@ export interface TocItem {
   hasReasoning: boolean;
   /** 消息创建时间（可能为空串） */
   createdAtUtc: string;
-  /** 是否为该轮第一条（用于“只看每轮首条”） */
+  /** 是否为该轮第一条（保留兼容；过滤已改为“只看每轮末条”） */
   isRoundHead: boolean;
+  /** 是否为该轮最后一条 assistant（用于“只看每轮末条”） */
+  isRoundTail: boolean;
 }
 export interface TocFilter {
   role: 'all' | 'user' | 'assistant';
   roundHeadsOnly: boolean;
   skipSystem?: boolean;
 }
-
 const MAX_SCAN = 4000; // 巨型消息只扫前 4k（07 E-07）
 const LABEL_MAX = 15;
 
@@ -41,7 +42,8 @@ export function toDisplayText(raw: string | null | undefined): string {
   let s = String(raw ?? '');
   if (s.length > MAX_SCAN) s = s.slice(0, MAX_SCAN);
   // 1) 去掉图片占位：[image:xxx] / ![alt](path) / <img ...>
-  s = s.replace(/\[image:[^\]]*\]/gi, ' ')
+  s = s
+    .replace(/\[image:[^\]]*\]/gi, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/<img\b[^>]*>/gi, ' ');
   // 2) 去掉代码围栏标记（保留代码内容文字）
@@ -53,7 +55,8 @@ export function toDisplayText(raw: string | null | undefined): string {
   // 5) 链接 [text](url) → text
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
   // 6) 强调/标题/引用/列表符
-  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '')
+  s = s
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
     .replace(/^\s{0,3}>\s?/gm, '')
     .replace(/^\s{0,3}([-*+]|\d{1,3}[.)])\s+/gm, '');
   s = s.replace(/[*_~]{1,3}/g, '');
@@ -94,7 +97,12 @@ export function labelOfEntry(e: TimelineEntry): string {
   if (e.kind === 'user') {
     const t = toDisplayText(String(e.msg?.content ?? ''));
     if (t) return bubbleLabel(t);
-    if (e.msg && Array.isArray((e.msg as unknown as { images?: unknown[] }).images) && ((e.msg as unknown as { images?: unknown[] }).images as unknown[]).length > 0) return '[图片]';
+    if (
+      e.msg &&
+      Array.isArray((e.msg as unknown as { images?: unknown[] }).images) &&
+      ((e.msg as unknown as { images?: unknown[] }).images as unknown[]).length > 0
+    )
+      return '[图片]';
     return '[空消息]';
   }
   if (e.kind === 'system') {
@@ -106,7 +114,8 @@ export function labelOfEntry(e: TimelineEntry): string {
   if (!g) return '[空回复]';
   const t = toDisplayText(String(g.content ?? ''));
   if (t) {
-    if (/^\s*(?:\[上下文压缩|压缩摘要)/.test(String(g.content ?? '')) || /^\s*(?:\[上下文压缩|压缩摘要)/.test(t)) return 'Σ ' + bubbleLabel(t);
+    if (/^\s*(?:\[上下文压缩|压缩摘要)/.test(String(g.content ?? '')) || /^\s*(?:\[上下文压缩|压缩摘要)/.test(t))
+      return 'Σ ' + bubbleLabel(t);
     return bubbleLabel(t);
   }
   const toolCount = (g.toolMessages || []).length;
@@ -119,27 +128,46 @@ export function labelOfEntry(e: TimelineEntry): string {
 }
 
 export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): TocItem[] {
-  const out: TocItem[] = [];
-  let round = 0;
-  let index = 0;
-  let sawHeadInRound = false;
+  // 预扫描：确定每轮最后一个 assistant 下标（只看每轮末条用）
+  const rounds: number[] = [];
+  const roles: TocRole[] = [];
+  let r = 0;
   for (const e of entries) {
-    index += 1;
     let role: TocRole;
-    if (e.kind === 'user') { role = 'user'; round += 1; sawHeadInRound = false; }
-    else if (e.kind === 'turn') role = 'assistant';
+    if (e.kind === 'user') {
+      role = 'user';
+      r += 1;
+    } else if (e.kind === 'turn') role = 'assistant';
     else role = 'system';
-
+    roles.push(role);
+    rounds.push(role === 'system' ? 0 : r);
+  }
+  const lastAssistantByRound = new Map<number, number>();
+  for (let i = 0; i < entries.length; i++) {
+    if (roles[i] === 'assistant') lastAssistantByRound.set(rounds[i], i);
+  }
+  const out: TocItem[] = [];
+  let sawHeadInRound = false;
+  let curRound = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const role = roles[i];
+    const round = rounds[i];
+    if (role === 'user') {
+      curRound = round;
+      sawHeadInRound = false;
+    }
+    void curRound;
     const isRoundHead = role === 'assistant' && !sawHeadInRound;
     if (role === 'assistant') sawHeadInRound = true;
-
+    const isRoundTail = role === 'assistant' && lastAssistantByRound.get(round) === i;
     // 过滤：角色
     if (filter.role === 'user' && role !== 'user') continue;
     if (filter.role === 'assistant' && role !== 'assistant') continue;
-    if (filter.roundHeadsOnly && role === 'assistant' && !isRoundHead) continue;
+    // roundHeadsOnly 复用为“只看每轮末条”
+    if (filter.roundHeadsOnly && role === 'assistant' && !isRoundTail) continue;
     if (filter.roundHeadsOnly && role === 'system') continue;
     if (filter.skipSystem !== false && role === 'system') continue;
-
     const { text, createdAtUtc } = textOfEntry(e);
     const display = toDisplayText(text);
     const label = labelOfEntry(e);
@@ -151,12 +179,13 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
       label,
       fullText: display.slice(0, MAX_SCAN),
       charCount: Array.from(display).length,
-      index,
-      round: role === 'system' ? 0 : round,
+      index: i + 1,
+      round,
       toolCount,
       hasReasoning,
       createdAtUtc,
       isRoundHead,
+      isRoundTail,
     });
   }
   return out;

@@ -1,7 +1,6 @@
 <template>
   <div class="toc-root" data-testid="history-toc-panel">
     <div class="toc-head">
-      <span class="toc-title">{{ isSub ? '子会话目录（只读）' : '历史目录' }}</span>
       <span class="toc-stat">共 {{ totalCount }} 条</span>
       <n-select
         v-model:value="roleFilter"
@@ -13,9 +12,9 @@
       />
       <n-tooltip trigger="hover" placement="top">
         <template #trigger>
-          <n-switch v-model:value="roundHeadsOnly" size="small" data-testid="toc-round-heads-switch" aria-label="只看每轮首条" />
+          <n-switch v-model:value="roundHeadsOnly" size="small" data-testid="toc-round-heads-switch" aria-label="只看每轮末条" />
         </template>
-        只看每轮首条
+        只看每轮末条
       </n-tooltip>
       <n-button size="tiny" quaternary title="置顶" data-testid="toc-to-top" @click="toTop">⇡</n-button>
       <n-button size="tiny" quaternary title="置底" data-testid="toc-to-bottom" @click="toBottom">⇣</n-button>
@@ -33,22 +32,19 @@
       <p class="toc-empty-desc">在下方输入指令后，这里会出现可跳转的历史目录</p>
     </div>
     <div v-else ref="listRef" class="toc-list" data-testid="toc-list" @scroll.passive="onListScroll">
-      <div
-        v-for="item in visibleItems"
-        :key="item.anchorKey"
-        class="toc-row"
-        :class="[`toc-row--${item.role}`]"
-      >
+      <div v-for="item in visibleItems" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
         <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
       </div>
       <div v-if="hasMoreBefore" class="toc-more">
-        <n-button size="tiny" @click="showEarlier" data-testid="toc-show-earlier">加载更早 {{ Math.min(PAGE, remainingBefore) }} 条</n-button>
+        <n-button size="tiny" data-testid="toc-show-earlier" @click="showEarlier"
+          >加载更早 {{ Math.min(PAGE, remainingBefore) }} 条</n-button
+        >
       </div>
       <div v-if="streamingPulse" class="toc-row toc-row--assistant">
         <span class="toc-bubble toc-bubble--assistant toc-pulse" aria-disabled="true">正在生成…</span>
       </div>
       <div v-if="hasMoreAfter" class="toc-more">
-        <n-button size="tiny" @click="showLater" data-testid="toc-show-later">加载更晚 {{ Math.min(PAGE, remainingAfter) }} 条</n-button>
+        <n-button size="tiny" data-testid="toc-show-later" @click="showLater">加载更晚 {{ Math.min(PAGE, remainingAfter) }} 条</n-button>
       </div>
     </div>
   </div>
@@ -95,11 +91,17 @@ const roleOptions = [
 ];
 const roleFilter = computed({
   get: () => ui.tocRole,
-  set: (v: 'all' | 'user' | 'assistant') => { ui.tocRole = v; resetWindow(); },
+  set: (v: 'all' | 'user' | 'assistant') => {
+    ui.tocRole = v;
+    resetWindow();
+  },
 });
 const roundHeadsOnly = computed({
   get: () => ui.tocRoundHeadsOnly,
-  set: (v: boolean) => { ui.tocRoundHeadsOnly = v; resetWindow(); },
+  set: (v: boolean) => {
+    ui.tocRoundHeadsOnly = v;
+    resetWindow();
+  },
 });
 
 const entries = computed<TimelineEntry[]>(() => {
@@ -129,7 +131,14 @@ function resetWindow(): void {
   windowEnd.value = 0;
   windowSize.value = PAGE;
 }
-watch([tocItems, activeSessionId], () => { resetWindow(); activeKey.value = null; }, { immediate: true });
+watch(
+  [tocItems, activeSessionId],
+  () => {
+    resetWindow();
+    activeKey.value = null;
+  },
+  { immediate: true }
+);
 const visibleItems = computed(() => {
   const all = tocItems.value;
   if (all.length <= 400) return all;
@@ -159,7 +168,9 @@ const remainingAfter = computed(() => {
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return Math.max(0, all.length - end);
 });
-function showEarlier(): void { windowSize.value += PAGE; }
+function showEarlier(): void {
+  windowSize.value += PAGE;
+}
 function showLater(): void {
   const all = tocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
@@ -167,10 +178,14 @@ function showLater(): void {
   if (windowEnd.value >= all.length) windowEnd.value = 0;
   if (windowEnd.value === 0) windowSize.value = all.length;
 }
-function onListScroll(): void { /* L1 不做无限滚动，仅按钮分页，避免误触 */ }
+function onListScroll(): void {
+  /* L1 不做无限滚动，仅按钮分页，避免误触 */
+}
 
 const hintBar = computed(() => !ui.hintShown);
-function dismissHint(): void { ui.markHintShown(); }
+function dismissHint(): void {
+  ui.markHintShown();
+}
 
 async function onJump(item: TocItem): Promise<void> {
   const ok = nav.scrollToAnchor(item.anchorKey, { behavior: 'smooth', highlight: true });
@@ -186,7 +201,10 @@ function toTop(): void {
   const first = tocItems.value[0];
   if (!first) return;
   const ok = nav.scrollToAnchor(first.anchorKey, { behavior: 'smooth', highlight: true });
-  if (ok) { ui.lockJump(1500); activeKey.value = first.anchorKey; }
+  if (ok) {
+    ui.lockJump(1500);
+    activeKey.value = first.anchorKey;
+  }
 }
 function toBottom(): void {
   nav.scrollToBottom();
@@ -194,28 +212,114 @@ function toBottom(): void {
   const last = tocItems.value[tocItems.value.length - 1];
   if (last) {
     activeKey.value = last.anchorKey;
-    void nextTick(() => { nav.scrollToAnchor(last.anchorKey, { behavior: 'auto', highlight: true }); });
+    void nextTick(() => {
+      nav.scrollToAnchor(last.anchorKey, { behavior: 'auto', highlight: true });
+    });
   }
 }
 
-watch(activeSessionId, () => { activeKey.value = null; });
+watch(activeSessionId, () => {
+  activeKey.value = null;
+});
 </script>
 <style scoped>
-.toc-root { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.toc-head { display: flex; align-items: center; gap: 6px; height: 34px; flex: 0 0 auto; }
-.toc-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.toc-stat { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); }
-.toc-hint { font-size: 11px; color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 8px; margin: 4px 0; display: flex; align-items: center; gap: 8px; }
-.toc-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 12px; }
-.toc-row { display: flex; }
-.toc-row--user { justify-content: flex-end; }
-.toc-row--assistant { justify-content: flex-start; }
-.toc-row--system { justify-content: center; }
-.toc-skeleton { height: 28px; border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); opacity: .7; }
-.toc-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-secondary); }
-.toc-empty-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0; }
-.toc-empty-desc { font-size: 12px; margin: 0; }
-.toc-more { display: flex; justify-content: center; padding: 2px 0; }
-.toc-pulse { animation: toc-pulse 1.2s ease-in-out infinite; }
-@keyframes toc-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+.toc-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.toc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  flex: 0 0 auto;
+}
+.toc-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.toc-stat {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.toc-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toc-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 12px;
+}
+.toc-row {
+  display: flex;
+}
+.toc-row--user {
+  justify-content: flex-end;
+}
+.toc-row--assistant {
+  justify-content: flex-start;
+}
+.toc-row--system {
+  justify-content: center;
+}
+.toc-skeleton {
+  height: 28px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  opacity: 0.7;
+}
+.toc-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.toc-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.toc-empty-desc {
+  font-size: 12px;
+  margin: 0;
+}
+.toc-more {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0;
+}
+.toc-pulse {
+  animation: toc-pulse 1.2s ease-in-out infinite;
+}
+@keyframes toc-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 </style>

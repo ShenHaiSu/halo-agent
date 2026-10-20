@@ -1,9 +1,19 @@
 <template>
   <div class="goal-panel-content" :class="[`goal-panel--${mode}`]" data-testid="goal-panel-content">
     <div class="goal-panel-head">
-      <span class="goal-panel-title">🎯 目标<span v-if="readonly">（父目标·只读）</span></span>
+      <span v-if="mode !== 'drawer'" class="goal-panel-title">🎯 目标<span v-if="readonly">（父目标·只读）</span></span>
+      <span v-else class="goal-panel-title is-drawer-sub"><span v-if="readonly">父目标·只读</span><span v-else>明细</span></span>
       <span class="goal-panel-head-actions">
-        <n-button v-if="mode === 'drawer'" size="tiny" quaternary :loading="loading" title="刷新" data-testid="goal-refresh-btn" @click="onRefresh">刷新</n-button>
+        <n-button
+          v-if="mode === 'drawer'"
+          size="tiny"
+          quaternary
+          :loading="loading"
+          title="刷新"
+          data-testid="goal-refresh-btn"
+          @click="onRefresh"
+          >刷新</n-button
+        >
       </span>
     </div>
     <div v-if="loading" class="goal-skeleton" aria-busy="true">
@@ -28,14 +38,19 @@
       </div>
       <div v-else-if="!editing" class="goal-info">
         <h4 class="goal-h" :title="title">{{ title || '（无标题）' }}</h4>
-        <p v-if="showDesc" class="goal-desc">{{ descShown }}<button v-if="descClamped" class="goal-link" @click="descOpen = !descOpen">{{ descOpen ? '收起' : '展开' }}</button></p>
+        <p v-if="showDesc" class="goal-desc">
+          {{ descShown
+          }}<button v-if="descClamped" class="goal-link" @click="descOpen = !descOpen">{{ descOpen ? '收起' : '展开' }}</button>
+        </p>
         <div class="goal-progress-row">
           <n-progress type="line" :percentage="pct" :show-indicator="false" data-testid="goal-progress-bar" style="flex: 1" />
           <span class="goal-meta">{{ done }}/{{ total }} · {{ note }}</span>
         </div>
         <ul class="goal-ms">
           <li v-for="m in milestones" :key="m.id" data-testid="goal-milestone-item" class="goal-ms-item">
-            <n-checkbox :checked="m.done" :disabled="readonly" @update:checked="(v: boolean) => onToggleMilestone(m.id, v)">{{ m.title }}</n-checkbox>
+            <n-checkbox :checked="m.done" :disabled="readonly" @update:checked="(v: boolean) => onToggleMilestone(m.id, v)">{{
+              m.title
+            }}</n-checkbox>
           </li>
         </ul>
       </div>
@@ -100,7 +115,12 @@ const hasContent = computed(() => !!title.value || !!description.value || total.
 const loadError = ref('');
 const staleTip = ref(false);
 
-watch(() => goalStore.goal, () => { if (editing.value) staleTip.value = true; });
+watch(
+  () => goalStore.goal,
+  () => {
+    if (editing.value) staleTip.value = true;
+  }
+);
 
 const descOpen = ref(false);
 const descShown = computed(() => {
@@ -110,18 +130,29 @@ const descShown = computed(() => {
   if (lines.length <= 6 && d.length <= 600) return d;
   return lines.slice(0, 6).join('\n').slice(0, 600);
 });
-const descClamped = computed(() => props.mode === 'drawer' && !descOpen.value && (description.value.split('\n').length > 6 || description.value.length > 600));
+const descClamped = computed(
+  () => props.mode === 'drawer' && !descOpen.value && (description.value.split('\n').length > 6 || description.value.length > 600)
+);
 const showDesc = computed(() => !!description.value);
 
 const editing = ref(false);
 const saving = ref(false);
 const dirty = ref(false);
-const draft = ref({ title: '', description: '', percent: 0, note: '', milestones: [] as Array<{ id: string; title: string; done: boolean }> });
+const draft = ref({
+  title: '',
+  description: '',
+  percent: 0,
+  note: '',
+  milestones: [] as Array<{ id: string; title: string; done: boolean }>,
+});
 const msTitles = ref<string[]>([]);
 
 function openEdit(): void {
   draft.value = {
-    title: title.value, description: description.value, percent: pct.value, note: note.value,
+    title: title.value,
+    description: description.value,
+    percent: pct.value,
+    note: note.value,
     milestones: milestones.value.map((m) => ({ ...m })),
   };
   msTitles.value = milestones.value.map((m) => m.title);
@@ -137,7 +168,10 @@ function randId(): string {
   try {
     const arr = new Uint32Array(2);
     crypto.getRandomValues(arr);
-    rand = Array.from(arr).map((n) => n.toString(36)).join('').slice(0, 6);
+    rand = Array.from(arr)
+      .map((n) => n.toString(36))
+      .join('')
+      .slice(0, 6);
   } catch {
     rand = Math.floor(Math.random() * 36 * 36 * 36 * 36 * 36 * 36).toString(36);
   }
@@ -159,7 +193,10 @@ function onToggleMilestone(id: string, v: boolean): void {
     // 非编辑态勾选：本地 draft + 脏标记，由保存落盘
     if (draft.value.milestones.length === 0) {
       draft.value = {
-        title: title.value, description: description.value, percent: pct.value, note: note.value,
+        title: title.value,
+        description: description.value,
+        percent: pct.value,
+        note: note.value,
         milestones: milestones.value.map((m) => ({ ...m })),
       };
       msTitles.value = milestones.value.map((m) => m.title);
@@ -184,8 +221,10 @@ async function onSaveDraftOnly(): Promise<void> {
       if (!wsId || !sessId) return;
       const payload = buildPayload();
       const r = await goalStore.save(wsId, sessId, payload);
-      if (r.ok) { dirty.value = false; message.success('目标已保存，下一轮生效'); }
-      else message.error(r.message);
+      if (r.ok) {
+        dirty.value = false;
+        message.success('目标已保存，下一轮生效');
+      } else message.error(r.message);
     })();
   }, 2000);
 }
@@ -210,12 +249,19 @@ function buildPayload() {
 async function onSave(): Promise<void> {
   const wsId = ws.activeWorkspaceId || '';
   const sessId = ws.activeSessionId || '';
-  if (!wsId || !sessId) { message.warning('请先选择工作区/会话'); return; }
+  if (!wsId || !sessId) {
+    message.warning('请先选择工作区/会话');
+    return;
+  }
   saving.value = true;
   try {
     const r = await goalStore.save(wsId, sessId, buildPayload());
-    if (r.ok) { message.success('目标已保存，下一轮生效'); editing.value = false; dirty.value = false; staleTip.value = false; }
-    else message.error(r.message);
+    if (r.ok) {
+      message.success('目标已保存，下一轮生效');
+      editing.value = false;
+      dirty.value = false;
+      staleTip.value = false;
+    } else message.error(r.message);
   } finally {
     saving.value = false;
   }
@@ -225,8 +271,11 @@ async function onReset(): Promise<void> {
   const sessId = ws.activeSessionId || '';
   const doReset = async () => {
     const r = await goalStore.clear(wsId, sessId);
-    if (r.ok) { message.success('目标已重置'); editing.value = false; dirty.value = false; }
-    else message.error(r.message);
+    if (r.ok) {
+      message.success('目标已重置');
+      editing.value = false;
+      dirty.value = false;
+    } else message.error(r.message);
   };
   if (props.mode === 'drawer') {
     dialog.warning({
@@ -234,7 +283,9 @@ async function onReset(): Promise<void> {
       content: '将清空标题/描述/里程碑/进度，不可撤销。',
       positiveText: '重置',
       negativeText: '取消',
-      onPositiveClick: () => { void doReset(); },
+      onPositiveClick: () => {
+        void doReset();
+      },
     });
   } else {
     await doReset();
@@ -262,28 +313,156 @@ async function onCopyMarkdown(): Promise<void> {
 void onCopyMarkdown;
 </script>
 <style scoped>
-.goal-panel-content { display: flex; flex-direction: column; gap: 8px; min-height: 0; color: var(--text-primary); }
-.goal-panel-head { display: flex; align-items: center; justify-content: space-between; height: 34px; flex: 0 0 auto; }
-.goal-panel-title { font-size: 13px; font-weight: 600; }
-.goal-panel-head-actions { display: flex; gap: 4px; }
-.goal-skeleton-bar { height: 12px; border-radius: 6px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); margin: 6px 0; }
-.goal-error { padding: 16px; text-align: center; color: var(--text-secondary); font-size: 12px; }
-.goal-corrupt { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 6px 8px; font-size: 12px; color: #92400e; display: flex; align-items: center; gap: 8px; }
-.goal-stale { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.4); border-radius: 8px; padding: 6px 8px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-.goal-empty { padding: 20px 12px; text-align: center; color: var(--text-secondary); font-size: 12px; }
-.goal-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.goal-h { font-size: 14px; font-weight: 600; margin: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.goal-desc { font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; margin: 0; }
-.goal-link { font-size: 12px; color: var(--accent-primary); background: none; border: none; cursor: pointer; }
-.goal-progress-row { display: flex; align-items: center; gap: 8px; }
-.goal-meta { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); white-space: nowrap; }
-.goal-ms { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.goal-ms-item { font-size: 12px; }
-.goal-foot { display: flex; align-items: center; gap: 8px; position: sticky; bottom: 0; padding: 6px 0; background: inherit; }
-.goal-dirty { font-size: 11px; color: #f59e0b; }
-.goal-edit { display: flex; flex-direction: column; gap: 8px; }
-.goal-edit-btns { display: flex; gap: 8px; }
-.goal-slider-row { display: flex; align-items: center; gap: 8px; }
-.goal-panel--float { padding: 8px 10px; }
-.goal-panel--drawer { padding: 2px; }
+.goal-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  color: var(--text-primary);
+}
+.goal-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  flex: 0 0 auto;
+}
+.goal-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.goal-panel-title.is-drawer-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.goal-panel-head-actions {
+  display: flex;
+  gap: 4px;
+}
+.goal-skeleton-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  margin: 6px 0;
+}
+.goal-error {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.goal-corrupt {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-stale {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.goal-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.goal-h {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.goal-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.goal-link {
+  font-size: 12px;
+  color: var(--accent-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.goal-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.goal-ms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.goal-ms-item {
+  font-size: 12px;
+}
+.goal-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding: 6px 0;
+  background: inherit;
+}
+.goal-dirty {
+  font-size: 11px;
+  color: #f59e0b;
+}
+.goal-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.goal-edit-btns {
+  display: flex;
+  gap: 8px;
+}
+.goal-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-panel--float {
+  padding: 8px 10px;
+}
+.goal-panel--drawer {
+  padding: 2px;
+}
 </style>
