@@ -1,23 +1,12 @@
 <template>
-  <n-config-provider
-    :theme="activeTheme"
-    :theme-overrides="activeThemeOverrides"
-    :locale="zhCN"
-    :date-locale="dateZhCN"
-  >
+  <n-config-provider :theme="activeTheme" :theme-overrides="activeThemeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <n-dialog-provider>
       <n-notification-provider placement="bottom-right">
         <n-message-provider>
           <div class="w-screen h-screen overflow-hidden flex flex-col bg-app text-primary select-none">
             <!-- 1. 主体可拖拽分栏区 -->
             <main class="flex-1 min-h-0 overflow-hidden">
-              <n-split
-                direction="horizontal"
-                :size="splitSize"
-                :min="0.16"
-                :max="0.35"
-                @update:size="handleSplitChange"
-              >
+              <n-split direction="horizontal" :size="splitSize" :min="0.16" :max="0.35" @update:size="handleSplitChange">
                 <template #1>
                   <!-- Pane 1: 左侧工作区与多会话导航 (Workspace & Session Sidebar) -->
                   <WorkspaceSessionSidebar />
@@ -27,12 +16,18 @@
                   <!-- Pane 2: 右侧主工作台 -->
                   <section class="h-full flex flex-col bg-app overflow-hidden">
                     <!-- 顶部工作台导航与上下文水位仪 -->
-                     <WorkbenchTopBar @open-settings="openSettingsModal('providers')" />
-                     <!-- need22-P3 G5：Mock 显式红色横幅（禁止静默 Mock）+ 重试按钮 -->
-                     <div v-if="bridgeMock" data-testid="bridge-mock-banner" class="shrink-0 px-3 py-1.5 bg-red-600 text-white text-xs font-medium flex items-center justify-between gap-2">
-                       <span>桥接未连接（Mock数据）——当前为本地 Mock 数据，仅供开发预览</span>
-                       <button data-testid="bridge-retry-btn" class="underline hover:no-underline shrink-0" @click="onBridgeRetry">重试连接</button>
-                     </div>
+                    <WorkbenchTopBar @open-settings="openSettingsModal('providers')" />
+                    <!-- need22-P3 G5：Mock 显式红色横幅（禁止静默 Mock）+ 重试按钮 -->
+                    <div
+                      v-if="bridgeMock"
+                      data-testid="bridge-mock-banner"
+                      class="shrink-0 px-3 py-1.5 bg-red-600 text-white text-xs font-medium flex items-center justify-between gap-2"
+                    >
+                      <span>桥接未连接（Mock数据）——当前为本地 Mock 数据，仅供开发预览</span>
+                      <button data-testid="bridge-retry-btn" class="underline hover:no-underline shrink-0" @click="onBridgeRetry">
+                        重试连接
+                      </button>
+                    </div>
 
                     <!-- Stage 06 Agent 工作台：消息时间轴 + 输入舱 -->
                     <WorkbenchView />
@@ -79,10 +74,7 @@
             </footer>
 
             <!-- 设置中心抽屉 -->
-            <SettingsCenterDrawer
-              v-model:show="showSettingsModal"
-              :default-tab="settingsModalTab"
-            />
+            <SettingsCenterDrawer v-model:show="showSettingsModal" :default-tab="settingsModalTab" />
           </div>
         </n-message-provider>
       </n-notification-provider>
@@ -93,23 +85,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { darkTheme, zhCN, dateZhCN } from 'naive-ui';
-import {
-  Monitor,
-  HardDrive,
-  Network,
-  Hash,
-} from 'lucide-vue-next';
+import { Monitor, HardDrive, Network, Hash } from 'lucide-vue-next';
 import { buildHaloThemeOverrides } from '@/theme/appearance';
 import { useAppearanceStore } from '@/stores/appearanceStore';
 import { useSystemStore } from '@/stores/systemStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useAgentConfigStore } from '@/stores/agentConfigStore';
 import WorkspaceSessionSidebar from '@/components/sidebar/WorkspaceSessionSidebar.vue';
 import WorkbenchTopBar from '@/components/workbench/WorkbenchTopBar.vue';
 import WorkbenchView from '@/views/WorkbenchView.vue';
- import SettingsCenterDrawer from '@/components/settings/SettingsCenterDrawer.vue';
- import { isBridgeMock } from '@/bridge/hostBridge';
- import { negotiate } from '@/bridge/proxy';
+import SettingsCenterDrawer from '@/components/settings/SettingsCenterDrawer.vue';
+import { isBridgeMock } from '@/bridge/hostBridge';
+import { negotiate } from '@/bridge/proxy';
 
 const systemStore = useSystemStore();
 const appearanceStore = useAppearanceStore();
@@ -128,38 +116,47 @@ function openSettingsModal(tab: 'appearance' | 'providers' | 'network' | 'storag
 }
 
 const activeTheme = computed(() => (systemStore.themeMode === 'dark' ? darkTheme : null));
-const activeThemeOverrides = computed(() =>
-  buildHaloThemeOverrides(appearanceStore.settings, appearanceStore.themeMode)
-);
+const activeThemeOverrides = computed(() => buildHaloThemeOverrides(appearanceStore.settings, appearanceStore.themeMode));
 
-const activeSessionHash = computed(
-  () => workspaceStore.activeSession?.sessionHash || '-'
-);
+const activeSessionHash = computed(() => workspaceStore.activeSession?.sessionHash || '-');
 
- function handleSplitChange(val: number) {
-   splitSize.value = val;
-   if (val >= 0.16) {
-     lastExpandedSplitSize.value = val;
-   }
- }
- // need22-P3 G5：Mock 横幅状态（isBridgeMock 由桥接 init 显式标记）
- const bridgeMock = ref(false);
- function refreshBridgeMockFlag(): void {
-   try { bridgeMock.value = isBridgeMock(); } catch (e) { console.warn('[app] mock flag read failed:', e); }
- }
- async function onBridgeRetry(): Promise<void> {
-   try {
-     await negotiate();
-   } catch (e) {
-     console.warn('[app] bridge retry failed:', e);
-   } finally {
-     refreshBridgeMockFlag();
-   }
- }
- onMounted(async () => {
-   appearanceStore.loadAndApply();
-   systemStore.setupEventListeners();
-   await Promise.all([systemStore.refreshAll(), configStore.initialize(), workspaceStore.initialize()]);
-   refreshBridgeMockFlag();
- });
+function handleSplitChange(val: number) {
+  splitSize.value = val;
+  if (val >= 0.16) {
+    lastExpandedSplitSize.value = val;
+  }
+}
+// need22-P3 G5：Mock 横幅状态（isBridgeMock 由桥接 init 显式标记）
+const bridgeMock = ref(false);
+function refreshBridgeMockFlag(): void {
+  try {
+    bridgeMock.value = isBridgeMock();
+  } catch (e) {
+    console.warn('[app] mock flag read failed:', e);
+  }
+}
+async function onBridgeRetry(): Promise<void> {
+  try {
+    await negotiate();
+  } catch (e) {
+    console.warn('[app] bridge retry failed:', e);
+  } finally {
+    refreshBridgeMockFlag();
+  }
+}
+onMounted(async () => {
+  appearanceStore.loadAndApply();
+  systemStore.setupEventListeners();
+  // 启动即异步预取工具 preset（不阻塞首屏，失败静默回退 coding）
+  try {
+    useAgentConfigStore().watchStorageChange();
+  } catch {
+    /* ignore */
+  }
+  const presetPrefetch = useAgentConfigStore()
+    .loadConfig()
+    .catch((e: unknown) => console.warn('[app] preset prefetch failed:', e));
+  await Promise.all([systemStore.refreshAll(), configStore.initialize(), workspaceStore.initialize(), presetPrefetch]);
+  refreshBridgeMockFlag();
+});
 </script>
