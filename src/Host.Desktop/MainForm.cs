@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private readonly bool _isDevelopment;
     private readonly ChromiumWebBrowser _chromeBrowser;
     private readonly HostBridgeFacade _hostBridgeFacade;
+    private readonly CancellationTokenSource _orphanScanCts = new();
     private int _autoVerifyTriggered;
 
     public MainForm(StoragePathManager storageManager, bool gpuDisabled = false)
@@ -78,12 +79,20 @@ public sealed class MainForm : Form
         _chromeBrowser.LoadError += OnLoadError;
 
         Controls.Add(_chromeBrowser);
-         // 启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；脏会话会自动补 synthetic cancelled tool）
-         _ = Task.Run(async () =>
-         {
-             try { await _hostBridgeFacade.ScanAndHealAllSessions().ConfigureAwait(false); }
-             catch (Exception ex) { HaloLogger.App.Warn("[History] startup orphan scan failed", ex); }
-         });
+        // need22-P4 H9：启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；随窗体关闭取消；异常进日志不吞）
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var response = await _hostBridgeFacade.ScanAndHealAllSessions(_orphanScanCts.Token).ConfigureAwait(false);
+                if (!response.Ok)
+                {
+                    HaloLogger.App.Error($"[History] startup orphan scan reported failure: {response.Code}");
+                }
+            }
+            catch (OperationCanceledException) { HaloLogger.App.Info("[History] startup orphan scan cancelled."); }
+            catch (Exception ex) { HaloLogger.App.Error("[History] startup orphan scan failed", ex); }
+        }, _orphanScanCts.Token);
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
     }
 
@@ -279,6 +288,8 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        try { _orphanScanCts.Cancel(); } catch { /* 关闭期忽略 */ }
+        _orphanScanCts.Dispose();
         JsEventDispatcher.Shutdown();
         _hostBridgeFacade.HttpClientFactory.Dispose();
         if (!_chromeBrowser.IsDisposed)

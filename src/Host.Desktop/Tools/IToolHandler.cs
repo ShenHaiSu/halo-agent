@@ -56,6 +56,8 @@ public sealed class ToolContext
     /// </summary>
     public int? ExecDefaultTimeoutMsOverride { get; set; }
     public int? ExecMaxTimeoutMsOverride { get; set; }
+    /// <summary>need22-P0 S2：exec_command 首 token 白名单覆盖（null/空=默认白名单；可配）。</summary>
+    public List<string>? AllowedCommandsOverride { get; set; }
     /// <summary>need13：main|sub（默认 main，老调用零改动）。</summary>
     public string AgentRole { get; init; } = "main";
     /// <summary>need13：sub 寄宿的主会话（main 为 null）。</summary>

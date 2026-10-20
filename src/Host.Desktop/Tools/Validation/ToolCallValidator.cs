@@ -37,7 +37,7 @@ public sealed class ToolCallValidationResult
 /// <summary>
 /// need17-02：中央校验管线（纯函数 + 注册表驱动，无 IO）。
 /// 四步（冻结顺序）：Parse → Shim → Required（含 ConditionalRequired）→ Type/Enum/约束 + 未知字段。
-/// 未知工具（不在注册表，如单测 spy/自定义工具）直接透传，不拦截。
+/// 未知工具（不在注册表）一律拒绝 UNKNOWN_TOOL（need22-P0 S3；透传分支已删除）。
 /// </summary>
 public static class ToolCallValidator
 {
@@ -53,7 +53,11 @@ public static class ToolCallValidator
         public const string EnumViolation = "ENUM_VIOLATION";
         public const string ConstraintViolation = "CONSTRAINT_VIOLATION";
         public const string UnknownArgument = "UNKNOWN_ARGUMENT";
+        public const string UnknownTool = "UNKNOWN_TOOL";
         // need17-07 预留：PYTHON_NOT_AVAILABLE（exec_command 业务层抛，见 07 专项）。
+        // need22-P0 S2/S1 新增（只增不改协议）：COMMAND_NOT_ALLOWED / COMMAND_TOO_LONG /
+        // PATH_OUTSIDE_WORKSPACE / INVALID_TIMEOUT / INVALID_CALL_ID / BACKUP_QUOTA_EXCEEDED /
+        // COMMAND_REDIRECT_OUTSIDE 由各业务层经 FailCode 抛出。
     }
 
     /// <summary>别名→主名（未知字段检查时豁免；shim 已做搬运，normalized 仅保留主名与 path 双键过渡）。</summary>
@@ -116,9 +120,10 @@ public static class ToolCallValidator
         ["edit_lines"] = new ToolSchemaSpec
         {
             // need17联调：limit 缺失留给业务层 MISSING_LIMIT（02 不前置），保证老回归绿；Schema 声明仍要求 limit（GetDefinition 侧）。
+            // need22-P0 S3：补 limit 下限 minimum:0（与业务层一致；缺失仍走业务层 MISSING_LIMIT）。
             ToolName = "edit_lines", Required = new[] { "file_path", "offset", "new_text" },
             Params = P(
-                S("file_path"), S("offset", "integer"), S("limit", "integer"), S("new_text"),
+                S("file_path"), S("offset", "integer"), S("limit", "integer", minimum: 0), S("new_text"),
                 S("expected_hash"), S("allow_empty", "boolean"), S("dry_run", "boolean")),
         },
         ["write_file"] = new ToolSchemaSpec
@@ -140,7 +145,7 @@ public static class ToolCallValidator
                 S("file_path"), S("mode", enums: new[] { "text", "lines" }),
                 S("old_string"), S("new_string"), S("replace_all", "boolean"),
                 S("match_mode", enums: new[] { "exact", "normalized", "regex" }),
-                S("offset", "integer"), S("limit", "integer"), S("new_text"),
+                S("offset", "integer"), S("limit", "integer", minimum: 0), S("new_text"),
                 S("dry_run", "boolean"), S("expected_hash")),
         },
         ["ask_user"] = new ToolSchemaSpec
@@ -154,14 +159,14 @@ public static class ToolCallValidator
         {
             ToolName = "skill_tool", Required = new[] { "action" },
             Params = P(
-                S("action", enums: new[] { "list", "get" }), S("scope"), S("name"), S("content"), S("pin"),
+                S("action", enums: new[] { "list", "get", "create", "update", "delete", "enable", "disable" }), S("scope"), S("name"), S("content"), S("pin"),
                 S("priority", "integer", minimum: 0, maximum: 1000), S("enabled", "boolean")),
         },
         ["memory_tool"] = new ToolSchemaSpec
         {
             ToolName = "memory_tool", Required = new[] { "action" },
             Params = P(
-                S("action", enums: new[] { "list", "get", "set" }), S("scope"), S("name"), S("body"), S("content"), S("pin"),
+                S("action", enums: new[] { "list", "get", "set", "create", "update", "delete", "enable", "disable" }), S("scope"), S("name"), S("body"), S("content"), S("pin"),
                 S("priority", "integer", minimum: 0, maximum: 1000), S("enabled", "boolean")),
         },
         ["spawn_subagent"] = new ToolSchemaSpec
@@ -173,7 +178,7 @@ public static class ToolCallValidator
         {
             ToolName = "goal_tool", Required = new[] { "action" },
             Params = P(
-                S("action", enums: new[] { "get", "set" }), S("title"), S("description"), S("milestones", "array"),
+                S("action", enums: new[] { "get", "set", "update", "progress", "add_milestone", "complete_milestone", "clear" }), S("title"), S("description"), S("milestones", "array"),
                 S("milestone"), S("percent", "integer", minimum: 0, maximum: 100), S("note")),
         },
     };
@@ -195,8 +200,10 @@ public static class ToolCallValidator
 
         if (!Schemas.TryGetValue(tool, out var spec))
         {
-            // 未知 Schema（自定义/桩工具）：透传，不拦截。
-            return new ToolCallValidationResult { Success = true, NormalizedJson = raw };
+            // need22-P0 S3：未知工具一律拒绝 UNKNOWN_TOOL，删除透传分支。
+            return Fail(Codes.UnknownTool,
+                $"未知工具 '{tool}'。请修正工具名后重试（可用工具以 ToolRegistry 声明为准）。",
+                tool, new { tool });
         }
 
         // 1. Parse：空串→{}；失败→INVALID_JSON_ARGUMENTS（含解析错误前 200 字符 + 原 args 前 500 字符）。

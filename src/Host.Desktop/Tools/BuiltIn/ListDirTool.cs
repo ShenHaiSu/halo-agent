@@ -48,24 +48,19 @@ public sealed class ListDirTool : IToolHandler
             int maxDepth = DefaultMaxDepth;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("path", out JsonElement pEl) && pEl.ValueKind == JsonValueKind.String)
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    pathArg = pEl.GetString();
-                }
-
-                if (root.TryGetProperty("recursive", out JsonElement rEl) &&
-                    (rEl.ValueKind == JsonValueKind.True || rEl.ValueKind == JsonValueKind.False))
-                {
-                    recursive = rEl.GetBoolean();
-                }
-
-                if (root.TryGetProperty("max_depth", out JsonElement dEl) && dEl.ValueKind == JsonValueKind.Number
-                    && dEl.TryGetInt32(out int parsedDepth))
-                {
-                    maxDepth = parsedDepth;
+                    pathArg = args.GetString("path");
+                    if (args.TryGetBool("recursive", out bool rec))
+                    {
+                        recursive = rec;
+                    }
+                    if (args.TryGetInt32("max_depth", out int parsedDepth))
+                    {
+                        maxDepth = parsedDepth;
+                    }
                 }
             }
             catch (JsonException ex)
@@ -86,7 +81,16 @@ public sealed class ListDirTool : IToolHandler
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
                 : context.WorkspaceRoot;
-            string fullPath = PathSafetyValidator.ResolveWorkspacePath(workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+            // need22-P0 S1：读路径强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
+            string fullPath;
+            {
+                var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+                if (!ok)
+                {
+                    return Task.FromResult(ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds));
+                }
+                fullPath = resolved;
+            }
 
             if (!Directory.Exists(fullPath))
             {
@@ -94,12 +98,12 @@ public sealed class ListDirTool : IToolHandler
                 {
                     var fi = new FileInfo(fullPath);
                     return Task.FromResult(ToolResult.Ok(
-                        $"路径 '{fullPath}' 是文件而非目录（{fi.Length} 字节）。请用 read_file 读取。",
+                        $"路径 '{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是文件而非目录（{fi.Length} 字节）。请用 read_file 读取。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
 
                 return Task.FromResult(ToolResult.Fail(
-                    $"目录不存在：'{fullPath}'。请检查 path 参数后重试。",
+                    $"目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请检查 path 参数后重试。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
@@ -163,6 +167,11 @@ public sealed class ListDirTool : IToolHandler
             string name = Path.GetFileName(entry);
             try
             {
+                // need22-P0 S1：跳过 symlink/junction（防区内软链穿越到区外被遍历/检索）
+                if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+                {
+                    continue;
+                }
                 if (Directory.Exists(entry))
                 {
                     if (ExcludedDirNames.Contains(name))

@@ -278,9 +278,14 @@ CREATE INDEX IF NOT EXISTS ix_llm_usage_pm ON llm_usage_records(provider_id, mod
         using var tx = conn.BeginTransaction();
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT OR IGNORE INTO llm_usage_records
+        cmd.CommandText = @"INSERT INTO llm_usage_records
 (provider_id,provider_name,model_id,model_display,protocol,input_tokens,output_tokens,cached_tokens,hit_rate,status,source,estimated,request_id,session_id,workspace_id,request_date,request_time,request_datetime,created_utc)
-VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$src,$est,$r,$sess,$ws,$d,$t,$dt,$u);";
+VALUES ($p,$pn,$m,$md,$pr,$i,$o,$c,$h,$s,$src,$est,$r,$sess,$ws,$d,$t,$dt,$u)
+ON CONFLICT(request_id) DO UPDATE SET
+input_tokens=llm_usage_records.input_tokens+excluded.input_tokens,
+output_tokens=llm_usage_records.output_tokens+excluded.output_tokens,
+cached_tokens=llm_usage_records.cached_tokens+excluded.cached_tokens,
+hit_rate=CASE WHEN (llm_usage_records.input_tokens+excluded.input_tokens)>0 THEN CAST((llm_usage_records.cached_tokens+excluded.cached_tokens) AS REAL)/(llm_usage_records.input_tokens+excluded.input_tokens) ELSE 0 END;";
         var pp = cmd.CreateParameter(); pp.ParameterName = "$p"; cmd.Parameters.Add(pp);
         var ppn = cmd.CreateParameter(); ppn.ParameterName = "$pn"; cmd.Parameters.Add(ppn);
         var pm = cmd.CreateParameter(); pm.ParameterName = "$m"; cmd.Parameters.Add(pm);

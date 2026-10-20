@@ -110,38 +110,54 @@ public sealed partial class HostBridgeFacade
          }
      }
 
-     /// <summary>
-     /// 启动时全量扫描：遍历全部工作区/会话做孤儿愈合（只读无伤会话直接跳过，只写脏会话）。
-     /// 后台 fire-and-forget 调用，永不阻塞 UI。
-     /// </summary>
-     public async Task<BridgeResponse<int>> ScanAndHealAllSessions()
-     {
-         int healedSessions = 0;
-         try
-         {
-             var workspaces = await _workspaceSessionService.GetAllWorkspacesAsync().ConfigureAwait(false);
-             foreach (var ws in workspaces)
-             {
-                 List<SessionMetadata> sessions;
-                 try { sessions = await _workspaceSessionService.GetSessionsByWorkspaceAsync(ws.Id).ConfigureAwait(false); }
-                 catch { continue; }
-                 foreach (var sess in sessions)
-                 {
-                     try
-                     {
-                         var r = await _workspaceSessionService.HealSessionHistoryAsync(ws.Id, sess.Id).ConfigureAwait(false);
-                         if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0)) healedSessions++;
-                     }
-                     catch { /* 单会话失败不影响其余 */ }
-                 }
-             }
-             HaloLogger.App.Info($"[History] startup orphan scan done, healedSessions={healedSessions}");
-             return BridgeResponse<int>.Success(healedSessions);
-         }
-         catch (Exception ex)
-         {
-             HaloLogger.App.Error("ScanAndHealAllSessions failed", ex);
-             return BridgeResponse<int>.Fail("SCAN_ERROR", ex.Message);
-         }
-     }
+    /// <summary>
+    /// 启动时全量扫描：遍历全部工作区/会话做孤儿愈合（只读无伤会话直接跳过，只写脏会话）。
+    /// 后台 fire-and-forget 调用，永不阻塞 UI。支持取消；逐项异常进日志不断链（need22-P4 H9）。
+    /// </summary>
+    public Task<BridgeResponse<int>> ScanAndHealAllSessions() => ScanAndHealAllSessions(CancellationToken.None);
+
+    public async Task<BridgeResponse<int>> ScanAndHealAllSessions(CancellationToken cancellationToken)
+    {
+        int healedSessions = 0;
+        try
+        {
+            var workspaces = await _workspaceSessionService.GetAllWorkspacesAsync().ConfigureAwait(false);
+            foreach (var ws in workspaces)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                List<SessionMetadata> sessions;
+                try { sessions = await _workspaceSessionService.GetSessionsByWorkspaceAsync(ws.Id).ConfigureAwait(false); }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Warn($"ScanAndHealAllSessions: list sessions failed for workspace '{ws.Id}', skipped.", ex);
+                    continue;
+                }
+                foreach (var sess in sessions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var r = await _workspaceSessionService.HealSessionHistoryAsync(ws.Id, sess.Id).ConfigureAwait(false);
+                        if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0)) healedSessions++;
+                    }
+                    catch (Exception ex)
+                    {
+                        HaloLogger.App.Warn($"ScanAndHealAllSessions: heal failed for session '{sess.Id}' in workspace '{ws.Id}', skipped.", ex);
+                    }
+                }
+            }
+            HaloLogger.App.Info($"[History] startup orphan scan done, healedSessions={healedSessions}");
+            return BridgeResponse<int>.Success(healedSessions);
+        }
+        catch (OperationCanceledException)
+        {
+            HaloLogger.App.Info("[History] startup orphan scan cancelled.");
+            return BridgeResponse<int>.Fail("SCAN_CANCELLED", "扫描已取消");
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("ScanAndHealAllSessions failed", ex);
+            return BridgeResponse<int>.Fail("SCAN_ERROR", ex.Message);
+        }
+    }
 }

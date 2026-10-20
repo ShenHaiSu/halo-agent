@@ -95,7 +95,8 @@ public sealed class GlobalNetworkSettings
 
     public int DefaultConnectTimeoutSeconds { get; set; } = 15;
 
-    public int DefaultRequestTimeoutSeconds { get; set; } = 300;
+     /// <summary>need22-P1 T3：单次请求超时默认 120s（HttpClient.Timeout 同步钳制到 120s 上限）。</summary>
+     public int DefaultRequestTimeoutSeconds { get; set; } = 120;
 
     public GlobalNetworkSettings Clone()
     {

@@ -37,13 +37,15 @@ public static class SseStreamReader
         string? currentEvent = null;
         var dataBuilder = new StringBuilder();
 
-        while (!ct.IsCancellationRequested)
-        {
-            string? line;
-            try
-            {
-                line = await reader.ReadLineAsync().WaitAsync(ct).ConfigureAwait(false);
-            }
+         while (true)
+         {
+             // need22-P1 T2：取消全链透传（循环入口即检查并优雅退出；ReadLineAsync 经 WaitAsync(ct) 可中断等待）。
+             if (ct.IsCancellationRequested) yield break;
+             string? line;
+             try
+             {
+                 line = await reader.ReadLineAsync().WaitAsync(ct).ConfigureAwait(false);
+             }
             catch (OperationCanceledException)
             {
                 yield break;

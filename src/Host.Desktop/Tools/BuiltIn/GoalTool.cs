@@ -29,7 +29,7 @@ public sealed class GoalTool : IToolHandler
 
      public ToolDefinition GetDefinition() => new(Name, Description,
          new ToolSchemaBuilder()
-             .AddString("action", "get|set. Required. Sub-agents: get only.", required: true, enumValues: new[] { "get", "set" })
+             .AddString("action", "get|set|update|progress|add_milestone|complete_milestone|clear. Required. Sub-agents: get only.", required: true, enumValues: new[] { "get", "set", "update", "progress", "add_milestone", "complete_milestone", "clear" })
              .AddString("title", string.Empty)
              .AddString("description", string.Empty)
              .AddArray("milestones", string.Empty, itemsType: "string")
@@ -43,8 +43,18 @@ public sealed class GoalTool : IToolHandler
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            JsonElement args;
-            try { args = string.IsNullOrWhiteSpace(call.ArgumentsJson) ? new JsonElement() : JsonDocument.Parse(call.ArgumentsJson).RootElement; }
+            // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口；异常交业务层兜底为空对象）
+            JsonElement args = new JsonElement();
+            try
+            {
+                using var toolArgs = ToolArgs.Parse(call.ArgumentsJson);
+                if (toolArgs.Root.ValueKind == JsonValueKind.Object)
+                {
+                    // Clone 出 Root：脱离 using 生命周期（ToolArgs 释放后仍可用）
+                    using JsonDocument snapshot = JsonDocument.Parse(toolArgs.Root.GetRawText());
+                    args = snapshot.RootElement.Clone();
+                }
+            }
             catch { args = new JsonElement(); }
             string action = "get";
             if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("action", out var av) && av.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(av.GetString()))

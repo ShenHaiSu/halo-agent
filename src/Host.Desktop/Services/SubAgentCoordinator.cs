@@ -45,8 +45,10 @@ public sealed class SubAgentResult
     public long OutputTokens { get; init; }
     public long CachedTokens { get; init; }
     public string? ErrorCode { get; init; }
-    public string? ErrorMessage { get; init; }
-    public string? Warning { get; init; }
+     public string? ErrorMessage { get; init; }
+     public string? Warning { get; init; }
+     /// <summary>need22-P1 T4：Barrier 超时标记（主轮继续，超时子按 summary 截断回填）。</summary>
+     public bool TimedOut { get; init; }
 
     public string ToJson() => JsonSerializer.Serialize(new
     {
@@ -60,6 +62,7 @@ public sealed class SubAgentResult
         errorCode = ErrorCode,
         errorMessage = ErrorMessage,
         warning = Warning,
+        timedOut = TimedOut,
     }, HaloJsonOptions.CompactCamelCase);
 }
 
@@ -152,6 +155,8 @@ public sealed class SubAgentCoordinator
         var handles = new List<SubHandle>();
         var rejected = new List<(string, string)>();
         int take = Math.Max(1, Math.Min(policy.SubMaxParallel, spawnCalls.Count));
+        try
+        {
         for (int i = 0; i < spawnCalls.Count; i++)
         {
             var spec = spawnCalls[i];
@@ -206,13 +211,38 @@ public sealed class SubAgentCoordinator
                 Label = lbl,
                 Cts = subCts,
                 StartedAtUtc = DateTime.UtcNow,
-                Task = Task.Run(() => RunSubTurnAsync(workspaceId, subId, taskText, providerId, modelId, subMaxIter, policy, modelWarning, subCts.Token), CancellationToken.None),
+                Task = Task.Run(() => RunSubTurnAsync(workspaceId, subId, taskText, providerId, modelId, subMaxIter, policy, modelWarning, subCts.Token), subCts.Token),
             };
             var list = _trees.GetOrAdd(mainSessionId, _ => new List<SubHandle>());
             lock (list) { list.Add(handle); }
             handles.Add(handle);
         }
+        }
+        catch
+        {
+            // need22-P1 T2：建子中途失败，已建子取消+摘除+Dispose，不泄漏 CTS，再原样抛出。
+            CleanupCreatedHandles(mainSessionId, handles);
+            throw;
+        }
         return (handles, rejected);
+    }
+
+    /// <summary>need22-P1 T2：建子失败清理（已建 handles 取消+摘除+Dispose，不泄漏 CTS）。</summary>
+    private void CleanupCreatedHandles(string mainSessionId, List<SubHandle> handles)
+    {
+        try
+        {
+            if (_trees.TryGetValue(mainSessionId, out var list))
+            {
+                lock (list) { foreach (var h in handles) list.Remove(h); }
+            }
+        }
+        catch { }
+        foreach (var h in handles)
+        {
+            try { h.Cts.Cancel(); } catch { }
+            try { h.Cts.Dispose(); } catch { }
+        }
     }
 
     private async Task<AgentTurnResult> RunSubTurnAsync(
@@ -246,29 +276,100 @@ public sealed class SubAgentCoordinator
         }
     }
 
-    /// <summary>need13：Barrier 永远等待（Task.WhenAll 无超时；响应 mainCt 取消）。</summary>
+    /// <summary>need22-P1 T4：Barrier 总体超时（默认=子数×单子超时+buffer；超时子截断+timedOut:true，主轮继续；响应 mainCt 取消）。</summary>
     public async Task<List<SubAgentResult>> BarrierAsync(
         string workspaceId, string parentSessionId,
         IReadOnlyList<SubHandle> handles,
         IReadOnlyList<(string CallId, string FailText)> rejected,
-        CancellationToken mainCt)
+        CancellationToken mainCt,
+        TimeSpan? overallTimeout = null)
     {
         var rejectMap = rejected.ToDictionary(x => x.CallId, x => x.FailText, StringComparer.Ordinal);
+        TimeSpan budget = overallTimeout ?? ResolveBarrierBudget(handles.Count);
+        var timedOutHandles = new HashSet<SubHandle>();
         if (handles.Count > 0)
         {
             Publish(parentSessionId, "SubAgentsBarrier", new { total = handles.Count, waiting = true });
-            await Task.WhenAll(handles.Select(h => h.Task)).ConfigureAwait(false);
+            Task allTask = Task.WhenAll(handles.Select(h => h.Task));
+            Task first = await Task.WhenAny(allTask, Task.Delay(budget, mainCt)).ConfigureAwait(false);
+            mainCt.ThrowIfCancellationRequested();
+            if (first != allTask)
+            {
+                // 总体超时：掐断未完成子，标记 timedOut，主轮继续（残留任务由其 CTS 取消后自行收敛，CTS 在方法末尾统一 Dispose）。
+                foreach (var h in handles)
+                {
+                    if (!h.Task.IsCompleted)
+                    {
+                        timedOutHandles.Add(h);
+                        try { h.Cts.Cancel(); } catch { }
+                    }
+                }
+                Publish(parentSessionId, "SubAgentsBarrierTimeout", new { total = handles.Count, timedOut = timedOutHandles.Count, budgetMs = (long)budget.TotalMilliseconds });
+            }
+            else
+            {
+                try { await allTask.ConfigureAwait(false); } catch { /* 单 handle 归因在下环处理 */ }
+            }
         }
         var results = new List<SubAgentResult>();
         foreach (var h in handles)
         {
             mainCt.ThrowIfCancellationRequested();
             AgentTurnResult r;
+            bool timedOut = timedOutHandles.Contains(h);
+            if (timedOut && !h.Task.IsCompleted)
+            {
+                // 超时残留子不再等待（已发 Cancel）：异常由延续观察，Barrier 直接截断回填，主轮继续。
+                _ = h.Task.ContinueWith(t => { try { var _ = t.Exception; } catch { } },
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                var (pin, pout, pcached) = await ReadTotalUsageAsync(workspaceId, h.SubSessionId).ConfigureAwait(false);
+                string psummary = await ReadLastAssistantTextAsync(workspaceId, h.SubSessionId).ConfigureAwait(false);
+                results.Add(new SubAgentResult
+                {
+                    CallId = h.CallId,
+                    SubSessionId = h.SubSessionId,
+                    Label = h.Label,
+                    Success = false,
+                    Summary = TruncateSummary(psummary, 2000) + "\n[子超时截断：Barrier 总体超时，主轮已继续，残缺结果仅供参考。]",
+                    ToolExecutions = 0,
+                    Iterations = 0,
+                    InputTokens = pin,
+                    OutputTokens = pout,
+                    CachedTokens = pcached,
+                    ErrorCode = "SUB_TIMEOUT",
+                    ErrorMessage = $"[SUB_TIMEOUT] 子 {h.Label} 超出 Barrier 总体超时，已截断，主轮继续。",
+                    TimedOut = true,
+                });
+                continue;
+            }
             try { r = await h.Task.ConfigureAwait(false); }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (mainCt.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) { r = AgentTurnResult.Cancelled(0, 0); }
             catch (Exception ex) { r = AgentTurnResult.Failed("SUB_EXEC_ERROR", ex.Message); }
             string summary = await ReadLastAssistantTextAsync(workspaceId, h.SubSessionId).ConfigureAwait(false);
-            var (inp, outp, cached) = await ReadLastUsageAsync(workspaceId, h.SubSessionId).ConfigureAwait(false);
+            // need22-P1 T7：累加子会话全部消息用量（多轮子耗全量，非末条）。
+            var (inp, outp, cached) = await ReadTotalUsageAsync(workspaceId, h.SubSessionId).ConfigureAwait(false);
+            if (timedOut)
+            {
+                // need22-P1 T4：超时子按 summary 截断回填 + timedOut:true，主轮继续。
+                results.Add(new SubAgentResult
+                {
+                    CallId = h.CallId,
+                    SubSessionId = h.SubSessionId,
+                    Label = h.Label,
+                    Success = false,
+                    Summary = TruncateSummary(summary, 2000) + "\n[子超时截断：Barrier 总体超时，主轮已继续，残缺结果仅供参考。]",
+                    ToolExecutions = r.ToolExecutions,
+                    Iterations = r.Iterations,
+                    InputTokens = inp,
+                    OutputTokens = outp,
+                    CachedTokens = cached,
+                    ErrorCode = "SUB_TIMEOUT",
+                    ErrorMessage = $"[SUB_TIMEOUT] 子 {h.Label} 超出 Barrier 总体超时，已截断，主轮继续。",
+                    TimedOut = true,
+                });
+                continue;
+            }
             string? errCode = null, errMsg = null;
             if (r.WasCancelled) { errCode = "SUBAGENT_CANCELLED"; errMsg = $"[SUBAGENT_CANCELLED] 子 {h.Label} 已随主取消被掐断（用户取消）。残缺结果不回填。"; }
             else if (r.WasTruncated) { errCode = "TURN_TRUNCATED"; errMsg = "子轮次耗尽被截断。"; }
@@ -291,13 +392,42 @@ public sealed class SubAgentCoordinator
         }
         Publish(parentSessionId, "SubAgentsBarrierReleased", new
         {
-            subs = results.Select(x => new { callId = x.CallId, subId = x.SubSessionId, success = x.Success }).ToArray(),
+            subs = results.Select(x => new { callId = x.CallId, subId = x.SubSessionId, success = x.Success, timedOut = x.TimedOut }).ToArray(),
             billedPrompt = results.Sum(x => x.InputTokens),
             billedCompletion = results.Sum(x => x.OutputTokens),
+            timedOut = results.Count(x => x.TimedOut),
         });
         var list = _trees.GetOrAdd(parentSessionId, _ => new List<SubHandle>());
         lock (list) { foreach (var h in handles) list.Remove(h); }
+        // need22-P1 T2：Barrier 结束统一释放子 CTS（已从树摘除；运行中残留已先 Cancel，Dispose 不影响其 Token 查询）。
+        foreach (var h in handles) { try { h.Cts.Dispose(); } catch { } }
         return results;
+    }
+
+    /// <summary>need22-P1 T4：Barrier 总体超时预算（子数×单子超时+buffer；单子超时取 turnTimeoutMs）。</summary>
+    private TimeSpan ResolveBarrierBudget(int subCount)
+    {
+        try
+        {
+            if (_agentConfig != null && subCount > 0)
+            {
+                var cfg = _agentConfig.GetInternal();
+                long single = cfg.TurnTimeoutMs > 0 ? cfg.TurnTimeoutMs : Host.Desktop.Core.Models.AgentDefaults.TurnTimeoutMs;
+                long buffer = Math.Max(0, cfg.SubBarrierBufferMs);
+                long total = checked((long)subCount * single + buffer);
+                return TimeSpan.FromMilliseconds(Math.Clamp(total, 1000L, (long)Host.Desktop.Core.Models.AgentDefaults.HardTimeoutCeilMs * 8));
+            }
+        }
+        catch { /* 配置读取失败回默认预算 */ }
+        return TimeSpan.FromMilliseconds(Math.Clamp(
+            (long)Math.Max(1, subCount) * Host.Desktop.Core.Models.AgentDefaults.TurnTimeoutMs + Host.Desktop.Core.Models.AgentDefaults.SubBarrierBufferMs,
+            1000L, (long)Host.Desktop.Core.Models.AgentDefaults.HardTimeoutCeilMs * 8));
+    }
+
+    private static string TruncateSummary(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        return s.Length > max ? s.Substring(0, max) : s;
     }
 
     public IReadOnlyList<SubHandle> GetActive(string parentSessionId)
@@ -407,14 +537,20 @@ public sealed class SubAgentCoordinator
         catch { return "[子未输出总结]"; }
     }
 
-    private async Task<(long In, long Out, long Cached)> ReadLastUsageAsync(string workspaceId, string subSessionId)
+    /// <summary>need22-P1 T7：累加子会话全部消息用量（多轮子耗全量；替代只读末条 usage 的旧口径）。</summary>
+    private async Task<(long In, long Out, long Cached)> ReadTotalUsageAsync(string workspaceId, string subSessionId)
     {
         try
         {
             var msgs = await _sessions.GetSessionMessagesAsync(workspaceId, subSessionId).ConfigureAwait(false);
-            var last = msgs.LastOrDefault(m => m.InputTokens.HasValue && m.InputTokens.Value > 0);
-            if (last == null) return (0, 0, 0);
-            return (last.InputTokens ?? 0, last.OutputTokens ?? 0, last.CachedTokens ?? 0);
+            long inp = 0, outp = 0, cached = 0;
+            foreach (var m in msgs)
+            {
+                inp += m.InputTokens ?? 0;
+                outp += m.OutputTokens ?? 0;
+                cached += m.CachedTokens ?? 0;
+            }
+            return (inp, outp, cached);
         }
         catch { return (0, 0, 0); }
     }

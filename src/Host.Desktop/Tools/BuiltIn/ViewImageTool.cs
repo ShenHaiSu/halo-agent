@@ -44,16 +44,19 @@ public sealed class ViewImageTool : IToolHandler
             string detail = "high";
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
-                    pathArg = fpEl.GetString();
-                // NEED17 compat: alias 'path' accepted (02 shim搬运; handler双读不断老调用).
-                if (string.IsNullOrWhiteSpace(pathArg) && root.TryGetProperty("path", out JsonElement pEl2) && pEl2.ValueKind == JsonValueKind.String)
-                    pathArg = pEl2.GetString();
-                if (root.TryGetProperty("detail", out JsonElement dEl) && dEl.ValueKind == JsonValueKind.String)
-                    detail = dEl.GetString() ?? "high";
+                // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口）
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    pathArg = args.GetString("file_path");
+                    // NEED17 compat: alias 'path' accepted (02 shim搬运; handler双读不断老调用).
+                    if (string.IsNullOrWhiteSpace(pathArg))
+                    {
+                        pathArg = args.GetString("path");
+                    }
+                    detail = args.GetString("detail") ?? "high";
+                }
             }
             catch (JsonException ex)
             {
@@ -102,21 +105,21 @@ public sealed class ViewImageTool : IToolHandler
             if (PathSafetyValidator.IsProtectedSystemPath(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"拒绝读取系统关键目录：'{fullPath}'。view_image 严禁触碰系统目录。[PATH_TRAVERSAL]",
+                    $"拒绝读取系统关键目录：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。view_image 严禁触碰系统目录。[PATH_TRAVERSAL]",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
             if (!ImageAttachmentStore.IsSupportedExtension(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"不支持的图片类型：'{fullPath}'。仅支持 jpg/png/webp（按扩展名 + 文件头双重校验，gif/bmp/tiff 请先转换）。",
+                    $"不支持的图片类型：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。仅支持 jpg/png/webp（按扩展名 + 文件头双重校验，gif/bmp/tiff 请先转换）。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"文件不存在：'{fullPath}'。请使用 list_dir 确认路径后重试。",
+                    $"文件不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请使用 list_dir 确认路径后重试。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
@@ -127,7 +130,7 @@ public sealed class ViewImageTool : IToolHandler
                 if (fi.Length > ImageAttachmentStore.MaxImageBytes)
                 {
                     return Task.FromResult(ToolResult.Fail(
-                        $"图片超限：'{fullPath}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
+                        $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
                 raw = File.ReadAllBytes(fullPath);
@@ -143,7 +146,7 @@ public sealed class ViewImageTool : IToolHandler
             if (!ImageAttachmentStore.CheckMagic(raw, mime))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"文件头校验失败：'{fullPath}' 的内容不是有效的 {mime}（扩展名与魔数不符，可能已损坏或改名伪装）。",
+                    $"文件头校验失败：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 的内容不是有效的 {mime}（扩展名与魔数不符，可能已损坏或改名伪装）。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 

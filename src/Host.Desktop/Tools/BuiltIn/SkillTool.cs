@@ -20,7 +20,7 @@ public sealed class SkillTool : IToolHandler
 
     public ToolDefinition GetDefinition() => new(Name, Description,
         new ToolSchemaBuilder()
-            .AddString("action", "list|get. Required.", required: true, enumValues: new[] { "list", "get" })
+            .AddString("action", "list|get|create|update|delete|enable|disable. Required.", required: true, enumValues: new[] { "list", "get", "create", "update", "delete", "enable", "disable" })
             .AddString("scope", "global|project. Default project. list accepts all.")
             .AddString("name", "Skill name (required for get, optional for list).")
             .AddString("content", "readme body for create/update (with optional frontmatter).")

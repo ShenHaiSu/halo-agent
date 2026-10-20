@@ -396,7 +396,7 @@ public sealed class ProviderConfigService
                 BypassOnLocal = true
             },
             DefaultConnectTimeoutSeconds = 15,
-            DefaultRequestTimeoutSeconds = 300
+             DefaultRequestTimeoutSeconds = 120 // need22-P1 T3：新装默认 120s（老文件沿用旧值，HttpClient 侧统一钳制 120s 上限）
         };
 
         AtomicFileWriter.WriteJsonAtomic(NetworkConfigFilePath, defaults);

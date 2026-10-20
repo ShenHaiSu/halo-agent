@@ -52,28 +52,20 @@ public sealed class GrepSearchTool : IToolHandler
             string? includeGlob = null;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("pattern", out JsonElement patEl) && patEl.ValueKind == JsonValueKind.String)
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    pattern = patEl.GetString();
-                }
+                    pattern = args.GetString("pattern");
+                    pathArg = args.GetString("path");
 
-                if (root.TryGetProperty("path", out JsonElement pEl) && pEl.ValueKind == JsonValueKind.String)
-                {
-                    pathArg = pEl.GetString();
-                }
+                    // NEED17 compat: alias 'file_path'→'path' (02 shim搬运; handler双读不断老调用).
+                    if (string.IsNullOrWhiteSpace(pathArg))
+                    {
+                        pathArg = args.GetString("file_path");
+                    }
 
-                // NEED17 compat: alias 'file_path'→'path' (02 shim搬运; handler双读不断老调用).
-                if (string.IsNullOrWhiteSpace(pathArg) && root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
-                {
-                    pathArg = fpEl.GetString();
-                }
-
-                if (root.TryGetProperty("include_glob", out JsonElement gEl) && gEl.ValueKind == JsonValueKind.String)
-                {
-                    includeGlob = gEl.GetString();
+                    includeGlob = args.GetString("include_glob");
                 }
             }
             catch (JsonException ex)
@@ -105,8 +97,17 @@ public sealed class GrepSearchTool : IToolHandler
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
                 : context.WorkspaceRoot;
-            string startPath = PathSafetyValidator.ResolveWorkspacePath(
-                workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+            // need22-P0 S1：检索起点强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
+            string startPath;
+            {
+                var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
+                    workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+                if (!ok)
+                {
+                    return ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds);
+                }
+                startPath = resolved;
+            }
 
             var files = new List<string>();
             if (File.Exists(startPath))
@@ -120,7 +121,7 @@ public sealed class GrepSearchTool : IToolHandler
             else
             {
                 return ToolResult.Fail(
-                    $"搜索路径不存在：'{startPath}'。请用 list_dir 确认路径后重试。",
+                    $"搜索路径不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, startPath)}'。请用 list_dir 确认路径后重试。",
                     durationMs: sw.ElapsedMilliseconds);
             }
 
@@ -255,6 +256,18 @@ public sealed class GrepSearchTool : IToolHandler
         {
             try
             {
+                // need22-P0 S1：跳过 symlink/junction（防区内软链穿越到区外被检索）
+                try
+                {
+                    if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                    // 属性读取失败交由后续判定
+                }
                 if (Directory.Exists(entry))
                 {
                     if (ExcludedDirNames.Contains(Path.GetFileName(entry)))

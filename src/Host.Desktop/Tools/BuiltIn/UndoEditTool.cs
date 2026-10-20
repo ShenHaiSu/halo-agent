@@ -9,6 +9,8 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// <summary>
 /// need15 P2-2：undo_edit——从备份恢复文件（误删一步恢复）。
 /// backup_path 必须位于 &lt;DataRoot&gt;/backups/ 下；落盘同样走 AtomicWriteAllText + 再备当前（撤销的撤销链）。
+/// need22-P0 S4：删除 GuessOriginal 文件名猜测，改为 .meta.json → index.json 精确回查；
+/// 找不到时要求显式 restore_to（BACKUP_INDEX_MISS）。
 /// </summary>
 public sealed class UndoEditTool : IToolHandler
 {
@@ -39,17 +41,12 @@ public sealed class UndoEditTool : IToolHandler
             string? restoreToArg = null;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("backup_path", out JsonElement bpEl) && bpEl.ValueKind == JsonValueKind.String)
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    backupPathArg = bpEl.GetString();
-                }
-
-                if (root.TryGetProperty("restore_to", out JsonElement rtEl) && rtEl.ValueKind == JsonValueKind.String)
-                {
-                    restoreToArg = rtEl.GetString();
+                    backupPathArg = args.GetString("backup_path");
+                    restoreToArg = args.GetString("restore_to");
                 }
             }
             catch (JsonException ex)
@@ -73,12 +70,12 @@ public sealed class UndoEditTool : IToolHandler
                 return Task.FromResult(ToolResult.Fail(error!, durationMs: sw.ElapsedMilliseconds));
             }
 
+            string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
+                ? Directory.GetCurrentDirectory()
+                : context.WorkspaceRoot;
             string? targetPath;
             if (!string.IsNullOrWhiteSpace(restoreToArg))
             {
-                string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
-                    ? Directory.GetCurrentDirectory()
-                    : context.WorkspaceRoot;
                 var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(workspaceRoot, restoreToArg);
                 if (!ok)
                 {
@@ -89,18 +86,19 @@ public sealed class UndoEditTool : IToolHandler
             }
             else
             {
-                targetPath = ResolveOriginalFromMeta(bakFull) ?? GuessOriginal(bakFull, context);
+                // need22-P0 S4：.meta.json → index.json 精确回查；无 GuessOriginal 猜测
+                targetPath = ResolveOriginalFromMeta(bakFull)
+                    ?? BackupStore.LookupOriginal(
+                        BackupStore.SessionBackupDir(dataRoot, context.WorkspaceId, context.SessionId),
+                        bakFull);
                 if (targetPath == null)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        "无法从备份推断原始路径（缺少 .meta.json 且未传 restore_to）。请显式传 restore_to。",
+                    return Task.FromResult(ToolResult.FailCode("BACKUP_INDEX_MISS",
+                        "BACKUP_INDEX_MISS：无法从备份推断原始路径（缺少 .meta.json 且索引无记录）。请显式传 restore_to。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
 
                 // 恢复目标仍需过写保护
-                string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
-                    ? Directory.GetCurrentDirectory()
-                    : context.WorkspaceRoot;
                 var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(workspaceRoot, targetPath);
                 if (!ok)
                 {
@@ -145,11 +143,16 @@ public sealed class UndoEditTool : IToolHandler
                     Directory.CreateDirectory(dir);
                 }
 
-                // 备份为原始字节，直接按字节恢复（保留编码/BOM）
+                // 备份为原始字节，直接按字节恢复（保留编码/BOM）；fsync 防半文件
                 string tmp = targetPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
-                    File.WriteAllBytes(tmp, bakBytes);
+                    using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write,
+                        FileShare.None, bufferSize: 4096, FileOptions.WriteThrough))
+                    {
+                        fs.Write(bakBytes, 0, bakBytes.Length);
+                        fs.Flush(flushToDisk: true);
+                    }
                     File.Move(tmp, targetPath, overwrite: true);
                 }
                 finally
@@ -174,12 +177,10 @@ public sealed class UndoEditTool : IToolHandler
             }
 
             string hash = FileToolShared.ComputeHash(bakBytes);
-            string display = PathSafetyValidator.GetWorkspaceRelativePath(
-                string.IsNullOrWhiteSpace(context.WorkspaceRoot) ? Directory.GetCurrentDirectory() : context.WorkspaceRoot,
-                targetPath);
+            string display = PathSafetyValidator.GetWorkspaceRelativePath(workspaceRoot, targetPath);
             var sb = new StringBuilder();
             sb.Append("已从 backup 恢复 '").Append(display).Append("'（")
-                .Append(bakBytes.Length).Append(" 字节，hash:").Append(hash).Append("）");
+                .Append(bakBytes.Length).Append(" 字节，hash:").Append(FileToolShared.TruncateHash(hash)).Append("）");
             var ok2 = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
             try
             {
@@ -226,32 +227,6 @@ public sealed class UndoEditTool : IToolHandler
             if (doc.RootElement.TryGetProperty("src", out var src2) && src2.ValueKind == JsonValueKind.String)
             {
                 return src2.GetString();
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
-    }
-
-    private static string? GuessOriginal(string bakFull, ToolContext ctx)
-    {
-        // 文件名形如 <stamp>_<guid8>_<basename>.bak，取最后一段为 basename
-        try
-        {
-            string name = Path.GetFileName(bakFull);
-            if (name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
-            {
-                name = name.Substring(0, name.Length - 4);
-            }
-
-            string[] parts = name.Split('_');
-            if (parts.Length >= 3)
-            {
-                string baseName = string.Join("_", parts.Skip(2));
-                string wsRoot = string.IsNullOrWhiteSpace(ctx.WorkspaceRoot) ? Directory.GetCurrentDirectory() : ctx.WorkspaceRoot;
-                return Path.Combine(wsRoot, baseName);
             }
         }
         catch

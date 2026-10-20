@@ -140,7 +140,12 @@ internal static class FileToolShared
         string tempPath = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllBytes(tempPath, payload);
+            using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, FileOptions.WriteThrough))
+            {
+                fs.Write(payload, 0, payload.Length);
+                fs.Flush(flushToDisk: true);
+            }
+        // need22-P0 S4：WriteThrough + fsync（参考 AtomicFileWriter），失败不留半文件。
             File.Move(tempPath, fullPath, overwrite: true);
         }
         finally
@@ -224,6 +229,18 @@ internal static class FileToolShared
          Buffer.BlockCopy(detected.Preamble, 0, payload, 0, detected.Preamble.Length);
          Buffer.BlockCopy(body, 0, payload, detected.Preamble.Length, body.Length);
          return ComputeHash(payload);
+     }
+
+     /// <summary>need22-P0 S5：hash 截断 12 位（错误回显/成功回执统一口径）。</summary>
+     internal static string TruncateHash(string? hash, int keep = 12)
+     {
+         if (string.IsNullOrEmpty(hash))
+         {
+             return "unknown";
+         }
+
+         string t = hash.Trim();
+         return t.Length > keep ? t.Substring(0, keep) : t;
      }
 
 

@@ -141,12 +141,14 @@ public sealed class HaloHttpClientFactory : IDisposable
         var effectiveProxy = ResolveEffectiveProxy(provider, global);
         string fingerprint = effectiveProxy.ComputeFingerprint();
 
-        var entry = _handlerPool.GetOrAdd(fingerprint, _ => CreateHandlerEntry(effectiveProxy));
-        var client = new HttpClient(entry.Handler, disposeHandler: false)
-        {
-            Timeout = TimeSpan.FromSeconds(Math.Clamp(global.DefaultRequestTimeoutSeconds, 5, 3600))
-        };
-        return client;
+         var entry = _handlerPool.GetOrAdd(fingerprint, _ => CreateHandlerEntry(effectiveProxy));
+         // need22-P1 T3：单次 HTTP 超时上限 120s（hung 网关不再跟随进程；配置更大值同样钳制到 120s）。
+         int requestTimeoutSec = global.DefaultRequestTimeoutSeconds <= 0 ? 120 : global.DefaultRequestTimeoutSeconds;
+         var client = new HttpClient(entry.Handler, disposeHandler: false)
+         {
+             Timeout = TimeSpan.FromSeconds(Math.Clamp(requestTimeoutSec, 5, 120))
+         };
+         return client;
     }
 
     /// <summary>

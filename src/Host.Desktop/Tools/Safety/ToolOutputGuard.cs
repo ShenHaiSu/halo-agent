@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Host.Desktop.Tools.Safety;
 
@@ -6,6 +7,7 @@ namespace Host.Desktop.Tools.Safety;
 /// 超长工具输出自动截断与落盘转存守卫（Output Spillover Protection）。
 /// 单次内联返回上限 16,000 字符（约 4,000 Tokens）；超限则完整输出落盘至会话 tool-outputs 目录，
 /// 上下文仅保留头部 4,000 + 省略提示 + 尾部 8,000 字符（编译错误与退出状态多在尾部，尾部权重更大）。
+/// need22-P0 S5：callId 白名单（非法拒绝落盘 INVALID_CALL_ID）、落盘前脱敏。
 /// </summary>
 public static class ToolOutputGuard
 {
@@ -24,11 +26,17 @@ public static class ToolOutputGuard
     /// </summary>
     public const int TailChars = 8000;
 
+    /// <summary>need22-P0 S5 新增错误码（只增不改前端协议）。</summary>
+    public const string InvalidCallIdCode = "INVALID_CALL_ID";
+
+    private static readonly Regex CallIdAllowlist = new(@"^[A-Za-z0-9_-]{1,64}$", RegexOptions.Compiled);
+
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
     /// 对工具输出执行守卫：未超限原样返回；超限则落盘并返回首尾片段 + 省略提示。
     /// 落盘路径：&lt;DataRoot&gt;/sessions/&lt;workspaceId&gt;/&lt;sessionId&gt;/tool-outputs/call_&lt;callId&gt;.txt
+    /// need22-P0 S5：callId 非法直接拒绝落盘（纯截断 + INVALID_CALL_ID 提示）；落盘前脱敏。
     /// </summary>
     public static (string DisplayText, string? SpilledFile) ApplyGuard(
         string? output,
@@ -43,11 +51,14 @@ public static class ToolOutputGuard
             return (text, null);
         }
 
-        string safeCallId = SanitizeFileName(callId);
-        if (string.IsNullOrWhiteSpace(safeCallId))
+        if (!IsValidCallId(callId))
         {
-            safeCallId = Guid.NewGuid().ToString("N");
+            // 非法 callId：拒绝落盘，回退纯截断并明示错误码
+            string truncated = BuildTruncatedText(text, fullPath: null);
+            return ($"{InvalidCallIdCode}：callId 非法已拒绝落盘（仅保留首尾片段）。\n{truncated}", null);
         }
+
+        string safeCallId = callId.Trim();
 
         string spillDir;
         try
@@ -65,17 +76,27 @@ public static class ToolOutputGuard
         }
 
         string spillPath = Path.Combine(spillDir, $"call_{safeCallId}.txt");
+        // need22-P0 S5：落盘前脱敏（sk-/Bearer 等命中即替换，原文不落地；展示文本同步脱敏）
+        var (scrubbed, hits) = SecretScrubber.Scrub(text);
+        string shownText = hits > 0 ? scrubbed : text;
         try
         {
-            File.WriteAllText(spillPath, text, Utf8NoBom);
+            string payload = hits > 0
+                ? scrubbed + $"\n\n[注：原文 {hits} 处疑似密钥已脱敏为 [REDACTED_SECRET]，未明文落盘。]"
+                : scrubbed;
+            File.WriteAllText(spillPath, payload, Utf8NoBom);
         }
         catch (Exception)
         {
-            return (BuildTruncatedText(text, fullPath: null), null);
+            return (BuildTruncatedText(shownText, fullPath: null), null);
         }
 
-        return (BuildTruncatedText(text, spillPath), spillPath);
+        return (BuildTruncatedText(shownText, spillPath), spillPath);
     }
+
+    /// <summary>need22-P0 S5：callId 白名单校验。</summary>
+    public static bool IsValidCallId(string? callId) =>
+        !string.IsNullOrWhiteSpace(callId) && CallIdAllowlist.IsMatch(callId.Trim());
 
     private static string BuildTruncatedText(string text, string? fullPath)
     {
@@ -111,14 +132,13 @@ public static class ToolOutputGuard
             return string.Empty;
         }
 
-        char[] invalid = Path.GetInvalidFileNameChars();
-        var sb = new StringBuilder(name.Length);
-        foreach (char c in name.Trim())
+        // need22-P0 S5：白名单优先；非法直接返回空（调用方拒绝落盘），不再做字符替换放行
+        string trimmed = name.Trim();
+        if (IsValidCallId(trimmed))
         {
-            sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+            return trimmed;
         }
 
-        string result = sb.ToString();
-        return result.Length > 64 ? result.Substring(0, 64) : result;
+        return string.Empty;
     }
 }
