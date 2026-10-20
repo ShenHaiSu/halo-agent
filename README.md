@@ -219,7 +219,19 @@ VS Code 用 `.vscode/tasks.json + launch.json` 做前后端联调；Win7 真机�
 
 ---
 
-## 11. 许可证与贡献
+## 11. 平台基线备案（need22-P4 H8：net6-EOL + Win7 保留）
+
+| 项 | 备案 |
+|---|---|
+| 现状 | 宿主锁 `net6.0-windows`、SDK `6.0.428`（`global.json` + `Directory.Build.props` 双锁）；.NET 6 已于 **2024-11-12 EOL**，属已知风险保留 |
+| 保留原因 | .NET 6 是最后一个支持 **Win7 SP1** 的 LTS；Chromium 109（`CefSharp 109.1.110`）是最后一个支持 Win7 的 Chromium；目标用户含 Win7 工控/老机，直升 net8 = 直接抛弃该群体 |
+| 缓解措施 | SDK `rollForward: latestPatch` 吃安全补丁；包版本中央钉死（`Directory.Packages.props`）；发布物 SBOM 随包（`build/publish.ps1 -GenerateSbom`）便于漏洞审计 |
+| 升级触发条件（任一满足即立项） | ① Win7 活跃用户占比连续两季度 \<5%；② CefSharp/上游出现 net6 无法修复的高危 CVE；③ 必须依赖仅 net8+ 的 API/库；④ 微软/客户合规强制要求受支持运行时 |
+| 升级路径 | 先并行 `net8.0-windows` 分支做 Win10/11 验证，保留 `win-x86`/Win7 构建线一个 LTS 周期；`installer.iss` 按架构分流（`MinVersion` 守 Win7） |
+
+---
+
+## 12. 许可证与贡献
 
 - 内部项目：许可证未定，默认保留所有权利；需开源请先补 `LICENSE` 再发布。
 - 贡献：按 `docs/need0X` 单需求单目录推进；新增 Bridge 方法只增量不改存量 DTO；后端 `dotnet build + test`、前端 `vue-tsc -b && vite build` 全绿方可合闸。
