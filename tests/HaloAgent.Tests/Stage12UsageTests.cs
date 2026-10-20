@@ -80,7 +80,7 @@ public sealed class Stage12UsageTests : IDisposable
         Assert.Equal(0, zero.HitRate);
     }
 
-    [Fact(DisplayName = "S12: 同 request_id 两次只留一（INSERT OR IGNORE）")]
+    [Fact(DisplayName = "S12: 同 request_id 重试累加不丢（ON CONFLICT 累加，need22-P1 T7）")]
     public void Dedup_SameRequestIdOnce()
     {
         using var svc = NewService(new DateTime(2026, 10, 17, 12, 0, 0));
@@ -90,7 +90,11 @@ public sealed class Stage12UsageTests : IDisposable
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests >= 1);
         Thread.Sleep(1500); // 让第二批也落完
         var ov = svc.GetOverview(new UsageFilter { Preset = "today" });
+        // need22-P1 T7：同 request_id 仍只占一行，但用量累加（重试不丢），非 OR IGNORE 丢弃。
         Assert.Equal(1, ov.TotalRequests);
+        Assert.Equal(20, ov.SumInput);
+        Assert.Equal(2, ov.SumOutput);
+        Assert.Equal(10, ov.SumCached);
     }
 
     [Fact(DisplayName = "S12: 本周自周一起算 + 跨月补零 + custom 校验")]
