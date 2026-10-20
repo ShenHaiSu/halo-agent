@@ -1,0 +1,36 @@
+# need22-P4 H3：C# 风格门禁（E2：csharpier --check 本地 + CI 双跑）
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+continuation_indent_size = 4
+
+# var 规则：内置类型/明显类型用显式类型，其余允许 var（建议级，不阻断）
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = false:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# 换行规则：花括号独占行；对象/集合初始化多行展开
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_space_after_cast = false
+csharp_space_before_colon_in_inheritance_clause = true
+csharp_space_after_colon_in_inheritance_clause = true
+
+# 文件头/using 排放
+csharp_sort_usings_on_save = true
+dotnet_sort_system_directives_first = true

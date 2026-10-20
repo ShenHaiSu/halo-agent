@@ -1,5 +1,7 @@
 ; Halo-Agent Inno Setup 6 安装脚本（Win7 SP1 / Win10 / Win11）
+; need22-P4 H7/H6：版本号由 CI 经 /DMyAppVersion 传入（git tag → 与 Assembly VersionPrefix 对齐，E6）；
 ; 发布目录由 build/publish.ps1 经 /DSourceDir 传入；架构经 /DMyAppArch 传入（win-x64 | win-x86）。
+; SBOM（Microsoft.Sbom.Targets 产物 artifacts\publish\<arch>\sbom\spdx.json）如存在则随包（见 [Files]）。
 
 #ifndef MyAppArch
   #define MyAppArch "win-x64"
@@ -7,9 +9,10 @@
 #ifndef SourceDir
   #define SourceDir "..\artifacts\publish\win-x64"
 #endif
-
 #define MyAppName "Halo Agent"
-#define MyAppVersion "0.6.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.6.0"
+#endif
 #define MyAppPublisher "Halo-Agent"
 #define MyAppExeName "Host.Desktop.exe"
 
@@ -23,6 +26,7 @@
 AppId={{8F3A2B1C-6D4E-4A5F-9C0B-1E2D3A4B5C6D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\HaloAgent
 DefaultGroupName={#MyAppName}
@@ -47,6 +51,7 @@ UninstallDisplayName={#MyAppName}
 [Files]
 ; 自包含多文件发布目录整体打包（严禁单文件模式，保留 libcef.dll / *.pak / BrowserSubprocess）
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; H6 SBOM 随包：发布时 -p:GenerateSbom=true 才会产出 sbom\spdx.json；不存在则跳过（安装后位于 {app}\sbom\spdx.json）
 ; 若 build 目录或 vc_redist 子目录下预置了 VC++ 运行库，自动随包附带打包进安装器（用于离线静默安装）
 Source: "vc_redist\{#VCRedistExe}"; DestDir: "{app}\vc_redist"; Flags: skipifsourcedoesntexist ignoreversion
 Source: "{#VCRedistExe}"; DestDir: "{app}\vc_redist"; Flags: skipifsourcedoesntexist ignoreversion
