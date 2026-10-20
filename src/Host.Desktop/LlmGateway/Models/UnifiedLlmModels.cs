@@ -1,4 +1,5 @@
-using System;
+ using System;
+ using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -105,6 +106,96 @@ public static class MultimodalPlanner
         return (kept, dropped, total);
     }
 }
+ /// <summary>
+ /// 发包前配对守卫（纯函数，无 Services 依赖，双协议适配器共用）：
+ /// assistant(tool_calls) 后必须紧跟覆盖全部 call_id 的 tool 块；缺回包在块尾补 synthetic，
+ /// 无主 tool 直接丢弃，保证任何历史脏数据都发不出坏包。
+ /// 合成文本与 WorkspaceSessionService.SyntheticCancelledToolText 同格式（前端可识别）。
+ /// </summary>
+ public static class ChatPairingGuard
+ {
+     public const string SyntheticPrefix = "[Tool Cancelled";
+     public static string SyntheticText(string? functionName)
+     {
+         string name = string.IsNullOrWhiteSpace(functionName) ? "tool" : functionName!.Trim();
+         return $"[Tool Cancelled - {name}]: 该工具调用在实际执行前被中断（用户手动停止或进程异常退出），未产生任何副作用。请基于已有上下文继续任务；如仍需要该操作，请重新发起工具调用。";
+     }
+     /// <summary>返回修好配对的内存副本（不改输入）；已配对时返回原引用拷贝。</summary>
+     public static List<Host.Desktop.Core.Models.UnifiedChatMessage> HealForSend(System.Collections.Generic.IReadOnlyList<Host.Desktop.Core.Models.UnifiedChatMessage>? messages)
+     {
+         var src = messages ?? System.Array.Empty<Host.Desktop.Core.Models.UnifiedChatMessage>();
+         int n = src.Count;
+         if (n == 0) return new List<Host.Desktop.Core.Models.UnifiedChatMessage>();
+         var uncoveredByAssistant = new System.Collections.Generic.Dictionary<int, System.Collections.Generic.List<(string CallId, string? Name)>>();
+         var orphanToolIndexes = new System.Collections.Generic.HashSet<int>();
+         for (int i = 0; i < n; i++)
+         {
+             var m = src[i];
+             if (m == null) continue;
+             string role = (m.Role ?? string.Empty).ToLowerInvariant();
+             if (string.Equals(role, "assistant", System.StringComparison.Ordinal))
+             {
+                 var calls = m.ToolCalls?
+                     .Where(c => c != null && !string.IsNullOrWhiteSpace(c.CallId))
+                     .ToList();
+                 if (calls == null || calls.Count == 0) continue;
+                 var covered = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+                 for (int j = i + 1; j < n; j++)
+                 {
+                     var t = src[j];
+                     if (t == null || !string.Equals((t.Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal)) break;
+                     if (!string.IsNullOrWhiteSpace(t.ToolCallId)) covered.Add(t.ToolCallId!);
+                 }
+                 var uncovered = calls.Where(c => !covered.Contains(c.CallId)).Select(c => (c.CallId, (string?)c.FunctionName)).ToList();
+                 if (uncovered.Count > 0) uncoveredByAssistant[i] = uncovered;
+             }
+             else if (string.Equals(role, "tool", System.StringComparison.Ordinal))
+             {
+                 bool owned = false;
+                 if (!string.IsNullOrWhiteSpace(m.ToolCallId))
+                 {
+                     int k = i - 1;
+                     while (k >= 0 && src[k] != null && string.Equals((src[k].Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal)) k--;
+                     if (k >= 0 && src[k] != null && string.Equals((src[k].Role ?? string.Empty).ToLowerInvariant(), "assistant", System.StringComparison.Ordinal))
+                     {
+                         owned = src[k].ToolCalls?.Any(c => c != null && string.Equals(c.CallId, m.ToolCallId, System.StringComparison.Ordinal)) == true;
+                     }
+                 }
+                 if (!owned) orphanToolIndexes.Add(i);
+             }
+         }
+         if (uncoveredByAssistant.Count == 0 && orphanToolIndexes.Count == 0)
+         {
+             return new List<Host.Desktop.Core.Models.UnifiedChatMessage>(src);
+         }
+         // 合成一律追加在存量 tool 块尾（[assistant, toolA, syntheticB]），不插在块中。
+         var fixed_ = new List<Host.Desktop.Core.Models.UnifiedChatMessage>(n + uncoveredByAssistant.Values.Sum(v => v.Count));
+         int idx = 0;
+         while (idx < n)
+         {
+             if (orphanToolIndexes.Contains(idx)) { idx++; continue; }
+             var m = src[idx];
+             fixed_.Add(m!);
+             if (uncoveredByAssistant.TryGetValue(idx, out var uncovered))
+             {
+                 int j = idx + 1;
+                 while (j < n && src[j] != null && string.Equals((src[j].Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal))
+                 {
+                     if (orphanToolIndexes.Contains(j)) { j++; continue; }
+                     fixed_.Add(src[j]!);
+                     j++;
+                 }
+                 foreach (var (callId, name) in uncovered)
+                 {
+                     fixed_.Add(Host.Desktop.Core.Models.UnifiedChatMessage.Tool(callId, SyntheticText(name), name));
+                 }
+                 idx = j;
+             }
+             else { idx++; }
+         }
+         return fixed_;
+     }
+ }
 
 
 

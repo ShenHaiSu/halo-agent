@@ -205,6 +205,7 @@ export interface ModelConfig {
   supportsVision?: boolean;
   maxImagesPerTurn?: number;
   visionDetail?: string | null;
+  includeReasoningInHistory?: boolean;
 }
 
 // need09-05：聊天图片引用（缺字段/null/空 = 纯文本）
@@ -222,13 +223,20 @@ export interface ChatImageRef {
 
 // need09-03：模型多模态能力位归一化（缺省 false/4/high；maxImagesPerTurn 0=默认4；显式 auto 保留，缺失/非法回 high）
 export function normalizeVisionFlag(m: Record<string, unknown>): void {
-  const r = m as unknown as { supportsVision?: unknown; maxImagesPerTurn?: unknown; visionDetail?: unknown };
+  const r = m as unknown as {
+    supportsVision?: unknown;
+    maxImagesPerTurn?: unknown;
+    visionDetail?: unknown;
+    includeReasoningInHistory?: unknown;
+  };
   if (typeof r.supportsVision !== 'boolean') r.supportsVision = false;
   if (!Number.isFinite(r.maxImagesPerTurn as number)) r.maxImagesPerTurn = 4;
   r.maxImagesPerTurn = Math.trunc(r.maxImagesPerTurn as number);
   if (r.maxImagesPerTurn === 0) r.maxImagesPerTurn = 4;
   if (r.visionDetail == null || r.visionDetail === '') r.visionDetail = 'high';
   if (!['auto', 'low', 'high'].includes(String(r.visionDetail))) r.visionDetail = 'high';
+  // 历史思考链默认随上下文发出（老 providers.json 缺字段回退 true）
+  if (typeof r.includeReasoningInHistory !== 'boolean') r.includeReasoningInHistory = true;
 }
 
 export interface CustomHeaderEntry {

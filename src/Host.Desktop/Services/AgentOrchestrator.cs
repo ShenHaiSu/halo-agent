@@ -390,17 +390,23 @@ public interface IAgentOrchestrator
             List<UnifiedChatMessage> history;
             try
             {
-                history = await _sessionService.GetSessionMessagesAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
-            }
-
-            // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
-            // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
-            List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history, 1024, residentStableTokens);
+                 history = await _sessionService.GetSessionMessagesAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
+                 // FIX(tool-400)：同轮内上次迭代可能留下孤儿（取消/截断死在 assistant→tool 之间），本轮发包前内存愈合，不写盘。
+                 try
+                 {
+                     var (healed, _, _) = WorkspaceSessionService.RebuildHealedHistory(history);
+                     history = healed;
+                 }
+                 catch { /* 愈合失败则用原历史，适配器发包前仍有守卫 */ }
+             }
+             catch (OperationCanceledException)
+             {
+                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
+             }
+             // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
+             // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
+             List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history, 1024, residentStableTokens);
 
              var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1);
              if (!string.IsNullOrWhiteSpace(systemPrompt)) requestMessages.Add(UnifiedChatMessage.System(systemPrompt));

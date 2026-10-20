@@ -6,13 +6,7 @@
         <span class="text-xs font-semibold text-secondary uppercase tracking-wider">
           已配置服务商 ({{ configStore.providersDoc.providers.length }})
         </span>
-        <n-button
-          type="primary"
-          size="tiny"
-          secondary
-          data-testid="add-provider-btn"
-          @click="handleAddNewProvider"
-        >
+        <n-button type="primary" size="tiny" secondary data-testid="add-provider-btn" @click="handleAddNewProvider">
           <template #icon>
             <Plus class="w-3.5 h-3.5" />
           </template>
@@ -35,19 +29,10 @@
               <span class="text-xs font-semibold truncate">{{ item.name }}</span>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <n-tag
-                v-if="configStore.providersDoc.activeProviderId === item.id"
-                type="info"
-                size="small"
-                :bordered="false"
-              >
+              <n-tag v-if="configStore.providersDoc.activeProviderId === item.id" type="info" size="small" :bordered="false">
                 当前激活
               </n-tag>
-              <n-tag
-                :type="item.enabled ? 'success' : 'default'"
-                size="small"
-                :bordered="false"
-              >
+              <n-tag :type="item.enabled ? 'success' : 'default'" size="small" :bordered="false">
                 {{ item.enabled ? '启用' : '停用' }}
               </n-tag>
             </div>
@@ -61,13 +46,7 @@
             <span>{{ item.models.length }} 个模型</span>
             <span class="font-mono">
               代理:
-              {{
-                item.proxyMode === 'Inherit'
-                  ? '继承全局'
-                  : item.proxyMode === 'None'
-                  ? '强制直连'
-                  : '独立代理'
-              }}
+              {{ item.proxyMode === 'Inherit' ? '继承全局' : item.proxyMode === 'None' ? '强制直连' : '独立代理' }}
             </span>
           </div>
         </div>
@@ -141,11 +120,7 @@
                   :bordered="false"
                   class="font-mono"
                 >
-                  {{
-                    editingProvider.apiKeyMasked
-                      ? `已加密 (${editingProvider.apiKeyMasked})`
-                      : '未设置密钥'
-                  }}
+                  {{ editingProvider.apiKeyMasked ? `已加密 (${editingProvider.apiKeyMasked})` : '未设置密钥' }}
                 </n-tag>
               </div>
               <n-input
@@ -183,20 +158,11 @@
           >
             <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">协议</label>
-              <n-select
-                v-model:value="editingProvider.customProxy.scheme"
-                :options="proxySchemeOptions"
-                size="tiny"
-              />
+              <n-select v-model:value="editingProvider.customProxy.scheme" :options="proxySchemeOptions" size="tiny" />
             </div>
             <div class="col-span-6 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">独立代理主机</label>
-              <n-input
-                v-model:value="editingProvider.customProxy.host"
-                placeholder="127.0.0.1"
-                size="tiny"
-                class="font-mono text-xs"
-              />
+              <n-input v-model:value="editingProvider.customProxy.host" placeholder="127.0.0.1" size="tiny" class="font-mono text-xs" />
             </div>
             <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-[11px] text-secondary">端口</label>
@@ -253,11 +219,7 @@
               class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center min-w-0"
             >
               <div class="col-span-1 flex justify-center">
-                <n-switch
-                  v-model:value="hdr.enabled"
-                  size="small"
-                  @update:value="refreshEndpointPreview"
-                />
+                <n-switch v-model:value="hdr.enabled" size="small" @update:value="refreshEndpointPreview" />
               </div>
               <div class="col-span-4 min-w-0">
                 <n-input
@@ -281,12 +243,7 @@
                 <n-checkbox v-model:checked="hdr.isSecret" size="small" title="日志脱敏">
                   <span class="text-[11px] text-secondary">敏感</span>
                 </n-checkbox>
-                <n-button
-                  quaternary
-                  size="tiny"
-                  type="error"
-                  @click="removeCustomHeader(idx)"
-                >
+                <n-button quaternary size="tiny" type="error" @click="removeCustomHeader(idx)">
                   <template #icon>
                     <Trash2 class="w-3.5 h-3.5" />
                   </template>
@@ -295,17 +252,13 @@
             </div>
           </div>
           <div v-else class="text-xs text-secondary py-1">
-            暂无自定义请求头，可点击下方按钮添加（例如注入 <code class="font-mono">${session-hash}</code> 实现网关亲和路由；推荐同时保留 <code class="font-mono">x-opencode-session</code> 以兼容 opencode 网关）。
+            暂无自定义请求头，可点击下方按钮添加（例如注入 <code class="font-mono">${session-hash}</code> 实现网关亲和路由；推荐同时保留
+            <code class="font-mono">x-opencode-session</code> 以兼容 opencode 网关）。
           </div>
 
           <div class="flex items-center justify-between pt-1">
             <div class="flex flex-wrap items-center gap-2">
-              <n-button
-                size="tiny"
-                secondary
-                data-testid="add-custom-header-btn"
-                @click="addCustomHeader"
-              >
+              <n-button size="tiny" secondary data-testid="add-custom-header-btn" @click="addCustomHeader">
                 <template #icon>
                   <Plus class="w-3.5 h-3.5" />
                 </template>
@@ -316,11 +269,7 @@
               </n-button>
             </div>
 
-            <span
-              v-if="endpointPreview?.sessionHash"
-              class="text-[11px] font-mono text-secondary"
-              data-testid="preview-session-hash"
-            >
+            <span v-if="endpointPreview?.sessionHash" class="text-[11px] font-mono text-secondary" data-testid="preview-session-hash">
               当前会话 ${session-hash} 预览:
               <strong class="text-emerald-400">{{ endpointPreview.sessionHash }}</strong>
             </span>
@@ -328,20 +277,12 @@
 
           <!-- 实时解析结果预览 -->
           <div
-            v-if="
-              editingProvider.enableCustomHeaders &&
-              endpointPreview &&
-              Object.keys(endpointPreview.resolvedHeaders).length > 0
-            "
+            v-if="editingProvider.enableCustomHeaders && endpointPreview && Object.keys(endpointPreview.resolvedHeaders).length > 0"
             class="setting-inset p-2 text-[11px] font-mono space-y-1 min-w-0"
             data-testid="resolved-headers-preview-box"
           >
             <div class="text-secondary">实际发包 Header 注入预览：</div>
-            <div
-              v-for="(val, key) in endpointPreview.resolvedHeaders"
-              :key="key"
-              class="flex items-center justify-between gap-2 min-w-0"
-            >
+            <div v-for="(val, key) in endpointPreview.resolvedHeaders" :key="key" class="flex items-center justify-between gap-2 min-w-0">
               <span class="text-blue-400 shrink-0">{{ key }}:</span>
               <span class="text-emerald-400 min-w-0 break-all text-right">{{ val }}</span>
             </div>
@@ -352,13 +293,7 @@
       <!-- 3. 模型配置列表卡片 (Protocol: chat / resp, MaxContextTokens, MaxOutputTokens) -->
       <n-card size="small" title="模型列表与协议预算配置 (Models)">
         <template #header-extra>
-          <n-button
-            size="tiny"
-            type="primary"
-            secondary
-            data-testid="add-model-btn"
-            @click="addModelRow"
-          >
+          <n-button size="tiny" type="primary" secondary data-testid="add-model-btn" @click="addModelRow">
             <template #icon>
               <Plus class="w-3.5 h-3.5" />
             </template>
@@ -380,10 +315,14 @@
                 <ChevronDown class="w-3.5 h-3.5 transition-transform shrink-0" :class="{ 'rotate-180': expandedModelIndex === mIdx }" />
                 <span class="text-xs font-semibold font-mono truncate">{{ mdl.id || '(未命名模型)' }}</span>
                 <span v-if="mdl.displayName" class="text-[11px] text-secondary truncate">({{ mdl.displayName }})</span>
-                <n-tag :type="mdl.protocol === 'resp' ? 'info' : 'success'" size="small" :bordered="false" class="font-mono shrink-0">{{ mdl.protocol === 'resp' ? 'resp' : 'chat' }}</n-tag>
+                <n-tag :type="mdl.protocol === 'resp' ? 'info' : 'success'" size="small" :bordered="false" class="font-mono shrink-0">{{
+                  mdl.protocol === 'resp' ? 'resp' : 'chat'
+                }}</n-tag>
               </div>
               <div class="flex items-center gap-2 shrink-0" @click.stop>
-                <span class="text-[11px] font-mono text-secondary hidden sm:inline">{{ formatK(mdl.maxContextTokens) }} / Out {{ formatK(mdl.maxOutputTokens) }}</span>
+                <span class="text-[11px] font-mono text-secondary hidden sm:inline"
+                  >{{ formatK(mdl.maxContextTokens) }} / Out {{ formatK(mdl.maxOutputTokens) }}</span
+                >
                 <n-tag v-if="isModelActive(editingProvider.id, mdl.id)" type="primary" size="small" :bordered="false">默认</n-tag>
                 <n-button size="tiny" secondary @click="handleSetActiveModel(editingProvider.id, mdl.id)">设为默认</n-button>
               </div>
@@ -443,7 +382,8 @@
                         secondary
                         :type="mdl.maxContextTokens === p.value ? 'primary' : 'default'"
                         @click="setPreset(mdl, 'maxContextTokens', p.value)"
-                      >{{ p.label }}</n-button>
+                        >{{ p.label }}</n-button
+                      >
                     </div>
                   </div>
                   <div class="col-span-12 sm:col-span-6 space-y-1 min-w-0">
@@ -464,32 +404,70 @@
                         secondary
                         :type="mdl.maxOutputTokens === p.value ? 'primary' : 'default'"
                         @click="setPreset(mdl, 'maxOutputTokens', p.value)"
-                      >{{ p.label }}</n-button>
+                        >{{ p.label }}</n-button
+                      >
                     </div>
                   </div>
                   <!-- need09-03：模型多模态能力位（与 protocol/temperature 同卡片行区，不新开卡片） -->
                   <div class="col-span-12 space-y-1.5 min-w-0 rounded-md border border-subtle/60 p-2">
-                     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-                       <div class="flex items-center gap-2">
-                         <span class="text-[11px] text-secondary">可读图片（多模态）</span>
-                         <n-switch :value="visionOf(mdl).supportsVision === true" size="small" :data-testid="`model-supports-vision-switch-${mIdx}`" @update:value="(v: boolean) => setVisionField(mdl, 'supportsVision', v)" />
-                       </div>
-                       <template v-if="visionOf(mdl).supportsVision === true">
-                         <div class="flex items-center gap-2">
-                           <span class="text-[11px] text-secondary">每轮最多图片（0=默认4，上限16）</span>
-                           <n-input-number :value="visionOf(mdl).maxImagesPerTurn ?? 4" :min="0" :max="16" :step="1" size="small" class="font-mono text-xs w-28" :data-testid="`model-max-images-input-${mIdx}`" @update:value="(v: number | null) => setVisionField(mdl, 'maxImagesPerTurn', v)" />
-                         </div>
-                         <div class="flex items-center gap-2">
-                           <span class="text-[11px] text-secondary">清晰度</span>
-                           <n-select :value="visionOf(mdl).visionDetail ?? 'high'" :options="visionDetailOptions" size="small" class="w-28" :data-testid="`model-vision-detail-select-${mIdx}`" @update:value="(v: string) => setVisionField(mdl, 'visionDetail', v)" />
-                         </div>
-                       </template>
-                     </div>
-                     <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。</div>
-                   </div>
+                    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[11px] text-secondary">可读图片（多模态）</span>
+                        <n-switch
+                          :value="visionOf(mdl).supportsVision === true"
+                          size="small"
+                          :data-testid="`model-supports-vision-switch-${mIdx}`"
+                          @update:value="(v: boolean) => setVisionField(mdl, 'supportsVision', v)"
+                        />
+                      </div>
+                      <template v-if="visionOf(mdl).supportsVision === true">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[11px] text-secondary">每轮最多图片（0=默认4，上限16）</span>
+                          <n-input-number
+                            :value="visionOf(mdl).maxImagesPerTurn ?? 4"
+                            :min="0"
+                            :max="16"
+                            :step="1"
+                            size="small"
+                            class="font-mono text-xs w-28"
+                            :data-testid="`model-max-images-input-${mIdx}`"
+                            @update:value="(v: number | null) => setVisionField(mdl, 'maxImagesPerTurn', v)"
+                          />
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <span class="text-[11px] text-secondary">清晰度</span>
+                          <n-select
+                            :value="visionOf(mdl).visionDetail ?? 'high'"
+                            :options="visionDetailOptions"
+                            size="small"
+                            class="w-28"
+                            :data-testid="`model-vision-detail-select-${mIdx}`"
+                            @update:value="(v: string) => setVisionField(mdl, 'visionDetail', v)"
+                          />
+                        </div>
+                      </template>
+                    </div>
+                    <div class="text-[11px] text-secondary">
+                      关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。
+                    </div>
+                  </div>
+                </div>
+                <!-- 历史思考链开关（chat: reasoning_content；resp: reasoning.summary，默认开，空则省略） -->
+                <div class="col-span-12 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-subtle/60 p-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] text-secondary">历史携带思考链</span>
+                    <n-switch
+                      :value="visionOf(mdl).includeReasoningInHistory !== false"
+                      size="small"
+                      :data-testid="`model-reasoning-switch-${mIdx}`"
+                      @update:value="(v: boolean) => setVisionField(mdl, 'includeReasoningInHistory', v)"
+                    />
+                  </div>
+                  <span class="text-[11px] text-secondary">关闭后历史 reasoning 不发包（严格网关 400 时可关）</span>
                 </div>
                 <div class="text-[11px] font-mono text-secondary break-all min-w-0">
-                  {{ mdl.protocol === 'resp' ? 'resp → ' : 'chat → ' }}{{ mdl.protocol === 'resp' ? computedRespEndpoint : computedChatEndpoint }}
+                  {{ mdl.protocol === 'resp' ? 'resp → ' : 'chat → '
+                  }}{{ mdl.protocol === 'resp' ? computedRespEndpoint : computedChatEndpoint }}
                 </div>
                 <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
                   <n-button
@@ -503,7 +481,13 @@
                     </template>
                     {{ isModelActive(editingProvider.id, mdl.id) ? '当前默认模型' : '设为默认模型' }}
                   </n-button>
-                  <n-button quaternary size="tiny" type="error" :disabled="editingProvider.models.length <= 1" @click="removeModelRow(mIdx)">
+                  <n-button
+                    quaternary
+                    size="tiny"
+                    type="error"
+                    :disabled="editingProvider.models.length <= 1"
+                    @click="removeModelRow(mIdx)"
+                  >
                     <template #icon>
                       <Trash2 class="w-3.5 h-3.5" />
                     </template>
@@ -533,13 +517,7 @@
           </n-button>
 
           <n-space :size="10">
-            <n-button
-              size="small"
-              secondary
-              :loading="testingProvider"
-              data-testid="test-provider-btn"
-              @click="handleTestCurrentProvider"
-            >
+            <n-button size="small" secondary :loading="testingProvider" data-testid="test-provider-btn" @click="handleTestCurrentProvider">
               <template #icon>
                 <Activity class="w-3.5 h-3.5" />
               </template>
@@ -578,9 +556,7 @@
                 : providerTestResult.errorMessage || '网关连接失败'
             }}
           </span>
-          <span>
-            代理: {{ providerTestResult.effectiveProxyUsed }} · {{ providerTestResult.elapsedMs }} ms
-          </span>
+          <span> 代理: {{ providerTestResult.effectiveProxyUsed }} · {{ providerTestResult.elapsedMs }} ms </span>
         </div>
       </div>
     </div>
@@ -590,15 +566,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
-import {
-  Plus,
-  Server,
-  Trash2,
-  CheckCircle2,
-  Activity,
-  Save,
-  ChevronDown,
-} from 'lucide-vue-next';
+import { Plus, Server, Trash2, CheckCircle2, Activity, Save, ChevronDown } from 'lucide-vue-next';
 import { useConfigStore } from '@/stores/configStore';
 import type {
   ModelConfig,
@@ -627,12 +595,12 @@ const visionDetailOptions = [
 function normalizeVisionFields(mdl: ModelConfig): void {
   const m = mdl as unknown as Record<string, unknown>;
   if (typeof m['supportsVision'] !== 'boolean') m['supportsVision'] = false;
+  if (typeof m['includeReasoningInHistory'] !== 'boolean') m['includeReasoningInHistory'] = true;
   if (!Number.isFinite(m['maxImagesPerTurn'] as number)) m['maxImagesPerTurn'] = 4;
   m['maxImagesPerTurn'] = Math.trunc(m['maxImagesPerTurn'] as number);
   if (m['visionDetail'] == null || m['visionDetail'] === '') m['visionDetail'] = 'high';
   if (!['auto', 'low', 'high'].includes(String(m['visionDetail']))) m['visionDetail'] = 'high';
 }
-
 
 function normalizeAllVisionFields(): void {
   if (!editingProvider.value) return;
@@ -643,16 +611,23 @@ interface VisionFieldView {
   supportsVision?: boolean;
   maxImagesPerTurn?: number | null;
   visionDetail?: string | null;
+  includeReasoningInHistory?: boolean;
 }
 
 function visionOf(mdl: ModelConfig): VisionFieldView {
   return mdl as unknown as VisionFieldView;
 }
 
-function setVisionField(mdl: ModelConfig, field: 'supportsVision' | 'maxImagesPerTurn' | 'visionDetail', value: unknown): void {
+function setVisionField(
+  mdl: ModelConfig,
+  field: 'supportsVision' | 'maxImagesPerTurn' | 'visionDetail' | 'includeReasoningInHistory',
+  value: unknown
+): void {
   const m = mdl as unknown as Record<string, unknown>;
   if (field === 'supportsVision') {
     m['supportsVision'] = value === true;
+  } else if (field === 'includeReasoningInHistory') {
+    m['includeReasoningInHistory'] = value !== false;
   } else if (field === 'maxImagesPerTurn') {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) {
@@ -792,10 +767,7 @@ onMounted(() => {
 
 async function refreshEndpointPreview() {
   if (!editingProvider.value) return;
-  const res = await configStore.previewProviderResolution(
-    editingProvider.value,
-    editingProvider.value.models[0]?.id || 'gpt-4o'
-  );
+  const res = await configStore.previewProviderResolution(editingProvider.value, editingProvider.value.models[0]?.id || 'gpt-4o');
   if (res.ok && res.data) {
     endpointPreview.value = res.data;
   }
@@ -860,8 +832,7 @@ function insertVariableToLastHeader(token: string) {
       isSecret: false,
     });
   } else {
-    const last =
-      editingProvider.value.customHeaders[editingProvider.value.customHeaders.length - 1];
+    const last = editingProvider.value.customHeaders[editingProvider.value.customHeaders.length - 1];
     last.valueTemplate = `${last.valueTemplate || ''}${token}`;
   }
   refreshEndpointPreview();
@@ -880,6 +851,7 @@ function addModelRow() {
     supportsVision: false,
     maxImagesPerTurn: 4,
     visionDetail: 'high',
+    includeReasoningInHistory: true,
   } as unknown as ModelConfig);
   expandedModelIndex.value = editingProvider.value.models.length - 1;
 }
@@ -891,10 +863,7 @@ function removeModelRow(index: number) {
 }
 
 function isModelActive(providerId: string, modelId: string): boolean {
-  return (
-    configStore.providersDoc.activeProviderId === providerId &&
-    configStore.providersDoc.activeModelId === modelId
-  );
+  return configStore.providersDoc.activeProviderId === providerId && configStore.providersDoc.activeModelId === modelId;
 }
 
 async function handleSetActiveModel(providerId: string, modelId: string) {
@@ -948,6 +917,7 @@ function handleAddNewProvider() {
         supportsVision: false,
         maxImagesPerTurn: 4,
         visionDetail: 'high',
+        includeReasoningInHistory: true,
       } as unknown as ModelConfig,
     ],
   };
@@ -975,6 +945,7 @@ async function handleSaveCurrentProvider(showToast = true) {
   for (const mdl of payload.models) {
     const m = mdl as unknown as Record<string, unknown>;
     if (typeof m['supportsVision'] !== 'boolean') m['supportsVision'] = false;
+    if (typeof m['includeReasoningInHistory'] !== 'boolean') m['includeReasoningInHistory'] = true;
     let n = Number(m['maxImagesPerTurn']);
     if (!Number.isFinite(n)) n = 4;
     n = Math.trunc(n);

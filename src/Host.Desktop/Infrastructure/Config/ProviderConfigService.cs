@@ -581,7 +581,8 @@ public sealed class ProviderConfigService
             Enabled = m.Enabled,
             SupportsVision = m.SupportsVision,
             MaxImagesPerTurn = m.MaxImagesPerTurn,
-            VisionDetail = VisionDefaults.NormalizeDetail(m.VisionDetail)
+            VisionDetail = VisionDefaults.NormalizeDetail(m.VisionDetail),
+            IncludeReasoningInHistory = m.IncludeReasoningInHistory
         };
     }
 

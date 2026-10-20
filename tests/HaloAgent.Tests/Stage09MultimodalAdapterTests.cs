@@ -238,7 +238,7 @@ public sealed class Stage09MultimodalAdapterTests
          finally { try { System.IO.Directory.Delete(root, true); } catch { } }
      }
  
-     [Fact(DisplayName = "N11-3: Responses 补 detail + tool 附图首位 input_text")]
+     [Fact(DisplayName = "N11-3: Responses 补 detail + tool 附图块尾 input_text（FIX-tool-400：图延迟到 output 块尾单个 user）")]
      public void Need11_Resp_DetailAndToolText()
      {
          var model = new ModelConfig { Id = "o3", Protocol = LlmProtocolType.Resp, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "low" };
@@ -247,19 +247,24 @@ public sealed class Stage09MultimodalAdapterTests
          using var doc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(req));
          var parts = doc.RootElement.GetProperty("input").EnumerateArray().ToList()[0].GetProperty("content").EnumerateArray().ToList();
          Assert.Equal("low", parts[1].GetProperty("detail").GetString());
+         // tool 附图必须配对在 assistant(function_call) 之后；图收齐到 output 块尾单个 user
+         var assistant = UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("c1", null, "read_file", "{}") });
          var tool = UnifiedChatMessage.Tool("c1", "已读取 a.png（1x1）"); tool.Images = new List<ChatImageRef> { Img("img_n11") };
-         var treq = ImgRequest(model, new List<UnifiedChatMessage> { tool }, _ => "data:image/png;base64,QUJD");
+         var treq = ImgRequest(model, new List<UnifiedChatMessage> { assistant, tool }, _ => "data:image/png;base64,QUJD");
          using var tdoc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(treq));
          var tinput = tdoc.RootElement.GetProperty("input").EnumerateArray().ToList();
-         Assert.Equal(2, tinput.Count);
-         var tparts = tinput[1].GetProperty("content").EnumerateArray().ToList();
+         Assert.Equal(3, tinput.Count);
+         Assert.Equal("function_call", tinput[0].GetProperty("type").GetString());
+         Assert.Equal("function_call_output", tinput[1].GetProperty("type").GetString());
+         var tparts = tinput[2].GetProperty("content").EnumerateArray().ToList();
          Assert.Equal("input_text", tparts[0].GetProperty("type").GetString());
          Assert.False(string.IsNullOrWhiteSpace(tparts[0].GetProperty("text").GetString()));
          Assert.Equal("input_image", tparts[1].GetProperty("type").GetString());
          Assert.Equal("low", tparts[1].GetProperty("detail").GetString());
+         var assistant2 = UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("c2", null, "read_file", "{}") });
          var emptyTool = UnifiedChatMessage.Tool("c2", "  "); emptyTool.Images = new List<ChatImageRef> { Img("img_n11") };
-         using var edoc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(ImgRequest(model, new List<UnifiedChatMessage> { emptyTool }, _ => "data:image/png;base64,QUJD")));
-         var eparts = edoc.RootElement.GetProperty("input").EnumerateArray().ToList()[1].GetProperty("content").EnumerateArray().ToList();
-         Assert.Equal("图片如下：", eparts[0].GetProperty("text").GetString());
+         using var edoc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(ImgRequest(model, new List<UnifiedChatMessage> { assistant2, emptyTool }, _ => "data:image/png;base64,QUJD")));
+         var eparts = edoc.RootElement.GetProperty("input").EnumerateArray().ToList()[2].GetProperty("content").EnumerateArray().ToList();
+         Assert.Contains("c2", eparts[0].GetProperty("text").GetString());
      }
 }
