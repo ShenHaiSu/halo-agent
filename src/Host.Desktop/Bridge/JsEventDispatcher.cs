@@ -12,17 +12,39 @@ public sealed record HostEventEnvelope(string Type, object? Payload, long Timest
 /// <summary>
 /// C# -&gt; JS 高频流式事件 16ms 节流合并推送器（约 60fps）：
 /// 将短时间内产生的多条事件打包为单个 JSON 数组，通过 window.__haloReceiveHostEvents 一次性投递给前端。
+/// need22-P1 T6：队列有界 1000 + 背压（保 agent:turn-event 等关键事件，丢中间 llm:stream-event；Shutdown 先排空再关）。
 /// </summary>
 public static class JsEventDispatcher
 {
     private const int ThrottleIntervalMs = 16;
     private const int MaxBatchSize = 128;
+    /// <summary>need22-P1 T6：事件队列上限（渲染慢时堆积不再无界增长）。</summary>
+    internal const int MaxQueueSize = 1000;
 
     private static readonly ConcurrentQueue<HostEventEnvelope> EventQueue = new();
     private static readonly object TimerLock = new();
+    /// <summary>need22-P1 T6：背压逐出锁（Publish/逐出/排空互斥，避免与 Flush 并发错乱）。</summary>
+    private static readonly object BackpressureLock = new();
     private static System.Threading.Timer? _flushTimer;
     private static ChromiumWebBrowser? _browser;
     private static int _isFlushing;
+    private static long _droppedEvents;
+
+    /// <summary>need22-P1 T6：背压丢弃计数（可观测）。</summary>
+    public static long DroppedEvents => Interlocked.Read(ref _droppedEvents);
+
+    /// <summary>need22-P1 T6：测试钩子（当前排队数）。</summary>
+    internal static int PendingCountForTests => EventQueue.Count;
+
+    /// <summary>need22-P1 T6：测试钩子（清空队列与计数）。</summary>
+    internal static void ClearForTests()
+    {
+        lock (BackpressureLock)
+        {
+            while (EventQueue.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref _droppedEvents, 0);
+        }
+    }
 
     public static void AttachBrowser(ChromiumWebBrowser browser)
     {
@@ -49,7 +71,54 @@ public static class JsEventDispatcher
             payload,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
-        EventQueue.Enqueue(envelope);
+        lock (BackpressureLock)
+        {
+            // need22-P1 T6：有界 1000 + 背压。关键事件（agent:turn-event 轮生命周期，如 TurnCompleted/TurnError）
+            // 永不丢：满时先逐出最旧的非关键事件腾位；非关键事件（llm:stream-event 等高频增量，可重放）满时直接丢新。
+            if (EventQueue.Count >= MaxQueueSize)
+            {
+                if (IsCritical(envelope))
+                {
+                    if (!DropOldestNonCritical() && EventQueue.Count >= MaxQueueSize)
+                        EventQueue.TryDequeue(out _);
+                }
+                else
+                {
+                    Interlocked.Increment(ref _droppedEvents);
+                    return;
+                }
+            }
+            EventQueue.Enqueue(envelope);
+        }
+    }
+
+    /// <summary>need22-P1 T6：关键事件判定（轮生命周期必达，如 TurnCompleted/TurnError/TurnCancelled/Compact*）。</summary>
+    internal static bool IsCritical(HostEventEnvelope envelope)
+    {
+        if (envelope.Type == null) return false;
+        // llm:stream-event 为高频增量（TextDelta/ReasoningDelta），可丢可重放；
+        // 其余（agent:turn-event/config:*/Compact*）视为关键。
+        return !string.Equals(envelope.Type, "llm:stream-event", StringComparison.Ordinal);
+    }
+
+    /// <summary>need22-P1 T6：逐出最旧的一条非关键事件（调用方需持 BackpressureLock）。</summary>
+    private static bool DropOldestNonCritical()
+    {
+        int n = EventQueue.Count;
+        var kept = new List<HostEventEnvelope>(n);
+        bool dropped = false;
+        while (kept.Count < n && EventQueue.TryDequeue(out var item))
+        {
+            if (!dropped && !IsCritical(item))
+            {
+                dropped = true;
+                Interlocked.Increment(ref _droppedEvents);
+                continue;
+            }
+            kept.Add(item);
+        }
+        foreach (var k in kept) EventQueue.Enqueue(k);
+        return dropped;
     }
 
     /// <summary>
@@ -165,11 +234,48 @@ public static class JsEventDispatcher
         {
             _flushTimer?.Dispose();
             _flushTimer = null;
-            _browser = null;
         }
 
-        while (EventQueue.TryDequeue(out _))
+        // need22-P1 T6：Shutdown 先排空再关（TurnCompleted 等关键事件不再被直接清空丢弃）。
+        try
         {
+            var browser = _browser;
+            if (browser != null && !browser.IsDisposed && browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame)
+            {
+                for (int i = 0; i < (MaxQueueSize / MaxBatchSize) + 2; i++)
+                {
+                    string? jsonBatch;
+                    lock (BackpressureLock)
+                    {
+                        if (EventQueue.IsEmpty) break;
+                        jsonBatch = DequeueBatchJson();
+                    }
+                    if (string.IsNullOrEmpty(jsonBatch)) break;
+                    try
+                    {
+                        var script = $"if (typeof window.__haloReceiveHostEvents === 'function') {{ window.__haloReceiveHostEvents({jsonBatch}); }}";
+                        browser.ExecuteScriptAsync(script);
+                    }
+                    catch (Exception ex)
+                    {
+                        HaloLogger.App.Warn("JsEventDispatcher failed to drain batch on shutdown.", ex);
+                        break;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            lock (TimerLock)
+            {
+                _browser = null;
+            }
+            lock (BackpressureLock)
+            {
+                while (EventQueue.TryDequeue(out _))
+                {
+                }
+            }
         }
     }
 }

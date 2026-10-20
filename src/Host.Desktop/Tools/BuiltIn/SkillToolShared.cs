@@ -4,6 +4,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Host.Desktop.Bridge;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Tools.Safety;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -411,6 +413,16 @@ public static class SkillToolShared
             string msg = $"{action} {kind} '{n}'（scope={scope}）。下轮生效；常驻索引 {deltaText}。";
             if (isSkill && finalPin == "full" && entry != null)
                 msg += $"警告：pin=full 使正文每轮常驻（约 +{entry.EstTokens} tokens/轮），确认常驻请保留，否则改回 auto。";
+            // need22-P0 S5：正文疑似密钥落盘审计（不阻断写入、不篡改正文，仅告警）
+            try
+            {
+                if (!string.IsNullOrEmpty(body) && SecretScrubber.ContainsSecret(body))
+                {
+                    msg += "（注：正文疑似含密钥明文，已记录审计告警；请勿长期存放明文密钥。）";
+                    HaloLogger.App.Warn($"[Skill] {kind} '{n}'（scope={scope}）正文疑似含密钥，已落盘并审计告警。");
+                }
+            }
+            catch { /* 审计失败不阻断写入 */ }
             return new WriteResult(true, msg, entry, delta);
         }
     }
@@ -509,26 +521,29 @@ public static class SkillToolShared
             bool? enabled = null;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
+                // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口）
+                using var toolArgs = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = toolArgs.Root;
                 if (root.ValueKind != JsonValueKind.Object)
                     return ToolResult.Fail($"参数必须是对象。正确示例：{{\"action\":\"list\",\"scope\":\"project\"}}。[SKILL_VALIDATION]",
                         durationMs: sw.ElapsedMilliseconds);
-                if (root.TryGetProperty("action", out var aEl) && aEl.ValueKind == JsonValueKind.String)
-                    action = (aEl.GetString() ?? "list").Trim().ToLowerInvariant();
-                if (root.TryGetProperty("scope", out var sEl) && sEl.ValueKind == JsonValueKind.String)
-                { scope = sEl.GetString() ?? string.Empty; hasScope = true; }
-                if (root.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String)
-                { name = nEl.GetString() ?? string.Empty; hasName = true; }
-                if (root.TryGetProperty("content", out var cEl) && cEl.ValueKind == JsonValueKind.String)
-                { content = cEl.GetString() ?? string.Empty; hasContent = true; }
-                if (root.TryGetProperty("pin", out var pEl) && pEl.ValueKind == JsonValueKind.String)
-                    pin = pEl.GetString();
-                if (root.TryGetProperty("priority", out var prEl) && prEl.ValueKind == JsonValueKind.Number && prEl.TryGetInt32(out int pv))
+                string? a = toolArgs.GetString("action");
+                if (!string.IsNullOrWhiteSpace(a))
+                    action = a.Trim().ToLowerInvariant();
+                scope = toolArgs.GetString("scope") ?? string.Empty; hasScope = toolArgs.Root.TryGetProperty("scope", out _);
+                name = toolArgs.GetString("name") ?? string.Empty; hasName = toolArgs.Root.TryGetProperty("name", out _);
+                string? c = toolArgs.GetString("content");
+                if (c != null || toolArgs.Root.TryGetProperty("content", out _)) { content = c ?? string.Empty; hasContent = toolArgs.Root.TryGetProperty("content", out var cc) && cc.ValueKind == JsonValueKind.String; }
+                // memory 存量别名：body 与 content 二选一（validator 已做条件必填，handler 双认）
+                if (!hasContent && toolArgs.GetString("body") is string b)
+                {
+                    content = b; hasContent = true;
+                }
+                pin = toolArgs.GetString("pin");
+                if (toolArgs.TryGetInt32("priority", out int pv))
                     priority = pv;
-                if (root.TryGetProperty("enabled", out var eEl) && eEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                    enabled = eEl.GetBoolean();
+                if (toolArgs.TryGetBool("enabled", out bool eb))
+                    enabled = eb;
             }
             catch (JsonException ex)
             {
@@ -584,6 +599,14 @@ public static class SkillToolShared
                 case "create":
                     return FromWrite(CreateOrUpdate(isSkill, scopeResolved, hasName ? name : string.Empty,
                         hasContent ? content : null, pin, priority, enabled, context, dataRoot, isCreate: true), sw);
+                case "set" when !isSkill:
+                {
+                    // need22-P0 S3：memory 存量 set 别名 = upsert（存在则 update，不存在则 create；与 validator 对齐）
+                    bool exists = !string.IsNullOrWhiteSpace(name)
+                        && GetEntry(false, scopeResolved, name, context, dataRoot) != null;
+                    return FromWrite(CreateOrUpdate(false, scopeResolved, hasName ? name : string.Empty,
+                        hasContent ? content : null, pin, priority, enabled, context, dataRoot, isCreate: !exists), sw);
+                }
                 case "update":
                     return FromWrite(CreateOrUpdate(isSkill, scopeResolved, hasName ? name : string.Empty,
                         hasContent ? content : null, pin, priority, enabled, context, dataRoot, isCreate: false), sw);

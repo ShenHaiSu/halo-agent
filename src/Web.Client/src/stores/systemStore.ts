@@ -37,6 +37,8 @@ export const useSystemStore = defineStore('system', () => {
     useAppearanceStore().toggleTheme();
   }
 
+  // need22-P3 G6：refreshAll 失败显式角标（顶栏⚠），统一 {code,message}
+  const refreshError = ref<{ code: string; message: string } | null>(null);
   async function refreshAll(): Promise<void> {
     loading.value = true;
     try {
@@ -48,10 +50,20 @@ export const useSystemStore = defineStore('system', () => {
 
       if (sysRes.ok && sysRes.data) {
         systemInfo.value = sysRes.data;
+      } else if (!sysRes.ok) {
+        refreshError.value = { code: sysRes.code || 'REFRESH_FAILED', message: sysRes.message || '系统信息刷新失败' };
+        console.warn('[systemStore] refreshAll sysInfo failed:', refreshError.value);
       }
       if (storageRes.ok && storageRes.data) {
         storageConfig.value = storageRes.data;
+      } else if (!storageRes.ok) {
+        refreshError.value = { code: storageRes.code || 'REFRESH_FAILED', message: storageRes.message || '存储配置刷新失败' };
+        console.warn('[systemStore] refreshAll storage failed:', refreshError.value);
       }
+      if (sysRes.ok && storageRes.ok) refreshError.value = null;
+    } catch (e) {
+      refreshError.value = { code: 'REFRESH_FAILED', message: e instanceof Error ? e.message : String(e) };
+      console.warn('[systemStore] refreshAll failed:', refreshError.value);
     } finally {
       loading.value = false;
     }
@@ -165,6 +177,7 @@ export const useSystemStore = defineStore('system', () => {
     diskFreeGbText,
     applyThemeClass,
     toggleTheme,
+    refreshError,
     refreshAll,
     selectFolder,
     changeStorageRoot,

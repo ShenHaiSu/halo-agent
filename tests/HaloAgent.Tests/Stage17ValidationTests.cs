@@ -109,7 +109,8 @@ public sealed class Stage17ValidationTests
     }
     [Fact] public void Skill_BadAction_EnumViolation()
     {
-        var r = ToolCallValidator.Validate("skill_tool", "{\"action\":\"delete\"}");
+        // need22-P0 S3：skill action 已对齐实现（list|get|create|update|delete|enable|disable），非法动作改用 explode 断言。
+        var r = ToolCallValidator.Validate("skill_tool", "{\"action\":\"explode\"}");
         Assert.False(r.Success);
         Assert.Equal("ENUM_VIOLATION", r.Code);
     }

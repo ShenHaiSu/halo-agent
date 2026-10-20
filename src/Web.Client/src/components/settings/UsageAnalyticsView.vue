@@ -210,7 +210,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { useUsageAnalyticsStore, USAGE_PRESETS } from '@/stores/usageAnalyticsStore';
 import { usePrivacyStore } from '@/stores/privacyStore';
 import { getHostBridge, type UsageDbStatus } from '@/bridge/hostBridge';
-import { formatTokenShort } from '@/utils/formatSmartBytes';
+import { formatTokenShort, formatSmartBytesShort } from '@/utils/formatSmartBytes';
 import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@/utils/maskProvider';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, DatasetComponent, CanvasRenderer]);
@@ -290,10 +290,8 @@ function hitColor(h: number): string {
 }
 const dbSize = computed(() => {
   if (!dbStatus.value) return '';
-  const b = dbStatus.value.dbSizeBytes || 0;
-  if (b < 1024) return b + ' B';
-  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
-  return (b / 1048576).toFixed(2) + ' MB';
+  // need22-P5 J7：收敛到 utils/formatSmartBytes（与原分段口径一致）。
+  return formatSmartBytesShort(dbStatus.value.dbSizeBytes || 0);
 });
 
 const rangeTs = ref<[number, number] | null>(null);

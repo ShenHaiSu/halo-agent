@@ -10,6 +10,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// write_file：新建或全量覆写文件 + need15 安全护栏。
 /// P0-2：覆盖需 allow_overwrite + size 上限 + expected_hash + 备份；
 /// P2-1 dry_run；P1-3 hash 回吐。
+/// need22-P0 S1：越界一律拒绝（无警告放行）；S3：NormalizedJson 单次解析；S5：错误回显相对路径。
 /// </summary>
 public sealed class WriteFileTool : IToolHandler
 {
@@ -55,39 +56,34 @@ public sealed class WriteFileTool : IToolHandler
             bool dryRun = false;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    filePathArg = fpEl.GetString();
-                }
+                    filePathArg = args.GetString("file_path");
 
-                if (root.TryGetProperty("content", out JsonElement contentEl) && contentEl.ValueKind == JsonValueKind.String)
-                {
-                    content = contentEl.GetString();
-                    hasContent = true;
-                }
+                    if (root.TryGetProperty("content", out JsonElement contentEl) && contentEl.ValueKind == JsonValueKind.String)
+                    {
+                        content = contentEl.GetString();
+                        hasContent = true;
+                    }
 
-                if (root.TryGetProperty("allow_overwrite", out JsonElement owEl) && IsBool(owEl))
-                {
-                    allowOverwrite = owEl.GetBoolean();
-                }
+                    if (args.TryGetBool("allow_overwrite", out bool ow))
+                    {
+                        allowOverwrite = ow;
+                    }
 
-                if (root.TryGetProperty("expected_hash", out JsonElement hashEl) && hashEl.ValueKind == JsonValueKind.String)
-                {
-                    expectedHash = hashEl.GetString();
-                }
+                    expectedHash = args.GetString("expected_hash");
 
-                if (root.TryGetProperty("max_bytes", out JsonElement maxEl) && maxEl.ValueKind == JsonValueKind.Number
-                    && maxEl.TryGetInt32(out int parsedMax))
-                {
-                    maxBytesReq = parsedMax;
-                }
+                    if (args.TryGetInt32("max_bytes", out int parsedMax))
+                    {
+                        maxBytesReq = parsedMax;
+                    }
 
-                if (root.TryGetProperty("dry_run", out JsonElement dryEl) && IsBool(dryEl))
-                {
-                    dryRun = dryEl.GetBoolean();
+                    if (args.TryGetBool("dry_run", out bool dry))
+                    {
+                        dryRun = dry;
+                    }
                 }
             }
             catch (JsonException ex)
@@ -114,7 +110,8 @@ public sealed class WriteFileTool : IToolHandler
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
                 : context.WorkspaceRoot;
-            var (allowed, error, fullPath, outsideWorkspace) =
+            // need22-P0 S1：越界一律拒绝（无警告放行分支）
+            var (allowed, error, fullPath, _) =
                 PathSafetyValidator.ValidateWrite(workspaceRoot, filePathArg);
             if (!allowed)
             {
@@ -193,7 +190,7 @@ public sealed class WriteFileTool : IToolHandler
                     }
 
                     return Task.FromResult(ToolResult.FailCode("NEED_CONFIRM_OVERWRITE",
-                        $"NEED_CONFIRM_OVERWRITE：目标已存在（{curLines} 行/{curBytes} 字节/hash:{curHash}）。确认全量覆盖请重调并传 allow_overwrite:true；局部改请用 edit_file/edit_lines。",
+                        $"NEED_CONFIRM_OVERWRITE：目标已存在（{curLines} 行/{curBytes} 字节/hash:{FileToolShared.TruncateHash(curHash)}，完整 hash 请用 read_file 查看）。确认全量覆盖请重调并传 allow_overwrite:true；局部改请用 edit_file/edit_lines。",
                         durationMs: sw.ElapsedMilliseconds));
                 }
 
@@ -213,7 +210,7 @@ public sealed class WriteFileTool : IToolHandler
                     if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
                     {
                         return Task.FromResult(ToolResult.FailCode("EXPECTED_HASH_MISMATCH",
-                            $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {currentHash}；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
+                            $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
                             durationMs: sw.ElapsedMilliseconds));
                     }
                 }
@@ -301,7 +298,7 @@ public sealed class WriteFileTool : IToolHandler
             }
 
             var sb = new StringBuilder();
-            sb.Append(action).Append(" '").Append(display).Append("')：")
+            sb.Append(action).Append(" '").Append(display).Append("'：")
               .Append(finalLines).Append(" 行 / ").Append(byteSizeFinal).Append(" 字节")
               .Append(" (Encoding: ").Append(encodingLabel)
               .Append(", LineEndings: ").Append(newLineLabel)
@@ -312,10 +309,6 @@ public sealed class WriteFileTool : IToolHandler
             }
 
             sb.Append(')');
-            if (outsideWorkspace)
-            {
-                sb.Append(" [警告：目标位于当前工作区之外，请确认路径无误]");
-            }
 
              var ok = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
              ok.FileBytes = byteSizeFinal;
@@ -332,9 +325,6 @@ public sealed class WriteFileTool : IToolHandler
             sw.Stop();
         }
     }
-
-    private static bool IsBool(JsonElement el) =>
-        el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False;
 
     private static string NormalizeHash(string value)
     {

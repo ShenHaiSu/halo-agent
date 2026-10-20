@@ -73,7 +73,7 @@ public static class SecretProtector
     }
 
     /// <summary>
-    /// 生成供前端 UI 展示的脱敏掩码（如 sk-1****9876）
+    /// need22-P0 S5：供前端 UI 展示的脱敏掩码（全掩码，仅保留类型前缀与长度，如 sk-****(len=51)）。
     /// </summary>
     public static string MaskSecret(string? plainText)
     {
@@ -82,11 +82,12 @@ public static class SecretProtector
             return string.Empty;
         }
 
-        if (plainText.Length <= 8)
+        // 全掩码：不保留首尾原文，仅保留类型前缀（sk- 族）与长度
+        if (plainText.StartsWith("sk-", StringComparison.OrdinalIgnoreCase))
         {
-            return "********";
+            return $"sk-****(len={plainText.Length})";
         }
 
-        return $"{plainText[..4]}****{plainText[^4..]}";
+        return $"****(len={plainText.Length})";
     }
 }

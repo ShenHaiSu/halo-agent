@@ -22,7 +22,7 @@ public sealed class MemoryTool : IToolHandler
     // 条件必填由基础组 02 Validator（ConditionalRequired 小表，码复用 MISSING_REQUIRED_PARAM）执行，见 05 实现注记。
     public ToolDefinition GetDefinition() => new(Name, Description,
         new ToolSchemaBuilder()
-            .AddString("action", "list|get|set. Required. set requires name and body.", required: true, enumValues: new[] { "list", "get", "set" })
+            .AddString("action", "list|get|set|create|update|delete|enable|disable. Required. set requires name and body.", required: true, enumValues: new[] { "list", "get", "set", "create", "update", "delete", "enable", "disable" })
             .AddString("scope", "global|project. Default project. list accepts all.")
             .AddString("name", "Memory name (required for get/set, optional for list).")
             .AddString("body", "Memory body (required for set).")

@@ -5,6 +5,7 @@ using CefSharp.WinForms;
 using Host.Desktop.Bridge;
 using Host.Desktop.Handlers;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Infrastructure.Process;
 using Host.Desktop.Infrastructure.Storage;
 
 namespace Host.Desktop;
@@ -19,6 +20,7 @@ public sealed class MainForm : Form
     private readonly bool _isDevelopment;
     private readonly ChromiumWebBrowser _chromeBrowser;
     private readonly HostBridgeFacade _hostBridgeFacade;
+    private readonly CancellationTokenSource _orphanScanCts = new();
     private int _autoVerifyTriggered;
 
     public MainForm(StoragePathManager storageManager, bool gpuDisabled = false)
@@ -77,12 +79,20 @@ public sealed class MainForm : Form
         _chromeBrowser.LoadError += OnLoadError;
 
         Controls.Add(_chromeBrowser);
-         // 启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；脏会话会自动补 synthetic cancelled tool）
-         _ = Task.Run(async () =>
-         {
-             try { await _hostBridgeFacade.ScanAndHealAllSessions().ConfigureAwait(false); }
-             catch (Exception ex) { HaloLogger.App.Warn("[History] startup orphan scan failed", ex); }
-         });
+        // need22-P4 H9：启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；随窗体关闭取消；异常进日志不吞）
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var response = await _hostBridgeFacade.ScanAndHealAllSessions(_orphanScanCts.Token).ConfigureAwait(false);
+                if (!response.Ok)
+                {
+                    HaloLogger.App.Error($"[History] startup orphan scan reported failure: {response.Code}");
+                }
+            }
+            catch (OperationCanceledException) { HaloLogger.App.Info("[History] startup orphan scan cancelled."); }
+            catch (Exception ex) { HaloLogger.App.Error("[History] startup orphan scan failed", ex); }
+        }, _orphanScanCts.Token);
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
     }
 
@@ -258,8 +268,28 @@ public sealed class MainForm : Form
         }
     }
 
+    // need18-04 L2 接收端：第二实例广播 WM_SHOWME 时还原+置顶（不改构造签名）
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == NativeWindowActivator.WM_SHOWME)
+        {
+            try
+            {
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                TopMost = true; TopMost = false; // 闪置顶一次，抢回任务栏焦点
+                Activate();
+                HaloLogger.App.Info("MainForm activated by second-instance WM_SHOWME.");
+            }
+            catch { /* 关闭期吞掉 */ }
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        try { _orphanScanCts.Cancel(); } catch { /* 关闭期忽略 */ }
+        _orphanScanCts.Dispose();
         JsEventDispatcher.Shutdown();
         _hostBridgeFacade.HttpClientFactory.Dispose();
         if (!_chromeBrowser.IsDisposed)

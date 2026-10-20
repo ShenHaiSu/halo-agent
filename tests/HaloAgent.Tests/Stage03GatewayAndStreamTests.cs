@@ -203,15 +203,17 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
             Provider = new ProviderConfig { Id = "p1", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1" },
             Model = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Resp },
             SystemInstructions = "You are a helpful assistant.",
-            Messages = new List<UnifiedChatMessage>
-            {
-                new() { Role = "user", Content = "List directory contents" },
-                new() {
-                    Role = "tool",
-                    Content = "{\"files\":[\"a.txt\"]}",
-                    ToolCallId = "call_prev_1"
-                }
-            },
+             Messages = new List<UnifiedChatMessage>
+             {
+                 new() { Role = "user", Content = "List directory contents" },
+                 // FIX-tool-400：tool 必须有归属 assistant，否则发包前守卫会按孤儿丢弃
+                 UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("call_prev_1", null, "list_dir", "{}") }),
+                 new() {
+                     Role = "tool",
+                     Content = "{\"files\":[\"a.txt\"]}",
+                     ToolCallId = "call_prev_1"
+                 }
+             },
             Tools = new List<UnifiedToolDefinition>
             {
                 UnifiedToolDefinition.Create(
@@ -229,9 +231,9 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         Assert.True(root.GetProperty("stream").GetBoolean());
         Assert.Equal("You are a helpful assistant.", root.GetProperty("instructions").GetString());
 
-        var input = root.GetProperty("input");
-        Assert.Equal(JsonValueKind.Array, input.ValueKind);
-        Assert.Equal(2, input.GetArrayLength());
+         var input = root.GetProperty("input");
+         Assert.Equal(JsonValueKind.Array, input.ValueKind);
+         Assert.Equal(3, input.GetArrayLength());
 
         // 验证 tools 展开为扁平结构
         var tools = root.GetProperty("tools");

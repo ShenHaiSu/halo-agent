@@ -29,7 +29,7 @@ public sealed class GoalTool : IToolHandler
 
      public ToolDefinition GetDefinition() => new(Name, Description,
          new ToolSchemaBuilder()
-             .AddString("action", "get|set. Required. Sub-agents: get only.", required: true, enumValues: new[] { "get", "set" })
+             .AddString("action", "get|set|update|progress|add_milestone|complete_milestone|clear. Required. Sub-agents: get only.", required: true, enumValues: new[] { "get", "set", "update", "progress", "add_milestone", "complete_milestone", "clear" })
              .AddString("title", string.Empty)
              .AddString("description", string.Empty)
              .AddArray("milestones", string.Empty, itemsType: "string")
@@ -38,13 +38,23 @@ public sealed class GoalTool : IToolHandler
              .AddString("note", string.Empty)
              .Build());
 
-     public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+      public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            JsonElement args;
-            try { args = string.IsNullOrWhiteSpace(call.ArgumentsJson) ? new JsonElement() : JsonDocument.Parse(call.ArgumentsJson).RootElement; }
+            // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口；异常交业务层兜底为空对象）
+            JsonElement args = new JsonElement();
+            try
+            {
+                using var toolArgs = ToolArgs.Parse(call.ArgumentsJson);
+                if (toolArgs.Root.ValueKind == JsonValueKind.Object)
+                {
+                    // Clone 出 Root：脱离 using 生命周期（ToolArgs 释放后仍可用）
+                    using JsonDocument snapshot = JsonDocument.Parse(toolArgs.Root.GetRawText());
+                    args = snapshot.RootElement.Clone();
+                }
+            }
             catch { args = new JsonElement(); }
             string action = "get";
             if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("action", out var av) && av.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(av.GetString()))
@@ -61,7 +71,7 @@ public sealed class GoalTool : IToolHandler
              if (isSub && act != "get")
              {
                  sw.Stop();
-                 return ToolResult.Fail("[GOAL_DENIED] 子代理仅可 goal_tool/get 查看父目标，不可写入。本次已拒绝，请在总结中引用目标文本交主代理修改。", durationMs: sw.ElapsedMilliseconds);
+                  return Task.FromResult(ToolResult.Fail("[GOAL_DENIED] 子代理仅可 goal_tool/get 查看父目标，不可写入。本次已拒绝，请在总结中引用目标文本交主代理修改。", durationMs: sw.ElapsedMilliseconds));
              }
              var svc = _serviceFactory != null
                  ? _serviceFactory(ws, sess)
@@ -75,7 +85,7 @@ public sealed class GoalTool : IToolHandler
             if (act == "get")
             {
                 string note = loaded.corrupted ? "[目标文件损坏，已视为空，可重置] " : string.Empty;
-                return ToolResult.Ok(note + SlimJson(cur), durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Ok(note + SlimJson(cur), durationMs: sw.ElapsedMilliseconds));
             }
 
             try
@@ -84,19 +94,19 @@ public sealed class GoalTool : IToolHandler
                 var saved = svc.SaveGoal(ws, sess, next, "main");
                 try { JsEventDispatcher.Publish("goal:updated", new { sessionId = sess, goal = SlimObj(saved) }); } catch { }
                 sw.Stop();
-                return ToolResult.Ok(SlimJson(saved), durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Ok(SlimJson(saved), durationMs: sw.ElapsedMilliseconds));
             }
             catch (Services.GoalValidationException gex)
             {
                 sw.Stop();
                 string prefix = gex.Code == "GOAL_MILESTONE_MISSING" ? "[GOAL_MILESTONE_MISSING] " : "[GOAL_VALIDATION] ";
-                return ToolResult.Fail(prefix + gex.Message, durationMs: sw.ElapsedMilliseconds);
+                return Task.FromResult(ToolResult.Fail(prefix + gex.Message, durationMs: sw.ElapsedMilliseconds));
             }
         }
         catch (Exception ex)
         {
             sw.Stop();
-            return ToolResult.Fail("[GOAL_VALIDATION] goal_tool 执行失败：" + ex.Message, durationMs: sw.ElapsedMilliseconds);
+            return Task.FromResult(ToolResult.Fail("[GOAL_VALIDATION] goal_tool 执行失败：" + ex.Message, durationMs: sw.ElapsedMilliseconds));
         }
     }
 

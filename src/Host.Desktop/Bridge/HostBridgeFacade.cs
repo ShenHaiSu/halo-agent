@@ -36,6 +36,19 @@ namespace Host.Desktop.Bridge;
     private readonly IWorkspaceSessionService _workspaceSessionService;
     private readonly ITokenBudgetService _tokenBudgetService;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
+    /// <summary>need22-P1 T1：进行中 Agent 轮的 requestId（turnKey→requestId；重入拒绝时附 activeRequestId）。</summary>
+    private readonly ConcurrentDictionary<string, string> _activeAgentRequestIds = new();
+    /// <summary>need22-P1 T1：sendPrompt requestId 去重集合（requestId→turnKey，有界，防重复投递重起一轮）。</summary>
+    private readonly ConcurrentDictionary<string, string> _recentAgentRequestIds = new();
+    private void RememberAgentRequestId(string reqId, string turnKey)
+    {
+        try
+        {
+            if (_recentAgentRequestIds.Count > 5000) _recentAgentRequestIds.Clear();
+            _recentAgentRequestIds[reqId] = turnKey;
+        }
+        catch { /* 去重集合永不阻断发轮 */ }
+    }
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
@@ -845,7 +858,8 @@ namespace Host.Desktop.Bridge;
         string userText,
         string? providerId = null,
         string? modelId = null,
-        string? attachmentsJson = null)
+        string? attachmentsJson = null,
+        string? requestId = null)
     {
         try
         {
@@ -858,14 +872,28 @@ namespace Host.Desktop.Bridge;
                 return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
             }
             string turnKey = "agent:" + sessionId.Trim();
-            // need13：重入先 CancelTree 防旧子泄漏
-            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
-            if (_activeSessionTokens.TryRemove(turnKey, out var oldCts))
+            // need22-P1 T1：sendPrompt requestId 回显去重（重复投递直接成功回显，不重起一轮）。
+            string turnRequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId.Trim();
+            if (_recentAgentRequestIds.ContainsKey(turnRequestId))
             {
-                try { oldCts.Cancel(); oldCts.Dispose(); } catch { /* ignore */ }
+                return Task.FromResult(BridgeResponse<string>.Success(sessionId.Trim(), $"重复请求已去重（requestId={turnRequestId} 回显）"));
+            }
+            // need22-P1 T5：压缩中查询可用，但新轮明确拒绝（COMPACTING 码；可先 CancelCompaction 再发轮）。
+            if (_activeSessionTokens.ContainsKey("compact:" + sessionId.Trim()))
+            {
+                return Task.FromResult(BridgeResponse<string>.Fail("COMPACTING", "该会话正在压缩上下文（查询可用），新一轮请稍候或先取消压缩"));
+            }
+            // need22-P1 T1：同 session 重入不再静默丢旧轮 → 返回 TURN_IN_PROGRESS（附 activeRequestId），旧轮继续跑。
+            // 旧轮走正常 TurnCancelled 落盘仅发生在显式 CancelAgentTree 时。
+            if (_activeSessionTokens.ContainsKey(turnKey))
+            {
+                string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar) ? ar : "unknown";
+                return Task.FromResult(BridgeResponse<string>.Fail("TURN_IN_PROGRESS", $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"));
             }
             var cts = new CancellationTokenSource();
             _activeSessionTokens[turnKey] = cts;
+            _activeAgentRequestIds[turnKey] = turnRequestId;
+            RememberAgentRequestId(turnRequestId, turnKey);
             string wsId = workspaceId.Trim();
             string sessId = sessionId.Trim();
             string prompt = userText;
@@ -899,6 +927,7 @@ namespace Host.Desktop.Bridge;
                 finally
                 {
                     _activeSessionTokens.TryRemove(turnKey, out _);
+                    _activeAgentRequestIds.TryRemove(turnKey, out _);
                     cts.Dispose();
                 }
             }, CancellationToken.None);
@@ -954,6 +983,48 @@ namespace Host.Desktop.Bridge;
             return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
+
+    /// <summary>need22-P1 T5：取消进行中的压缩（CTS 接入取消；服务侧落 COMPACT_CANCELLED 并发布 CompactFailed）。</summary>
+    public Task<BridgeResponse<bool>> CancelCompaction(string sessionId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+            }
+            string compactKey = "compact:" + sessionId.Trim();
+            if (_activeSessionTokens.TryRemove(compactKey, out var cts))
+            {
+                try { cts.Cancel(); } catch { }
+                try { cts.Dispose(); } catch { }
+                HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {sessionId.Trim()} 的压缩");
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送压缩取消指令"));
+            }
+            return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在进行的压缩任务"));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"CancelCompaction failed for '{sessionId}'", ex);
+            return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_COMPACT_ERROR", ex.Message));
+        }
+    }
+
+    /// <summary>need22-P1：测试钩子（进行中 Agent 轮数；COMPACTING/重入断言用）。</summary>
+    internal int ActiveTurnCountForTests
+    {
+        get
+        {
+            int n = 0;
+            foreach (var kv in _activeSessionTokens)
+                if (kv.Key.StartsWith("agent:", StringComparison.Ordinal)) n++;
+            return n;
+        }
+    }
+
+    /// <summary>need22-P1：测试钩子（指定会话是否压缩中）。</summary>
+    internal bool IsCompactingForTests(string sessionId) =>
+        !string.IsNullOrWhiteSpace(sessionId) && _activeSessionTokens.ContainsKey("compact:" + sessionId.Trim());
 
 
     #region Stage 04: Workspace, Session & Token Budget Methods
@@ -1221,6 +1292,7 @@ namespace Host.Desktop.Bridge;
                 var agentCfg = _agentConfigService.GetInternal();
                 context.ExecDefaultTimeoutMsOverride = agentCfg.ExecDefaultTimeoutMs;
                 context.ExecMaxTimeoutMsOverride = agentCfg.ExecMaxTimeoutMs;
+                context.AllowedCommandsOverride = agentCfg.AllowedCommands;
             }
             catch { /* 调试单跑快照失败则回退常量，不阻断 */ }
             var call = new ToolCallDto(
@@ -1280,10 +1352,12 @@ namespace Host.Desktop.Bridge;
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
 
+            // need22-P1 T5：CTS 同步前置注册（消除检查与后台注册之间的竞态；CancelCompaction 可靠中断）。
+            var compactCts = new CancellationTokenSource();
+            _activeSessionTokens[compactKey] = compactCts;
             _ = Task.Run(async () =>
             {
-                var cts = new CancellationTokenSource();
-                _activeSessionTokens[compactKey] = cts;
+                var cts = compactCts;
                 try
                 {
                     var result = await CompactionService.CompactAsync(wsId, sessId, provId, modId, keep, cts.Token).ConfigureAwait(false);

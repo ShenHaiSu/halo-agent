@@ -94,7 +94,54 @@ public interface IAgentOrchestrator
         MaxIterations = maxIterations > 0 ? maxIterations : 25;
         ResolvedMaxIterations = MaxIterations;
     }
+     /// <summary>need22-P1 T3：单轮总体超时包装（默认 10min，agent.json/turnTimeoutMs 可配）。
+     /// 超时触发时旧轮按 TurnCancelled 已落盘片段保留，并额外发布 TurnError(TIMEOUT) 终轮；用户取消语义不变。</summary>
      public async Task<AgentTurnResult> RunAgentTurnAsync(string workspaceId, string sessionId, string userText, string? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
+     {
+         int turnTimeoutMs = ResolveTurnTimeoutMs();
+         if (turnTimeoutMs <= 0)
+             return await RunAgentTurnCoreAsync(workspaceId, sessionId, userText, providerId, modelId, cancellationToken).ConfigureAwait(false);
+         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+         try { turnCts.CancelAfter(turnTimeoutMs); } catch { /* 计时器失败则退化为无总体超时 */ }
+         AgentTurnResult result;
+         try
+         {
+             result = await RunAgentTurnCoreAsync(workspaceId, sessionId, userText, providerId, modelId, turnCts.Token).ConfigureAwait(false);
+         }
+         catch (OperationCanceledException) when (turnCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+         {
+             string msg = TurnTimeoutMessage(turnTimeoutMs);
+             PublishTurnEvent(sessionId, "TurnError", new { iteration = 0, errorCode = "TIMEOUT", errorMessage = msg });
+             return AgentTurnResult.Failed("TIMEOUT", msg);
+         }
+         if (result.WasCancelled && turnCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+         {
+             string msg = TurnTimeoutMessage(turnTimeoutMs);
+             PublishTurnEvent(sessionId, "TurnError", new { iteration = result.Iterations, errorCode = "TIMEOUT", errorMessage = msg });
+             return AgentTurnResult.Failed("TIMEOUT", msg, result.Iterations, result.ToolExecutions);
+         }
+         return result;
+     }
+
+     private int ResolveTurnTimeoutMs()
+     {
+         try
+         {
+             if (_agentConfigService != null)
+             {
+                 int v = _agentConfigService.GetInternal().TurnTimeoutMs;
+                 if (v <= 0) return AgentDefaults.TurnTimeoutMs;
+                 return Math.Clamp(v, AgentDefaults.TurnTimeoutMinMs, AgentDefaults.HardTimeoutCeilMs);
+             }
+         }
+         catch { /* 配置读取失败回默认不断会话 */ }
+         return AgentDefaults.TurnTimeoutMs;
+     }
+
+     private static string TurnTimeoutMessage(int ms) =>
+         $"本轮执行超过总体超时（{ms / 1000}s）已终止，已落盘片段予以保留；长任务请拆小步后继续，或调大 config/agent.json 的 turnTimeoutMs（默认 600000 即 10min）。";
+
+    private async Task<AgentTurnResult> RunAgentTurnCoreAsync(string workspaceId, string sessionId, string userText, string? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
      {
          if (cancellationToken.IsCancellationRequested)
          {
@@ -114,7 +161,6 @@ public interface IAgentOrchestrator
          try
          {
              workspace = await _sessionService.GetWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
-             session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
              session = await _sessionService.GetSessionAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -258,6 +304,20 @@ public interface IAgentOrchestrator
          // need05-01：本轮账单累计 Σ（含工具循环的多 call；单 call 轮即等于 usage）。失败/取消分支直接返回不发布，不计入。
          long turnBilledIn = 0;
          long turnBilledOut = 0;
+         // need22-P1 T7：本轮子耗 rollup（Barrier 结果累加，TurnCompleted 回填真实子耗）。
+         long subBilledIn = 0;
+         long subBilledOut = 0;
+         int subTotalCount = 0;
+         // need22-P1 T3：连续同错计数（空工具名/工具失败同码连续 3 次直接终轮）。
+         string? lastToolErrorCode = null;
+         int consecutiveToolErrors = 0;
+         bool NoteToolError(string code)
+         {
+             if (string.Equals(lastToolErrorCode, code, StringComparison.Ordinal)) consecutiveToolErrors++;
+             else { lastToolErrorCode = code; consecutiveToolErrors = 1; }
+             return consecutiveToolErrors >= 3;
+         }
+         void NoteToolSuccess() { lastToolErrorCode = null; consecutiveToolErrors = 0; }
          // need12：轮内用量行收集（每次 HTTP 请求一行，轮末单事务批量写库）。
          var usageRows = new List<PendingUsageRow>();
         // need08：轮首快照（追加 user 之后、循环之前，只读一次；保存不中断本轮，下一轮生效）
@@ -265,6 +325,7 @@ public interface IAgentOrchestrator
         int effectiveMax = MaxIterations;
         int cfgExecDefaultMs = AgentDefaults.DefaultTimeoutMs;
         int cfgExecMaxMs = AgentDefaults.MaxTimeoutMs;
+        System.Collections.Generic.List<string>? cfgAllowedCommands = null;
         string? cfgToolsPreset = null;
         System.Collections.Generic.List<string>? cfgToolsAllow = null;
         System.Collections.Generic.List<string>? cfgToolsDeny = null;
@@ -276,6 +337,7 @@ public interface IAgentOrchestrator
                 var cfg = _agentConfigService.GetInternal();
                 cfgExecDefaultMs = cfg.ExecDefaultTimeoutMs;
                 cfgExecMaxMs = cfg.ExecMaxTimeoutMs;
+                cfgAllowedCommands = cfg.AllowedCommands;
                 cfgToolsPreset = cfg.ToolsPreset;
                 cfgToolsAllow = cfg.ToolsAllowlist;
                 cfgToolsDeny = cfg.ToolsDenylist;
@@ -328,17 +390,23 @@ public interface IAgentOrchestrator
             List<UnifiedChatMessage> history;
             try
             {
-                history = await _sessionService.GetSessionMessagesAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
-            }
-
-            // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
-            // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
-            List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history, 1024, residentStableTokens);
+                 history = await _sessionService.GetSessionMessagesAsync(workspaceId, sessionId, cancellationToken).ConfigureAwait(false);
+                 // FIX(tool-400)：同轮内上次迭代可能留下孤儿（取消/截断死在 assistant→tool 之间），本轮发包前内存愈合，不写盘。
+                 try
+                 {
+                     var (healed, _, _) = WorkspaceSessionService.RebuildHealedHistory(history);
+                     history = healed;
+                 }
+                 catch { /* 愈合失败则用原历史，适配器发包前仍有守卫 */ }
+             }
+             catch (OperationCanceledException)
+             {
+                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                 return AgentTurnResult.Cancelled(iteration - 1, toolExecutions);
+             }
+             // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
+             // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
+             List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(model, history, 1024, residentStableTokens);
 
              var requestMessages = new List<UnifiedChatMessage>(budgeted.Count + 1);
              if (!string.IsNullOrWhiteSpace(systemPrompt)) requestMessages.Add(UnifiedChatMessage.System(systemPrompt));
@@ -375,7 +443,7 @@ public interface IAgentOrchestrator
                 }
             }
             string requestId = Guid.NewGuid().ToString("N");
-            string sessionHash = !string.IsNullOrWhiteSpace(session.SessionHash)
+            string sessionHash = !string.IsNullOrWhiteSpace(session!.SessionHash)
                 ? session.SessionHash
                 : HeaderVariableResolver.ComputeSessionHash(workspaceId, sessionId);
 
@@ -395,13 +463,23 @@ public interface IAgentOrchestrator
                  .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
                  .ToList();
              // need11-01：读盘→dataURL 本轮内存缓存（重启/多会话安全，无全局锁；null 也缓存避免重复读丢失文件）
+             // need22-P1 T6：本轮图片字节预算 8MB（缩略图走 GetImageThumbnail 懒取；超预算原图降级跳过并 Warn，防多图 OOM）。
              var imgCache = new Dictionary<string, string?>(StringComparer.Ordinal);
+             long imgUsedBytes = 0;
+             const long ImgBudgetBytes = 8L * 1024 * 1024;
              Func<ChatImageRef, string?> imgResolver = img =>
              {
                  if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
                  string key = img.ImageId.Trim();
                  if (imgCache.TryGetValue(key, out var hit)) return hit;
                  string? url = ImageAttachmentStore.ResolveDataUrl(dataRoot, workspaceId, sessionId, img);
+                 if (url != null && imgUsedBytes + url.Length > ImgBudgetBytes)
+                 {
+                     Infrastructure.Logging.HaloLogger.App.Warn($"[Image] 本轮图片字节超预算（{ImgBudgetBytes}），已跳过 {key}（前端可经 GetImageThumbnail 懒取）");
+                     imgCache[key] = null;
+                     return null;
+                 }
+                 if (url != null) imgUsedBytes += url.Length;
                  imgCache[key] = url;
                  return url;
              };
@@ -628,21 +706,23 @@ public interface IAgentOrchestrator
             }
 
             // 汇总 AssistantMessage 并持久化
-            var completedCalls = new List<UnifiedToolCall>();
-            foreach (string cid in toolOrder)
-            {
-                var p = pendingTools[cid];
-                if (string.IsNullOrWhiteSpace(p.FunctionName))
-                {
-                    continue;
-                }
-                completedCalls.Add(new UnifiedToolCall(cid, p.ItemId, p.FunctionName, p.ArgsBuilder.ToString()));
-            }
-
-            var assistantMessage = UnifiedChatMessage.Assistant(
-                textAcc.Length > 0 ? textAcc.ToString() : null,
-                completedCalls.Count > 0 ? completedCalls : null,
-                reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null);
+             var completedCalls = new List<UnifiedToolCall>();
+             var emptyNameCids = new List<string>();
+             foreach (string cid in toolOrder)
+             {
+                 var p = pendingTools[cid];
+                 if (string.IsNullOrWhiteSpace(p.FunctionName))
+                 {
+                     emptyNameCids.Add(cid);
+                     continue;
+                 }
+                 completedCalls.Add(new UnifiedToolCall(cid, p.ItemId, p.FunctionName, p.ArgsBuilder.ToString()));
+             }
+             // need22-P1 T3：空 FunctionName 收集（回包落在 assistant 之后，保证 tool_calls→tool 先后序；见 AssistantMessagePersisted 后处理）。
+             var assistantMessage = UnifiedChatMessage.Assistant(
+                 textAcc.Length > 0 ? textAcc.ToString() : null,
+                 completedCalls.Count > 0 ? completedCalls : null,
+                 reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null);
              if (usage != null)
              {
                  assistantMessage.InputTokens = usage.InputTokens;
@@ -679,27 +759,60 @@ public interface IAgentOrchestrator
                 billedCompletion = turnBilledOut,
                 updatedAtUtc = DateTime.UtcNow.ToString("o")
             });
-
-            // (6) 无 ToolCalls 则 TurnCompleted 结束
-             if (completedCalls.Count == 0)
+             // need22-P1 T3：空 FunctionName 回包（assistant 之后，保证 tool_calls→tool 先后序）+ EMPTY_TOOL_NAME 连续失败终轮。
+             if (emptyNameCids.Count > 0)
              {
-                 // need13：主 TurnCompleted 透出子耗 rollup（供顶栏“本轮含子耗”）
-                 PublishTurnEvent(sessionId, "TurnCompleted", new
+                 foreach (string ecid in emptyNameCids)
                  {
-                     iterations = iteration,
-                     toolExecutions,
-                     protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
-                     inputTokens = usage?.InputTokens ?? 0,
-                     outputTokens = usage?.OutputTokens ?? 0,
-                     cachedTokens = usage?.CachedInputTokens ?? 0,
-                     billedPrompt = turnBilledIn,
-                     billedCompletion = turnBilledOut,
-                     subAgents = new { count = 0, billedPrompt = 0L, billedCompletion = 0L },
-                     updatedAtUtc = DateTime.UtcNow.ToString("o")
-                 });
-                 FlushUsageRows(usageRows, sessionId, workspaceId);
-                 return AgentTurnResult.Completed(iteration, toolExecutions);
+                     string emptyText = "[EMPTY_TOOL_NAME] 模型返回了缺少工具名的调用，已忽略。请用完整 functionName 重发该调用。";
+                     try { await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, UnifiedChatMessage.Tool(ecid, emptyText, "unknown"), cancellationToken).ConfigureAwait(false); }
+                     catch (OperationCanceledException)
+                     {
+                         PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+                         UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                         return AgentTurnResult.Cancelled(iteration, toolExecutions);
+                     }
+                     catch { /* 落盘失败不掩盖错误码语义 */ }
+                     PublishTurnEvent(sessionId, "ToolExecutionCompleted", new { iteration, callId = ecid, functionName = "", success = false, exitCode = -1, durationMs = 0L, argsJson = "", resultText = emptyText, updatedAtUtc = DateTime.UtcNow.ToString("o") });
+                     toolExecutions++;
+                 }
+                 // need22-P1 T3/无限模式兼容：无限轮次（effectiveMax<=0）下取消即停（S08 契约），不提前截断；
+                 // 有限轮次下同码连续 3 次提前截断暂停（Success=true，可“继续”；与 maxIterations 截断同契约）。
+                 if (effectiveMax > 0 && NoteToolError("EMPTY_TOOL_NAME"))
+                 {
+                     // need22-P1 T3：同码连续 3 次提前截断暂停（Success=true，可“继续”；与 maxIterations 截断同契约）。
+                     string msgEmpty3 = "同一工具错误（EMPTY_TOOL_NAME：空工具名）连续出现 3 次，已暂停自动执行。请检查模型输出后发送“继续”以恢复任务。";
+                     try
+                     {
+                         await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, UnifiedChatMessage.Assistant(msgEmpty3), CancellationToken.None).ConfigureAwait(false);
+                     }
+                     catch { /* ignore */ }
+                     PublishTurnEvent(sessionId, "TurnTruncated", new { iterations = iteration, toolExecutions, maxIterations = effectiveMax, reason = "repeated-tool-error", errorCode = "EMPTY_TOOL_NAME" });
+                     UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
+                     return AgentTurnResult.Truncated(iteration, toolExecutions);
+                 }
              }
+
+             // (6) 无 ToolCalls（含空名调用已单独处理）则 TurnCompleted 结束
+              if (completedCalls.Count == 0 && emptyNameCids.Count == 0)
+              {
+                  // need13/T7：主 TurnCompleted 回填真实子耗 rollup（Barrier 累加，非 0；供顶栏“本轮含子耗”）
+                  PublishTurnEvent(sessionId, "TurnCompleted", new
+                  {
+                      iterations = iteration,
+                      toolExecutions,
+                      protocol = model.Protocol == LlmProtocolType.Resp ? "resp" : "chat",
+                      inputTokens = usage?.InputTokens ?? 0,
+                      outputTokens = usage?.OutputTokens ?? 0,
+                      cachedTokens = usage?.CachedInputTokens ?? 0,
+                      billedPrompt = turnBilledIn,
+                      billedCompletion = turnBilledOut,
+                      subAgents = new { count = subTotalCount, billedPrompt = subBilledIn, billedCompletion = subBilledOut },
+                      updatedAtUtc = DateTime.UtcNow.ToString("o")
+                  });
+                  FlushUsageRows(usageRows, sessionId, workspaceId);
+                  return AgentTurnResult.Completed(iteration, toolExecutions);
+              }
 
             // 达到最大迭代仍有工具调用 → 截断暂停（need08：无限模式 effectiveMax<=0 永不进）
             if (effectiveMax > 0 && iteration >= effectiveMax)
@@ -764,6 +877,7 @@ public interface IAgentOrchestrator
                         ExecDefaultTimeoutMsOverride = cfgExecDefaultMs,
                         ExecMaxTimeoutMsOverride = cfgExecMaxMs,
                         AgentRole = AgentRole,
+                        AllowedCommandsOverride = cfgAllowedCommands,
                         ParentSessionId = string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase) ? (session.ParentSessionId ?? string.Empty) : string.Empty,
                         SubAgentEnabled = SubPolicy.SubAgentEnabled,
                         SubMaxParallel = SubPolicy.SubMaxParallel,
@@ -793,15 +907,17 @@ public interface IAgentOrchestrator
 
                 toolExecutions++;
 
-                 string errorCode = toolResult.ErrorCode ?? ToolResult.TryExtractCode(toolResult.Error) ?? string.Empty;
-                 string toolText = toolResult.Success
-                     ? (string.IsNullOrEmpty(toolResult.Output) ? "(工具执行成功，无输出)" : toolResult.Output)
-                     : $"[Tool Error - {call.FunctionName}]: {toolResult.Error}"
-                       + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
-                       + HintForTool(call.FunctionName, errorCode)
-                       + BuildNextActionHint(toolResult, call.FunctionName, call.ArgumentsJson, errorCode);
+                  string errorCode = toolResult.ErrorCode ?? ToolResult.TryExtractCode(toolResult.Error) ?? string.Empty;
+                  string toolText = toolResult.Success
+                      ? (string.IsNullOrEmpty(toolResult.Output) ? "(工具执行成功，无输出)" : toolResult.Output)
+                      : $"[Tool Error - {call.FunctionName}]: {toolResult.Error}"
+                        + (string.IsNullOrEmpty(toolResult.Output) ? string.Empty : $"\nOutput: {toolResult.Output}")
+                        + HintForTool(call.FunctionName, errorCode)
+                        + BuildNextActionHint(toolResult, call.FunctionName, call.ArgumentsJson, errorCode);
+                  // need22-P1 T6：大 toolOutput（>64KB）先落盘 fileRef{path,size}，content 只留前 4K 预览（messages.jsonl 信封格式不变）。
+                  toolText = SpillLargeToolOutput(toolText, dataRoot, workspaceId, sessionId, call.CallId);
 
-                 var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
+                  var toolMessage = UnifiedChatMessage.Tool(call.CallId, toolText, call.FunctionName);
                  // need11-fix: view_image 等工具返回的 Images 必须挂到 tool 消息上，否则下一轮 PlanTurn 读不到，静默丢图（仅文本上游）。
                  if (toolResult.Success && toolResult.Images != null && toolResult.Images.Count > 0)
                  {
@@ -832,8 +948,26 @@ public interface IAgentOrchestrator
                      fileBytes = toolResult.FileBytes,
                      updatedAtUtc = DateTime.UtcNow.ToString("o")
                  });
-            }
-            // need13：spawn 分流（主才允许；子调 spawn 由 registry 禁用桩直接拒，不会走到这里——此处为纵深兜底）
+                 // need22-P1 T3：工具失败连续同码 3 次提前截断暂停（防空转多轮耗费；Success=true，可“继续”）。
+                 if (toolResult.Success) NoteToolSuccess();
+                 else
+                 {
+                     string failCode = string.IsNullOrEmpty(errorCode) ? "TOOL_FAILED" : errorCode;
+                     if (effectiveMax > 0 && NoteToolError(failCode))
+                     {
+                         string msgFail3 = $"同一工具错误（{failCode}）连续出现 3 次，已暂停自动执行。请检查参数后发送“继续”以恢复任务。";
+                         try
+                         {
+                             await _sessionService.AppendSessionMessageAsync(workspaceId, sessionId, UnifiedChatMessage.Assistant(msgFail3), CancellationToken.None).ConfigureAwait(false);
+                         }
+                         catch { /* ignore */ }
+                         PublishTurnEvent(sessionId, "TurnTruncated", new { iteration, toolExecutions, maxIterations = effectiveMax, reason = "repeated-tool-error", errorCode = failCode });
+                         FlushUsageRows(usageRows, sessionId, workspaceId);
+                         return AgentTurnResult.Truncated(iteration, toolExecutions);
+                     }
+                 }
+             // need13：spawn 分流（主才允许；子调 spawn 由 registry 禁用桩直接拒，不会走到这里——此处为纵深兜底）
+             }
             if (spawnCalls.Count > 0)
             {
                 if (!string.Equals(AgentRole, "main", StringComparison.OrdinalIgnoreCase))
@@ -888,12 +1022,15 @@ public interface IAgentOrchestrator
                             UsageRecorder.Flush(_usageMetrics, usageRows, sessionId, workspaceId);
                             return AgentTurnResult.Cancelled(iteration, toolExecutions);
                         }
-                        foreach (var res in results)
-                        {
-                            await AppendToolTextAsync(workspaceId, sessionId, res.CallId, "spawn_subagent", res.ToJson(), cancellationToken).ConfigureAwait(false);
-                            toolExecutions++;
-                        }
-                        PublishTurnEvent(sessionId, "SubAgentsBarrierReleased", new { subs = results.Select(x => new { callId = x.CallId, subId = x.SubSessionId, success = x.Success }).ToArray() });
+                         foreach (var res in results)
+                         {
+                             await AppendToolTextAsync(workspaceId, sessionId, res.CallId, "spawn_subagent", res.ToJson(), cancellationToken).ConfigureAwait(false);
+                             toolExecutions++;
+                         }
+                         // need22-P1 T7：Barrier 全部子 usage 累加（本轮 TurnCompleted 回填真实子耗）。
+                         subTotalCount += results.Count;
+                         foreach (var res in results) { subBilledIn += res.InputTokens; subBilledOut += res.OutputTokens; }
+                         PublishTurnEvent(sessionId, "SubAgentsBarrierReleased", new { subs = results.Select(x => new { callId = x.CallId, subId = x.SubSessionId, success = x.Success }).ToArray() });
                     }
                 }
             }
@@ -1189,6 +1326,43 @@ public interface IAgentOrchestrator
 
          return "{}";
      }
+     /// <summary>need22-P1 T6：大 toolOutput（>64KB 按 UTF-8 字节）先落盘再引用 fileRef{path,size}，content 只留前 4K 预览。
+     /// 落盘失败回退为 8K 截断；messages.jsonl 信封格式不变（仍是 tool 文本消息）。</summary>
+     internal const long ToolOutputSpillThresholdBytes = 64L * 1024;
+     internal const int ToolOutputPreviewChars = 4096;
+     internal static string SpillLargeToolOutput(string toolText, string? dataRoot, string workspaceId, string sessionId, string callId)
+     {
+         try
+         {
+             if (string.IsNullOrEmpty(toolText)) return toolText;
+             long approxBytes;
+             try { approxBytes = System.Text.Encoding.UTF8.GetByteCount(toolText); }
+             catch { approxBytes = toolText.Length; }
+             if (approxBytes <= ToolOutputSpillThresholdBytes) return toolText;
+             string Safe(string s, int max)
+             {
+                 if (string.IsNullOrWhiteSpace(s)) return "x";
+                 var chars = s.Trim().Select(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_').ToArray();
+                 string r = new string(chars);
+                 return r.Length > max ? r.Substring(0, max) : r;
+             }
+             string baseDir = string.IsNullOrWhiteSpace(dataRoot) ? System.IO.Path.GetTempPath() : dataRoot;
+             string dir = System.IO.Path.Combine(baseDir, "tool-outputs", Safe(workspaceId, 32) + "_" + Safe(sessionId, 32));
+             System.IO.Directory.CreateDirectory(dir);
+             string fileName = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "_" + Safe(callId, 32) + ".txt";
+             string abs = System.IO.Path.Combine(dir, fileName);
+             System.IO.File.WriteAllText(abs, toolText, System.Text.Encoding.UTF8);
+             long size = 0;
+             try { size = new System.IO.FileInfo(abs).Length; } catch { size = approxBytes; }
+             string preview = toolText.Length > ToolOutputPreviewChars ? toolText.Substring(0, ToolOutputPreviewChars) : toolText;
+             return preview + $"\n...（工具输出约 {approxBytes} 字节，超 64KB 已落盘，仅保留前 4K 预览；全文见 fileRef）\n[fileRef path=\"{abs}\" size={size}]";
+         }
+         catch
+         {
+             return toolText.Length > 8000 ? toolText.Substring(0, 8000) + "\n...（输出过长已截断）" : toolText;
+         }
+     }
+
      private static string TruncateForEvent(string? s, int max)
     {
         if (string.IsNullOrEmpty(s)) return string.Empty;

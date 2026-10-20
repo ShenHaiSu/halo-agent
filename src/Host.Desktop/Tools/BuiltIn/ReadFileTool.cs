@@ -43,24 +43,19 @@ public sealed class ReadFileTool : IToolHandler
             int limit = DefaultLimit;
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    filePathArg = fpEl.GetString();
-                }
-
-                if (root.TryGetProperty("offset", out JsonElement offEl) && offEl.ValueKind == JsonValueKind.Number
-                    && offEl.TryGetInt32(out int parsedOffset))
-                {
-                    offset = parsedOffset;
-                }
-
-                if (root.TryGetProperty("limit", out JsonElement limEl) && limEl.ValueKind == JsonValueKind.Number
-                    && limEl.TryGetInt32(out int parsedLimit))
-                {
-                    limit = parsedLimit;
+                    filePathArg = args.GetString("file_path");
+                    if (args.TryGetInt32("offset", out int parsedOffset))
+                    {
+                        offset = parsedOffset;
+                    }
+                    if (args.TryGetInt32("limit", out int parsedLimit))
+                    {
+                        limit = parsedLimit;
+                    }
                 }
             }
             catch (JsonException ex)
@@ -80,12 +75,21 @@ public sealed class ReadFileTool : IToolHandler
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
                 : context.WorkspaceRoot;
-            string fullPath = PathSafetyValidator.ResolveReadPath(workspaceRoot, filePathArg);
+            // need22-P0 S1：读路径强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
+            string fullPath;
+            {
+                var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(workspaceRoot, filePathArg);
+                if (!ok)
+                {
+                    return Task.FromResult(ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds));
+                }
+                fullPath = resolved;
+            }
 
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"文件不存在：'{fullPath}'。请使用 list_dir 确认路径后重试。",
+                    $"文件不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请使用 list_dir 确认路径后重试。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
@@ -93,7 +97,7 @@ public sealed class ReadFileTool : IToolHandler
             {
                 long size = new FileInfo(fullPath).Length;
                 return Task.FromResult(ToolResult.Fail(
-                    $"拒绝按文本读取二进制文件：'{fullPath}'（{size} 字节，检测到 NUL 字节）。图片/可执行文件/压缩包请改用 exec_command 处理。",
+                    $"拒绝按文本读取二进制文件：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{size} 字节，检测到 NUL 字节）。图片/可执行文件/压缩包请改用 exec_command 处理。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 

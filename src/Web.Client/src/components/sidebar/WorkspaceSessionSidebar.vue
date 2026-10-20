@@ -2,12 +2,7 @@
   <aside class="h-full bg-sidebar border-r border-subtle flex flex-col p-2.5 gap-2.5 overflow-hidden select-none">
     <!-- 1. 顶部：当前工作区切换舱 (Workspace Switcher Popover) -->
     <div class="shrink-0">
-      <n-popover
-        v-model:show="showWorkspacePopover"
-        trigger="click"
-        placement="bottom-start"
-        style="width: 360px; padding: 0"
-      >
+      <n-popover v-model:show="showWorkspacePopover" trigger="click" placement="bottom-start" style="width: 360px; padding: 0">
         <template #trigger>
           <div
             class="group p-2.5 rounded-md bg-surface hover:bg-elevated border border-subtle hover:border-accent/40 transition-colors cursor-pointer space-y-1.5"
@@ -19,21 +14,13 @@
                 <span class="text-xs font-semibold truncate">{{ activeWorkspace?.name || '选择工作路径' }}</span>
               </div>
               <div class="flex items-center gap-1">
-                <n-tag
-                  v-if="activeWorkspace && !activeWorkspace.directoryExists"
-                  size="tiny"
-                  type="warning"
-                  :bordered="false"
-                >
+                <n-tag v-if="activeWorkspace && !activeWorkspace.directoryExists" size="tiny" type="warning" :bordered="false">
                   路径失效
                 </n-tag>
                 <ChevronDown class="w-3.5 h-3.5 text-secondary group-hover:text-primary transition-transform" />
               </div>
             </div>
-            <div
-              class="text-[11px] text-secondary font-mono truncate"
-              :title="activeWorkspace?.rootPath || ''"
-            >
+            <div class="text-[11px] text-secondary font-mono truncate" :title="activeWorkspace?.rootPath || ''">
               {{ activeWorkspace?.rootPath || '未绑定工作路径' }}
             </div>
           </div>
@@ -42,9 +29,7 @@
         <!-- 弹出面板内容 -->
         <div class="flex flex-col max-h-[460px]">
           <div class="p-3 border-b border-subtle flex items-center justify-between">
-            <span class="text-xs font-semibold text-primary">
-              已绑定工作路径 (共 {{ workspaces.length }} 个)
-            </span>
+            <span class="text-xs font-semibold text-primary"> 已绑定工作路径 (共 {{ workspaces.length }} 个) </span>
           </div>
 
           <div class="p-2 overflow-y-auto flex-1 space-y-1 max-h-[320px]">
@@ -65,13 +50,7 @@
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1.5">
                     <span class="text-xs font-medium truncate">{{ ws.name }}</span>
-                    <n-tag
-                      v-if="!ws.directoryExists"
-                      size="tiny"
-                      type="warning"
-                      :bordered="false"
-                      class="shrink-0"
-                    >
+                    <n-tag v-if="!ws.directoryExists" size="tiny" type="warning" :bordered="false" class="shrink-0">
                       <template #icon>
                         <AlertTriangle class="w-3 h-3" />
                       </template>
@@ -86,30 +65,15 @@
 
               <!-- 操作区 -->
               <div class="flex items-center gap-1 shrink-0 ml-2" @click.stop>
-                <n-button
-                  quaternary
-                  circle
-                  size="tiny"
-                  title="在资源管理器中打开"
-                  @click="handleOpenWorkspaceExplorer(ws.rootPath)"
-                >
+                <n-button quaternary circle size="tiny" title="在资源管理器中打开" @click="handleOpenWorkspaceExplorer(ws.rootPath)">
                   <template #icon>
                     <ExternalLink class="w-3.5 h-3.5" />
                   </template>
                 </n-button>
 
-                <n-popconfirm
-                  v-if="workspaces.length > 1"
-                  @positive-click="handleRemoveWorkspace(ws.id)"
-                >
+                <n-popconfirm v-if="workspaces.length > 1" @positive-click="handleRemoveWorkspace(ws.id)">
                   <template #trigger>
-                    <n-button
-                      quaternary
-                      circle
-                      size="tiny"
-                      type="error"
-                      title="从工作区列表移除"
-                    >
+                    <n-button quaternary circle size="tiny" type="error" title="从工作区列表移除">
                       <template #icon>
                         <Trash2 class="w-3.5 h-3.5" />
                       </template>
@@ -123,14 +87,7 @@
 
           <!-- 底部添加新工作区按钮 -->
           <div class="p-2.5 border-t border-subtle">
-            <n-button
-              dashed
-              block
-              type="primary"
-              size="small"
-              data-testid="add-workspace-btn"
-              @click="handleAddNewWorkspace"
-            >
+            <n-button dashed block type="primary" size="small" data-testid="add-workspace-btn" @click="handleAddNewWorkspace">
               <template #icon>
                 <FolderPlus class="w-4 h-4" />
               </template>
@@ -143,13 +100,7 @@
 
     <!-- 2. 中部：新建会话与搜索栏 -->
     <div class="shrink-0 space-y-2">
-      <n-button
-        type="primary"
-        size="medium"
-        block
-        data-testid="new-session-btn"
-        @click="handleCreateNewSession"
-      >
+      <n-button type="primary" size="medium" block data-testid="new-session-btn" @click="handleCreateNewSession">
         <template #icon>
           <Plus class="w-4 h-4" />
         </template>
@@ -157,13 +108,7 @@
         <span class="ml-1 text-[11px] opacity-75 font-mono">(Ctrl+N)</span>
       </n-button>
 
-      <n-input
-        v-model:value="searchQuery"
-        size="small"
-        placeholder="搜索当前项目下的会话..."
-        clearable
-        data-testid="session-search-input"
-      >
+      <n-input v-model:value="searchQuery" size="small" placeholder="搜索当前项目下的会话..." clearable data-testid="session-search-input">
         <template #prefix>
           <Search class="w-3.5 h-3.5 text-secondary" />
         </template>
@@ -198,10 +143,16 @@
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <div
                   class="w-2 h-2 rounded-full shrink-0"
-                  :class="isSessionRunning(sess.id) ? 'bg-emerald-400 shadow-sm animate-pulse' : sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :class="
+                    isSessionRunning(sess.id)
+                      ? 'bg-emerald-400 shadow-sm animate-pulse'
+                      : sess.id === activeSessionId
+                        ? 'bg-accent shadow-sm'
+                        : 'bg-secondary/40'
+                  "
                   :title="isSessionRunning(sess.id) ? '后台运行中' : ''"
                 />
-                
+
                 <div class="min-w-0 flex-1">
                   <!-- 行内编辑模式 -->
                   <div v-if="editingSessionId === sess.id" class="my-0.5" @click.stop>
@@ -214,26 +165,41 @@
                       @blur="handleSaveRename(sess.id)"
                     />
                   </div>
-                  <div
-                    v-else
-                    class="truncate font-medium"
-                    :title="sess.title"
-                    @dblclick="startInlineRename(sess)"
-                  >
+                  <div v-else class="truncate font-medium" :title="sess.title" @dblclick="startInlineRename(sess)">
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden" :title="sessionTimeTitle(sess)" data-testid="session-meta-line" :data-tick="nowTick">
+                  <div
+                    class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden"
+                    :title="sessionTimeTitle(sess)"
+                    data-testid="session-meta-line"
+                    :data-tick="nowTick"
+                  >
                     <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
-                    <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
+                    <template v-else
+                      ><span>{{ formatSessionTime(sess.createdAtUtc) }}</span
+                      ><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template
+                    >
                   </div>
-                  <n-tag v-if="hasAskPending(sess.id)" type="error" size="tiny" :bordered="false" :data-testid="`sess-ask-badge-${sess.id}`" class="mt-1 self-start">待回答</n-tag>
+                  <n-tag
+                    v-if="hasAskPending(sess.id)"
+                    type="error"
+                    size="tiny"
+                    :bordered="false"
+                    :data-testid="`sess-ask-badge-${sess.id}`"
+                    class="mt-1 self-start"
+                    >待回答</n-tag
+                  >
                 </div>
               </div>
 
               <!-- 悬停更多操作按钮 -->
               <!-- 悬停操作区：行外删除（二次确认） + 更多菜单 -->
-              <div class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1" :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'" @click.stop>
+              <div
+                class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1"
+                :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+                @click.stop
+              >
                 <n-button
                   quaternary
                   circle
@@ -257,7 +223,13 @@
                   @update:show="(v: boolean) => onDropdownShowChange(v, sess.id)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny" data-testid="session-more-btn" @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)">
+                  <n-button
+                    quaternary
+                    circle
+                    size="tiny"
+                    data-testid="session-more-btn"
+                    @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)"
+                  >
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -294,7 +266,13 @@
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <div
                   class="w-2 h-2 rounded-full shrink-0"
-                  :class="isSessionRunning(sess.id) ? 'bg-emerald-400 shadow-sm animate-pulse' : sess.id === activeSessionId ? 'bg-accent shadow-sm' : 'bg-secondary/40'"
+                  :class="
+                    isSessionRunning(sess.id)
+                      ? 'bg-emerald-400 shadow-sm animate-pulse'
+                      : sess.id === activeSessionId
+                        ? 'bg-accent shadow-sm'
+                        : 'bg-secondary/40'
+                  "
                   :title="isSessionRunning(sess.id) ? '后台运行中' : ''"
                 />
 
@@ -310,25 +288,40 @@
                       @blur="handleSaveRename(sess.id)"
                     />
                   </div>
-                  <div
-                    v-else
-                    class="truncate font-medium"
-                    :title="sess.title"
-                    @dblclick="startInlineRename(sess)"
-                  >
+                  <div v-else class="truncate font-medium" :title="sess.title" @dblclick="startInlineRename(sess)">
                     {{ sess.title }}
                   </div>
 
-                  <div class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden" :title="sessionTimeTitle(sess)" data-testid="session-meta-line" :data-tick="nowTick">
+                  <div
+                    class="flex items-center gap-1.5 text-[11px] text-secondary font-mono mt-0.5 truncate min-w-0 overflow-hidden"
+                    :title="sessionTimeTitle(sess)"
+                    data-testid="session-meta-line"
+                    :data-tick="nowTick"
+                  >
                     <template v-if="hasNoTime(sess)"><span>时间未知</span></template>
-                    <template v-else><span>{{ formatSessionTime(sess.createdAtUtc) }}</span><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template>
+                    <template v-else
+                      ><span>{{ formatSessionTime(sess.createdAtUtc) }}</span
+                      ><span class="opacity-50">·</span><span>活跃 {{ relativeLabel(sess.updatedAtUtc) }}</span></template
+                    >
                   </div>
-                  <n-tag v-if="hasAskPending(sess.id)" type="error" size="tiny" :bordered="false" :data-testid="`sess-ask-badge-${sess.id}`" class="mt-1 self-start">待回答</n-tag>
+                  <n-tag
+                    v-if="hasAskPending(sess.id)"
+                    type="error"
+                    size="tiny"
+                    :bordered="false"
+                    :data-testid="`sess-ask-badge-${sess.id}`"
+                    class="mt-1 self-start"
+                    >待回答</n-tag
+                  >
                 </div>
               </div>
 
               <!-- 悬停操作区：行外删除（二次确认） + 更多菜单 -->
-              <div class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1" :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'" @click.stop>
+              <div
+                class="transition-opacity ml-1.5 shrink-0 flex items-center gap-1"
+                :class="isArmed(sess.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+                @click.stop
+              >
                 <n-button
                   quaternary
                   circle
@@ -352,7 +345,13 @@
                   @update:show="(v: boolean) => onDropdownShowChange(v, sess.id)"
                   @select="(key: string | number) => handleSessionMenuSelect(String(key), sess)"
                 >
-                  <n-button quaternary circle size="tiny" data-testid="session-more-btn" @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)">
+                  <n-button
+                    quaternary
+                    circle
+                    size="tiny"
+                    data-testid="session-more-btn"
+                    @click="openMenuSessionId === sess.id ? onDropdownShowChange(false, sess.id) : onDropdownShowChange(true, sess.id)"
+                  >
                     <template #icon>
                       <MoreVertical class="w-3.5 h-3.5" />
                     </template>
@@ -367,28 +366,20 @@
 
     <!-- 4. 底部快捷工具条 -->
     <div class="shrink-0 pt-2 border-t border-subtle flex items-center justify-between text-xs text-secondary">
-      <n-button
-        quaternary
-        size="tiny"
-        class="!px-1.5 text-secondary hover:text-primary"
-        @click="handleOpenActiveWorkspaceFolder"
-      >
+      <n-button quaternary size="tiny" class="!px-1.5 text-secondary hover:text-primary" @click="handleOpenActiveWorkspaceFolder">
         <template #icon>
           <FolderOpen class="w-3.5 h-3.5" />
         </template>
         打开项目目录
       </n-button>
 
-      <span class="font-mono text-[11px]">
-        共 {{ sessions.length }} 个会话
-      </span>
+      <span class="font-mono text-[11px]"> 共 {{ sessions.length }} 个会话 </span>
     </div>
-
   </aside>
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, onMounted, onUnmounted, h } from 'vue';
+import { ref, computed, onMounted, onUnmounted, h } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMessage } from 'naive-ui';
 import {
@@ -432,74 +423,71 @@ function isSessionRunning(sessId: string): boolean {
   return runningSessionIdSet.value.has(sessId);
 }
 
-
-const {
-  workspaces,
-  activeWorkspaceId,
-  activeWorkspace,
-  sessions,
-  activeSessionId,
-  searchQuery,
-  pinnedSessions,
-  unpinnedSessions,
-} = storeToRefs(workspaceStore);
+const { workspaces, activeWorkspaceId, activeWorkspace, sessions, activeSessionId, searchQuery, pinnedSessions, unpinnedSessions } =
+  storeToRefs(workspaceStore);
 
 const showWorkspacePopover = ref(false);
 const editingSessionId = ref<string | null>(null);
 const editingTitleDraft = ref('');
-  const pendingDeleteSessionId = ref<string | null>(null);
-  const deletingSessionId = ref<string | null>(null);
-  let pendingDeleteTimer: number | null = null;
-  // need03-02：受控菜单（保持展开的关键），null=关闭
-  const openMenuSessionId = ref<string | null>(null);
-  // need03-01：60s tick 驱动相对时间重算（模板经 relativeLabel 读取 nowTick）
-  const nowTick = ref(Date.now());
-  let tickTimer: number | null = null;
+const pendingDeleteSessionId = ref<string | null>(null);
+const deletingSessionId = ref<string | null>(null);
+let pendingDeleteTimer: number | null = null;
+// need03-02：受控菜单（保持展开的关键），null=关闭
+const openMenuSessionId = ref<string | null>(null);
+// need03-01：60s tick 驱动相对时间重算（模板经 relativeLabel 读取 nowTick）
+const nowTick = ref(Date.now());
+let tickTimer: number | null = null;
 
-  function armDeleteConfirm(sessId: string): void {
-    if (editingSessionId.value) return;
-    if (deletingSessionId.value !== null) return;
-    pendingDeleteSessionId.value = sessId;
-    if (pendingDeleteTimer !== null) {
-      clearTimeout(pendingDeleteTimer);
-    }
-    pendingDeleteTimer = window.setTimeout(() => {
-      pendingDeleteSessionId.value = null;
-      pendingDeleteTimer = null;
-    }, 3000);
+function armDeleteConfirm(sessId: string): void {
+  if (editingSessionId.value) return;
+  if (deletingSessionId.value !== null) return;
+  pendingDeleteSessionId.value = sessId;
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
   }
-  function cancelDeleteConfirm(): void {
+  pendingDeleteTimer = window.setTimeout(() => {
     pendingDeleteSessionId.value = null;
-    if (pendingDeleteTimer !== null) {
-      clearTimeout(pendingDeleteTimer);
-      pendingDeleteTimer = null;
-    }
+    pendingDeleteTimer = null;
+  }, 3000);
+}
+function cancelDeleteConfirm(): void {
+  pendingDeleteSessionId.value = null;
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
+    pendingDeleteTimer = null;
   }
-  function onDropdownShowChange(v: boolean, id: string): void {
-    if (v) { openMenuSessionId.value = id; return; }
-    if (openMenuSessionId.value === id) openMenuSessionId.value = null;
+}
+function onDropdownShowChange(v: boolean, id: string): void {
+  if (v) {
+    openMenuSessionId.value = id;
+    return;
   }
-  function isArmed(sessId: string): boolean {
-    return pendingDeleteSessionId.value === sessId;
+  if (openMenuSessionId.value === id) openMenuSessionId.value = null;
+}
+function isArmed(sessId: string): boolean {
+  return pendingDeleteSessionId.value === sessId;
+}
+async function handleDeleteBtnClick(sessId: string): Promise<void> {
+  if (deletingSessionId.value !== null) return;
+  if (editingSessionId.value) return;
+  if (!isArmed(sessId)) {
+    armDeleteConfirm(sessId);
+    return;
   }
-  async function handleDeleteBtnClick(sessId: string): Promise<void> {
-    if (deletingSessionId.value !== null) return;
-    if (editingSessionId.value) return;
-    if (!isArmed(sessId)) {
-      armDeleteConfirm(sessId);
-      return;
-    }
-    await confirmDeleteInline(sessId);
-  }
-  // need03-01：时间行展示兜底 + tick 依赖（空白行=用户视角“没展示”，非法时显示“时间未知”）
-  // need04-01：坏时间统一判（空串/null/0001/无时区），新会话永不进此分支
-  function hasNoTime(sess: SessionMetadata): boolean {
-    return isBadTime((sess as unknown as { createdAtUtc: string }).createdAtUtc) && isBadTime((sess as unknown as { updatedAtUtc: string }).updatedAtUtc);
-  }
-  function relativeLabel(iso: string): string {
-    void nowTick.value;
-    return formatRelativeTime(iso);
-  }
+  await confirmDeleteInline(sessId);
+}
+// need03-01：时间行展示兜底 + tick 依赖（空白行=用户视角“没展示”，非法时显示“时间未知”）
+// need04-01：坏时间统一判（空串/null/0001/无时区），新会话永不进此分支
+function hasNoTime(sess: SessionMetadata): boolean {
+  return (
+    isBadTime((sess as unknown as { createdAtUtc: string }).createdAtUtc) &&
+    isBadTime((sess as unknown as { updatedAtUtc: string }).updatedAtUtc)
+  );
+}
+function relativeLabel(iso: string): string {
+  void nowTick.value;
+  return formatRelativeTime(iso);
+}
 
 async function confirmDeleteInline(sessId: string): Promise<void> {
   if (deletingSessionId.value !== null) return;
@@ -548,19 +536,26 @@ async function handleRemoveWorkspace(workspaceId: string): Promise<void> {
 }
 
 async function handleCreateNewSession(): Promise<void> {
+  // 复用空白“新建会话”，避免重复开空白会话
+  const blank = workspaceStore.sessions.find((s) => (s.title || '').trim() === '新建会话' && (s.messageCount ?? 0) === 0 && !s.isPinned);
+  if (blank) {
+    await workspaceStore.selectSession(blank.id);
+    message.info(`已选中空白会话: ${blank.title}`);
+    return;
+  }
   const sess = await workspaceStore.createSession();
   if (sess) {
     message.success(`已创建会话: ${sess.title}`);
   }
 }
 
-  async function handleSelectSession(sessionId: string): Promise<void> {
-    cancelDeleteConfirm();
-    openMenuSessionId.value = null;
-    await workspaceStore.selectSession(sessionId);
-    // need09-06：点击切回有 pending 的会话自动弹问询框（AskUserModal 跟随 activeSessionId，无 pending 则保持关闭）
-    if (hasAskPending(sessionId)) askUserStore.openModal(sessionId);
-  }
+async function handleSelectSession(sessionId: string): Promise<void> {
+  cancelDeleteConfirm();
+  openMenuSessionId.value = null;
+  await workspaceStore.selectSession(sessionId);
+  // need09-06：点击切回有 pending 的会话自动弹问询框（AskUserModal 跟随 activeSessionId，无 pending 则保持关闭）
+  if (hasAskPending(sessionId)) askUserStore.openModal(sessionId);
+}
 
 function startInlineRename(sess: SessionMetadata): void {
   editingSessionId.value = sess.id;
@@ -578,85 +573,91 @@ async function handleSaveRename(sessionId: string): Promise<void> {
   }
 }
 
-  function getSessionDropdownOptions(sess: SessionMetadata) {
-    return [
-      {
-        label: '重命名会话',
-        key: 'rename',
-        icon: () => h(Edit3, { class: 'w-4 h-4' }),
-      },
-      {
-        label: sess.isPinned ? '取消置顶' : '置顶会话',
-        key: 'pin',
-        icon: () => h(Pin, { class: 'w-4 h-4' }),
-      },
-      {
-        label: '复制会话 Hash',
-        key: 'copy-hash',
-        icon: () => h(Hash, { class: 'w-4 h-4' }),
-      },
-      {
-        label: '导出为 Markdown',
-        key: 'export-md',
-        icon: () => h(Download, { class: 'w-4 h-4' }),
-      },
-    ];
-  }
-  async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
-    if (isArmed(sess.id)) cancelDeleteConfirm();
-    switch (key) {
-      case 'rename':
-        openMenuSessionId.value = null;
-        startInlineRename(sess);
-        break;
-      case 'pin':
-        await workspaceStore.togglePinSession(sess.id, !sess.isPinned);
-        message.success(sess.isPinned ? '已取消置顶' : '已置顶会话');
-        break;
-      case 'copy-hash':
-        try {
-          await navigator.clipboard.writeText(sess.sessionHash);
-          message.success(`已复制 Session Hash: ${sess.sessionHash}`);
-        } catch {
-          message.info(`Session Hash: ${sess.sessionHash}`);
-        }
-        break;
-      case 'export-md': {
-        const md = await workspaceStore.exportSessionMarkdown(sess.id);
-        if (md) {
-          try {
-            await navigator.clipboard.writeText(md);
-            message.success('已导出 Markdown 文本至剪贴板');
-          } catch {
-            message.success('Markdown 导出成功');
-          }
-        }
-        break;
-      }
-    }
-  }
-  function handleGlobalKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
-      cancelDeleteConfirm();
+function getSessionDropdownOptions(sess: SessionMetadata) {
+  return [
+    {
+      label: '重命名会话',
+      key: 'rename',
+      icon: () => h(Edit3, { class: 'w-4 h-4' }),
+    },
+    {
+      label: sess.isPinned ? '取消置顶' : '置顶会话',
+      key: 'pin',
+      icon: () => h(Pin, { class: 'w-4 h-4' }),
+    },
+    {
+      label: '复制会话 Hash',
+      key: 'copy-hash',
+      icon: () => h(Hash, { class: 'w-4 h-4' }),
+    },
+    {
+      label: '导出为 Markdown',
+      key: 'export-md',
+      icon: () => h(Download, { class: 'w-4 h-4' }),
+    },
+  ];
+}
+async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
+  if (isArmed(sess.id)) cancelDeleteConfirm();
+  switch (key) {
+    case 'rename':
       openMenuSessionId.value = null;
-      return;
+      startInlineRename(sess);
+      break;
+    case 'pin':
+      await workspaceStore.togglePinSession(sess.id, !sess.isPinned);
+      message.success(sess.isPinned ? '已取消置顶' : '已置顶会话');
+      break;
+    case 'copy-hash':
+      try {
+        await navigator.clipboard.writeText(sess.sessionHash);
+        message.success(`已复制 Session Hash: ${sess.sessionHash}`);
+      } catch {
+        message.info(`Session Hash: ${sess.sessionHash}`);
+      }
+      break;
+    case 'export-md': {
+      const md = await workspaceStore.exportSessionMarkdown(sess.id);
+      if (md) {
+        try {
+          await navigator.clipboard.writeText(md);
+          message.success('已导出 Markdown 文本至剪贴板');
+        } catch {
+          message.success('Markdown 导出成功');
+        }
+      }
+      break;
     }
+  }
+}
+function handleGlobalKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    cancelDeleteConfirm();
+    openMenuSessionId.value = null;
+    return;
+  }
   if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault();
     handleCreateNewSession();
   }
 }
 
-  onMounted(() => {
-    window.addEventListener('keydown', handleGlobalKeydown);
-    if (tickTimer === null) tickTimer = window.setInterval(() => { nowTick.value = Date.now(); }, 60000);
-  });
-  onUnmounted(() => {
-    window.removeEventListener('keydown', handleGlobalKeydown);
-    if (pendingDeleteTimer !== null) {
-      clearTimeout(pendingDeleteTimer);
-      pendingDeleteTimer = null;
-    }
-    if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null; }
-  });
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown);
+  if (tickTimer === null)
+    tickTimer = window.setInterval(() => {
+      nowTick.value = Date.now();
+    }, 60000);
+});
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
+  if (pendingDeleteTimer !== null) {
+    clearTimeout(pendingDeleteTimer);
+    pendingDeleteTimer = null;
+  }
+  if (tickTimer !== null) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+});
 </script>

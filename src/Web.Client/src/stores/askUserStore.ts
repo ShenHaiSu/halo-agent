@@ -100,6 +100,15 @@ export const useAskUserStore = defineStore('askUser', () => {
 
   const anyPendingCount = computed(() => Object.keys(pendingBySession.value).length);
 
+  /** need22-P2 F4：全部有问询的会话 id（顶栏 badge 用）。 */
+  const pendingSessionIds = computed(() => Object.keys(pendingBySession.value));
+
+  /** need22-P2 F4：非当前会话的问询（badge 红点+计数，点击跳回）。 */
+  function foreignPendings(currentSessionId: string): AskUserPending[] {
+    const cur = (currentSessionId || '').trim();
+    return Object.values(pendingBySession.value).filter((p) => p.sessionId !== cur);
+  }
+
   function ensureDraft(sessionId: string, questions: AskUserQuestion[]): Record<string, AskUserAnswerDraft> {
     const sid = (sessionId || '').trim();
     if (!sid) return {};
@@ -177,6 +186,8 @@ export const useAskUserStore = defineStore('askUser', () => {
     modalVisible,
     draftBySession,
     anyPendingCount,
+    pendingSessionIds,
+    foreignPendings,
     getPending,
     hasPending,
     pendingCount,

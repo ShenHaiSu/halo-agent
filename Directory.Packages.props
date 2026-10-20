@@ -1,0 +1,21 @@
+<Project>
+  <!-- need22-P4 H2：中央包版本管理。改这里一处即改全解（E1）。
+       各 csproj 的 PackageReference 只写名称，不写 Version。 -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 铁律：CefSharp 109.1.110 = Chromium 109（Win7 最终版），禁止升级大版本 -->
+    <PackageVersion Include="CefSharp.Common.NETCore" Version="109.1.110" />
+    <PackageVersion Include="CefSharp.WinForms.NETCore" Version="109.1.110" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="6.0.28" />
+    <!-- Win7 DPAPI 加密支持 -->
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
+    <PackageVersion Include="xunit" Version="2.4.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.4.5" />
+    <!-- H6 SBOM：仅 -p:GenerateSbom=true 的发布构建引用，默认构建不触发还原 -->
+    <PackageVersion Include="Microsoft.Sbom.Targets" Version="3.1.0" />
+  </ItemGroup>
+</Project>

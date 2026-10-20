@@ -188,7 +188,8 @@ import {
  import type { AgentToolCard } from '@/stores/agentStore';
  import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
  import { useWorkspaceStore } from '@/stores/workspaceStore';
- import { formatSmartBytes } from '@/utils/formatSmartBytes';
+ import { useSubSessionStore } from '@/stores/subSessionStore';
+ import { formatSmartBytes, formatSmartBytesShort } from '@/utils/formatSmartBytes';
 
 const props = defineProps<{
   card: AgentToolCard;
@@ -240,17 +241,34 @@ const iconComponent = computed(() => {
   }
 });
 
-function parseArgs(): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(props.card.argsJson || '{}');
-    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
-  } catch {
-    /* fall through */
-  }
-  return {};
-}
-
-const argsObj = computed(() => parseArgs());
+ // need22-P3 G2：argsJson 按 callId+hash memo 缓存（工具卡多时避免重复 JSON.parse）。
+ const argsParseCache = new Map<string, Record<string, unknown>>();
+ const ARGS_CACHE_MAX = 100;
+ function hashStr(s: string): string {
+   let h = 0x811c9dc5;
+   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+   return (h >>> 0).toString(16);
+ }
+ function parseArgs(): Record<string, unknown> {
+   const raw = props.card.argsJson || '{}';
+   const key = `${props.card.callId}:${hashStr(raw)}:${raw.length}`;
+   const hit = argsParseCache.get(key);
+   if (hit) return hit;
+   let out: Record<string, unknown> = {};
+   try {
+     const parsed = JSON.parse(raw);
+     if (parsed && typeof parsed === 'object') out = parsed as Record<string, unknown>;
+   } catch (e) {
+     console.warn('[tool-card] args parse failed:', props.card.callId, e);
+   }
+   argsParseCache.set(key, out);
+   if (argsParseCache.size > ARGS_CACHE_MAX) {
+     const oldest = argsParseCache.keys().next();
+     if (!oldest.done) argsParseCache.delete(oldest.value);
+   }
+   return out;
+ }
+ const argsObj = computed(() => parseArgs());
 
 const filePath = computed(() => {
   const v = argsObj.value['file_path'] ?? argsObj.value['path'] ?? '';
@@ -358,7 +376,8 @@ const viewImageWH = computed(() => {
 
 const viewImageKB = computed(() => {
   const first = viewImages.value.length > 0 ? viewImages.value[0] : null;
-  if (first && first.sizeBytes > 0) return `${(first.sizeBytes / 1024).toFixed(1)}KB`;
+  // need22-P5 J7：收敛到 utils/formatSmartBytes（无尺寸时保持 '?KB' 占位）。
+  if (first && first.sizeBytes > 0) return formatSmartBytesShort(first.sizeBytes);
   return '?KB';
 });
 
@@ -431,17 +450,16 @@ async function handleKill(): Promise<void> {
    } catch { /* ignore */ }
    return '';
  });
- async function openSub() {
-   if (!subId.value) return;
-   try {
-     const { useSubSessionStore } = await import('@/stores/subSessionStore');
-     const s = useSubSessionStore();
-     const wsId = workspaceStore.activeWorkspaceId || '';
-     const parent = workspaceStore.activeSessionId || '';
-     if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
-   } catch { /* ignore */ }
- }
- </script>
+  async function openSub() {
+    if (!subId.value) return;
+    try {
+      const s = useSubSessionStore();
+      const wsId = workspaceStore.activeWorkspaceId || '';
+      const parent = workspaceStore.activeSessionId || '';
+      if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
+    } catch { /* ignore */ }
+  }
+  </script>
  
  <style scoped>
  .bytes-dot { width: 7px; height: 7px; border-radius: 9999px; flex-shrink: 0; }

@@ -59,8 +59,9 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
 
         string masked = SecretProtector.MaskSecret(rawSecret);
         Assert.StartsWith("sk-", masked);
-        Assert.EndsWith("3210", masked);
+        Assert.DoesNotContain("3210", masked);
         Assert.Contains("****", masked);
+        Assert.Contains($"len={rawSecret.Length}", masked);
     }
 
     [Fact]

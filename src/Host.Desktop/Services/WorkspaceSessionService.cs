@@ -542,8 +542,10 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
                  cut = removeAnchor ? idx : idx + 1; replayText = messages[idx].Content;
              }
              if (string.IsNullOrWhiteSpace(replayText)) return HistoryTruncateResult.Fail("EMPTY_REPLAY_TEXT");
-             var kept = messages.Take(cut).ToList();
-             int removed = messages.Count - kept.Count;
+             var keptRaw = messages.Take(cut).ToList();
+             int removed = messages.Count - keptRaw.Count;
+             // FIX(tool-400)：截断切面可能劈开 assistant→tool 块，落盘前内存愈合，保证尾部配对完整。
+             var (kept, synthetic, orphans) = RebuildHealedHistory(keptRaw);
              string bak = await _sessionRepository.BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.replay-bak-", ct).ConfigureAwait(false);
              try { await _sessionRepository.RewriteMessagesJsonlAsync(workspaceId, sessionId, kept, ct).ConfigureAwait(false); }
              catch { return HistoryTruncateResult.Fail("REWRITE_ERROR"); }
@@ -553,7 +555,7 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
              meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
              meta.UpdatedAtUtc = DateTime.UtcNow;
              await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
-             try { Infrastructure.Logging.HaloLogger.App.Info($"[History] truncate ws={workspaceId} sess={sessionId} anchor={anchorMessageId} kept={kept.Count} removed={removed} bak={bak}"); } catch { }
+             try { Infrastructure.Logging.HaloLogger.App.Info($"[History] truncate ws={workspaceId} sess={sessionId} anchor={anchorMessageId} kept={kept.Count} removed={removed} synthetic={synthetic} orphans={orphans} bak={bak}"); } catch { }
              return HistoryTruncateResult.Ok(kept.Count, removed, replayText, bak);
          }
          finally { appendLock.Release(); }
@@ -576,7 +578,9 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
              while (t < messages.Count && string.Equals(messages[t].Role, "tool", StringComparison.OrdinalIgnoreCase)) t++;
              end = t - 1;
          }
-          var prefix = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
+           var prefixRaw = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
+           // FIX(tool-400)：分支前缀同样可能劈开 assistant→tool 块，复制前内存愈合。
+           var (prefix, _, _) = RebuildHealedHistory(prefixRaw);
           string title = string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话" ? "新建会话" : srcMeta.Title + "·分支";
           // need13：分支永远是新 main，不继承父子链（CreateSessionAsync 委托 parent=null 即 main）
           var created = await CreateSessionAsync(workspaceId, title, srcMeta.ProviderId, srcMeta.ModelId, ct).ConfigureAwait(false);
@@ -586,6 +590,7 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
              ToolCalls = m.ToolCalls != null ? new List<UnifiedToolCall>(m.ToolCalls) : null,
              ToolCallId = m.ToolCallId, Name = m.Name,
              InputTokens = m.InputTokens, OutputTokens = m.OutputTokens, CachedTokens = m.CachedTokens,
+             Images = m.Images != null ? new List<ChatImageRef>(m.Images) : null,
          }).ToList();
          await _sessionRepository.RewriteMessagesJsonlAsync(workspaceId, created.Id, cloned, ct).ConfigureAwait(false);
          var newMeta = await _sessionRepository.LoadSessionMetaAsync(workspaceId, created.Id, ct).ConfigureAwait(false);
@@ -649,10 +654,10 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
                      if (!string.Equals((t.Role ?? string.Empty).ToLowerInvariant(), "tool", StringComparison.Ordinal)) break;
                      if (!string.IsNullOrWhiteSpace(t.ToolCallId)) covered.Add(t.ToolCallId!);
                  }
-                 var uncovered = calls
-                     .Where(c => !covered.Contains(c.CallId))
-                     .Select(c => (c.CallId, c.FunctionName))
-                     .ToList();
+                  var uncovered = calls
+                      .Where(c => !covered.Contains(c.CallId))
+                      .Select(c => (c.CallId, (string?)c.FunctionName))
+                      .ToList();
                  if (uncovered.Count > 0) uncoveredByAssistant[i] = uncovered;
              }
              else if (string.Equals(role, "tool", StringComparison.Ordinal))
@@ -675,20 +680,31 @@ public sealed class WorkspaceSessionService : IWorkspaceSessionService
          {
              return (messages!.ToList(), 0, 0);
          }
+         // FIX(tool-400)：合成一律追加在存量 tool 块尾（[assistant, toolA, syntheticB]），不插在块中，避免严格网关误杀。
          var fixed_ = new List<UnifiedChatMessage>(n + uncoveredByAssistant.Values.Sum(v => v.Count));
          int synthetic = 0;
-         for (int i = 0; i < n; i++)
+         int idx = 0;
+         while (idx < n)
          {
-             if (orphanToolIndexes.Contains(i)) continue;
-             fixed_.Add(messages![i]);
-             if (uncoveredByAssistant.TryGetValue(i, out var uncovered))
+             if (orphanToolIndexes.Contains(idx)) { idx++; continue; }
+             fixed_.Add(messages![idx]);
+             if (uncoveredByAssistant.TryGetValue(idx, out var uncovered))
              {
+                 int j = idx + 1;
+                 while (j < n && string.Equals((messages[j].Role ?? string.Empty).ToLowerInvariant(), "tool", StringComparison.OrdinalIgnoreCase))
+                 {
+                     if (orphanToolIndexes.Contains(j)) { j++; continue; }
+                     fixed_.Add(messages[j]);
+                     j++;
+                 }
                  foreach (var (callId, name) in uncovered)
                  {
                      fixed_.Add(UnifiedChatMessage.Tool(callId, SyntheticCancelledToolText(name), name));
                      synthetic++;
                  }
+                 idx = j;
              }
+             else { idx++; }
          }
          return (fixed_, synthetic, orphanToolIndexes.Count);
      }

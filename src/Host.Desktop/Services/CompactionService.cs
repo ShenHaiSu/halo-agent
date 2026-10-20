@@ -49,6 +49,8 @@ public interface ICompactionService
 /// need05-03：/compact 上下文压缩服务（模型摘要 + 原子重写 + 不可中断）。
 /// 学 znaide compact_context（system+摘要+最近 N 条，失败不动，累计不清零），
 /// deliberate 差异：本项目 messages.jsonl 即请求源，必须重写（bak 保留可审计）。
+/// need22-P1 T5：三段式（快照拷贝→释锁→LLM 摘要→重加锁重写），压缩耗时不再占用追加锁临界区；
+/// 压缩中查询/追加可用；取消经 ct 接入（HostBridgeFacade.cancelCompaction）。
 /// </summary>
 public sealed class CompactionService : ICompactionService
 {
@@ -99,98 +101,24 @@ public sealed class CompactionService : ICompactionService
         if (_sessionService is not WorkspaceSessionService concrete)
             return CompactionResult.Fail("UNSUPPORTED_SERVICE", "当前会话服务不支持压缩重写");
 
-        // 全程持追加锁：与 AppendSessionMessageAsync 同一把锁，天然互斥（不可中断契约）。
+        // Phase 1（持锁，短临界区）：快照拷贝（messages 复制 + 摘要 body 拼接 + 请求预组装），随后立即释锁。
+        CompactSnapshot? snapshot;
         var appendLock = concrete.GetSessionAppendLock(sessionId);
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await CompactCoreAsync(concrete, workspaceId, sessionId, providerId, modelId, keepLastGroups, ct).ConfigureAwait(false);
+            snapshot = await BuildSnapshotAsync(concrete, workspaceId, sessionId, providerId, modelId, keepLastGroups, ct).ConfigureAwait(false);
         }
         finally
         {
             appendLock.Release();
         }
-    }
-
-    private async Task<CompactionResult> CompactCoreAsync(
-        WorkspaceSessionService service,
-        string workspaceId,
-        string sessionId,
-        string? providerId,
-        string? modelId,
-        int keepLastGroups,
-        CancellationToken ct)
-    {
-        // 1. load messages；太短 → NoOp（不动盘、无 bak，前端提示“还短无需压缩”）
-        var messages = await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
-            ?? new List<UnifiedChatMessage>();
-        if (messages.Count <= keepLastGroups + 2)
+        if (snapshot == null)
             return CompactionResult.NoOp();
 
-        // 2. 原子组切分（排除首条 system 后的全部）；anchor = 首个含 user 组及之前；tail = 末 keepLastGroups 组
-        UnifiedChatMessage? origSystem = null;
-        IReadOnlyList<UnifiedChatMessage> rest = messages;
-        if (messages.Count > 0 && string.Equals(messages[0].Role, "system", StringComparison.OrdinalIgnoreCase))
-        {
-            origSystem = messages[0];
-            rest = messages.Skip(1).ToList();
-        }
-        var groups = _budgetService.GroupIntoAtomicTurns(rest);
-        if (groups.Count == 0)
-            return CompactionResult.NoOp();
-
-        int firstUserGroupIndex = groups.FindIndex(g => g.Messages.Any(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)));
-        if (firstUserGroupIndex < 0) firstUserGroupIndex = 0;
-        int anchorCount = firstUserGroupIndex + 1;
-        int tailStart = Math.Max(anchorCount, groups.Count - keepLastGroups);
-        var oldGroups = groups.Skip(anchorCount).Take(Math.Max(0, tailStart - anchorCount)).ToList();
-        var tailGroups = groups.Skip(tailStart).ToList();
-        int oldCount = oldGroups.Sum(g => g.Messages.Count);
-        if (oldCount == 0)
-            return CompactionResult.NoOp();
-
-        // 3. body 拼接（tool 参数 ArgumentsJson 同截 2000）
-        var body = new StringBuilder();
-        foreach (var g in oldGroups)
-        {
-            foreach (var m in g.Messages)
-            {
-                ct.ThrowIfCancellationRequested();
-                body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
-                if (m.ToolCalls != null && m.ToolCalls.Count > 0)
-                {
-                    foreach (var tc in m.ToolCalls)
-                        body.Append(Truncate(tc.FunctionName + ":" + (tc.ArgumentsJson ?? string.Empty), TruncPerMessage)).Append(' ');
-                }
-                body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-            }
-        }
-
-        // 4. 经网关发起一次非流式调用（复用 StreamAsync 累积文本，不新增 HTTP 通道；tools 置空）
-        var workspace = await service.GetWorkspaceAsync(workspaceId, ct).ConfigureAwait(false);
-        var session = await service.GetSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
-        var (provider, model) = ResolveProviderAndModel(providerId, modelId, session);
-        string sessionHash = !string.IsNullOrWhiteSpace(session?.SessionHash)
-            ? session!.SessionHash
-            : HeaderVariableResolver.ComputeSessionHash(workspaceId, sessionId);
-        var headerContext = new HeaderResolutionContext(
-            workspace?.Id ?? workspaceId,
-            workspace?.Name ?? string.Empty,
-            workspace?.RootPath ?? string.Empty,
-            sessionId, sessionHash,
-            provider.Id, provider.Name, model.Id,
-            Guid.NewGuid().ToString("N"));
-        var request = new UnifiedLlmRequest
-        {
-            RequestId = headerContext.RequestId,
-            Provider = provider,
-            Model = model,
-            HeaderContext = headerContext,
-            SystemInstructions = CompressorSystemPrompt,
-            Messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User(body.ToString()) },
-            Tools = Array.Empty<UnifiedToolDefinition>(),
-        };
-
+        // Phase 2（无锁）：经网关发起一次非流式调用（复用 StreamAsync 累积文本，不新增 HTTP 通道；tools 置空）。
+        // ct 直连调用方：HostBridgeFacade.cancelCompaction 可中断，取消落 COMPACT_CANCELLED。
+        var request = snapshot.Request;
         var summaryAcc = new StringBuilder();
         UnifiedTokenUsage? compactUsage = null;
         string compactStatus = "ok";
@@ -231,7 +159,7 @@ public sealed class CompactionService : ICompactionService
         try
         {
             var compactRows = new List<PendingUsageRow>();
-            UsageRecorder.CollectAuto(compactRows, provider, model, compactUsage,
+            UsageRecorder.CollectAuto(compactRows, snapshot.Provider, snapshot.Model, compactUsage,
                 UsageRecorder.EstimateInput(request.Messages, request.SystemInstructions),
                 UsageRecorder.EstimateOutput(summaryAcc.ToString()),
                 compactStatus, request.RequestId, sessionId, workspaceId, UsageRecorder.SourceCompact);
@@ -246,14 +174,147 @@ public sealed class CompactionService : ICompactionService
         if (string.IsNullOrWhiteSpace(summary))
             return CompactionResult.Fail("COMPACT_EMPTY", "摘要模型返回为空");
 
-        // 6-7. 组装 newMessages = [origSystem] + anchorGroups + [summaryMsg] + tailGroups
+        // Phase 3（重加锁，短临界区）：原子落盘；压缩期间新追加的消息（append-only 尾巴）予以保留不丢失。
+        await appendLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await RewriteAsync(concrete, workspaceId, sessionId, snapshot, summary, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            appendLock.Release();
+        }
+    }
+
+    /// <summary>need22-P1 T5：压缩快照（锁内拷贝，锁外消费）。</summary>
+    private sealed class CompactSnapshot
+    {
+        public UnifiedChatMessage? OrigSystem;
+        public List<UnifiedChatMessage> AnchorMessages = new();
+        public List<UnifiedChatMessage> TailMessages = new();
+        public int OldCount;
+        public int SnapshotCount;
+        public ProviderConfig Provider = null!;
+        public ModelConfig Model = null!;
+        public UnifiedLlmRequest Request = null!;
+    }
+
+    private async Task<CompactSnapshot?> BuildSnapshotAsync(
+        WorkspaceSessionService service,
+        string workspaceId,
+        string sessionId,
+        string? providerId,
+        string? modelId,
+        int keepLastGroups,
+        CancellationToken ct)
+    {
+        // 1. load messages；太短 → null（外层转 NoOp，不动盘、无 bak，前端提示“还短无需压缩”）
+        var messages = await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
+            ?? new List<UnifiedChatMessage>();
+        if (messages.Count <= keepLastGroups + 2)
+            return null;
+
+        // 2. 原子组切分（排除首条 system 后的全部）；anchor = 首个含 user 组及之前；tail = 末 keepLastGroups 组
+        UnifiedChatMessage? origSystem = null;
+        IReadOnlyList<UnifiedChatMessage> rest = messages;
+        if (messages.Count > 0 && string.Equals(messages[0].Role, "system", StringComparison.OrdinalIgnoreCase))
+        {
+            origSystem = messages[0];
+            rest = messages.Skip(1).ToList();
+        }
+        var groups = _budgetService.GroupIntoAtomicTurns(rest);
+        if (groups.Count == 0)
+            return null;
+
+        int firstUserGroupIndex = groups.FindIndex(g => g.Messages.Any(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)));
+        if (firstUserGroupIndex < 0) firstUserGroupIndex = 0;
+        int anchorCount = firstUserGroupIndex + 1;
+        int tailStart = Math.Max(anchorCount, groups.Count - keepLastGroups);
+        var oldGroups = groups.Skip(anchorCount).Take(Math.Max(0, tailStart - anchorCount)).ToList();
+        var tailGroups = groups.Skip(tailStart).ToList();
+        int oldCount = oldGroups.Sum(g => g.Messages.Count);
+        if (oldCount == 0)
+            return null;
+
+        // 3. body 拼接（tool 参数 ArgumentsJson 同截 2000）
+        var body = new StringBuilder();
+        foreach (var g in oldGroups)
+        {
+            foreach (var m in g.Messages)
+            {
+                ct.ThrowIfCancellationRequested();
+                body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
+                if (m.ToolCalls != null && m.ToolCalls.Count > 0)
+                {
+                    foreach (var tc in m.ToolCalls)
+                        body.Append(Truncate(tc.FunctionName + ":" + (tc.ArgumentsJson ?? string.Empty), TruncPerMessage)).Append(' ');
+                }
+                body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
+            }
+        }
+
+        // 4. 预组装网关请求（provider/model/header 均在锁内快照，锁外直接使用）
+        var workspace = await service.GetWorkspaceAsync(workspaceId, ct).ConfigureAwait(false);
+        var session = await service.GetSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        var (provider, model) = ResolveProviderAndModel(providerId, modelId, session);
+        string sessionHash = !string.IsNullOrWhiteSpace(session?.SessionHash)
+            ? session!.SessionHash
+            : HeaderVariableResolver.ComputeSessionHash(workspaceId, sessionId);
+        var headerContext = new HeaderResolutionContext(
+            workspace?.Id ?? workspaceId,
+            workspace?.Name ?? string.Empty,
+            workspace?.RootPath ?? string.Empty,
+            sessionId, sessionHash,
+            provider.Id, provider.Name, model.Id,
+            Guid.NewGuid().ToString("N"));
+        var request = new UnifiedLlmRequest
+        {
+            RequestId = headerContext.RequestId,
+            Provider = provider,
+            Model = model,
+            HeaderContext = headerContext,
+            SystemInstructions = CompressorSystemPrompt,
+            Messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User(body.ToString()) },
+            Tools = Array.Empty<UnifiedToolDefinition>(),
+        };
+
+        var snapshot = new CompactSnapshot
+        {
+            OrigSystem = origSystem,
+            OldCount = oldCount,
+            SnapshotCount = messages.Count,
+            Provider = provider,
+            Model = model,
+            Request = request,
+        };
+        for (int i = 0; i < anchorCount; i++) snapshot.AnchorMessages.AddRange(groups[i].Messages);
+        foreach (var g in tailGroups) snapshot.TailMessages.AddRange(g.Messages);
+        return snapshot;
+    }
+
+    private async Task<CompactionResult> RewriteAsync(
+        WorkspaceSessionService service,
+        string workspaceId,
+        string sessionId,
+        CompactSnapshot snapshot,
+        string summary,
+        CancellationToken ct)
+    {
+        // 6-7. 组装 newMessages = [origSystem] + anchorGroups + [summaryMsg] + tailGroups + 压缩期间新追加
         var summaryMsg = UnifiedChatMessage.User(
-            "【上下文摘要：压缩自此前 " + oldCount + " 条，由模型自动生成，细节以备份为准】\n" + summary);
-        var newMessages = new List<UnifiedChatMessage>(messages.Count - oldCount + 1);
-        if (origSystem != null) newMessages.Add(origSystem);
-        for (int i = 0; i < anchorCount; i++) newMessages.AddRange(groups[i].Messages);
+            "【上下文摘要：压缩自此前 " + snapshot.OldCount + " 条，由模型自动生成，细节以备份为准】\n" + summary);
+        var newMessages = new List<UnifiedChatMessage>();
+        if (snapshot.OrigSystem != null) newMessages.Add(snapshot.OrigSystem);
+        newMessages.AddRange(snapshot.AnchorMessages);
         newMessages.Add(summaryMsg);
-        foreach (var g in tailGroups) newMessages.AddRange(g.Messages);
+        newMessages.AddRange(snapshot.TailMessages);
+        try
+        {
+            var current = await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+            if (current != null && current.Count > snapshot.SnapshotCount)
+                newMessages.AddRange(current.Skip(snapshot.SnapshotCount));
+        }
+        catch { /* 重载失败则按快照重写，不阻塞压缩 */ }
 
         // 8. 原子落盘：备份 → 重写 → meta（MessageCount/UpdatedAt；Cumulative*/Total* 不动，账单不清零）
         var repository = service.SessionRepository;
@@ -276,8 +337,8 @@ public sealed class CompactionService : ICompactionService
 
         // 9. 成功（占用快照 TotalInput/TotalCached 保持旧值不动，LastPrompt 下轮 usage 到账前为 unknown，前端画 ?）
         string preview = summary.Length > 200 ? summary.Substring(0, 200) : summary;
-        int keptTail = tailGroups.Sum(g => g.Messages.Count);
-        return CompactionResult.Ok(oldCount, keptTail, preview, backupFileName);
+        int keptTail = snapshot.TailMessages.Count;
+        return CompactionResult.Ok(snapshot.OldCount, keptTail, preview, backupFileName);
     }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(string? providerId, string? modelId, SessionMetadata? session)

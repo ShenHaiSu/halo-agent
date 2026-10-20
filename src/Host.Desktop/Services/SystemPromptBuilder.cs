@@ -27,8 +27,11 @@ public sealed record PromptContext(
 /// </summary>
 public sealed class SystemPromptBuilder
 {
+    // need17-07：60s 缓存逻辑已删除，残留字段仅为兼容 ClearPythonCacheForTests（历史测试入口），对外行为不变。
+#pragma warning disable CS0414 // 历史残留字段：有意保留，仅写不读
     private static string? _pyCache;
     private static long _pyCacheTick;
+#pragma warning restore CS0414
     private static readonly object PyCacheLock = new();
     private static readonly Regex UnknownVarRegex = new(@"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", RegexOptions.Compiled);
 
@@ -81,7 +84,7 @@ public sealed class SystemPromptBuilder
         string hash = HeaderVariableResolver.ComputeDeterministicHash16(assembled ?? string.Empty);
         return new PromptPreviewDto
         {
-            AssembledText = assembled,
+            AssembledText = assembled ?? string.Empty,
             Blocks = blocks,
             TotalEstimatedTokens = total,
             StableEstimatedTokens = stable,

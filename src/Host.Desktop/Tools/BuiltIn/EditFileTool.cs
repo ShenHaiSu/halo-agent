@@ -81,68 +81,49 @@ public sealed class EditFileTool : IToolHandler
 
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口）
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind != JsonValueKind.Object)
                 {
-                    filePathArg = fpEl.GetString();
+                    throw new JsonException("参数不是合法 JSON 对象。");
                 }
-
-                if (root.TryGetProperty("old_string", out JsonElement oldEl) && oldEl.ValueKind == JsonValueKind.String)
+                filePathArg = args.GetString("file_path");
+                oldString = args.GetString("old_string");
+                newString = args.GetString("new_string");
+                if (args.TryGetBool("replace_all", out bool all))
                 {
-                    oldString = oldEl.GetString();
+                    replaceAll = all;
                 }
-
-                if (root.TryGetProperty("new_string", out JsonElement newEl) && newEl.ValueKind == JsonValueKind.String)
+                string? mode = args.GetString("match_mode");
+                if (!string.IsNullOrWhiteSpace(mode))
                 {
-                    newString = newEl.GetString();
+                    matchMode = mode.Trim().ToLowerInvariant();
                 }
-
-                if (root.TryGetProperty("replace_all", out JsonElement allEl) && IsBool(allEl))
+                if (args.TryGetBool("normalize_eol", out bool eol))
                 {
-                    replaceAll = allEl.GetBoolean();
+                    normalizeEol = eol;
                 }
-
-                if (root.TryGetProperty("match_mode", out JsonElement modeEl) && modeEl.ValueKind == JsonValueKind.String)
-                {
-                    matchMode = (modeEl.GetString() ?? "normalized").Trim().ToLowerInvariant();
-                }
-
-                if (root.TryGetProperty("normalize_eol", out JsonElement eolEl) && IsBool(eolEl))
-                {
-                    normalizeEol = eolEl.GetBoolean();
-                }
-
-                if (root.TryGetProperty("expand_tabs", out JsonElement tabEl) && tabEl.ValueKind == JsonValueKind.Number
-                    && tabEl.TryGetInt32(out int parsedTabs))
+                if (args.TryGetInt32("expand_tabs", out int parsedTabs))
                 {
                     expandTabs = Math.Clamp(parsedTabs, 0, MaxExpandTabs);
                 }
-
-                if (root.TryGetProperty("trim_trailing_space", out JsonElement trimEl) && IsBool(trimEl))
+                if (args.TryGetBool("trim_trailing_space", out bool trim))
                 {
-                    trimTrailingSpace = trimEl.GetBoolean();
+                    trimTrailingSpace = trim;
                 }
-
-                if (root.TryGetProperty("ignore_leading_whitespace", out JsonElement leadEl) && IsBool(leadEl))
+                if (args.TryGetBool("ignore_leading_whitespace", out bool lead))
                 {
-                    ignoreLeadingWhitespace = leadEl.GetBoolean();
+                    ignoreLeadingWhitespace = lead;
                 }
-
-                if (root.TryGetProperty("regex_expand_groups", out JsonElement expEl) && IsBool(expEl))
+                if (args.TryGetBool("regex_expand_groups", out bool exp))
                 {
-                    regexExpandGroups = expEl.GetBoolean();
+                    regexExpandGroups = exp;
                 }
-
-                if (root.TryGetProperty("expected_hash", out JsonElement hashEl) && hashEl.ValueKind == JsonValueKind.String)
+                expectedHash = args.GetString("expected_hash");
+                if (args.TryGetBool("dry_run", out bool dry))
                 {
-                    expectedHash = hashEl.GetString();
-                }
-
-                if (root.TryGetProperty("dry_run", out JsonElement dryEl) && IsBool(dryEl))
-                {
-                    dryRun = dryEl.GetBoolean();
+                    dryRun = dry;
                 }
             }
             catch (JsonException ex)
@@ -189,14 +170,14 @@ public sealed class EditFileTool : IToolHandler
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"文件不存在：'{fullPath}'。edit_file 仅修改已存在文件，新建请用 write_file。",
+                    $"文件不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。edit_file 仅修改已存在文件，新建请用 write_file。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
             if (FileToolShared.LooksBinary(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"拒绝编辑二进制文件：'{fullPath}'。",
+                    $"拒绝编辑二进制文件：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
@@ -278,7 +259,7 @@ public sealed class EditFileTool : IToolHandler
                 if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
                 {
                     return Task.FromResult(ToolResult.FailCode("EXPECTED_HASH_MISMATCH",
-                        $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {currentHash}；期望: {want}）。"
+                        $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。"
                         + "请用 read_file 重新确认内容后重试，或不传 expected_hash。",
                         durationMs: sw.ElapsedMilliseconds));
                 }

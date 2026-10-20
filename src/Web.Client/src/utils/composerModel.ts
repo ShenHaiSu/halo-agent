@@ -204,3 +204,58 @@ export function cleanupObjectUrls(draft: ComposerDraft): void {
     }
   }
 }
+ /** need22-P3 G3：缩略图 LRU（20 张）+ URL.createObjectURL 预览，发送才转码，revoke 释放。 */
+ export const THUMB_LRU_MAX = 20;
+ /** need22-P3 G3：>5MB 预览前压缩阈值（canvas.toBlob）。 */
+ export const PREVIEW_COMPRESS_BYTES = 5 * 1024 * 1024;
+ const thumbLruOrder: string[] = [];
+ function thumbLruTouch(url: string): void {
+   const i = thumbLruOrder.indexOf(url);
+   if (i >= 0) thumbLruOrder.splice(i, 1);
+   thumbLruOrder.push(url);
+   while (thumbLruOrder.length > THUMB_LRU_MAX) {
+     const oldest = thumbLruOrder.shift();
+     if (oldest) {
+       try { URL.revokeObjectURL(oldest); } catch (e) { console.warn('[composer] lru revoke failed:', e); }
+     }
+   }
+ }
+ /** 预览 URL（objectURL，不转 base64；LRU 满 20 自动 revoke 最旧）。 */
+ export function createPreviewUrl(file: File): string {
+   const url = URL.createObjectURL(file);
+   thumbLruTouch(url);
+   return url;
+ }
+ export function revokePreviewUrl(url: string): void {
+   if (!url) return;
+   const i = thumbLruOrder.indexOf(url);
+   if (i >= 0) thumbLruOrder.splice(i, 1);
+   try { URL.revokeObjectURL(url); } catch (e) { console.warn('[composer] revoke failed:', e); }
+ }
+ /** need22-P3 G3：>5MB 图片压缩后再预览（canvas.toBlob，长边 ≤1920，jpeg 0.82）；失败回退原文件。 */
+ export async function compressImageIfNeeded(file: File): Promise<File> {
+   try {
+     if (file.size <= PREVIEW_COMPRESS_BYTES) return file;
+     if (typeof createImageBitmap === 'undefined' || typeof document === 'undefined') return file;
+     const bitmap = await createImageBitmap(file);
+     const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+     const w = Math.max(1, Math.round(bitmap.width * scale));
+     const h = Math.max(1, Math.round(bitmap.height * scale));
+     const canvas = document.createElement('canvas');
+     canvas.width = w;
+     canvas.height = h;
+     const ctx = canvas.getContext('2d');
+     if (!ctx) { bitmap.close(); return file; }
+     ctx.drawImage(bitmap, 0, 0, w, h);
+     bitmap.close();
+     const blob = await new Promise<Blob | null>((resolve) => {
+       try { canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.82); }
+       catch (e) { console.warn('[composer] toBlob failed:', e); resolve(null); }
+     });
+     if (!blob) return file;
+     return new File([blob], file.name, { type: 'image/jpeg' });
+   } catch (e) {
+     console.warn('[composer] compress failed, fallback original:', e);
+     return file;
+   }
+ }

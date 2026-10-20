@@ -57,47 +57,32 @@ public sealed class EditLinesTool : IToolHandler
 
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(
-                    string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("file_path", out JsonElement fpEl) && fpEl.ValueKind == JsonValueKind.String)
+                // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口）
+                using var args = ToolArgs.Parse(call.ArgumentsJson);
+                JsonElement root = args.Root;
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    filePathArg = fpEl.GetString();
+                    filePathArg = args.GetString("file_path");
+                    if (args.TryGetInt32("offset", out int parsedOffset))
+                    {
+                        offset = parsedOffset;
+                    }
+                    if (args.TryGetInt32("limit", out int parsedLimit))
+                    {
+                        limit = parsedLimit;
+                        hasLimit = true;
+                    }
+                    newText = args.GetString("new_text");
+                    expectedHash = args.GetString("expected_hash");
+                    if (args.TryGetBool("allow_empty", out bool empty))
+                    {
+                        allowEmpty = empty;
+                    }
+                    if (args.TryGetBool("dry_run", out bool dry))
+                    {
+                        dryRun = dry;
+                    }
                 }
-
-                if (root.TryGetProperty("offset", out JsonElement offEl) && offEl.ValueKind == JsonValueKind.Number
-                    && offEl.TryGetInt32(out int parsedOffset))
-                {
-                    offset = parsedOffset;
-                }
-
-                if (root.TryGetProperty("limit", out JsonElement limEl) && limEl.ValueKind == JsonValueKind.Number
-                    && limEl.TryGetInt32(out int parsedLimit))
-                {
-                    limit = parsedLimit;
-                    hasLimit = true;
-                }
-
-                if (root.TryGetProperty("new_text", out JsonElement txtEl) && txtEl.ValueKind == JsonValueKind.String)
-                {
-                    newText = txtEl.GetString();
-                }
-
-                if (root.TryGetProperty("expected_hash", out JsonElement hashEl) && hashEl.ValueKind == JsonValueKind.String)
-                {
-                    expectedHash = hashEl.GetString();
-                }
-                 if (root.TryGetProperty("allow_empty", out JsonElement emptyEl) &&
-                     (emptyEl.ValueKind == JsonValueKind.True || emptyEl.ValueKind == JsonValueKind.False))
-                 {
-                     allowEmpty = emptyEl.GetBoolean();
-                 }
-
-                 if (root.TryGetProperty("dry_run", out JsonElement dryEl) &&
-                     (dryEl.ValueKind == JsonValueKind.True || dryEl.ValueKind == JsonValueKind.False))
-                 {
-                     dryRun = dryEl.GetBoolean();
-                 }
             }
             catch (JsonException ex)
             {
@@ -162,14 +147,14 @@ public sealed class EditLinesTool : IToolHandler
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"文件不存在：'{fullPath}'。edit_lines 仅修改已存在文件，新建请用 write_file。",
+                    $"文件不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。edit_lines 仅修改已存在文件，新建请用 write_file。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 
             if (FileToolShared.LooksBinary(fullPath))
             {
                 return Task.FromResult(ToolResult.Fail(
-                    $"拒绝编辑二进制文件：'{fullPath}'。",
+                    $"拒绝编辑二进制文件：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。",
                     durationMs: sw.ElapsedMilliseconds));
             }
 

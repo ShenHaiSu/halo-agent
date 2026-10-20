@@ -38,6 +38,43 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
   return `${base}#img:${imgs.map((i) => i.sha16 || i.imageId).join(',')}`;
 }
 
+/** need19：时间轴条目（主时间轴与目录共用；key 即锚点 key）。 */
+export interface TimelineEntry {
+  key: string;
+  kind: 'user' | 'system' | 'turn';
+  msg?: UnifiedChatMessage;
+  group?: TurnGroup;
+}
+
+/**
+ * need19：由 messages + 可见 turn 组构造时间轴条目。
+ * 与 MessageTimeline.vue 原内联 timelineItems 逻辑逐项一致（纯抽取，不改语义）。
+ */
+export function buildTimelineEntries(messages: UnifiedChatMessage[], groups: TurnGroup[]): TimelineEntry[] {
+  const items: TimelineEntry[] = [];
+  const groupsByAssistant = new Map<string, TurnGroup>();
+  for (const g of groups) {
+    if (g.assistantId) groupsByAssistant.set(g.assistantId, g);
+    else if (g.toolMessages.length) {
+      items.push({ key: g.key, kind: 'turn', group: g });
+    }
+  }
+  const emitted = new Set<string>();
+  for (const msg of messages) {
+    const role = String(msg.role || '').toLowerCase();
+    if (role === 'user') items.push({ key: `u-${msg.id}`, kind: 'user', msg });
+    else if (role !== 'assistant' && role !== 'tool') items.push({ key: `s-${msg.id}`, kind: 'system', msg });
+    else if (role === 'assistant') {
+      const g = groupsByAssistant.get(String(msg.id));
+      if (g && !emitted.has(g.key)) { emitted.add(g.key); items.push({ key: g.key, kind: 'turn', group: g }); }
+    }
+  }
+  for (const g of groups) {
+    if (g.assistantId && !emitted.has(g.key)) items.push({ key: g.key, kind: 'turn', group: g });
+  }
+  return items;
+}
+
 export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   const groups: TurnGroup[] = [];
   let cur: TurnGroup | null = null;
@@ -81,6 +118,41 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   }
   flush();
   return groups;
+}
+
+/** need22-P3 G1：增量归并——仅末 turn 重算，其余复用引用（依赖行表 rowId=msg.id 稳定）。
+ * 历史删改（消息减少/末 assistant 落在旧前缀内且后缀非纯 tool）时全量回退，保证正确性。 */
+export function buildTurnGroupsIncremental(prevGroups: TurnGroup[], prevMsgCount: number, messages: UnifiedChatMessage[]): { groups: TurnGroup[]; msgCount: number } {
+  const full = (): { groups: TurnGroup[]; msgCount: number } => ({ groups: buildTurnGroups(messages), msgCount: messages.length });
+  if (!prevGroups.length || prevMsgCount <= 0 || messages.length < prevMsgCount) return full();
+  let lastAsstIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() === 'assistant') { lastAsstIdx = i; break; }
+  }
+  if (lastAsstIdx < 0) return full();
+  if (lastAsstIdx < prevMsgCount) {
+    let onlyTools = true;
+    for (let i = prevMsgCount; i < messages.length; i++) {
+      if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() !== 'tool') { onlyTools = false; break; }
+    }
+    if (!onlyTools) return full();
+  }
+  const lastAsstId = String(messages[lastAsstIdx].id || '');
+  const keepEnd = prevGroups.findIndex((g) => g.assistantId === lastAsstId);
+  const kept = keepEnd < 0 ? [] : prevGroups.slice(0, keepEnd);
+  const tail = buildTurnGroups(messages.slice(lastAsstIdx));
+  return { groups: [...kept, ...tail], msgCount: messages.length };
+}
+
+/** need22-P3 G1：blockHash（终态 md.render 缓存键；FNV-1a 32bit hex + 长度）。 */
+export function blockHash(s: string): string {
+  let h = 0x811c9dc5;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0') + ':' + str.length;
 }
 
 /** need09-05：会话导出 markdown（含图：`![file](relPath)`；丢失：`[图片已丢失：file]`；不嵌 base64） */

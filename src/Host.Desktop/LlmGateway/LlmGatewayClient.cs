@@ -81,17 +81,19 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
             SingleWriter = true
         });
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await ExecuteStreamPipelineAsync(request, channel.Writer, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                channel.Writer.TryComplete();
-            }
-        }, CancellationToken.None);
+         // need22-P1 T2：Task.Run 透传 ct（取消后不再调度旧轮管线；已取消则直接不启动，读端随即 OCE 退出）。
+         _ = Task.Run(async () =>
+         {
+             try
+             {
+                 await ExecuteStreamPipelineAsync(request, channel.Writer, ct).ConfigureAwait(false);
+             }
+             finally
+             {
+                 // need22-P1 T2：取消后直接 TryComplete，不再写旧事件串扰新轮。
+                 channel.Writer.TryComplete();
+             }
+         }, ct);
 
         while (await channel.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
         {
@@ -204,10 +206,12 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
                     // 忽略读取错误体的二次异常
                 }
 
-                string formattedError = adapter.FormatErrorResponse(finalStatusCode, errorBody);
-                LogResponseTrace(request, finalStatusCode, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
-                await writer.WriteAsync(UnifiedStreamEvent.Error($"HTTP_{finalStatusCode}", formattedError), CancellationToken.None).ConfigureAwait(false);
-                return;
+                 string formattedError = adapter.FormatErrorResponse(finalStatusCode, errorBody);
+                 LogResponseTrace(request, finalStatusCode, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
+                 // need22-P1 T2：取消后不再写旧事件（错误码 HTTP_{code} 照常透传给未取消的调用方）。
+                 if (!ct.IsCancellationRequested)
+                     await writer.WriteAsync(UnifiedStreamEvent.Error($"HTTP_{finalStatusCode}", formattedError), ct).ConfigureAwait(false);
+                 return;
             }
 
             var responseStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -231,31 +235,35 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
                     }
                 }
 
-                if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
-                {
-                    inTokens = evt.Usage.InputTokens;
-                    outTokens = evt.Usage.OutputTokens;
-                    cachedTokens = evt.Usage.CachedInputTokens;
-                    totalTokens = evt.Usage.TotalTokens;
-                }
+                 if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
+                 {
+                     inTokens = evt.Usage.InputTokens;
+                     outTokens = evt.Usage.OutputTokens;
+                     cachedTokens = evt.Usage.CachedInputTokens;
+                     totalTokens = evt.Usage.TotalTokens;
+                 }
 
-                await writer.WriteAsync(evt, CancellationToken.None).ConfigureAwait(false);
-            }
+                 if (!ct.IsCancellationRequested)
+                     await writer.WriteAsync(evt, ct).ConfigureAwait(false);
+             }
 
              RecordPredictionActual(request, inTokens, cachedTokens);
              LogResponseTrace(request, finalStatusCode, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames, predictedHit, predictedCached, divergenceBlock);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            LogResponseTrace(request, 499, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
-            await writer.WriteAsync(UnifiedStreamEvent.Cancelled(), CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Error($"[LlmGateway] 调用异常 ({request.Provider.Name} / {request.Model.Id})", ex);
-            LogResponseTrace(request, 500, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
-            await writer.WriteAsync(UnifiedStreamEvent.Error("GATEWAY_EXCEPTION", ex.Message), CancellationToken.None).ConfigureAwait(false);
-        }
+         }
+         catch (OperationCanceledException) when (ct.IsCancellationRequested)
+         {
+             LogResponseTrace(request, 499, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
+             // need22-P1 T2：读端已随 ct 退出，此处不再补写 Cancelled（TryComplete 即 enough）。
+         }
+         catch (Exception ex)
+         {
+             HaloLogger.App.Error($"[LlmGateway] 调用异常 ({request.Provider.Name} / {request.Model.Id})", ex);
+             LogResponseTrace(request, 500, stopwatch.ElapsedMilliseconds, ttftMs, inTokens, outTokens, cachedTokens, totalTokens, toolCallCount, toolNames);
+             // need22-P1 T3：网关侧超时（HttpClient.Timeout/传输超时且非用户取消）透传 TIMEOUT 码，其它异常沿用 GATEWAY_EXCEPTION。
+             string code = IsTimeoutException(ex) ? "TIMEOUT" : "GATEWAY_EXCEPTION";
+             if (!ct.IsCancellationRequested)
+                 await writer.WriteAsync(UnifiedStreamEvent.Error(code, ex.Message), ct).ConfigureAwait(false);
+         }
         finally
         {
             response?.Dispose();
@@ -315,30 +323,103 @@ public sealed class LlmGatewayClient : ILlmGatewayClient
         }
     }
 
-    private static async Task<HttpResponseMessage> SendRequestAsync(
-        HttpClient client,
-        UnifiedLlmRequest request,
-        string endpointUrl,
-        string requestPayload,
-        CancellationToken ct)
-    {
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpointUrl)
-        {
-            Content = new StringContent(requestPayload, Encoding.UTF8, "application/json")
-        };
+     /// <summary>need22-P1 T3：重试退避等待（测试可替换为立即返回以加速单测）。</summary>
+     internal static Func<int, CancellationToken, Task> RetryDelayAsync = (ms, ct) => Task.Delay(ms, ct);
 
-        // 1. 注入 API Key 认证头
-        string rawApiKey = request.Provider.GetEffectiveApiKey();
-        if (!string.IsNullOrWhiteSpace(rawApiKey))
-        {
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rawApiKey);
-        }
+     /// <summary>need22-P1 T3：网关超时判定（HttpClient.Timeout 抛 TaskCanceledException；ct 未取消时即超时）。</summary>
+     internal static bool IsTimeoutException(Exception? ex)
+     {
+         if (ex == null) return false;
+         if (ex is TimeoutException) return true;
+         if (ex is TaskCanceledException) return true;
+         if (ex is IOException io && io.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)) return true;
+         return false;
+     }
 
-        // 2. 注入预设变量自定义 Header（包含 ${session-hash} 等）
-        HeaderVariableResolver.ApplyCustomHeaders(httpRequest, request.Provider, request.HeaderContext);
+     private static bool IsTransientTransportError(Exception ex, CancellationToken ct)
+     {
+         if (ct.IsCancellationRequested) return false;
+         return ex is TaskCanceledException || ex is TimeoutException
+             || ex is HttpRequestException || ex is IOException;
+     }
 
-        return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-    }
+     /// <summary>
+     /// need22-P1 T3：429/5xx/传输超时指数退避重试（初始 1 次 + 最多 3 次重试，退避 1s/2s/4s+抖动）。
+     /// 400 等其它状态码直接返回，由调用方走降级/透传逻辑；错误码 HTTP_{code} 保持透传。
+     /// </summary>
+     private static async Task<HttpResponseMessage> SendRequestAsync(
+         HttpClient client,
+         UnifiedLlmRequest request,
+         string endpointUrl,
+         string requestPayload,
+         CancellationToken ct)
+     {
+         HttpResponseMessage? retryableResponse = null;
+         try
+         {
+             for (int attempt = 0; ; attempt++)
+             {
+                 if (attempt > 0)
+                 {
+                     int baseMs = attempt == 1 ? 1000 : attempt == 2 ? 2000 : 4000;
+                     int delayMs = baseMs + Random.Shared.Next(0, 500);
+                     await RetryDelayAsync(delayMs, ct).ConfigureAwait(false);
+                 }
+                 retryableResponse?.Dispose();
+                 retryableResponse = null;
+                 HttpResponseMessage response;
+                 try
+                 {
+                     response = await SendOnceAsync(client, request, endpointUrl, requestPayload, ct).ConfigureAwait(false);
+                 }
+                 catch (Exception ex) when (IsTransientTransportError(ex, ct))
+                 {
+                     HaloLogger.App.Warn($"[LlmGateway] 传输异常可重试（第{attempt + 1}/4 次）：{ex.GetType().Name} {ex.Message}");
+                     if (attempt >= 3) throw;
+                     continue;
+                 }
+                 int code = (int)response.StatusCode;
+                 bool retryableStatus = code == 429 || (code >= 500 && code <= 599);
+                 if (retryableStatus && attempt < 3)
+                 {
+                     HaloLogger.App.Warn($"[LlmGateway] HTTP {code} 可重试（第{attempt + 1}/4 次），退避后重试");
+                     retryableResponse = response;
+                     continue;
+                 }
+                 return response;
+             }
+         }
+         catch
+         {
+             retryableResponse?.Dispose();
+             throw;
+         }
+     }
+
+     private static async Task<HttpResponseMessage> SendOnceAsync(
+         HttpClient client,
+         UnifiedLlmRequest request,
+         string endpointUrl,
+         string requestPayload,
+         CancellationToken ct)
+     {
+         var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpointUrl)
+         {
+             Content = new StringContent(requestPayload, Encoding.UTF8, "application/json")
+         };
+
+         // 1. 注入 API Key 认证头
+         string rawApiKey = request.Provider.GetEffectiveApiKey();
+         if (!string.IsNullOrWhiteSpace(rawApiKey))
+         {
+             httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rawApiKey);
+         }
+
+         // 2. 注入预设变量自定义 Header（包含 ${session-hash} 等）
+         HeaderVariableResolver.ApplyCustomHeaders(httpRequest, request.Provider, request.HeaderContext);
+
+         return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+     }
 
      private void LogRequestTrace(UnifiedLlmRequest request, string endpointUrl, string? prefixHash = null, double? predictedHit = null, int predictedCached = 0, string? divergenceBlock = null)
      {

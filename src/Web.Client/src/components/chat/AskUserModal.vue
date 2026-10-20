@@ -7,7 +7,7 @@
     title="需要你的确认"
     style="width: 560px; max-width: 94vw"
     data-testid="ask-user-modal"
-    @close="handleCancel"
+    @close="handleDismiss"
   >
     <div v-if="pending" class="space-y-3">
       <n-steps :current="step" size="small">
@@ -82,22 +82,27 @@
     <div v-else class="text-xs text-secondary py-2">暂无待回答问题。</div>
 
     <template #footer>
-      <div class="flex items-center justify-end gap-2">
-        <n-button size="small" :disabled="step <= 1" @click="prev">上一步</n-button>
-        <n-button v-if="pending && step < pending.questions.length" size="small" @click="next">下一步</n-button>
-        <n-button
-          type="primary"
-          size="small"
-          data-testid="ask-user-submit"
-          :loading="submitting"
-          :disabled="!pending"
-          @click="handleSubmit"
-        >
-          提交回答（{{ answeredCount }}/{{ totalCount }}）
-        </n-button>
-        <n-button type="error" ghost size="small" data-testid="ask-user-cancel" @click="handleCancel">
-          取消提问
-        </n-button>
+      <div class="flex items-center justify-between gap-2">
+        <span v-if="pending" class="text-[11px] text-secondary font-mono" :title="pending.sessionId">问询归属会话 …{{ pending.sessionId.slice(-6) }}</span>
+        <span v-else />
+        <div class="flex items-center justify-end gap-2">
+          <n-button size="small" :disabled="step <= 1" @click="prev">上一步</n-button>
+          <n-button v-if="pending && step < pending.questions.length" size="small" @click="next">下一步</n-button>
+          <n-button
+            type="primary"
+            size="small"
+            data-testid="ask-user-submit"
+            :loading="submitting"
+            :disabled="!pending"
+            @click="handleSubmit"
+          >
+            提交回答（{{ answeredCount }}/{{ totalCount }}）
+          </n-button>
+          <n-button size="small" data-testid="ask-user-dismiss" @click="handleDismiss">稍后回答</n-button>
+          <n-button type="error" ghost size="small" data-testid="ask-user-cancel" @click="handleCancel">
+            取消整轮
+          </n-button>
+        </div>
       </div>
     </template>
   </n-modal>
@@ -122,13 +127,10 @@ const submitting = ref(false);
 const activeSessionId = computed(() => workspaceStore.activeSessionId || '');
 
 const pending = computed<AskUserPending | null>(() => {
-  const sid = modalSessionId.value || activeSessionId.value;
+  // need22-P2 F4：问询按 sessionId 归属，以 modalSessionId 为准（不再优先当前会话，防 A 问卷切 B 错票）
+  const sid = modalSessionId.value;
   if (!sid) return null;
-  // modal 跟随当前会话：优先当前会话的 pending
-  const cur = askUserStore.getPending(activeSessionId.value);
-  if (cur) return cur;
-  if (modalSessionId.value) return askUserStore.getPending(modalSessionId.value);
-  return null;
+  return askUserStore.getPending(sid);
 });
 
 const visible = computed<boolean>({
@@ -229,19 +231,16 @@ watch(
   }
 );
 
-// 切换会话跟随：切回有 pending 的会话自动弹；无 pending 自动关
+// 切换会话跟随：切到有 pending 的会话自动弹；切走则收起（后台 pending 保留，顶栏 badge 可跳回）
 watch(activeSessionId, (sid) => {
   if (!sid) return;
   if (askUserStore.hasPending(sid)) {
     askUserStore.openModal(sid);
-  } else if (modalVisible.value && modalSessionId.value && modalSessionId.value !== sid) {
-    // A 问卷不留在 B 会话：若当前 modal 归属会话无 pending 则关闭
-    if (!askUserStore.hasPending(modalSessionId.value)) {
-      askUserStore.closeModal();
-    } else {
-      // 后台 pending 保留红点，前台 modal 跟随当前会话
-      askUserStore.closeModal();
-    }
+  } else if (modalVisible.value) {
+    // F6 dismiss 语义：只关问询窗，不取消问询本身（pendingBySession 保留）
+    const prev = modalSessionId.value || '';
+    askUserStore.closeModal();
+    haloEventBus.emitLocal('agent:ask-user-dismissed', { sessionId: prev });
   }
 });
 
@@ -284,9 +283,18 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+// need22-P2 F6：两级取消——“只关问询”（稍后回答，pending 保留，顶栏 badge 可跳回）
+function handleDismiss(): void {
+  const p = pending.value;
+  const sid = p?.sessionId || modalSessionId.value || '';
+  askUserStore.closeModal();
+  haloEventBus.emitLocal('agent:ask-user-dismissed', { sessionId: sid });
+  message.info('问询已收起（稍后可从顶栏红点继续回答），本轮继续等待');
+}
+
+// need22-P2 F6：“取消整轮”（取消提问 + 取消后端整轮）
 async function handleCancel(): Promise<void> {
   const p = pending.value;
-  // 取消提问 = 取消整轮（后端走取消分支）
   if (p) {
     try {
       await getHostBridge().cancelAgentTurn(p.sessionId);

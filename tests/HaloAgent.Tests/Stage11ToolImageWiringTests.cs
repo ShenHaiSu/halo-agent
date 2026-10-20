@@ -134,39 +134,47 @@ public sealed class Stage11ToolImageWiringTests : IDisposable
         Assert.NotNull(toolMsg.Images);
         string dataRoot = _storageManager.CurrentDataRoot;
 
-        // Chat：tool 附图展开为 tool_call 输出 + 下一条 user(text + image_url/detail)
-        var chatModel = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "high" };
-        var chatReq = ImgReq(chatModel, new List<UnifiedChatMessage> { toolMsg },
-            img => ImageAttachmentStore.ResolveDataUrl(dataRoot, _workspace.Id, _session.Id, img));
-        string chatPayload = new ChatCompletionsAdapter().SerializeRequest(chatReq);
-        using (var cdoc = JsonDocument.Parse(chatPayload))
-        {
-            var msgs = cdoc.RootElement.GetProperty("messages").EnumerateArray().ToList();
-            var withImg = msgs.First(m => m.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array);
-            var parts = withImg.GetProperty("content").EnumerateArray().ToList();
-            Assert.Equal("text", parts[0].GetProperty("type").GetString());
-            Assert.False(string.IsNullOrWhiteSpace(parts[0].GetProperty("text").GetString()));
-            Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
-            Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetProperty("url").GetString());
-            Assert.Equal("high", parts[1].GetProperty("image_url").GetProperty("detail").GetString());
-        }
-
-        // Resp：function_call_output + 下一条 user(input_text 首位非空 + input_image/detail)
-        var respModel = new ModelConfig { Id = "o3", Protocol = LlmProtocolType.Resp, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "low" };
-        var respReq = ImgReq(respModel, new List<UnifiedChatMessage> { toolMsg },
-            img => ImageAttachmentStore.ResolveDataUrl(dataRoot, _workspace.Id, _session.Id, img));
-        string respPayload = new ResponsesApiAdapter().SerializeRequest(respReq);
-        using (var rdoc = JsonDocument.Parse(respPayload))
-        {
-            var input = rdoc.RootElement.GetProperty("input").EnumerateArray().ToList();
-            Assert.Equal(2, input.Count);
-            var parts = input[1].GetProperty("content").EnumerateArray().ToList();
-            Assert.Equal("input_text", parts[0].GetProperty("type").GetString());
-            Assert.False(string.IsNullOrWhiteSpace(parts[0].GetProperty("text").GetString()));
-            Assert.Equal("input_image", parts[1].GetProperty("type").GetString());
-            Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetString());
-            Assert.Equal("low", parts[1].GetProperty("detail").GetString());
-        }
+         // Chat：tool 附图展开为 tool_call 输出 + 块尾单个 user(text + image_url/detail)
+         // FIX-tool-400：请求必须配对，单测同样先给归属 assistant，再跟 tool。
+         var chatAssistant = UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("call_view_2", null, "view_image", "{}") });
+         var chatModel = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "high" };
+         var chatReq = ImgReq(chatModel, new List<UnifiedChatMessage> { chatAssistant, toolMsg },
+             img => ImageAttachmentStore.ResolveDataUrl(dataRoot, _workspace.Id, _session.Id, img));
+         string chatPayload = new ChatCompletionsAdapter().SerializeRequest(chatReq);
+         using (var cdoc = JsonDocument.Parse(chatPayload))
+         {
+             var msgs = cdoc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+             // sys + assistant + tool + trailing-user = 4
+             Assert.Equal(4, msgs.Count);
+             Assert.Equal("tool", msgs[2].GetProperty("role").GetString());
+             var withImg = msgs[3];
+             Assert.Equal("user", withImg.GetProperty("role").GetString());
+             var parts = withImg.GetProperty("content").EnumerateArray().ToList();
+             Assert.Equal("text", parts[0].GetProperty("type").GetString());
+             Assert.False(string.IsNullOrWhiteSpace(parts[0].GetProperty("text").GetString()));
+             Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
+             Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetProperty("url").GetString());
+             Assert.Equal("high", parts[1].GetProperty("image_url").GetProperty("detail").GetString());
+         }
+         // Resp：function_call + function_call_output + 块尾 user(input_text 首位非空 + input_image/detail)
+         var respAssistant = UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("call_view_2", null, "view_image", "{}") });
+         var respModel = new ModelConfig { Id = "o3", Protocol = LlmProtocolType.Resp, SupportsVision = true, MaxImagesPerTurn = 4, VisionDetail = "low" };
+         var respReq = ImgReq(respModel, new List<UnifiedChatMessage> { respAssistant, toolMsg },
+             img => ImageAttachmentStore.ResolveDataUrl(dataRoot, _workspace.Id, _session.Id, img));
+         string respPayload = new ResponsesApiAdapter().SerializeRequest(respReq);
+         using (var rdoc = JsonDocument.Parse(respPayload))
+         {
+             var input = rdoc.RootElement.GetProperty("input").EnumerateArray().ToList();
+             Assert.Equal(3, input.Count);
+             Assert.Equal("function_call", input[0].GetProperty("type").GetString());
+             Assert.Equal("function_call_output", input[1].GetProperty("type").GetString());
+             var parts = input[2].GetProperty("content").EnumerateArray().ToList();
+             Assert.Equal("input_text", parts[0].GetProperty("type").GetString());
+             Assert.False(string.IsNullOrWhiteSpace(parts[0].GetProperty("text").GetString()));
+             Assert.Equal("input_image", parts[1].GetProperty("type").GetString());
+             Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetString());
+             Assert.Equal("low", parts[1].GetProperty("detail").GetString());
+         }
     }
 
     [Fact(DisplayName = "N11-FIX-3: view_image 失败不挂图（tool 消息 Images 为空）")]

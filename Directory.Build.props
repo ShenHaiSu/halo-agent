@@ -1,0 +1,27 @@
+<Project>
+  <!-- need22-P4 H1：全解集中构建管控。各 csproj 不得重复定义此处已统管的属性。 -->
+  <PropertyGroup>
+    <!-- 铁律：锁死 net6.0-windows（Win7 SP1 可跑的最后基线，见 README §12 备案） -->
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>10.0</LangVersion>
+
+    <!-- 版本单源：与 build/installer.iss #MyAppVersion、CI git tag 对齐（E6） -->
+    <VersionPrefix>0.6.0</VersionPrefix>
+
+    <!-- H7 SelfContained 对齐：与发布（self-contained true）一致。
+         Release 直接自包含；Debug 保持框架依赖以保内环速度。 -->
+    <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
+    <SelfContained Condition="'$(Configuration)' != 'Release'">false</SelfContained>
+
+    <!-- 铁律：CefSharp 109 原生件（libcef.dll / *.pak / BrowserSubprocess）要求多文件发布 -->
+    <PublishSingleFile>false</PublishSingleFile>
+
+    <!-- H1/H2 WarnAsError：包降级（NU1605）任何配置下即错；
+         全量警告即错仅 Release 生效，Debug 内环不受历史警告阻塞。 -->
+    <WarningsAsErrors>NU1605</WarningsAsErrors>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' != 'Release'">false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

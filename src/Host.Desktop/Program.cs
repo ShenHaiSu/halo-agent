@@ -3,12 +3,17 @@ using CefSharp;
 using CefSharp.SchemeHandler;
 using CefSharp.WinForms;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Infrastructure.Process;
 using Host.Desktop.Infrastructure.Storage;
 
 namespace Host.Desktop;
 
 internal static class Program
 {
+    private static SingleInstanceGuard? _appGuard;   // need18：static 持有防 GC 回收
+    private static SingleInstanceGuard? _dataGuard;  // need18：static 持有防 GC 回收
+    private const int SecondInstanceExitCode = 42;   // need18：约定的“重复实例”退出码
+
     /// <summary>
     /// 渐进式安全协商策略：Win7 SP1 必开 TLS 1.2，在支持 TLS 1.3 的 Win10/11 上追加开启 TLS 1.3，
     /// Win7 不支持 TLS 1.3 枚举时静默保留 TLS 1.2。
@@ -30,6 +35,11 @@ internal static class Program
      static void Main()
      {
          TraceStartup("stage=main-enter");
+         SingleInstanceGuard.TraceSink = TraceStartup;
+         NativeWindowActivator.TraceSink = TraceStartup;
+         // —— need18 [A] App锁：Storage/Log/Cef 之前 ——
+         if (!TryAcquireAppGuard()) { Environment.ExitCode = SecondInstanceExitCode; return; }
+
          // 0. 强制开启 TLS 1.2 (兼容 Win7 SP1)
          ConfigureWin7CompatibleTls();
  
@@ -70,6 +80,9 @@ internal static class Program
          }
          HaloLogger.App.Info(
              $"HaloAgent starting. OS={Environment.OSVersion}, TLS={ServicePointManager.SecurityProtocol}, DataRoot={storageManager.CurrentDataRoot}, Bootstrap={storageManager.BootstrapFilePath}");
+        // —— need18 [B] Data锁：Storage之后、Cef之前 ——
+        if (!TryAcquireDataGuard(storageManager.CurrentDataRoot)) { Environment.ExitCode = SecondInstanceExitCode; return; }
+        HaloLogger.App.Info($"SingleInstance ok app={_appGuard?.MutexName} data={_dataGuard?.MutexName} root={storageManager.CurrentDataRoot}");
         // need17-07：Python 可用性后台快照（不阻塞 UI/网关启动；失败只记日志）
         _ = Task.Run(() =>
         {
@@ -141,10 +154,101 @@ internal static class Program
         finally
          {
              // 8. 退出时优雅释放日志队列与 CEF 句柄，防止残留 CefSharp.BrowserSubprocess.exe 僵尸进程
+            _dataGuard?.Dispose(); _dataGuard = null; // need18：先放 data
+            _appGuard?.Dispose(); _appGuard = null;   // need18：再放 app
             HaloLogger.App.Info("HaloAgent shutting down gracefully.");
             HaloLogger.Shutdown();
             Cef.Shutdown();
         }
+    }
+
+    // —— need18 [A] App 锁：探针路径 + 旁路 + 被占分支 ——
+    private static bool TryAcquireAppGuard()
+    {
+        // 2.1 旁路（自动化并行验收用，不记为异常）
+        if (SingleInstanceGuard.ShouldBypass())
+        {
+            TraceStartup("stage=single-instance-bypass reason=HALO_ALLOW_MULTIINSTANCE=1");
+            return true;
+        }
+        // 2.2 探针 bootstrap 路径：只拼接，不写盘（绝不调 StoragePathManager.Initialize）
+        string probe;
+        try { probe = SingleInstanceGuard.ResolveBootstrapProbePath(); }
+        catch (Exception ex)
+        {
+            TraceStartup("stage=single-instance-probe-FAILED: " + ex.Message);
+            return true; // 探针失败宁可放行（避免误杀），Data锁兜底
+        }
+        // 2.3 获取
+        SingleInstanceGuard? guard;
+        string mutexName;
+        try { guard = SingleInstanceGuard.TryAcquireApp(probe, out mutexName); }
+        catch (Exception ex)
+        {
+            TraceStartup("stage=app-mutex-EX: " + ex.GetType().Name + ":" + ex.Message);
+            return true; // 获取抛异常宁可放行，Data锁兜底
+        }
+        if (guard == null)
+        {
+            TraceStartup($"stage=app-mutex-null name={mutexName} action=pass-through-to-data-guard");
+            return true; // 内部已 trace，回退到 Data 锁
+        }
+        if (!guard.IsFirstInstance)
+        {
+            TraceStartup($"stage=single-instance-blocked scope=app name={mutexName} probe={probe}");
+            TryLogWarn($"Second instance blocked (app mutex {mutexName}).");
+            NativeWindowActivator.TryBringToFront("Halo-Agent Desktop");
+            try
+            {
+                System.Windows.Forms.MessageBox.Show(
+                    "Halo-Agent 已在运行中，已为你唤起已有窗口。\n\n如需多开：设置环境变量 HALO_ALLOW_MULTIINSTANCE=1，或为第二个实例配置不同的数据目录。",
+                    "Halo-Agent", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch { /* 无窗口会话（如冒烟）吞掉 */ }
+            guard.Dispose();
+            return false;
+        }
+        _appGuard = guard;
+        TraceStartup($"stage=single-instance-ok scope=app name={mutexName} probe={probe}");
+        return true;
+    }
+
+    // —— need18 [B] Data 锁：强兜底 + 占用弹窗 ——
+    private static bool TryAcquireDataGuard(string dataRoot)
+    {
+        if (SingleInstanceGuard.ShouldBypass())
+            return true; // 已在 [A] trace，本处静默
+        SingleInstanceGuard? guard;
+        string mutexName; string lockPath;
+        try { guard = SingleInstanceGuard.TryAcquireData(dataRoot, out mutexName, out lockPath); }
+        catch (Exception ex)
+        {
+            TraceStartup("stage=data-mutex-EX: " + ex.GetType().Name + ":" + ex.Message);
+            ShowFatalStartupError("数据目录锁初始化失败", ex);
+            _appGuard?.Dispose(); _appGuard = null;
+            return false;
+        }
+        if (guard == null || !guard.IsFirstInstance)
+        {
+            TraceStartup($"stage=single-instance-blocked scope=data name={mutexName} root={dataRoot} lock={lockPath}");
+            TryLogWarn($"Second instance blocked (data mutex {mutexName}, root {dataRoot}).");
+            NativeWindowActivator.TryBringToFront("Halo-Agent Desktop");
+            ShowFatalStartupError(
+                "数据目录已被另一 Halo-Agent 实例占用",
+                new IOException($"DataRoot '{dataRoot}' 已被占用（lock={lockPath}）。请先关闭已有窗口，或更换数据目录后重试。"));
+            guard?.Dispose();
+            _appGuard?.Dispose(); _appGuard = null;
+            return false;
+        }
+        _dataGuard = guard;
+        TraceStartup($"stage=single-instance-ok scope=data name={mutexName} root={dataRoot} lock={lockPath}");
+        return true;
+    }
+
+    private static void TryLogWarn(string message)
+    {
+        try { HaloLogger.App.Warn(message); }
+        catch { }
     }
 
      private static string StartupTracePath()

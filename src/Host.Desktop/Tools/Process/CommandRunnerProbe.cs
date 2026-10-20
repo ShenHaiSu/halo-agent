@@ -31,14 +31,27 @@ public static class CommandRunnerProbe
     }
 
     /// <summary>
-    /// 获取 cmd.exe 可执行文件路径（ComSpec 环境变量优先）。
+    /// 获取 cmd.exe 可执行文件路径（need22-P0 S2：固定 %SystemRoot%\System32\cmd.exe，不读 ComSpec 环境变量，防劫持）。
     /// </summary>
     public static string GetComSpec()
     {
-        string? comSpec = Environment.GetEnvironmentVariable("ComSpec");
-        if (!string.IsNullOrWhiteSpace(comSpec))
+        try
         {
-            return comSpec.Trim();
+            string? sysRoot = Environment.GetEnvironmentVariable("SystemRoot");
+            if (!string.IsNullOrWhiteSpace(sysRoot))
+            {
+                string fixed_ = Path.Combine(sysRoot.Trim(), "System32", "cmd.exe");
+                if (File.Exists(fixed_))
+                {
+                    return fixed_;
+                }
+
+                return fixed_;
+            }
+        }
+        catch
+        {
+            // 环境变量读取异常时降级固定路径
         }
 
         return @"C:\Windows\System32\cmd.exe";

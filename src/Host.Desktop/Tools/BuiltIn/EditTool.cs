@@ -49,11 +49,12 @@ public sealed class EditTool : IToolHandler
         string mode = "text";
         try
         {
-            using JsonDocument doc = JsonDocument.Parse(
-                string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-            if (doc.RootElement.TryGetProperty("mode", out JsonElement m) && m.ValueKind == JsonValueKind.String)
+            // need22-P0 S3：NormalizedJson 单次解析（ToolArgs 统一入口）
+            using var args = ToolArgs.Parse(call.ArgumentsJson);
+            string? m = args.Root.ValueKind == JsonValueKind.Object ? args.GetString("mode") : null;
+            if (!string.IsNullOrWhiteSpace(m))
             {
-                mode = (m.GetString() ?? "text").Trim().ToLowerInvariant();
+                mode = m.Trim().ToLowerInvariant();
             }
         }
         catch (JsonException ex)

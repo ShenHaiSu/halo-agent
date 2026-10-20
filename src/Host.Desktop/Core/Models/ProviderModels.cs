@@ -96,6 +96,10 @@ public sealed class ModelConfig
     /// need09-03：图片清晰度透传（chat image_url.detail）。auto|low|high，缺失/非法网关回退 high（不拒绝，原图 base64 直发不压缩）。
     /// </summary>
     public string? VisionDetail { get; set; } = "high";
+     /// <summary>
+     /// 历史是否携带思考链：true=assistant.ReasoningContent 随上下文发出（默认开；空则省略零抖动）。
+     /// </summary>
+     public bool IncludeReasoningInHistory { get; set; } = true;
 
     public ModelConfig Clone()
     {
@@ -110,7 +114,8 @@ public sealed class ModelConfig
             Enabled = Enabled,
             SupportsVision = SupportsVision,
             MaxImagesPerTurn = MaxImagesPerTurn,
-            VisionDetail = VisionDetail
+            VisionDetail = VisionDetail,
+            IncludeReasoningInHistory = IncludeReasoningInHistory
         };
     }
 }

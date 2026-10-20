@@ -106,6 +106,17 @@ public sealed class AgentConfigService
                     current.MaxIterations = AgentDefaults.MaxIterations;
                     break;
                 // need13：子代理按项恢复
+                 case "turntimeout":
+                 case "turntimeoutms":
+                 case "turn-timeout":
+                 case "turn_timeout":
+                     current.TurnTimeoutMs = AgentDefaults.TurnTimeoutMs;
+                     break;
+                 case "subbarrierbuffer":
+                 case "subbarrierbufferms":
+                 case "barrierbuffer":
+                     current.SubBarrierBufferMs = AgentDefaults.SubBarrierBufferMs;
+                     break;
                 case "subenabled":
                 case "subagentenabled":
                 case "sub-enabled":
@@ -214,6 +225,8 @@ public sealed class AgentConfigService
         ExecDefaultTimeoutMs = AgentDefaults.DefaultTimeoutMs,
         ExecMaxTimeoutMs = AgentDefaults.MaxTimeoutMs,
         MaxIterations = AgentDefaults.MaxIterations,
+         TurnTimeoutMs = AgentDefaults.TurnTimeoutMs,
+         SubBarrierBufferMs = AgentDefaults.SubBarrierBufferMs,
         SubAgentEnabled = true,
         SubMaxParallel = AgentDefaults.SubMaxParallelDefault,
         SubMaxIterations = AgentDefaults.SubMaxIterationsDefault,
@@ -246,6 +259,9 @@ public sealed class AgentConfigService
             SubMaxParallel = incoming.SubMaxParallel == 0 && !forSave ? AgentDefaults.SubMaxParallelDefault : incoming.SubMaxParallel,
             SubMaxIterations = incoming.SubMaxIterations == 0 && !forSave ? AgentDefaults.SubMaxIterationsDefault : incoming.SubMaxIterations,
             SubAllowExecCommand = incoming.SubAllowExecCommand,
+             // need22-P1 T3/T4：新超时字段透传（老文件缺失=0，读时回默认；保存时 0 同样回默认后校验）。
+             TurnTimeoutMs = incoming.TurnTimeoutMs <= 0 ? AgentDefaults.TurnTimeoutMs : incoming.TurnTimeoutMs,
+             SubBarrierBufferMs = incoming.SubBarrierBufferMs <= 0 ? AgentDefaults.SubBarrierBufferMs : incoming.SubBarrierBufferMs,
             SubAllowFileWrite = incoming.SubAllowFileWrite,
             SubAllowSkillWrite = incoming.SubAllowSkillWrite,
             SubAllowMemoryWrite = incoming.SubAllowMemoryWrite,
@@ -255,6 +271,7 @@ public sealed class AgentConfigService
             ToolsPreset = string.IsNullOrWhiteSpace(incoming.ToolsPreset) ? null : incoming.ToolsPreset.Trim(),
             ToolsAllowlist = incoming.ToolsAllowlist == null ? null : incoming.ToolsAllowlist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
             ToolsDenylist = incoming.ToolsDenylist == null ? null : incoming.ToolsDenylist.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
+            AllowedCommands = incoming.AllowedCommands == null ? null : incoming.AllowedCommands.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList(),
             Scope = "global",
             UpdatedAtUtc = incoming.UpdatedAtUtc == default ? DateTime.UtcNow : incoming.UpdatedAtUtc,
         };
@@ -278,6 +295,17 @@ public sealed class AgentConfigService
         {
             throw new AgentConfigValidationException("execDefaultTimeoutMs",
                 $"默认超时不得大于上限（默认 {doc.ExecDefaultTimeoutMs} > 上限 {doc.ExecMaxTimeoutMs}），请调大上限或调小默认");
+        }
+        // need22-P1 T3/T4：单轮总体超时与 Barrier buffer 范围校验（超限存时拒绝、读时回默认由 LoadInternal 兜底）。
+        if (doc.TurnTimeoutMs < AgentDefaults.TurnTimeoutMinMs || doc.TurnTimeoutMs > AgentDefaults.HardTimeoutCeilMs)
+        {
+            throw new AgentConfigValidationException("turnTimeoutMs",
+                $"单轮总体超时非法：{doc.TurnTimeoutMs}（允许 {AgentDefaults.TurnTimeoutMinMs}..{AgentDefaults.HardTimeoutCeilMs} 毫秒，默认 {AgentDefaults.TurnTimeoutMs} 即 10min）");
+        }
+        if (doc.SubBarrierBufferMs < 0 || doc.SubBarrierBufferMs > AgentDefaults.HardTimeoutCeilMs)
+        {
+            throw new AgentConfigValidationException("subBarrierBufferMs",
+                $"Barrier 超时余量非法：{doc.SubBarrierBufferMs}（允许 0..{AgentDefaults.HardTimeoutCeilMs} 毫秒）");
         }
         // need13：子代理校验（老文件缺字段已在上回默认；此处只判显式超限）
         if (doc.SubMaxParallel < 1 || doc.SubMaxParallel > AgentDefaults.SubHardParallelCeil)

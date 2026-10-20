@@ -1,26 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <!-- 铁律：锁死 net6.0-windows，禁止升级 net7.0/net8.0 -->
-    <TargetFramework>net6.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- TFM/Nullable/ImplicitUsings/LangVersion/SelfContained/VersionPrefix 见 develop/Directory.Build.props（P4 H1/H7），此处不重复 -->
     <!-- 明确指定平台架构与 RuntimeIdentifier，确保 CefSharp 109 非托管与混合模式运行时 DLL 自动平铺到输出目录 -->
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64;x86</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
     <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 铁律：锁死 CefSharp 109.1.110，Chromium 109 为支持 Win7 最终版 -->
-    <PackageReference Include="CefSharp.Common.NETCore" Version="109.1.110" />
-    <PackageReference Include="CefSharp.WinForms.NETCore" Version="109.1.110" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="6.0.28" />
+    <!-- 铁律：锁死 CefSharp 109.1.110，Chromium 109 为支持 Win7 最终版（版本见 Directory.Packages.props，P4 H2） -->
+    <PackageReference Include="CefSharp.Common.NETCore" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <!-- Win7 DPAPI 加密支持（用于 Stage 02 API Key 加密存储） -->
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <!-- H6 SBOM：发布时 -p:GenerateSbom=true 才引入，默认构建不还原 -->
+    <PackageReference Include="Microsoft.Sbom.Targets" Condition="'$(GenerateSbom)' == 'true'">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>

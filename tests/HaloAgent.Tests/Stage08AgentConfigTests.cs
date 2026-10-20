@@ -221,8 +221,8 @@ public sealed class Stage08AgentConfigTests : IDisposable
         Assert.Contains("60000", raw);
     }
 
-    [Fact(DisplayName = "S08: T=0 跑 ~5s 命令正常完成非超时")]
-    public async Task Exec_Infinite_NoKill()
+    [Fact(DisplayName = "S08: T=0 非法直接拒绝 INVALID_TIMEOUT（need22-P0 S2：删除无限语义）")]
+    public async Task Exec_ZeroTimeout_Rejected()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -235,20 +235,20 @@ public sealed class Stage08AgentConfigTests : IDisposable
             WorkspaceId = _workspace.Id,
             SessionId = _session.Id,
             DataRoot = _tempRoot,
-            ExecDefaultTimeoutMsOverride = 30000,
+            ExecDefaultTimeoutMsOverride = 60000,
             ExecMaxTimeoutMsOverride = 300000,
         };
         var result = await registry.DispatchAsync(
             new ToolCallDto("call_s08_inf", "exec_command",
                 "{\"command\": \"ping 127.0.0.1 -n 6\", \"timeout_ms\": 0}"),
             ctx);
-        Assert.True(result.Success, result.Error);
-        Assert.DoesNotContain("超时", result.Error ?? string.Empty);
-        Assert.DoesNotContain("超时", result.Output ?? string.Empty);
+        Assert.False(result.Success);
+        Assert.Equal("INVALID_TIMEOUT", result.ErrorCode);
+        Assert.StartsWith("INVALID_TIMEOUT", result.Error);
     }
 
-    [Fact(DisplayName = "S08: T=0 长命令 1s 后取消即停且杀树")]
-    public async Task Exec_Infinite_Cancellable()
+    [Fact(DisplayName = "S08: 长命令 1s 后取消即停且杀树（need22-P0 S2：有限超时+取消）")]
+    public async Task Exec_Cancellable()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -261,7 +261,7 @@ public sealed class Stage08AgentConfigTests : IDisposable
             WorkspaceId = _workspace.Id,
             SessionId = _session.Id,
             DataRoot = _tempRoot,
-            ExecDefaultTimeoutMsOverride = 30000,
+            ExecDefaultTimeoutMsOverride = 60000,
             ExecMaxTimeoutMsOverride = 300000,
         };
         using var cts = new CancellationTokenSource();
@@ -269,7 +269,7 @@ public sealed class Stage08AgentConfigTests : IDisposable
         var sw = Stopwatch.StartNew();
         var result = await registry.DispatchAsync(
             new ToolCallDto("call_s08_infcancel", "exec_command",
-                "{\"command\": \"ping 127.0.0.1 -n 60\", \"timeout_ms\": 0}"),
+                "{\"command\": \"ping 127.0.0.1 -n 60\", \"timeout_ms\": 60000}"),
             ctx,
             cts.Token);
         sw.Stop();

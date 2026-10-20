@@ -12,16 +12,23 @@
         等待回答问题…（输入框已遮罩，提交后恢复）
       </div>
       <!-- need13：子代理 barrier 等待条（输入禁用，取消可掐断整树；取消按钮文案不变，底层已走 CancelTree） -->
-       <div v-if="subWaiting" class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary" data-testid="composer-sub-waiting">
-         子代理执行中（{{ subDone }}/{{ subTotal }}），取消可掐断整树 <button data-testid="composer-sub-open" class="text-accent hover:underline" @click="openFirstSub">查看子进度（{{ subDone }}/{{ subTotal }}）</button>
-       </div>
+      <div
+        v-if="subWaiting"
+        class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary"
+        data-testid="composer-sub-waiting"
+      >
+        子代理执行中（{{ subDone }}/{{ subTotal }}），取消可掐断整树
+        <button data-testid="composer-sub-open" class="text-accent hover:underline" @click="openFirstSub">
+          查看子进度（{{ subDone }}/{{ subTotal }}）
+        </button>
+      </div>
       <div
         ref="editorRef"
         class="composer-editor"
         :contenteditable="!askMasked && !subWaiting"
         data-testid="composer-rich-input"
         aria-label="任务指令输入框，支持粘贴图片"
-        :class="(askMasked || subWaiting) ? 'masked' : ''"
+        :class="askMasked || subWaiting ? 'masked' : ''"
         :data-placeholder="subWaiting ? `子代理执行中（${subDone}/${subTotal}），取消可掐断整树` : undefined"
         @input="onEditorInput"
         @paste="onPaste"
@@ -40,49 +47,43 @@
       >
         当前模型不支持看图，发送时将自动忽略图片（文字仍发送）
       </n-alert>
-      <div v-if="overLimitWarn" class="text-[11px] text-amber-500">
-        图片超限，将只发送最新 {{ maxImages }} 张
-      </div>
-      <div v-if="oversizeWarn" class="text-[11px] text-amber-500">
-        部分图片超过 8MB，发送时将自动跳过（文字仍发送）
-      </div>
-      <div class="flex items-center justify-end gap-2">
-        <n-button
-          secondary
-          size="small"
-          data-testid="composer-add-image"
-          :disabled="!canSend || agentStore.isGenerating || askMasked || subWaiting"
-          @click="openPicker"
-        >
-          🖼 添加图片
-        </n-button>
-        <input
-          ref="fileRef"
-          type="file"
-          accept=".jpg,.jpeg,.png,.webp"
-          multiple
-          class="hidden"
-          @change="onPickerChange"
-        />
-        <n-button
-          v-if="!agentStore.isGenerating"
-          type="primary"
-          size="small"
-          data-testid="composer-send"
-          :disabled="!canSend"
-          @click="handleSend"
-        >
-          <template #icon>
-            <SendHorizontal class="w-3.5 h-3.5" />
-          </template>
-          发送 (Enter)
-        </n-button>
-        <n-button v-else type="error" size="small" @click="handleStop">
-          <template #icon>
-            <Square class="w-3.5 h-3.5" />
-          </template>
-          停止生成 (Esc)
-        </n-button>
+      <div v-if="overLimitWarn" class="text-[11px] text-amber-500">图片超限，将只发送最新 {{ maxImages }} 张</div>
+      <div v-if="oversizeWarn" class="text-[11px] text-amber-500">部分图片超过 8MB，发送时将自动跳过（文字仍发送）</div>
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <PresetPopover />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <n-button
+            secondary
+            size="small"
+            data-testid="composer-add-image"
+            :disabled="!canSend || agentStore.isGenerating || askMasked || subWaiting"
+            @click="openPicker"
+          >
+            🖼 添加图片
+          </n-button>
+          <input ref="fileRef" type="file" accept=".jpg,.jpeg,.png,.webp" multiple class="hidden" @change="onPickerChange" />
+          <n-button
+            v-if="!agentStore.isGenerating"
+            type="primary"
+            size="small"
+            data-testid="composer-send"
+            :disabled="!canSend"
+            @click="handleSend"
+          >
+            <template #icon>
+              <SendHorizontal class="w-3.5 h-3.5" />
+            </template>
+            发送 (Enter)
+          </n-button>
+          <n-button v-else type="error" size="small" @click="handleStop">
+            <template #icon>
+              <Square class="w-3.5 h-3.5" />
+            </template>
+            停止生成 (Esc)
+          </n-button>
+        </div>
       </div>
     </div>
   </div>
@@ -90,29 +91,35 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
- import { useDialog, useMessage } from 'naive-ui';
- import { SendHorizontal, Square } from 'lucide-vue-next';
- import { haloEventBus } from '@/bridge/hostBridge';
- import { useWorkspaceStore } from '@/stores/workspaceStore';
- import { useAgentStore } from '@/stores/agentStore';
- import { useConfigStore } from '@/stores/configStore';
- import {
-   cleanupObjectUrls,
-   createEmptyDraft,
-   genAttId,
-   insertImage,
-   isEmpty,
-   MAX_IMAGE_BYTES,
-   MAX_PASTE_TEXT,
-   removeAttachment,
-   safeFileName,
-   toSendPayload,
-   type AttachmentSource,
-   type ComposerAttachment,
-   type ComposerDraft,
-   type ComposerImageMime,
- } from '@/utils/composerModel';
+import { useDialog, useMessage } from 'naive-ui';
+import { SendHorizontal, Square } from 'lucide-vue-next';
+import { haloEventBus } from '@/bridge/hostBridge';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useAgentStore } from '@/stores/agentStore';
+import { useConfigStore } from '@/stores/configStore';
+import {
+  cleanupObjectUrls,
+  compressImageIfNeeded,
+  createEmptyDraft,
+  createPreviewUrl,
+  genAttId,
+  insertImage,
+  isEmpty,
+  MAX_IMAGE_BYTES,
+  MAX_PASTE_TEXT,
+  removeAttachment,
+  revokePreviewUrl,
+  safeFileName,
+  toSendPayload,
+  type AttachmentSource,
+  type ComposerAttachment,
+  type ComposerDraft,
+  type ComposerImageMime,
+} from '@/utils/composerModel';
 import { acceptImageFile, collectImageFiles, extractPaste, firstHtmlImgSrc } from '@/utils/clipboardImage';
+import { formatSmartBytesShort } from '@/utils/formatSmartBytes';
+import { useSubSessionStore } from '@/stores/subSessionStore';
+import PresetPopover from './PresetPopover.vue';
 
 const workspaceStore = useWorkspaceStore();
 const agentStore = useAgentStore();
@@ -126,36 +133,43 @@ const dragOver = ref(false);
 const askMasked = ref(false);
 const textLen = ref(0);
 
- let draft: ComposerDraft = createEmptyDraft();
- const draftVer = ref(0);
- function setDraft(next: ComposerDraft): void {
-   draft = next;
-   draftVer.value++;
- }
+let draft: ComposerDraft = createEmptyDraft();
+const draftVer = ref(0);
+function setDraft(next: ComposerDraft): void {
+  draft = next;
+  draftVer.value++;
+}
 
 /** 会话级草稿：文字保留；图片 File 不跨会话，只存文件名/mime 作 invalid 占位 */
-interface SavedDraft { text: string; images: Array<{ fileName: string; mime: ComposerImageMime }> }
+interface SavedDraft {
+  text: string;
+  images: Array<{ fileName: string; mime: ComposerImageMime }>;
+}
 const savedDrafts: Record<string, SavedDraft> = {};
 
 const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id));
 // need13：子代理等待态（barrier 等待中输入禁用，取消可掐断整树）
- const subWaiting = computed(() => agentStore.subAgents?.waiting === true);
- const subDone = computed(() => agentStore.subAgents?.done ?? 0);
- const subTotal = computed(() => agentStore.subAgents?.total ?? 0);
- async function openFirstSub() {
-   try {
-     const { useSubSessionStore } = await import('@/stores/subSessionStore');
-     const s = useSubSessionStore();
-     const wsId = workspaceStore.activeWorkspaceId || '';
-     const parent = workspaceStore.activeSessionId || '';
-     if (!wsId || !parent) return;
-     await s.refreshList(wsId, parent);
-     const first = s.subs[0];
-     if (first) await s.enterSub(wsId, parent, first.id);
-   } catch { /* ignore */ }
- }
+const subWaiting = computed(() => agentStore.subAgents?.waiting === true);
+const subDone = computed(() => agentStore.subAgents?.done ?? 0);
+const subTotal = computed(() => agentStore.subAgents?.total ?? 0);
+async function openFirstSub() {
+  try {
+    const s = useSubSessionStore();
+    const wsId = workspaceStore.activeWorkspaceId || '';
+    const parent = workspaceStore.activeSessionId || '';
+    if (!wsId || !parent) return;
+    await s.refreshList(wsId, parent);
+    const first = s.subs[0];
+    if (first) await s.enterSub(wsId, parent, first.id);
+  } catch {
+    /* ignore */
+  }
+}
 
- const attachmentList = computed<ComposerAttachment[]>(() => { void draftVer.value; return Object.values(draft.attachments); });
+const attachmentList = computed<ComposerAttachment[]>(() => {
+  void draftVer.value;
+  return Object.values(draft.attachments);
+});
 
 const readyCount = computed(() => attachmentList.value.filter((a) => a.status === 'ready').length);
 
@@ -180,27 +194,27 @@ function shortNameOf(n: string): string {
   const arr = [...String(n || '')];
   return arr.length <= 12 ? n : arr.slice(0, 12).join('') + '…';
 }
- function createPillEl(att: ComposerAttachment): HTMLSpanElement {
-   // 文本 tag：仅文件名 + ×，不渲染缩略图（objectUrl 仅用于发送，不进 DOM）
-   const span = document.createElement('span');
-   span.className = 'img-tag' + (att.status === 'ready' ? '' : ' invalid');
-   span.contentEditable = 'false';
-   span.setAttribute('data-att', att.attId);
-   span.title = att.error || att.fileName;
-   const fn = document.createElement('span');
-   fn.className = 'fname';
-   fn.textContent = shortNameOf(att.fileName);
-   span.appendChild(fn);
-   const btn = document.createElement('button');
-   btn.type = 'button';
-   btn.className = 'img-x';
-   btn.textContent = '×';
-   btn.setAttribute('data-testid', `att-remove-${att.attId}`);
-   btn.setAttribute('data-x', att.attId);
-   btn.setAttribute('aria-label', `移除图片 ${att.fileName}`);
-   span.appendChild(btn);
-   return span;
- }
+function createPillEl(att: ComposerAttachment): HTMLSpanElement {
+  // 文本 tag：仅文件名 + ×，不渲染缩略图（objectUrl 仅用于发送，不进 DOM）
+  const span = document.createElement('span');
+  span.className = 'img-tag' + (att.status === 'ready' ? '' : ' invalid');
+  span.contentEditable = 'false';
+  span.setAttribute('data-att', att.attId);
+  span.title = att.error || att.fileName;
+  const fn = document.createElement('span');
+  fn.className = 'fname';
+  fn.textContent = shortNameOf(att.fileName);
+  span.appendChild(fn);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'img-x';
+  btn.textContent = '×';
+  btn.setAttribute('data-testid', `att-remove-${att.attId}`);
+  btn.setAttribute('data-x', att.attId);
+  btn.setAttribute('aria-label', `移除图片 ${att.fileName}`);
+  span.appendChild(btn);
+  return span;
+}
 
 /** 编辑器 DOM → 段模型（文本保留原生；pill 按 data-att 还原 image 段） */
 function readEditorToDraft(): void {
@@ -268,7 +282,9 @@ function gcUnreferenced(): void {
       try {
         const u = draft.attachments[id].objectUrl;
         if (u) URL.revokeObjectURL(u);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       delete draft.attachments[id];
     }
   }
@@ -281,7 +297,6 @@ function renderEditorFromText(text: string): void {
   textLen.value = text.length;
 }
 
-
 function placeCaretAfter(node: Node): void {
   try {
     const sel = window.getSelection();
@@ -292,7 +307,9 @@ function placeCaretAfter(node: Node): void {
     sel.removeAllRanges();
     sel.addRange(range);
     editorRef.value.focus();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function insertTextAtCaret(text: string): void {
@@ -318,7 +335,9 @@ function insertTextAtCaret(text: string): void {
       } else {
         editor.appendChild(document.createTextNode(text));
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   readEditorToDraft();
 }
@@ -352,6 +371,7 @@ function insertPillAtCaret(att: ComposerAttachment): void {
 }
 
 // ---------- 附件入口 ----------
+// need22-P3 G3：缩略图 LRU20 张 + URL.createObjectURL 预览（发送才转码，revoke 释放）；>5MB canvas.toBlob 压缩再预览。
 function addFile(f: File, source: AttachmentSource): void {
   const chk = acceptImageFile(f);
   if (!chk.ok) {
@@ -362,47 +382,80 @@ function addFile(f: File, source: AttachmentSource): void {
   const attId = genAttId();
   const fileName = safeFileName(f.name || `pasted-${Date.now()}.png`);
   const oversize = f.size > MAX_IMAGE_BYTES;
+  // 发送用原文件（发送才转码）；预览用 objectURL，大图先压缩再预览
   const att: ComposerAttachment = {
     attId,
     fileName,
     mime,
     sizeBytes: f.size,
-    objectUrl: URL.createObjectURL(f),
+    objectUrl: createPreviewUrl(f),
     file: f,
     source,
     status: oversize ? 'oversize' : 'ready',
-    error: oversize ? `单张超过 8MB（${(f.size / 1024 / 1024).toFixed(1)}MB），发送时自动跳过` : undefined,
+    error: oversize ? `单张超过 8MB（${formatSmartBytesShort(f.size)}），发送时自动跳过` : undefined,
   };
   draft.attachments[attId] = att;
   setDraft(insertImage(draft, attId));
   insertPillAtCaret(att);
   if (oversize) message.warning('图片超过 8MB，发送时将自动跳过（文字仍发送）');
+  // >5MB：压缩后再预览（替换 objectURL，原文件保留用于发送转码）
+  void compressImageIfNeeded(f).then((smaller) => {
+    try {
+      if (smaller === f) return;
+      const hit = draft.attachments[attId];
+      if (!hit) return;
+      revokePreviewUrl(hit.objectUrl);
+      hit.objectUrl = createPreviewUrl(smaller);
+      const probe = new Image();
+      probe.onload = () => {
+        const h2 = draft.attachments[attId];
+        if (h2) {
+          h2.width = probe.naturalWidth;
+          h2.height = probe.naturalHeight;
+        }
+      };
+      probe.onerror = () => {
+        /* 读不到即 undefined，不阻塞 */
+      };
+      probe.src = hit.objectUrl;
+    } catch (e) {
+      console.warn('[composer] compressed preview failed:', e);
+    }
+  });
   // 宽高异步回填，失败忽略
   try {
     const probe = new Image();
-     probe.onload = () => {
-       const hit = draft.attachments[attId];
-       if (hit) {
-         hit.width = probe.naturalWidth;
-         hit.height = probe.naturalHeight;
-       }
-     };
-    probe.onerror = () => { /* 读不到即 undefined，不阻塞 */ };
+    probe.onload = () => {
+      const hit = draft.attachments[attId];
+      if (hit) {
+        hit.width = probe.naturalWidth;
+        hit.height = probe.naturalHeight;
+      }
+    };
+    probe.onerror = () => {
+      /* 读不到即 undefined，不阻塞 */
+    };
     probe.src = att.objectUrl;
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.warn('[composer] probe failed:', e);
+  }
 }
 
 function removeImage(attId: string): void {
   const hit = draft.attachments[attId];
   try {
-    if (hit && hit.objectUrl) URL.revokeObjectURL(hit.objectUrl);
-  } catch { /* ignore */ }
+    if (hit && hit.objectUrl) revokePreviewUrl(hit.objectUrl);
+  } catch (e) {
+    console.warn('[composer] revoke failed:', e);
+  }
   setDraft(removeAttachment(draft, attId));
   try {
     const editor = editorRef.value;
     const pill = editor?.querySelector(`[data-att="${attId}"]`);
     pill?.parentNode?.removeChild(pill);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   readEditorToDraft();
   editorRef.value?.focus();
 }
@@ -417,7 +470,13 @@ function tryHandleHtmlImage(html: string): boolean {
     const body = comma >= 0 ? src.slice(comma + 1) : '';
     const mimeRaw = head.split(';')[0].slice(5).toLowerCase();
     const mime: ComposerImageMime | null =
-      mimeRaw === 'image/png' ? 'image/png' : mimeRaw === 'image/webp' ? 'image/webp' : mimeRaw === 'image/jpeg' || mimeRaw === 'image/jpg' ? 'image/jpeg' : null;
+      mimeRaw === 'image/png'
+        ? 'image/png'
+        : mimeRaw === 'image/webp'
+          ? 'image/webp'
+          : mimeRaw === 'image/jpeg' || mimeRaw === 'image/jpg'
+            ? 'image/jpeg'
+            : null;
     if (!mime || !body) return false;
     try {
       const bin = atob(body);
@@ -441,47 +500,47 @@ function tryHandleHtmlImage(html: string): boolean {
   return true;
 }
 
- // 单次 Ctrl+V 双触发/双源复用兜底：同指纹 300ms 内只处理一次
- let lastPasteSig = '';
- let lastPasteAt = 0;
- function pasteFingerprint(files: File[], text: string, html: string): string {
-   return files.map((f) => `${f.size}|${String(f.type || '').toLowerCase()}`).join(';') + `|t${text.length}|h${html.length}`;
- }
- function onPaste(e: ClipboardEvent): void {
-   if (agentStore.isGenerating || askMasked.value) {
-     e.preventDefault();
-     return;
-   }
-   const { files, text, html } = extractPaste(e);
-   if (files.length > 0) {
-     e.preventDefault();
-     e.stopPropagation();
-     const sig = pasteFingerprint(files, text, html);
-     const now = Date.now();
-     if (sig === lastPasteSig && now - lastPasteAt < 300) return;
-     lastPasteSig = sig;
-     lastPasteAt = now;
-     for (const f of files) {
-       const named = f.name ? f : new File([f], `pasted-${Date.now()}.png`, { type: f.type });
-       addFile(named, 'paste');
-     }
-     if (text.trim()) insertTextAtCaret(text);
-     return;
-   }
-   if (/<img/i.test(html)) {
-     if (tryHandleHtmlImage(html)) {
-       e.preventDefault();
-       e.stopPropagation();
-       return;
-     }
-     return; // 兜底走原生粘贴
-   }
-   if (text && text.length > MAX_PASTE_TEXT) {
-     e.preventDefault();
-     insertTextAtCaret(text.slice(0, MAX_PASTE_TEXT));
-     message.warning(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
-   }
- }
+// 单次 Ctrl+V 双触发/双源复用兜底：同指纹 300ms 内只处理一次
+let lastPasteSig = '';
+let lastPasteAt = 0;
+function pasteFingerprint(files: File[], text: string, html: string): string {
+  return files.map((f) => `${f.size}|${String(f.type || '').toLowerCase()}`).join(';') + `|t${text.length}|h${html.length}`;
+}
+function onPaste(e: ClipboardEvent): void {
+  if (agentStore.isGenerating || askMasked.value) {
+    e.preventDefault();
+    return;
+  }
+  const { files, text, html } = extractPaste(e);
+  if (files.length > 0) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sig = pasteFingerprint(files, text, html);
+    const now = Date.now();
+    if (sig === lastPasteSig && now - lastPasteAt < 300) return;
+    lastPasteSig = sig;
+    lastPasteAt = now;
+    for (const f of files) {
+      const named = f.name ? f : new File([f], `pasted-${Date.now()}.png`, { type: f.type });
+      addFile(named, 'paste');
+    }
+    if (text.trim()) insertTextAtCaret(text);
+    return;
+  }
+  if (/<img/i.test(html)) {
+    if (tryHandleHtmlImage(html)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    return; // 兜底走原生粘贴
+  }
+  if (text && text.length > MAX_PASTE_TEXT) {
+    e.preventDefault();
+    insertTextAtCaret(text.slice(0, MAX_PASTE_TEXT));
+    message.warning(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
+  }
+}
 
 function onDrop(e: DragEvent): void {
   e.preventDefault();
@@ -526,7 +585,7 @@ function onEditorInput(): void {
 
 function onEditorClick(e: MouseEvent): void {
   const t = e.target as HTMLElement | null;
-  const x = t && typeof t.closest === 'function' ? t.closest('[data-x]') as HTMLElement | null : null;
+  const x = t && typeof t.closest === 'function' ? (t.closest('[data-x]') as HTMLElement | null) : null;
   if (x) {
     e.preventDefault();
     e.stopPropagation();
@@ -547,7 +606,7 @@ function onBeforeInput(e: InputEvent): void {
       const prev = anchor.previousSibling as HTMLElement | null;
       if (prev && prev.nodeType === 1 && prev.hasAttribute && prev.hasAttribute('data-att')) pill = prev;
     }
-  } else if (anchor && (anchor === editorRef.value as unknown as Node)) {
+  } else if (anchor && anchor === (editorRef.value as unknown as Node)) {
     const child = editorRef.value.childNodes[sel.anchorOffset - 1] as HTMLElement | undefined;
     if (child && child.nodeType === 1 && child.hasAttribute && child.hasAttribute('data-att')) pill = child;
   }
@@ -637,7 +696,11 @@ async function handleSend(): Promise<void> {
             positiveText: '仍发送',
             negativeText: '取消',
             onPositiveClick: () => {
-              try { window.localStorage.setItem('halo-skip-novision-warn', '1'); } catch { /* ignore */ }
+              try {
+                window.localStorage.setItem('halo-skip-novision-warn', '1');
+              } catch {
+                /* ignore */
+              }
               resolve(true);
               return true;
             },
@@ -653,7 +716,9 @@ async function handleSend(): Promise<void> {
         });
         if (!confirmed) return;
       }
-    } catch { /* 确认框异常则继续发送 */ }
+    } catch {
+      /* 确认框异常则继续发送 */
+    }
   }
 
   const ok = await agentStore.sendPrompt(text, attachments);
@@ -741,7 +806,9 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
 function focusInput(): void {
   try {
     editorRef.value?.focus();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 let unsubs: Array<() => void> = [];
@@ -757,7 +824,9 @@ onMounted(() => {
         if (sid && sid !== (workspaceStore.activeSessionId || '')) return;
         insertTextAtCaret(String(payload?.text || ''));
         focusInput();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })
   );
   // need09-06 联动：问询遮罩（不直接依赖 askUserStore，避免跨轨道耦合）
@@ -767,7 +836,9 @@ onMounted(() => {
         const sid = String(payload?.sessionId || '');
         if (sid && sid !== (workspaceStore.activeSessionId || '')) return;
         askMasked.value = true;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })
   );
   const unmask = (payload: { sessionId?: string }) => {
@@ -775,22 +846,32 @@ onMounted(() => {
       const sid = String(payload?.sessionId || '');
       if (sid && sid !== (workspaceStore.activeSessionId || '')) return;
       askMasked.value = false;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
   unsubs.push(haloEventBus.on<{ sessionId?: string }>('agent:ask-user-resolved', unmask));
+  // need22-P2 F6：问询收起（只关问询窗）同样解罩，输入可用、可继续浏览历史
+  unsubs.push(haloEventBus.on<{ sessionId?: string }>('agent:ask-user-dismissed', unmask));
   unsubs.push(
     haloEventBus.on<{ sessionId?: string }>('agent:turn-event', (payload) => {
       try {
         const p = payload as unknown as { sessionId?: string; kind?: string };
         if (p && (p.kind === 'TurnCompleted' || p.kind === 'TurnCancelled' || p.kind === 'TurnError')) unmask(p);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })
-   );
- });
+  );
+});
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
   for (const u of unsubs) {
-    try { u(); } catch { /* ignore */ }
+    try {
+      u();
+    } catch {
+      /* ignore */
+    }
   }
   unsubs = [];
 });
@@ -822,52 +903,52 @@ onUnmounted(() => {
   border-color: rgba(59, 130, 246, 0.9);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
- .img-tag {
-   display: inline-flex;
-   align-items: center;
-   gap: 2px;
-   border: 1px solid var(--border-subtle, #374151);
-   border-radius: 4px;
-   padding: 0 6px;
-   font-size: 11px;
-   line-height: 18px;
-   background: var(--bg-elevated, #1f2937);
-   vertical-align: middle;
-   margin: 0 1px;
-   user-select: none;
- }
- .img-tag.invalid {
-   border-color: #f43f5e;
-   background: rgba(244, 63, 94, 0.08);
- }
- .img-tag .fname {
-   max-width: 120px;
-   overflow: hidden;
-   text-overflow: ellipsis;
-   white-space: nowrap;
- }
- .img-tag .img-x {
-   border: none;
-   background: transparent;
-   cursor: pointer;
-   font-size: 12px;
-   line-height: 1;
-   padding: 0;
-   color: inherit;
- }
- .img-tag .img-x:hover {
-   color: #f43f5e;
- }
- /* 警告条紧凑化：覆盖 naive-ui 默认大内边距 + 缩小字号（<style> 非 scoped，用后代选择器） */
- .composer-vision-warn {
-   font-size: 11px;
-   line-height: 1.5;
- }
- .composer-vision-warn .n-alert-body {
-   padding: 4px 8px !important;
- }
- .composer-vision-warn .n-alert-body__content {
-   font-size: 11px !important;
-   line-height: 1.5 !important;
- }
- </style>
+.img-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border-subtle, #374151);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  background: var(--bg-elevated, #1f2937);
+  vertical-align: middle;
+  margin: 0 1px;
+  user-select: none;
+}
+.img-tag.invalid {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.08);
+}
+.img-tag .fname {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.img-tag .img-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  color: inherit;
+}
+.img-tag .img-x:hover {
+  color: #f43f5e;
+}
+/* 警告条紧凑化：覆盖 naive-ui 默认大内边距 + 缩小字号（<style> 非 scoped，用后代选择器） */
+.composer-vision-warn {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.composer-vision-warn .n-alert-body {
+  padding: 4px 8px !important;
+}
+.composer-vision-warn .n-alert-body__content {
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+}
+</style>
