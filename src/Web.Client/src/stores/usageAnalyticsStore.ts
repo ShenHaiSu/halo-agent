@@ -91,7 +91,12 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     }
   }
 
+  // 并发刷新序号：只有最后一次请求的结果允许落地，
+  // 避免"旧筛选条件的慢响应"覆盖"新筛选条件的结果"（图表显示上一次筛选的数据）。
+  let reqSeq = 0;
+
   async function refresh(): Promise<void> {
+    const seq = ++reqSeq;
     loading.value = true;
     error.value = '';
     try {
@@ -103,6 +108,8 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
         bridge.getUsageProviderShare(f),
         bridge.queryUsagePage(f, page.value, pageSize.value),
       ]);
+      // 过期响应直接丢弃（期间已有更新的请求发起）
+      if (seq !== reqSeq) return;
       if (ov.ok && ov.data) overview.value = ov.data;
       else if (!ov.ok && ov.code === 'USAGE_DB_NOT_READY') error.value = '用量库初始化失败，不影响对话';
       if (tr.ok && tr.data) trend.value = tr.data;
@@ -112,13 +119,14 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
       } else if (!pg.ok && pg.code === 'USAGE_PAGE_OVERFLOW') {
         page.value = 1;
         const retry = await bridge.queryUsagePage(f, 1, pageSize.value);
+        if (seq !== reqSeq) return;
         if (retry.ok && retry.data) pageData.value = retry.data;
       }
       if (!ov.ok && ov.code && ov.code !== 'USAGE_DB_NOT_READY') error.value = ov.message || '查询失败';
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (seq === reqSeq) error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      if (seq === reqSeq) loading.value = false;
     }
   }
 
