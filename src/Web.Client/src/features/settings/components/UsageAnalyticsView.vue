@@ -224,9 +224,9 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { useUsageAnalyticsStore, USAGE_PRESETS } from '@/stores/usageAnalyticsStore';
 import { usePrivacyStore } from '@/stores/privacyStore';
 import { useAppearanceStore } from '@/stores/appearanceStore';
-import { getHostBridge, type UsageDbStatus } from '@/bridge/hostBridge';
-import { formatTokenShort, formatSmartBytesShort } from '@/utils/formatSmartBytes';
-import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@/utils/maskProvider';
+import { getHostBridge, type UsageDbStatus } from '@shared/bridge/hostBridge';
+import { formatTokenShort, formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
+import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@shared/utils/maskProvider';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, DatasetComponent, CanvasRenderer]);
 

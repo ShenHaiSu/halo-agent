@@ -3,18 +3,14 @@
     <!-- A. 说明与筛选区 -->
     <n-card title="技能与记忆（只读管理）" size="small">
       <n-alert type="info" :show-icon="true" class="mb-3">
-        仅查看、开关与删除，不支持新建与编辑。正文由模型经 skill_tool/memory_tool 维护；开关与删除下一轮对话起生效。Project 域随当前工作区 .haloagent/ 走。
+        仅查看、开关与删除，不支持新建与编辑。正文由模型经 skill_tool/memory_tool 维护；开关与删除下一轮对话起生效。Project 域随当前工作区
+        .haloagent/ 走。
       </n-alert>
       <div class="sm-filters">
         <div class="sm-field">
           <div class="sm-field-label text-secondary">种类</div>
           <div class="sm-field-control">
-            <n-segmented
-              v-model:value="store.kind"
-              :options="kindOptions"
-              data-testid="sm-kind-seg"
-              @update:value="onKind"
-            />
+            <n-segmented v-model:value="store.kind" :options="kindOptions" data-testid="sm-kind-seg" @update:value="onKind" />
           </div>
         </div>
         <div class="sm-field">
@@ -23,7 +19,7 @@
             <n-select
               v-model:value="store.scopeFilter"
               :options="scopeOptions"
-              style="width: 140px;"
+              style="width: 140px"
               data-testid="sm-scope-select"
               @update:value="onScope"
             />
@@ -35,7 +31,7 @@
             <n-select
               v-model:value="wsSelect"
               :options="wsOptions"
-              style="width: 200px;"
+              style="width: 200px"
               data-testid="sm-workspace-select"
               placeholder="选择工作区"
               @update:value="onWorkspace"
@@ -49,7 +45,7 @@
               v-model:value="searchInput"
               clearable
               placeholder="按名称 / 标题 / 摘要搜索"
-              style="width: 220px;"
+              style="width: 220px"
               data-testid="sm-search"
               @update:value="onSearch"
             />
@@ -58,15 +54,11 @@
         <div class="sm-field">
           <div class="sm-field-label">&nbsp;</div>
           <div class="sm-field-control">
-            <n-button size="small" data-testid="sm-refresh" :loading="store.loading" @click="onReload">
-              刷新
-            </n-button>
+            <n-button size="small" data-testid="sm-refresh" :loading="store.loading" @click="onReload"> 刷新 </n-button>
           </div>
         </div>
       </div>
-      <p v-if="showNoWsHint" class="text-xs text-amber-500 mt-2">
-        当前无工作区，Project 为空，只显示 Global。
-      </p>
+      <p v-if="showNoWsHint" class="text-xs text-amber-500 mt-2">当前无工作区，Project 为空，只显示 Global。</p>
     </n-card>
 
     <!-- B. 列表区（可伸缩卡片） -->
@@ -108,13 +100,35 @@
                 :data-testid="`sm-switch-${item.scope}-${item.name}`"
                 @update:value="() => onToggle(item)"
               />
-              <n-button circle tertiary size="small" title="预览" :data-testid="`sm-preview-${item.scope}-${item.name}`" @click="onPreview(item)">
+              <n-button
+                circle
+                tertiary
+                size="small"
+                title="预览"
+                :data-testid="`sm-preview-${item.scope}-${item.name}`"
+                @click="onPreview(item)"
+              >
                 <template #icon><Eye class="w-3.5 h-3.5" /></template>
               </n-button>
-              <n-button circle tertiary size="small" title="打开文件夹" :data-testid="`sm-folder-${item.scope}-${item.name}`" @click="onFolder(item)">
+              <n-button
+                circle
+                tertiary
+                size="small"
+                title="打开文件夹"
+                :data-testid="`sm-folder-${item.scope}-${item.name}`"
+                @click="onFolder(item)"
+              >
                 <template #icon><FolderOpen class="w-3.5 h-3.5" /></template>
               </n-button>
-              <n-button circle ghost type="error" size="small" title="删除" :data-testid="`sm-delete-${item.scope}-${item.name}`" @click="onDelete(item)">
+              <n-button
+                circle
+                ghost
+                type="error"
+                size="small"
+                title="删除"
+                :data-testid="`sm-delete-${item.scope}-${item.name}`"
+                @click="onDelete(item)"
+              >
                 <template #icon><Trash2 class="w-3.5 h-3.5" /></template>
               </n-button>
             </div>
@@ -123,7 +137,9 @@
             <p class="text-sm font-medium">{{ item.title }}</p>
             <p class="text-xs text-secondary mt-1 sm-sub">{{ item.summary }}</p>
             <p class="text-xs font-mono mt-2">
-              pin {{ item.pin }} · v{{ item.version }} · ~{{ item.estTokens }} tokens · {{ item.chars }} 字{{ item.hasAssets ? ' · 含附件' : '' }}
+              pin {{ item.pin }} · v{{ item.version }} · ~{{ item.estTokens }} tokens · {{ item.chars }} 字{{
+                item.hasAssets ? ' · 含附件' : ''
+              }}
             </p>
           </div>
         </div>
@@ -135,22 +151,21 @@
       v-model:show="showModal"
       preset="card"
       :title="modalTitle"
-      style="width: 640px; max-width: 90vw;"
+      style="width: 640px; max-width: 90vw"
       data-testid="sm-preview-modal"
     >
       <n-card size="small" :bordered="false">
         <p class="text-sm font-medium">{{ store.preview?.title }}</p>
         <p class="text-xs text-secondary mt-1">{{ store.preview?.summary }}</p>
         <p class="text-xs font-mono mt-2">
-          pin {{ store.preview?.pin }} · v{{ store.preview?.version }} · ~{{ store.preview?.estTokens }} tokens · {{ store.preview?.chars }} 字{{ store.preview?.hasAssets ? ' · 含附件' : '' }}
+          pin {{ store.preview?.pin }} · v{{ store.preview?.version }} · ~{{ store.preview?.estTokens }} tokens ·
+          {{ store.preview?.chars }} 字{{ store.preview?.hasAssets ? ' · 含附件' : '' }}
         </p>
         <pre class="sm-preview-body mt-3">{{ store.preview?.bodyPreview }}</pre>
         <p v-if="store.preview?.truncated" class="text-xs text-secondary mt-2">
           正文过长，仅显示前 800 字，完整内容点「打开文件夹」查看 readme.md。
         </p>
-        <p v-if="store.preview?.hasAssets" class="text-xs text-secondary mt-1">
-          含 assets/ 附件，正文引用 assets/...
-        </p>
+        <p v-if="store.preview?.hasAssets" class="text-xs text-secondary mt-1">含 assets/ 附件，正文引用 assets/...</p>
       </n-card>
       <template #footer>
         <div class="flex justify-end gap-2">
@@ -169,7 +184,7 @@ import { useMessage, useDialog } from 'naive-ui';
 import { Eye, FolderOpen, Trash2, ChevronDown } from 'lucide-vue-next';
 import { useSkillMemoryStore } from '@/stores/skillMemoryStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { SkillMemoryKind, SkillMemoryScopeFilter, SkillMemoryListItem } from '@/bridge/hostBridge';
+import type { SkillMemoryKind, SkillMemoryScopeFilter, SkillMemoryListItem } from '@shared/bridge/hostBridge';
 
 const store = useSkillMemoryStore();
 const workspaceStore = useWorkspaceStore();
@@ -203,7 +218,9 @@ const showNoWsHint = computed(() => {
 
 const showModal = computed({
   get: () => store.preview != null,
-  set: (v: boolean) => { if (!v) store.closePreview(); },
+  set: (v: boolean) => {
+    if (!v) store.closePreview();
+  },
 });
 const modalTitle = computed(() => {
   const p = store.preview;
@@ -258,7 +275,8 @@ async function onPreview(item: SkillMemoryListItem): Promise<void> {
 
 async function onToggle(item: SkillMemoryListItem): Promise<void> {
   const r = await store.toggleEnabled(item);
-  if (r.ok) message.success(r.message || `已${item.enabled ? '启用' : '停用'} ${kindCn()} '${item.name}'（${item.scope}）。下一轮对话起生效。`);
+  if (r.ok)
+    message.success(r.message || `已${item.enabled ? '启用' : '停用'} ${kindCn()} '${item.name}'（${item.scope}）。下一轮对话起生效。`);
   else message.error(r.message || '开关失败');
 }
 
@@ -328,21 +346,92 @@ onUnmounted(() => {
 
 <style scoped>
 /* A 区筛选：label 与控件各包一层 div，自然形成组件边距 */
-.sm-filters { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: flex-end; min-width: 0; max-width: 100%; }
-.sm-field { min-width: 0; }
-.sm-field-label { font-size: 12px; line-height: 1.5; margin: 0 0 6px 0; }
-.sm-field-control { min-width: 0; }
+.sm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: flex-end;
+  min-width: 0;
+  max-width: 100%;
+}
+.sm-field {
+  min-width: 0;
+}
+.sm-field-label {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 6px 0;
+}
+.sm-field-control {
+  min-width: 0;
+}
 /* B 区卡片列表：纵向伸缩卡片 */
-.sm-card-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: 100%; }
-.sm-card { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px; min-width: 0; max-width: 100%; box-sizing: border-box; }
-.sm-card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
-.sm-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; justify-self: start; }
-.sm-head-center { justify-self: center; white-space: nowrap; }
-.sm-head-right { display: flex; align-items: center; gap: 6px; justify-self: end; }
-.sm-name { min-width: 0; max-width: 100%; }
-.sm-chevron { transition: transform 0.15s ease; }
-.sm-chevron.open { transform: rotate(180deg); }
-.sm-card-body { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-subtle); min-width: 0; }
-.sm-sub { white-space: normal; overflow-wrap: break-word; }
-.sm-preview-body { white-space: pre-wrap; overflow-wrap: break-word; font-size: 12px; line-height: 1.7; max-height: 40vh; overflow-y: auto; margin: 0; }
+.sm-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.sm-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.sm-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sm-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  justify-self: start;
+}
+.sm-head-center {
+  justify-self: center;
+  white-space: nowrap;
+}
+.sm-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: end;
+}
+.sm-name {
+  min-width: 0;
+  max-width: 100%;
+}
+.sm-chevron {
+  transition: transform 0.15s ease;
+}
+.sm-chevron.open {
+  transform: rotate(180deg);
+}
+.sm-card-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+  min-width: 0;
+}
+.sm-sub {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.sm-preview-body {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0;
+}
 </style>

@@ -5,21 +5,29 @@
   >
     <!-- 左侧：工作区 / 会话 路径指示 -->
     <div class="flex items-center gap-2 min-w-0">
-       <div class="flex items-center gap-1.5 text-xs text-primary font-medium min-w-0">
-         <span class="text-secondary truncate max-w-[140px]" :title="activeWorkspace?.name">
-           {{ activeWorkspace?.name || 'Halo' }}
-         </span>
-         <span class="text-secondary/60">/</span>
-         <button class="truncate max-w-[200px]" :class="{ link: subStore.mode === 'sub' }" :title="activeSession?.title" @click="onCrumbMain">
-           {{ activeSession?.title || '未选择会话' }}
-         </button>
-         <template v-if="subStore.mode === 'sub'"> <span class="text-secondary/60">/</span>
-           <n-dropdown :options="subOptions" trigger="click" @select="onSelectSub" data-testid="topbar-sub-dropdown">
-             <span data-testid="topbar-sub-crumb" class="truncate max-w-[200px] cursor-pointer">{{ subStore.activeSubLabel }}({{ subStore.shortId }}) ▾</span>
-           </n-dropdown>
-           <n-button size="tiny" data-testid="topbar-back-main" @click="onBackMain">← 返回主会话</n-button>
-         </template>
-       </div>
+      <div class="flex items-center gap-1.5 text-xs text-primary font-medium min-w-0">
+        <span class="text-secondary truncate max-w-[140px]" :title="activeWorkspace?.name">
+          {{ activeWorkspace?.name || 'Halo' }}
+        </span>
+        <span class="text-secondary/60">/</span>
+        <button
+          class="truncate max-w-[200px]"
+          :class="{ link: subStore.mode === 'sub' }"
+          :title="activeSession?.title"
+          @click="onCrumbMain"
+        >
+          {{ activeSession?.title || '未选择会话' }}
+        </button>
+        <template v-if="subStore.mode === 'sub'">
+          <span class="text-secondary/60">/</span>
+          <n-dropdown :options="subOptions" trigger="click" data-testid="topbar-sub-dropdown" @select="onSelectSub">
+            <span data-testid="topbar-sub-crumb" class="truncate max-w-[200px] cursor-pointer"
+              >{{ subStore.activeSubLabel }}({{ subStore.shortId }}) ▾</span
+            >
+          </n-dropdown>
+          <n-button size="tiny" data-testid="topbar-back-main" @click="onBackMain">← 返回主会话</n-button>
+        </template>
+      </div>
     </div>
 
     <!-- 右侧：模型与协议选择器 + 上下文水位仪 + 设置与主题 -->
@@ -44,7 +52,14 @@
             class="flex items-center gap-2 px-2.5 py-1 rounded bg-surface hover:bg-elevated border border-subtle transition-colors cursor-pointer text-xs"
             data-testid="context-quota-meter-badge"
           >
-            <span v-if="budgetWarnText" data-testid="budget-warn-badge" class="text-amber-500 font-bold" :title="budgetWarnText" @click.stop="onBudgetWarnClick">⚠</span>
+            <span
+              v-if="budgetWarnText"
+              data-testid="budget-warn-badge"
+              class="text-amber-500 font-bold"
+              :title="budgetWarnText"
+              @click.stop="onBudgetWarnClick"
+              >⚠</span
+            >
             <n-progress
               type="circle"
               :percentage="progressPercentage"
@@ -68,20 +83,12 @@
               <Layers class="w-3.5 h-3.5 text-accent" />
               <span>上下文预算监控 (Context Budget)</span>
             </span>
-            <n-tag size="tiny" :type="usageTagType" :bordered="false" class="font-mono">
-              {{ percentDisplay }} 已用
-            </n-tag>
+            <n-tag size="tiny" :type="usageTagType" :bordered="false" class="font-mono"> {{ percentDisplay }} 已用 </n-tag>
           </div>
 
           <!-- 水位进度条 -->
           <div class="space-y-1">
-            <n-progress
-              type="line"
-              :percentage="progressPercentage"
-              :color="statusColor"
-              :height="8"
-              :show-indicator="false"
-            />
+            <n-progress type="line" :percentage="progressPercentage" :color="statusColor" :height="8" :show-indicator="false" />
             <div class="flex items-center justify-between text-[10px] text-secondary font-mono">
               <span>0</span>
               <span>安全上限: {{ formatTokens(totalTokens) }}</span>
@@ -98,10 +105,10 @@
               <span class="text-secondary shrink-0">计费累计 in/out/Σ</span>
               <span class="text-primary font-medium whitespace-nowrap">{{ billedDisplay }}</span>
             </div>
-             <div class="flex items-center justify-between" :title="hitRateTitle">
-               <span class="text-secondary">命中率 cache/input</span>
-               <span class="font-medium" :class="hitRateIsPredicted ? 'text-secondary' : 'text-primary'">{{ hitRateDisplay }}</span>
-             </div>
+            <div class="flex items-center justify-between" :title="hitRateTitle">
+              <span class="text-secondary">命中率 cache/input</span>
+              <span class="font-medium" :class="hitRateIsPredicted ? 'text-secondary' : 'text-primary'">{{ hitRateDisplay }}</span>
+            </div>
             <div class="flex items-center justify-between">
               <span class="text-secondary">最大输出预留 (Reserve)</span>
               <span class="text-secondary">{{ maxOutputTokens.toLocaleString() }} tokens</span>
@@ -122,14 +129,7 @@
               <span class="text-secondary">当前会话 Hash:</span>
               <div class="flex items-center gap-1">
                 <span class="font-mono text-primary font-medium">{{ activeSession?.sessionHash || '-' }}</span>
-                <n-button
-                  v-if="activeSession?.sessionHash"
-                  quaternary
-                  circle
-                  size="tiny"
-                  title="复制 Hash"
-                  @click="copySessionHash"
-                >
+                <n-button v-if="activeSession?.sessionHash" quaternary circle size="tiny" title="复制 Hash" @click="copySessionHash">
                   <template #icon>
                     <Copy class="w-3 h-3" />
                   </template>
@@ -154,12 +154,7 @@
 
             <div class="flex items-center justify-between">
               <span class="text-secondary">推理协议标识:</span>
-              <n-tag
-                size="tiny"
-                :type="activeModel?.protocol === 'resp' ? 'warning' : 'info'"
-                :bordered="false"
-                class="font-mono"
-              >
+              <n-tag size="tiny" :type="activeModel?.protocol === 'resp' ? 'warning' : 'info'" :bordered="false" class="font-mono">
                 {{ activeModel?.protocol === 'resp' ? 'RESP (Responses API)' : 'CHAT (Chat Completions)' }}
               </n-tag>
             </div>
@@ -168,19 +163,8 @@
       </n-popover>
 
       <!-- need22-P2 F4：非当前会话问询 badge（红点+计数，点击跳回归属会话） -->
-      <n-badge
-        v-if="askBadgeCount > 0"
-        :value="askBadgeCount"
-        :max="9"
-        data-testid="ask-pending-badge"
-        @click="onJumpToAsk"
-      >
-        <n-button
-          quaternary
-          size="small"
-          class="!px-2"
-          title="有会话在等待你的回答，点击跳回"
-        >
+      <n-badge v-if="askBadgeCount > 0" :value="askBadgeCount" :max="9" data-testid="ask-pending-badge" @click="onJumpToAsk">
+        <n-button quaternary size="small" class="!px-2" title="有会话在等待你的回答，点击跳回">
           <template #icon>
             <span class="relative inline-flex">
               <MessageCircleQuestion class="w-4 h-4 text-rose-500" />
@@ -191,13 +175,7 @@
       </n-badge>
 
       <!-- 3. 主题切换 -->
-      <n-button
-        quaternary
-        size="small"
-        class="!px-2"
-        title="切换暗黑/浅色主题"
-        @click="appearanceStore.toggleTheme()"
-      >
+      <n-button quaternary size="small" class="!px-2" title="切换暗黑/浅色主题" @click="appearanceStore.toggleTheme()">
         <template #icon>
           <Sun v-if="appearanceStore.themeMode === 'dark'" class="w-4 h-4" />
           <Moon v-else class="w-4 h-4" />
@@ -205,12 +183,7 @@
       </n-button>
 
       <!-- 4. 设置中心入口 -->
-      <n-button
-        type="primary"
-        size="small"
-        data-testid="open-settings-btn"
-        @click="emit('openSettings')"
-      >
+      <n-button type="primary" size="small" data-testid="open-settings-btn" @click="emit('openSettings')">
         <template #icon>
           <Settings class="w-3.5 h-3.5" />
         </template>
@@ -224,46 +197,55 @@
 import { computed, h, type VNode } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useMessage, NTag } from 'naive-ui';
-import {
-  Layers,
-  Copy,
-  Settings,
-  Sun,
-  Moon,
-  MessageCircleQuestion,
-} from 'lucide-vue-next';
- import { useAppearanceStore } from '@/stores/appearanceStore';
- import { useConfigStore } from '@/stores/configStore';
- import { useWorkspaceStore } from '@/stores/workspaceStore';
- import { useAgentStore } from '@/stores/agentStore';
- import { useAskUserStore } from '@/stores/askUserStore';
- import { useSubSessionStore } from '@/stores/subSessionStore';
- import type { ModelConfig } from '@/bridge/hostBridge';
+import { Layers, Copy, Settings, Sun, Moon, MessageCircleQuestion } from 'lucide-vue-next';
+import { useAppearanceStore } from '@/stores/appearanceStore';
+import { useConfigStore } from '@/stores/configStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
+import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
+import { useAskUserStore } from '@/stores/askUserStore';
+import { useSubSessionStore } from '@/stores/subSessionStore';
+import type { ModelConfig } from '@shared/bridge/hostBridge';
 
 const emit = defineEmits<{
   (e: 'openSettings'): void;
 }>();
- const message = useMessage();
- const appearanceStore = useAppearanceStore();
- const configStore = useConfigStore();
- const workspaceStore = useWorkspaceStore();
- const agentStore = useAgentStore();
- const subStore = useSubSessionStore();
- const { activeWorkspace, activeSession, budgetStatus, budgetError } = storeToRefs(workspaceStore);
- // need22-P3 G6：budget/refreshAll 失败顶栏⚠角标（统一 {code,message}，点击重试）
- const budgetWarnText = computed(() => {
-   const b = budgetError.value;
-   if (b) return `预算刷新失败 [${b.code}]：${b.message}（点击重试）`;
-   return '';
- });
- function onBudgetWarnClick(): void {
-   try { void workspaceStore.refreshBudget(); } catch (e) { console.warn('[topbar] budget retry failed:', e); }
- }
- const { providersDoc, activeProvider, activeModel } = storeToRefs(configStore);
- const subOptions = computed(() => subStore.subs.map((s) => ({ label: `${(s.subLabel || s.title || '').slice(0, 12)}(${String(s.id).slice(-6)})`, key: s.id })));
- function onBackMain() { subStore.exitSub(); }
- function onCrumbMain() { if (subStore.mode === 'sub') subStore.exitSub(); }
- function onSelectSub(key: string) { const wsId = workspaceStore.activeWorkspaceId || ''; const parent = workspaceStore.activeSessionId || ''; if (wsId && parent && key) void subStore.enterSub(wsId, parent, key); }
+const message = useMessage();
+const appearanceStore = useAppearanceStore();
+const configStore = useConfigStore();
+const workspaceStore = useWorkspaceStore();
+const agentTurn = useAgentTurn();
+const agentTelemetry = useAgentTelemetry();
+const subStore = useSubSessionStore();
+const { activeWorkspace, activeSession, budgetStatus, budgetError } = storeToRefs(workspaceStore);
+// need22-P3 G6：budget/refreshAll 失败顶栏⚠角标（统一 {code,message}，点击重试）
+const budgetWarnText = computed(() => {
+  const b = budgetError.value;
+  if (b) return `预算刷新失败 [${b.code}]：${b.message}（点击重试）`;
+  return '';
+});
+function onBudgetWarnClick(): void {
+  try {
+    void workspaceStore.refreshBudget();
+  } catch (e) {
+    console.warn('[topbar] budget retry failed:', e);
+  }
+}
+const { providersDoc, activeProvider, activeModel } = storeToRefs(configStore);
+const subOptions = computed(() =>
+  subStore.subs.map((s) => ({ label: `${(s.subLabel || s.title || '').slice(0, 12)}(${String(s.id).slice(-6)})`, key: s.id }))
+);
+function onBackMain() {
+  subStore.exitSub();
+}
+function onCrumbMain() {
+  if (subStore.mode === 'sub') subStore.exitSub();
+}
+function onSelectSub(key: string) {
+  const wsId = workspaceStore.activeWorkspaceId || '';
+  const parent = workspaceStore.activeSessionId || '';
+  if (wsId && parent && key) void subStore.enterSub(wsId, parent, key);
+}
 
 function formatTokens(count: number): string {
   if (count >= 1000) {
@@ -283,7 +265,7 @@ const isUnknown = computed(() => {
   if (usedTokens.value === 0 && occupancyState.value === 'known') return false; // 空会话
   return occupancyState.value === 'unknown' || lastPromptTokens.value === null;
 });
-const liveEst = computed(() => agentStore.telemetry.liveEst || 0);
+const liveEst = computed(() => agentTelemetry.telemetry.liveEst || 0);
 const usedDisplay = computed(() => {
   if (isUnknown.value) return '?';
   const base = formatTokens(usedTokens.value);
@@ -313,32 +295,33 @@ const billedDisplay = computed(() => {
   if (p === undefined || p === null || c === undefined || c === null) return '-';
   return `${formatCompact(p)} / ${formatCompact(c)} / ${formatCompact(p + c)}`;
 });
- const hitRateIsPredicted = computed(() => {
-   const r = budgetStatus.value?.cacheHitRate;
-   if (r !== undefined && r !== null) return false;
-   const p = budgetStatus.value?.predictedCacheHitRate;
-   return p !== undefined && p !== null;
- });
- const hitRateDisplay = computed(() => {
-   const r = budgetStatus.value?.cacheHitRate;
-   if (r !== undefined && r !== null) return `${Math.round(r * 100)}%`;
-   // need05-06：无实测时用本地预测灰色 ~ 显示，绝不画 0% 误导
-   const p = budgetStatus.value?.predictedCacheHitRate;
-   if (p === undefined || p === null) return '-';
-   return `~${Math.round(p * 100)}%·预估`;
- });
- const hitRateTitle = computed(() => {
-   const div = budgetStatus.value?.prefixDivergenceBlock || '-';
-   const pc = budgetStatus.value?.predictedCachedTokens;
-   if (hitRateIsPredicted.value) return `本地预估（非账单口径）：断裂块 ${div}，预期命中 ~${pc ?? '?'} tokens；收到后端 usage 后自动校准为实测值`;
-   return `实测命中率（后端 usage 口径）：断裂块 ${div}`;
- });
+const hitRateIsPredicted = computed(() => {
+  const r = budgetStatus.value?.cacheHitRate;
+  if (r !== undefined && r !== null) return false;
+  const p = budgetStatus.value?.predictedCacheHitRate;
+  return p !== undefined && p !== null;
+});
+const hitRateDisplay = computed(() => {
+  const r = budgetStatus.value?.cacheHitRate;
+  if (r !== undefined && r !== null) return `${Math.round(r * 100)}%`;
+  // need05-06：无实测时用本地预测灰色 ~ 显示，绝不画 0% 误导
+  const p = budgetStatus.value?.predictedCacheHitRate;
+  if (p === undefined || p === null) return '-';
+  return `~${Math.round(p * 100)}%·预估`;
+});
+const hitRateTitle = computed(() => {
+  const div = budgetStatus.value?.prefixDivergenceBlock || '-';
+  const pc = budgetStatus.value?.predictedCachedTokens;
+  if (hitRateIsPredicted.value)
+    return `本地预估（非账单口径）：断裂块 ${div}，预期命中 ~${pc ?? '?'} tokens；收到后端 usage 后自动校准为实测值`;
+  return `实测命中率（后端 usage 口径）：断裂块 ${div}`;
+});
 // need05-03：压缩忙态（压缩中不可取消，按钮置灰）
 const isCompacting = computed(() => {
   const sid = activeSession.value?.id || '';
   if (!sid) return false;
   try {
-    return agentStore.isCompacting(sid);
+    return agentTurn.isCompacting(sid);
   } catch {
     return false;
   }
@@ -349,7 +332,11 @@ async function handleCompact(): Promise<void> {
   const ok = await workspaceStore.compactSession(sid);
   if (!ok) message.warning('压缩启动失败，请稍后重试');
 }
-const availableTokens = computed(() => budgetStatus.value?.availableInputTokens || Math.max(0, totalTokens.value - maxOutputTokens.value - safetyBuffer.value - usedTokens.value));
+const availableTokens = computed(
+  () =>
+    budgetStatus.value?.availableInputTokens ||
+    Math.max(0, totalTokens.value - maxOutputTokens.value - safetyBuffer.value - usedTokens.value)
+);
 
 const usagePercentage = computed(() => {
   if (budgetStatus.value?.usagePercentage !== undefined) {
@@ -446,7 +433,9 @@ const askBadgeCount = computed(() => {
   try {
     const cur = workspaceStore.activeSessionId || '';
     return askUserStore.foreignPendings(cur).length;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 });
 async function onJumpToAsk(): Promise<void> {
   try {
@@ -456,7 +445,9 @@ async function onJumpToAsk(): Promise<void> {
     if (!target) return;
     if (target !== cur) await workspaceStore.selectSession(target);
     askUserStore.openModal(target);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 async function copySessionHash(): Promise<void> {

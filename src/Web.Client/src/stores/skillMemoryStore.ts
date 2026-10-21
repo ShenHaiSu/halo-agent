@@ -8,7 +8,7 @@ import {
   type SkillMemoryScopeFilter,
   type SkillMemoryListItem,
   type SkillMemoryDetail,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 export const useSkillMemoryStore = defineStore('skillMemory', () => {
@@ -32,11 +32,7 @@ export const useSkillMemoryStore = defineStore('skillMemory', () => {
       .filter((i) => (scopeFilter.value === 'all' ? true : i.scope === scopeFilter.value))
       .filter((i) => {
         if (!q) return true;
-        return (
-          i.name.toLowerCase().includes(q) ||
-          (i.title || '').toLowerCase().includes(q) ||
-          (i.summary || '').toLowerCase().includes(q)
-        );
+        return i.name.toLowerCase().includes(q) || (i.title || '').toLowerCase().includes(q) || (i.summary || '').toLowerCase().includes(q);
       });
   });
 
@@ -167,7 +163,11 @@ export const useSkillMemoryStore = defineStore('skillMemory', () => {
   function detachBus(): void {
     busAttached = false;
     for (const off of busOff) {
-      try { off(); } catch { /* ignore */ }
+      try {
+        off();
+      } catch {
+        /* ignore */
+      }
     }
     busOff = [];
   }

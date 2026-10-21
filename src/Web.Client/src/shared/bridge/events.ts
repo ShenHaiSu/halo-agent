@@ -1,5 +1,5 @@
 /** need22-P5 J4：宿主事件总线（自 hostBridge.ts 迁入：dispatchIncomingEvents + haloEventBus；connect 层唯一入口）。 */
-import type { HostEventEnvelope } from './types';
+import type { HostEventEnvelope } from './protocol/types';
 
 type EventListener = (payload: any, timestamp: number) => void;
 const listeners = new Map<string, Set<EventListener>>();

@@ -1,6 +1,6 @@
 /** need22-P3 G5：Mock 桥接（四模块之 mock，仅开发用，显式标记，禁止静默）。
  * Mock 生效时 UI 必须展示红色横幅 MOCK_BANNER_TEXT + 重试按钮（见 App.vue 横幅）。 */
-import { MOCK_BANNER_TEXT } from './types';
+import { MOCK_BANNER_TEXT } from '@shared/bridge/protocol/types';
 
 export { MOCK_BANNER_TEXT };
 
@@ -33,7 +33,7 @@ export function shouldShowMockBanner(): boolean {
   return isMockMode();
 }
 
-import type { HostBridgeApi } from './types';
+import type { HostBridgeApi } from '@shared/bridge/protocol/types';
 import { createMockState } from './mockState';
 import { mockSystemMethods } from './mockSystem';
 import { mockWorkspaceMethods } from './mockWorkspace';

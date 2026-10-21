@@ -5,10 +5,7 @@
     :data-tool="card.functionName"
   >
     <!-- Header -->
-    <div
-      class="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer select-none hover:bg-elevated/60 transition-colors"
-      @click="toggle"
-    >
+    <div class="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer select-none hover:bg-elevated/60 transition-colors" @click="toggle">
       <component :is="iconComponent" class="w-3.5 h-3.5 shrink-0 text-accent" />
       <span class="font-mono font-medium text-primary truncate">{{ card.functionName }}</span>
 
@@ -40,28 +37,29 @@
       <span v-if="card.durationMs !== null && card.durationMs !== undefined" class="font-mono text-[11px] text-secondary shrink-0">
         {{ card.durationMs }}ms
       </span>
-      <span v-if="isExec && card.exitCode !== null && card.exitCode !== undefined" class="font-mono text-[11px] shrink-0" :class="card.exitCode === 0 ? 'text-[var(--stat-add-text)]' : 'text-[var(--stat-del-text)]'">
+      <span
+        v-if="isExec && card.exitCode !== null && card.exitCode !== undefined"
+        class="font-mono text-[11px] shrink-0"
+        :class="card.exitCode === 0 ? 'text-[var(--stat-add-text)]' : 'text-[var(--stat-del-text)]'"
+      >
         Exit: {{ card.exitCode }}
       </span>
-       <ChevronDown
-         class="w-3.5 h-3.5 text-secondary shrink-0 transition-transform"
-         :class="expanded ? 'rotate-180' : ''"
-       />
-     </div>
- 
-     <!-- need12 R1：流式写入字节计数行（write_file/edit_file 专属） -->
-     <div
-       v-if="showBytesRow"
-       class="flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] text-secondary border-t border-subtle bytes-counter"
-       data-testid="tool-bytes-counter"
-       :title="bytesTooltip"
-     >
-       <span class="bytes-dot" :class="bytesDotClass"></span>
-       <span class="truncate" style="font-variant-numeric: tabular-nums;">{{ bytesText }}</span>
-       <span v-if="isReceiving" class="shimmer shrink-0">流式接收中…</span>
-       <span v-else-if="card.status === 'running'" class="shrink-0">正在写入磁盘…</span>
-       <span v-else-if="card.status === 'done'" class="shrink-0 text-[var(--stat-add-text)]">✓</span>
-     </div>
+      <ChevronDown class="w-3.5 h-3.5 text-secondary shrink-0 transition-transform" :class="expanded ? 'rotate-180' : ''" />
+    </div>
+
+    <!-- need12 R1：流式写入字节计数行（write_file/edit_file 专属） -->
+    <div
+      v-if="showBytesRow"
+      class="flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] text-secondary border-t border-subtle bytes-counter"
+      data-testid="tool-bytes-counter"
+      :title="bytesTooltip"
+    >
+      <span class="bytes-dot" :class="bytesDotClass"></span>
+      <span class="truncate" style="font-variant-numeric: tabular-nums">{{ bytesText }}</span>
+      <span v-if="isReceiving" class="shimmer shrink-0">流式接收中…</span>
+      <span v-else-if="card.status === 'running'" class="shrink-0">正在写入磁盘…</span>
+      <span v-else-if="card.status === 'done'" class="shrink-0 text-[var(--stat-add-text)]">✓</span>
+    </div>
     <!-- Body -->
     <n-collapse-transition :show="expanded">
       <div class="border-t border-subtle">
@@ -100,7 +98,9 @@
           <div
             class="max-h-72 overflow-y-auto bg-[var(--tool-output-bg)] p-3 font-mono text-xs leading-relaxed text-[var(--tool-output-text)] select-text rounded whitespace-pre-wrap break-all border border-subtle"
             data-testid="terminal-output"
-          ><span v-if="!displayOutput" class="text-secondary">等待输出...</span><span v-else>{{ displayOutput }}</span></div>
+          >
+            <span v-if="!displayOutput" class="text-secondary">等待输出...</span><span v-else>{{ displayOutput }}</span>
+          </div>
           <div class="flex items-center justify-end gap-2">
             <n-button v-if="card.status === 'running'" size="tiny" type="error" ghost @click="handleKill">
               <template #icon><Square class="w-3 h-3" /></template>
@@ -152,44 +152,39 @@
             <div
               v-if="displayOutput"
               class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
-            >{{ viewImageTruncated }}</div>
-          </div>
-        </div>
-         <div v-else class="p-2.5 space-y-1.5">
-           <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
-           <div
-             v-if="displayOutput"
-             class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
-           >{{ truncatedOutput }}</div>
-            <div v-if="isSpawn" class="pt-1">
-              <n-button size="small" type="primary" ghost data-testid="toolcard-open-sub" :disabled="!subId" @click="openSub">{{ subId ? '查看子会话 →' : '执行中…' }}</n-button>
+            >
+              {{ viewImageTruncated }}
             </div>
           </div>
-       </div>
-     </n-collapse-transition>
+        </div>
+        <div v-else class="p-2.5 space-y-1.5">
+          <div class="font-mono app-text-small text-secondary break-all whitespace-pre-wrap">{{ compactSummary }}</div>
+          <div
+            v-if="displayOutput"
+            class="max-h-64 overflow-y-auto bg-[var(--tool-output-bg)] p-2.5 rounded font-mono app-text-small leading-relaxed text-[var(--tool-output-text)] whitespace-pre-wrap break-all select-text border border-subtle"
+          >
+            {{ truncatedOutput }}
+          </div>
+          <div v-if="isSpawn" class="pt-1">
+            <n-button size="small" type="primary" ghost data-testid="toolcard-open-sub" :disabled="!subId" @click="openSub">{{
+              subId ? '查看子会话 →' : '执行中…'
+            }}</n-button>
+          </div>
+        </div>
+      </div>
+    </n-collapse-transition>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useMessage } from 'naive-ui';
-import {
-  ChevronDown,
-  Copy,
-  FileDiff,
-  FilePlus2,
-  FileText,
-  FolderSearch,
-  Search,
-  Square,
-  Terminal,
-  Wrench,
-} from 'lucide-vue-next';
- import type { AgentToolCard } from '@/stores/agentStore';
- import { getHostBridge, type ChatImageRef } from '@/bridge/hostBridge';
- import { useWorkspaceStore } from '@/stores/workspaceStore';
- import { useSubSessionStore } from '@/stores/subSessionStore';
- import { formatSmartBytes, formatSmartBytesShort } from '@/utils/formatSmartBytes';
+import { ChevronDown, Copy, FileDiff, FilePlus2, FileText, FolderSearch, Search, Square, Terminal, Wrench } from 'lucide-vue-next';
+import type { AgentToolCard } from '@features/agent/stores/model';
+import { getHostBridge, type ChatImageRef } from '@shared/bridge/hostBridge';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useSubSessionStore } from '@/stores/subSessionStore';
+import { formatSmartBytes, formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
 
 const props = defineProps<{
   card: AgentToolCard;
@@ -199,7 +194,9 @@ const props = defineProps<{
 const message = useMessage();
 const workspaceStore = useWorkspaceStore();
 
-const defaultExpanded = props.defaultCollapsed ? false : (props.card.functionName === 'edit_file' || props.card.functionName === 'write_file' || props.card.functionName === 'exec_command');
+const defaultExpanded = props.defaultCollapsed
+  ? false
+  : props.card.functionName === 'edit_file' || props.card.functionName === 'write_file' || props.card.functionName === 'exec_command';
 const expanded = ref(defaultExpanded);
 const showAllDiff = ref(false);
 
@@ -207,68 +204,80 @@ function toggle(): void {
   expanded.value = !expanded.value;
 }
 
- const isFileEdit = computed(() => props.card.functionName === 'edit_file' || props.card.functionName === 'write_file');
- const isExec = computed(() => props.card.functionName === 'exec_command');
- const isViewImage = computed(() => props.card.functionName === 'view_image');
- 
- // ---- need12 R1：字节计数行 ----
- const receivedBytes = computed(() => Math.max(0, Math.floor(props.card.receivedBytes || 0)));
- const showBytesRow = computed(() => isFileEdit.value);
- const isReceiving = computed(() => props.card.status === 'running' && (props.card.fileBytes === null || props.card.fileBytes === undefined));
- const bytesText = computed(() => {
-   if (props.card.status === 'done' && typeof props.card.fileBytes === 'number' && Number.isFinite(props.card.fileBytes)) {
-     return `参数已接收 ${formatSmartBytes(receivedBytes.value)} · 落盘 ${formatSmartBytes(props.card.fileBytes)}`;
-   }
-   const hot = receivedBytes.value >= 50 * 1024 ? ' 🔥' : '';
-   return `参数已接收 ${formatSmartBytes(receivedBytes.value)}${hot}`;
- });
- const bytesTooltip = computed(() => `参数线字节（含 JSON 转义）≈ ${receivedBytes.value.toLocaleString('en-US')}；文件实际字节以完成态为准`);
- const bytesDotClass = computed(() => {
-   if (props.card.status === 'done') return 'bytes-dot-done';
-   if (props.card.status === 'error') return 'bytes-dot-error';
-   return 'bytes-dot-run';
- });
+const isFileEdit = computed(() => props.card.functionName === 'edit_file' || props.card.functionName === 'write_file');
+const isExec = computed(() => props.card.functionName === 'exec_command');
+const isViewImage = computed(() => props.card.functionName === 'view_image');
+
+// ---- need12 R1：字节计数行 ----
+const receivedBytes = computed(() => Math.max(0, Math.floor(props.card.receivedBytes || 0)));
+const showBytesRow = computed(() => isFileEdit.value);
+const isReceiving = computed(
+  () => props.card.status === 'running' && (props.card.fileBytes === null || props.card.fileBytes === undefined)
+);
+const bytesText = computed(() => {
+  if (props.card.status === 'done' && typeof props.card.fileBytes === 'number' && Number.isFinite(props.card.fileBytes)) {
+    return `参数已接收 ${formatSmartBytes(receivedBytes.value)} · 落盘 ${formatSmartBytes(props.card.fileBytes)}`;
+  }
+  const hot = receivedBytes.value >= 50 * 1024 ? ' 🔥' : '';
+  return `参数已接收 ${formatSmartBytes(receivedBytes.value)}${hot}`;
+});
+const bytesTooltip = computed(() => `参数线字节（含 JSON 转义）≈ ${receivedBytes.value.toLocaleString('en-US')}；文件实际字节以完成态为准`);
+const bytesDotClass = computed(() => {
+  if (props.card.status === 'done') return 'bytes-dot-done';
+  if (props.card.status === 'error') return 'bytes-dot-error';
+  return 'bytes-dot-run';
+});
 
 const iconComponent = computed(() => {
   switch (props.card.functionName) {
-    case 'edit_file': return FileDiff;
-    case 'write_file': return FilePlus2;
-    case 'read_file': return FileText;
-    case 'list_dir': return FolderSearch;
-    case 'grep_search': return Search;
-    case 'exec_command': return Terminal;
-    default: return Wrench;
+    case 'edit_file':
+      return FileDiff;
+    case 'write_file':
+      return FilePlus2;
+    case 'read_file':
+      return FileText;
+    case 'list_dir':
+      return FolderSearch;
+    case 'grep_search':
+      return Search;
+    case 'exec_command':
+      return Terminal;
+    default:
+      return Wrench;
   }
 });
 
- // need22-P3 G2：argsJson 按 callId+hash memo 缓存（工具卡多时避免重复 JSON.parse）。
- const argsParseCache = new Map<string, Record<string, unknown>>();
- const ARGS_CACHE_MAX = 100;
- function hashStr(s: string): string {
-   let h = 0x811c9dc5;
-   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-   return (h >>> 0).toString(16);
- }
- function parseArgs(): Record<string, unknown> {
-   const raw = props.card.argsJson || '{}';
-   const key = `${props.card.callId}:${hashStr(raw)}:${raw.length}`;
-   const hit = argsParseCache.get(key);
-   if (hit) return hit;
-   let out: Record<string, unknown> = {};
-   try {
-     const parsed = JSON.parse(raw);
-     if (parsed && typeof parsed === 'object') out = parsed as Record<string, unknown>;
-   } catch (e) {
-     console.warn('[tool-card] args parse failed:', props.card.callId, e);
-   }
-   argsParseCache.set(key, out);
-   if (argsParseCache.size > ARGS_CACHE_MAX) {
-     const oldest = argsParseCache.keys().next();
-     if (!oldest.done) argsParseCache.delete(oldest.value);
-   }
-   return out;
- }
- const argsObj = computed(() => parseArgs());
+// need22-P3 G2：argsJson 按 callId+hash memo 缓存（工具卡多时避免重复 JSON.parse）。
+const argsParseCache = new Map<string, Record<string, unknown>>();
+const ARGS_CACHE_MAX = 100;
+function hashStr(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+function parseArgs(): Record<string, unknown> {
+  const raw = props.card.argsJson || '{}';
+  const key = `${props.card.callId}:${hashStr(raw)}:${raw.length}`;
+  const hit = argsParseCache.get(key);
+  if (hit) return hit;
+  let out: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') out = parsed as Record<string, unknown>;
+  } catch (e) {
+    console.warn('[tool-card] args parse failed:', props.card.callId, e);
+  }
+  argsParseCache.set(key, out);
+  if (argsParseCache.size > ARGS_CACHE_MAX) {
+    const oldest = argsParseCache.keys().next();
+    if (!oldest.done) argsParseCache.delete(oldest.value);
+  }
+  return out;
+}
+const argsObj = computed(() => parseArgs());
 
 const filePath = computed(() => {
   const v = argsObj.value['file_path'] ?? argsObj.value['path'] ?? '';
@@ -279,18 +288,29 @@ const summaryText = computed(() => {
   const a = argsObj.value;
   const s = (v: unknown): string => (typeof v === 'string' ? v : '');
   switch (props.card.functionName) {
-    case 'read_file': return filePath.value ? `已读取 ${filePath.value}` : '读取文件';
-    case 'write_file': return filePath.value ? `写入 ${filePath.value}` : '写入文件';
-    case 'edit_file': return filePath.value ? `修改 ${filePath.value}` : '修改文件';
-    case 'list_dir': return s(a['path'] || a['dir']) ? `浏览 ${s(a['path'] || a['dir'])}` : '浏览目录';
-    case 'grep_search': return s(a['pattern'] || a['query']) ? `检索 ${s(a['pattern'] || a['query'])}` : '检索';
-    case 'exec_command': return '';
-    case 'view_image': return filePath.value ? `查看 ${filePath.value}` : '查看图片';
-    default: return filePath.value;
+    case 'read_file':
+      return filePath.value ? `已读取 ${filePath.value}` : '读取文件';
+    case 'write_file':
+      return filePath.value ? `写入 ${filePath.value}` : '写入文件';
+    case 'edit_file':
+      return filePath.value ? `修改 ${filePath.value}` : '修改文件';
+    case 'list_dir':
+      return s(a['path'] || a['dir']) ? `浏览 ${s(a['path'] || a['dir'])}` : '浏览目录';
+    case 'grep_search':
+      return s(a['pattern'] || a['query']) ? `检索 ${s(a['pattern'] || a['query'])}` : '检索';
+    case 'exec_command':
+      return '';
+    case 'view_image':
+      return filePath.value ? `查看 ${filePath.value}` : '查看图片';
+    default:
+      return filePath.value;
   }
 });
 
-interface DiffLine { kind: 'add' | 'del' | 'ctx'; text: string; }
+interface DiffLine {
+  kind: 'add' | 'del' | 'ctx';
+  text: string;
+}
 
 const diffLines = computed<DiffLine[]>(() => {
   const a = argsObj.value;
@@ -338,10 +358,14 @@ const compactSummary = computed(() => {
   const a = argsObj.value;
   const s = (v: unknown): string => (typeof v === 'string' ? v : '');
   switch (props.card.functionName) {
-    case 'read_file': return `已读取文件 ${filePath.value || '(未知)'}（点击展开查看参数与输出）`;
-    case 'list_dir': return `已浏览目录 ${s(a['path'] || a['dir']) || '.'}（点击展开查看输出）`;
-    case 'grep_search': return `检索 "${s(a['pattern'] || a['query'])}"（点击展开查看匹配行）`;
-    default: return `参数：${props.card.argsJson || '{}'}（点击展开）`;
+    case 'read_file':
+      return `已读取文件 ${filePath.value || '(未知)'}（点击展开查看参数与输出）`;
+    case 'list_dir':
+      return `已浏览目录 ${s(a['path'] || a['dir']) || '.'}（点击展开查看输出）`;
+    case 'grep_search':
+      return `检索 "${s(a['pattern'] || a['query'])}"（点击展开查看匹配行）`;
+    default:
+      return `参数：${props.card.argsJson || '{}'}（点击展开）`;
   }
 });
 
@@ -433,40 +457,73 @@ async function handleKill(): Promise<void> {
   }
 }
 
- async function handleCopy(): Promise<void> {
-   try {
-     await navigator.clipboard.writeText(displayOutput.value);
-     message.success('已复制终端输出');
-   } catch {
-     message.info('复制失败，请手动选择文本');
-   }
- }
- const isSpawn = computed(() => props.card.functionName === 'spawn_subagent');
- const subId = computed(() => {
-   try {
-     const out = displayOutput.value || '';
-     const m = out.match(/"subSessionId"\s*:\s*"([^"]+)"/) || out.match(/subSessionId[:=]\s*([A-Za-z0-9_\-]+)/) || out.match(/(sess_[A-Za-z0-9_\-]+)/);
-     if (m && m[1]) return m[1];
-   } catch { /* ignore */ }
-   return '';
- });
-  async function openSub() {
-    if (!subId.value) return;
-    try {
-      const s = useSubSessionStore();
-      const wsId = workspaceStore.activeWorkspaceId || '';
-      const parent = workspaceStore.activeSessionId || '';
-      if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
-    } catch { /* ignore */ }
+async function handleCopy(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(displayOutput.value);
+    message.success('已复制终端输出');
+  } catch {
+    message.info('复制失败，请手动选择文本');
   }
-  </script>
- 
- <style scoped>
- .bytes-dot { width: 7px; height: 7px; border-radius: 9999px; flex-shrink: 0; }
- .bytes-dot-run { background: #3b82f6; animation: bytes-pulse 1.2s ease-in-out infinite; }
- .bytes-dot-done { background: #10b981; }
- .bytes-dot-error { background: #ef4444; }
- @keyframes bytes-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
- .shimmer { animation: bytes-pulse 1.2s ease-in-out infinite; }
- .bytes-counter { font-variant-numeric: tabular-nums; }
- </style>
+}
+const isSpawn = computed(() => props.card.functionName === 'spawn_subagent');
+const subId = computed(() => {
+  try {
+    const out = displayOutput.value || '';
+    const m =
+      out.match(/"subSessionId"\s*:\s*"([^"]+)"/) ||
+      out.match(/subSessionId[:=]\s*([A-Za-z0-9_\-]+)/) ||
+      out.match(/(sess_[A-Za-z0-9_\-]+)/);
+    if (m && m[1]) return m[1];
+  } catch {
+    /* ignore */
+  }
+  return '';
+});
+async function openSub() {
+  if (!subId.value) return;
+  try {
+    const s = useSubSessionStore();
+    const wsId = workspaceStore.activeWorkspaceId || '';
+    const parent = workspaceStore.activeSessionId || '';
+    if (wsId && parent) await s.enterSub(wsId, parent, subId.value);
+  } catch {
+    /* ignore */
+  }
+}
+</script>
+
+<style scoped>
+.bytes-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.bytes-dot-run {
+  background: #3b82f6;
+  animation: bytes-pulse 1.2s ease-in-out infinite;
+}
+.bytes-dot-done {
+  background: #10b981;
+}
+.bytes-dot-error {
+  background: #ef4444;
+}
+@keyframes bytes-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+.shimmer {
+  animation: bytes-pulse 1.2s ease-in-out infinite;
+}
+.bytes-counter {
+  font-variant-numeric: tabular-nums;
+}
+</style>

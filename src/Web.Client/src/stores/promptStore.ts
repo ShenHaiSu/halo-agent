@@ -6,7 +6,7 @@ import {
   type PromptPreviewDto,
   type PromptDiagnosticsDto,
   type BridgeResponse,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 
 export const usePromptStore = defineStore('prompt', () => {
   const config = ref<PromptConfigDocument | null>(null);

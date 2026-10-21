@@ -1,7 +1,7 @@
 /** need22-P5 J4：Mock 共享状态（原 createBrowserMockBridge 闭包的跨文件形态）。
  * - 可变闭包变量经 getter/setter 暴露为 MockState，跨 mockSystem/mockWorkspace 读写语义与原闭包一致（含重赋值）。
  * - self 为组合后的桥自引用（替代原字面量内 this. 调用），由 mock.ts 装配后回填。 */
-import { haloEventBus } from './events';
+import { haloEventBus } from '@shared/bridge/events';
 import type {
   AgentConfigDocument,
   GlobalNetworkSettings,
@@ -13,7 +13,7 @@ import type {
   SessionMetadata,
   UnifiedChatMessage,
   WorkspaceInfo,
-} from './types';
+} from '@shared/bridge/protocol/types';
 
 export function fireMockAskUser(s: MockState, sessionId: string): void {
   const ticketId = `tick_${Math.random().toString(36).substring(2, 10)}`;

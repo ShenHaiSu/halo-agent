@@ -61,19 +61,21 @@ import { useMessage } from 'naive-ui';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSubSessionStore } from '@/stores/subSessionStore';
-import { useAgentStore } from '@/stores/agentStore';
+import { useAgentStream } from '@features/agent/stores/useAgentStream';
+import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { useUiStore } from '@/stores/uiStore';
-import { useTimelineNav } from '@/composables/useTimelineNav';
-import type { TimelineEntry } from '@/utils/turnGroup';
-import { buildTimelineItems } from '@/composables/useTimelineGroups';
-import { buildHistoryToc, type TocItem } from '@/utils/historyToc';
+import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
+import type { TimelineEntry } from '@features/session/utils/turnGroup';
+import { buildTimelineItems } from '@features/agent/composables/useTimelineGroups';
+import { buildHistoryToc, type TocItem } from '@features/session/utils/historyToc';
 import HistoryBubble from './HistoryBubble.vue';
 
 const PAGE = 200;
 
 const ws = useWorkspaceStore();
 const sub = useSubSessionStore();
-const agent = useAgentStore();
+const agentStream = useAgentStream();
+const agentTelemetry = useAgentTelemetry();
 const ui = useUiStore();
 const message = useMessage();
 const nav = useTimelineNav();
@@ -82,7 +84,7 @@ const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
-const streamingPulse = computed(() => !isSub.value && agent.hasActiveTurn);
+const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
 
 const roleOptions = [
   { label: '全部', value: 'all' },
@@ -109,8 +111,8 @@ const entries = computed<TimelineEntry[]>(() => {
     const simple = buildTimelineItems(sub.messages || []);
     return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
   }
-  // need22-P2 F1：主会话归并只在 agentStore 算一次，与 Timeline 共享同一结果（不再各自 buildTurnGroups/去重）
-  return agent.activeTimelineEntries;
+  // need21-F05：主会话归并只在 useAgentTelemetry 算一次，与 Timeline 共享同一结果（不再各自 buildTurnGroups/去重）
+  return agentTelemetry.activeTimelineEntries;
 });
 
 const tocItems = computed<TocItem[]>(() =>

@@ -20,8 +20,8 @@
  * 不计算跳转坐标，只 emit jump。
  */
 import { computed } from 'vue';
-import type { TocItem } from '@/utils/historyToc';
-import { bubbleLabel } from '@/utils/historyToc';
+import type { TocItem } from '@features/session/utils/historyToc';
+import { bubbleLabel } from '@features/session/utils/historyToc';
 
 const props = defineProps<{
   item: TocItem;
@@ -40,12 +40,35 @@ const tooltipText = computed(() => {
 </script>
 <style scoped>
 .toc-bubble {
-  display: inline-flex; align-items: baseline; gap: 6px;
-  border: 1px solid transparent; cursor: pointer; text-align: left;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.toc-bubble:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
-.toc-seq { font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); opacity: .7; flex: 0 0 auto; }
-.toc-label { overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
-.toc-badge { font-size: 11px; color: var(--text-secondary); flex: 0 0 auto; }
+.toc-bubble:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+.toc-seq {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.toc-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+.toc-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
 </style>

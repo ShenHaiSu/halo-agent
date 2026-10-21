@@ -1,5 +1,5 @@
 /** need19：历史目录纯函数（无 Vue / 无 DOM 依赖，可裸 node 断言） */
-import type { TimelineEntry } from '@/utils/turnGroup';
+import type { TimelineEntry } from '@features/session/utils/turnGroup';
 
 export type TocRole = 'user' | 'assistant' | 'system';
 export interface TocItem {

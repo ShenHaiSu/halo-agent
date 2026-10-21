@@ -1,5 +1,5 @@
 /** need22-P5 J4：Mock 业务域方法（workspace/session/history/goal/sub/skill/usage；原 createBrowserMockBridge 后半，行为不变）。 */
-import { haloEventBus } from './events';
+import { haloEventBus } from '@shared/bridge/events';
 import { buildMockPreview } from './mockState';
 import type { MockState } from './mockState';
 import type {
@@ -15,7 +15,7 @@ import type {
   UsageFilter,
   UsageRowDto,
   WorkspaceInfo,
-} from './types';
+} from '@shared/bridge/protocol/types';
 
 export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
   return {
@@ -447,6 +447,7 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
             memory: s.mockAgentConfig.subAllowMemoryWrite,
           },
           lastRejection: null,
+          recentRejections: [],
         },
       };
     },

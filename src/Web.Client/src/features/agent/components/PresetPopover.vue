@@ -35,7 +35,7 @@
 import { computed, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useAgentConfigStore } from '@/stores/agentConfigStore';
-import { presetLabel, dotColor, normalizePreset } from '@/utils/toolPreset';
+import { presetLabel, dotColor, normalizePreset } from '@shared/utils/toolPreset';
 
 const message = useMessage();
 const agentStore = useAgentConfigStore();

@@ -1,5 +1,5 @@
 /** need07：历史锚点纯函数 + 剪切板双通道（供 Timeline/store/单测复用）。 */
-import type { UnifiedChatMessage } from '@/bridge/hostBridge';
+import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 
 export type HistoryTargetKind = 'user' | 'assistant';
 

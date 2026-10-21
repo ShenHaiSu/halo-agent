@@ -86,7 +86,7 @@ import { computed, ref, watch } from 'vue';
 import { useDialog, useMessage } from 'naive-ui';
 import { useGoalStore } from '@/stores/goalStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { copyTextToClipboard } from '@/utils/historyAnchor';
+import { copyTextToClipboard } from '@features/session/utils/historyAnchor';
 
 const props = defineProps<{
   mode: 'float' | 'drawer';

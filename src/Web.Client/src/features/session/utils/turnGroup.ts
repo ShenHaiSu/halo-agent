@@ -1,7 +1,10 @@
 /** need04-04：轮次聚合纯函数（assistant + 后续 tool* 归为一组，不改落盘结构）。 */
-import type { UnifiedChatMessage, ChatImageRef } from '@/bridge/hostBridge';
+import type { UnifiedChatMessage, ChatImageRef } from '@shared/bridge/hostBridge';
 
-export interface TurnToolRef { id: string; name: string; }
+export interface TurnToolRef {
+  id: string;
+  name: string;
+}
 export interface TurnGroup {
   key: string;
   assistantId: string;
@@ -14,12 +17,16 @@ export interface TurnGroup {
 }
 
 function toolRefsOf(msg: UnifiedChatMessage): TurnToolRef[] {
-  const list = (msg as unknown as { toolCalls?: Array<{ id?: string; function?: { name?: string }; functionName?: string; name?: string }> }).toolCalls;
+  const list = (
+    msg as unknown as { toolCalls?: Array<{ id?: string; function?: { name?: string }; functionName?: string; name?: string }> }
+  ).toolCalls;
   if (!Array.isArray(list)) return [];
-  return list.map((tc) => ({
-    id: String((tc as { id?: string }).id || ''),
-    name: String(tc.function?.name || tc.functionName || tc.name || 'tool'),
-  })).filter((t) => t.id);
+  return list
+    .map((tc) => ({
+      id: String((tc as { id?: string }).id || ''),
+      name: String(tc.function?.name || tc.functionName || tc.name || 'tool'),
+    }))
+    .filter((t) => t.id);
 }
 
 /** need09-05：消息图片取用（缺字段/null/空 = 纯文本；图片不拆轮，只跟随所属消息） */
@@ -66,7 +73,10 @@ export function buildTimelineEntries(messages: UnifiedChatMessage[], groups: Tur
     else if (role !== 'assistant' && role !== 'tool') items.push({ key: `s-${msg.id}`, kind: 'system', msg });
     else if (role === 'assistant') {
       const g = groupsByAssistant.get(String(msg.id));
-      if (g && !emitted.has(g.key)) { emitted.add(g.key); items.push({ key: g.key, kind: 'turn', group: g }); }
+      if (g && !emitted.has(g.key)) {
+        emitted.add(g.key);
+        items.push({ key: g.key, kind: 'turn', group: g });
+      }
     }
   }
   for (const g of groups) {
@@ -78,7 +88,10 @@ export function buildTimelineEntries(messages: UnifiedChatMessage[], groups: Tur
 export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
   const groups: TurnGroup[] = [];
   let cur: TurnGroup | null = null;
-  const flush = () => { if (cur) groups.push(cur); cur = null; };
+  const flush = () => {
+    if (cur) groups.push(cur);
+    cur = null;
+  };
   for (const msg of messages) {
     const role = String((msg as UnifiedChatMessage).role || '').toLowerCase();
     if (role === 'assistant') {
@@ -90,9 +103,14 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
         content: (msg.content as string) || null,
         toolCalls: toolRefsOf(msg),
         toolMessages: [],
-        telemetry: (msg.inputTokens != null || msg.outputTokens != null)
-          ? { inputTokens: (msg.inputTokens as number) ?? null, cachedTokens: (msg.cachedTokens as number) ?? null, outputTokens: (msg.outputTokens as number) ?? null }
-          : null,
+        telemetry:
+          msg.inputTokens != null || msg.outputTokens != null
+            ? {
+                inputTokens: (msg.inputTokens as number) ?? null,
+                cachedTokens: (msg.cachedTokens as number) ?? null,
+                outputTokens: (msg.outputTokens as number) ?? null,
+              }
+            : null,
         createdAtUtc: String((msg as unknown as { createdAtUtc?: string }).createdAtUtc || ''),
       };
     } else if (role === 'tool') {
@@ -106,8 +124,13 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
         flush();
         // 孤立 tool：自成一组（无 assistant 头，仅工具舱）
         cur = {
-          key: `tool-${String(msg.id)}`, assistantId: '', reasoning: null, content: null,
-          toolCalls: [], toolMessages: [msg], telemetry: null,
+          key: `tool-${String(msg.id)}`,
+          assistantId: '',
+          reasoning: null,
+          content: null,
+          toolCalls: [],
+          toolMessages: [msg],
+          telemetry: null,
           createdAtUtc: String((msg as unknown as { createdAtUtc?: string }).createdAtUtc || ''),
         };
         flush();
@@ -122,18 +145,28 @@ export function buildTurnGroups(messages: UnifiedChatMessage[]): TurnGroup[] {
 
 /** need22-P3 G1：增量归并——仅末 turn 重算，其余复用引用（依赖行表 rowId=msg.id 稳定）。
  * 历史删改（消息减少/末 assistant 落在旧前缀内且后缀非纯 tool）时全量回退，保证正确性。 */
-export function buildTurnGroupsIncremental(prevGroups: TurnGroup[], prevMsgCount: number, messages: UnifiedChatMessage[]): { groups: TurnGroup[]; msgCount: number } {
+export function buildTurnGroupsIncremental(
+  prevGroups: TurnGroup[],
+  prevMsgCount: number,
+  messages: UnifiedChatMessage[]
+): { groups: TurnGroup[]; msgCount: number } {
   const full = (): { groups: TurnGroup[]; msgCount: number } => ({ groups: buildTurnGroups(messages), msgCount: messages.length });
   if (!prevGroups.length || prevMsgCount <= 0 || messages.length < prevMsgCount) return full();
   let lastAsstIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() === 'assistant') { lastAsstIdx = i; break; }
+    if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() === 'assistant') {
+      lastAsstIdx = i;
+      break;
+    }
   }
   if (lastAsstIdx < 0) return full();
   if (lastAsstIdx < prevMsgCount) {
     let onlyTools = true;
     for (let i = prevMsgCount; i < messages.length; i++) {
-      if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() !== 'tool') { onlyTools = false; break; }
+      if (String((messages[i] as UnifiedChatMessage).role || '').toLowerCase() !== 'tool') {
+        onlyTools = false;
+        break;
+      }
     }
     if (!onlyTools) return full();
   }
@@ -160,7 +193,14 @@ export function exportSessionMarkdown(messages: UnifiedChatMessage[]): string {
   const lines: string[] = [];
   for (const msg of messages) {
     const role = String(msg.role || '').toLowerCase();
-    const head = role === 'user' ? '## 用户' : role === 'assistant' ? '## 助手' : role === 'tool' ? `## 工具${msg.name ? `（${msg.name}）` : ''}` : '## 系统';
+    const head =
+      role === 'user'
+        ? '## 用户'
+        : role === 'assistant'
+          ? '## 助手'
+          : role === 'tool'
+            ? `## 工具${msg.name ? `（${msg.name}）` : ''}`
+            : '## 系统';
     lines.push(head, '');
     if (msg.content) lines.push(String(msg.content), '');
     for (const img of imagesOf(msg)) {

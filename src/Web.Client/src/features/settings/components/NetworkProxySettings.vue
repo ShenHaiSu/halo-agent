@@ -14,11 +14,7 @@
       </template>
 
       <div class="space-y-4">
-        <n-radio-group
-          v-model:value="draft.mode"
-          name="global-proxy-mode"
-          data-testid="global-proxy-mode-group"
-        >
+        <n-radio-group v-model:value="draft.mode" name="global-proxy-mode" data-testid="global-proxy-mode-group">
           <div class="grid grid-cols-1 xl:grid-cols-3 gap-3 min-w-0">
             <!-- 模式 A: 系统代理 -->
             <div
@@ -77,28 +73,16 @@
         </n-radio-group>
 
         <!-- 系统代理实时快照面板 (Mode === System) -->
-        <div
-          v-if="draft.mode === 'System'"
-          class="setting-inset p-3 space-y-2.5 min-w-0"
-        >
+        <div v-if="draft.mode === 'System'" class="setting-inset p-3 space-y-2.5 min-w-0">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <Radar class="w-4 h-4 text-blue-400" />
               <span class="text-xs font-medium">Windows 系统代理实时探测快照</span>
-              <n-tag
-                :type="sysProxy?.isEnabled ? 'success' : 'default'"
-                size="small"
-                :bordered="false"
-              >
+              <n-tag :type="sysProxy?.isEnabled ? 'success' : 'default'" size="small" :bordered="false">
                 {{ sysProxy?.isEnabled ? '已开启系统代理' : '系统未开启代理 (直连)' }}
               </n-tag>
             </div>
-            <n-button
-              size="tiny"
-              secondary
-              data-testid="refresh-sys-proxy-btn"
-              @click="handleRefreshSystemProxy"
-            >
+            <n-button size="tiny" secondary data-testid="refresh-sys-proxy-btn" @click="handleRefreshSystemProxy">
               <template #icon>
                 <RefreshCw class="w-3.5 h-3.5" />
               </template>
@@ -110,29 +94,36 @@
             <tbody>
               <tr>
                 <th scope="row">生效代理 URI</th>
-                <td><span class="font-mono text-xs text-emerald-400 snapshot-value">{{ sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)' }}</span></td>
+                <td>
+                  <span class="font-mono text-xs text-emerald-400 snapshot-value">{{
+                    sysProxy?.effectiveHttpProxyUri || 'DIRECT (无代理)'
+                  }}</span>
+                </td>
               </tr>
               <tr>
                 <th scope="row">注册表 ProxyServer</th>
-                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.proxyServerRaw || '(未配置)' }}</span></td>
+                <td>
+                  <span class="font-mono text-xs snapshot-value">{{ sysProxy?.proxyServerRaw || '(未配置)' }}</span>
+                </td>
               </tr>
               <tr>
                 <th scope="row">PAC 自动脚本地址</th>
-                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.autoConfigUrl || '(无)' }}</span></td>
+                <td>
+                  <span class="font-mono text-xs snapshot-value">{{ sysProxy?.autoConfigUrl || '(无)' }}</span>
+                </td>
               </tr>
               <tr>
                 <th scope="row">绕过列表 (ProxyOverride)</th>
-                <td><span class="font-mono text-xs snapshot-value">{{ sysProxy?.bypassOverride || '(默认)' }}</span></td>
+                <td>
+                  <span class="font-mono text-xs snapshot-value">{{ sysProxy?.bypassOverride || '(默认)' }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <!-- 手动代理详细表单 (Mode === Custom) -->
-        <div
-          v-if="draft.mode === 'Custom'"
-          class="setting-inset p-3.5 space-y-3 min-w-0"
-        >
+        <div v-if="draft.mode === 'Custom'" class="setting-inset p-3.5 space-y-3 min-w-0">
           <div class="grid grid-cols-12 gap-3 min-w-0">
             <div class="col-span-3 space-y-1 min-w-0">
               <label class="text-xs text-secondary">代理协议 (Scheme)</label>
@@ -235,13 +226,7 @@
         <div class="grid grid-cols-2 gap-3 pt-1">
           <div class="space-y-1">
             <label class="text-xs text-secondary">TCP 建连超时时间 (秒, 3 ~ 120)</label>
-            <n-input-number
-              v-model:value="draft.defaultConnectTimeoutSeconds"
-              :min="3"
-              :max="120"
-              size="small"
-              class="font-mono text-xs"
-            />
+            <n-input-number v-model:value="draft.defaultConnectTimeoutSeconds" :min="3" :max="120" size="small" class="font-mono text-xs" />
           </div>
           <div class="space-y-1">
             <label class="text-xs text-secondary">长流式请求超时时间 (秒, 5 ~ 3600)</label>
@@ -315,11 +300,7 @@
         <div
           v-if="probeResult"
           class="p-3 rounded-lg border text-xs space-y-1.5"
-          :class="
-            probeResult.success
-              ? 'border-emerald-500/40 bg-emerald-500/10'
-              : 'border-rose-500/40 bg-rose-500/10'
-          "
+          :class="probeResult.success ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-rose-500/40 bg-rose-500/10'"
           data-testid="proxy-probe-result-box"
         >
           <div class="flex items-center justify-between">
@@ -329,12 +310,7 @@
               <span>
                 {{ probeResult.success ? '代理与目标网关链路畅通' : '代理或目标连接异常' }}
               </span>
-              <n-tag
-                :type="probeResult.success ? 'success' : 'error'"
-                size="small"
-                :bordered="false"
-                class="font-mono"
-              >
+              <n-tag :type="probeResult.success ? 'success' : 'error'" size="small" :bordered="false" class="font-mono">
                 {{ probeResult.diagnosticCategory }}
               </n-tag>
             </div>
@@ -361,22 +337,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
-import {
-  Globe,
-  Sliders,
-  ZapOff,
-  Radar,
-  RefreshCw,
-  Lock,
-  RotateCcw,
-  Save,
-  Activity,
-  CheckCircle2,
-  AlertTriangle,
-} from 'lucide-vue-next';
+import { Globe, Sliders, ZapOff, Radar, RefreshCw, Lock, RotateCcw, Save, Activity, CheckCircle2, AlertTriangle } from 'lucide-vue-next';
 import { useConfigStore } from '@/stores/configStore';
 import { useSystemStore } from '@/stores/systemStore';
-import type { GlobalNetworkSettings } from '@/bridge/hostBridge';
+import type { GlobalNetworkSettings } from '@shared/bridge/hostBridge';
 
 const configStore = useConfigStore();
 const systemStore = useSystemStore();
@@ -431,11 +395,7 @@ onMounted(() => {
 async function handleRefreshSystemProxy() {
   const snap = await configStore.refreshSystemProxySnapshot(probeTargetUrl.value);
   if (snap) {
-    message.success(
-      snap.isEnabled
-        ? `检测到系统代理：${snap.effectiveHttpProxyUri}`
-        : '当前系统未启用代理 (直连)'
-    );
+    message.success(snap.isEnabled ? `检测到系统代理：${snap.effectiveHttpProxyUri}` : '当前系统未启用代理 (直连)');
   }
 }
 
@@ -470,21 +430,48 @@ async function handleTestConnectivity() {
 </script>
 <style scoped>
 /* 原生 table：固定布局，label 定宽，content 占剩余并约束在表内换行 */
-.sys-proxy-snapshot-table { table-layout: fixed; width: 100%; max-width: 100%; box-sizing: border-box; border-collapse: collapse; border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.sys-proxy-snapshot-table {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-collapse: collapse;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+}
 .sys-proxy-snapshot-table th {
-  width: 168px; min-width: 168px; max-width: 168px;
-  text-align: left; font-weight: 500; font-size: 12px;
-  padding: 6px 10px; border: 1px solid var(--border-subtle);
-  white-space: normal; overflow-wrap: break-word; word-break: normal;
-  line-height: 1.5; vertical-align: top;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.5;
+  vertical-align: top;
 }
 .sys-proxy-snapshot-table td {
-  padding: 6px 10px; border: 1px solid var(--border-subtle);
-  white-space: normal; overflow-wrap: anywhere; word-break: normal;
-  line-height: 1.6; vertical-align: top; min-width: 0; max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.6;
+  vertical-align: top;
+  min-width: 0;
+  max-width: 100%;
 }
 .sys-proxy-snapshot-table .snapshot-value {
-  display: block; max-width: 100%; min-width: 0;
-  white-space: normal; overflow-wrap: anywhere; word-break: normal;
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 </style>

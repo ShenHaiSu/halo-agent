@@ -66,15 +66,13 @@
           :value="draftOf(q.id).customInput"
           type="textarea"
           :autosize="{ minRows: 2, maxRows: 4 }"
-          :placeholder="q.options && q.options.length ? '或手动输入自定义答案…' : '请输入你的回答…' "
+          :placeholder="q.options && q.options.length ? '或手动输入自定义答案…' : '请输入你的回答…'"
           :data-testid="`ask-user-custom-${q.id}`"
           @update:value="(v: string) => setCustom(q.id, v)"
         />
 
         <div class="flex items-center justify-between">
-          <n-button text tiny :data-testid="`ask-user-skip-${q.id}`" @click="skipQuestion(q.id)">
-            跳过此题
-          </n-button>
+          <n-button text tiny :data-testid="`ask-user-skip-${q.id}`" @click="skipQuestion(q.id)"> 跳过此题 </n-button>
           <span v-if="isSkipped(q.id)" class="text-[11px] text-secondary">已跳过（提交时记 skipped）</span>
         </div>
       </div>
@@ -83,7 +81,9 @@
 
     <template #footer>
       <div class="flex items-center justify-between gap-2">
-        <span v-if="pending" class="text-[11px] text-secondary font-mono" :title="pending.sessionId">问询归属会话 …{{ pending.sessionId.slice(-6) }}</span>
+        <span v-if="pending" class="text-[11px] text-secondary font-mono" :title="pending.sessionId"
+          >问询归属会话 …{{ pending.sessionId.slice(-6) }}</span
+        >
         <span v-else />
         <div class="flex items-center justify-end gap-2">
           <n-button size="small" :disabled="step <= 1" @click="prev">上一步</n-button>
@@ -99,9 +99,7 @@
             提交回答（{{ answeredCount }}/{{ totalCount }}）
           </n-button>
           <n-button size="small" data-testid="ask-user-dismiss" @click="handleDismiss">稍后回答</n-button>
-          <n-button type="error" ghost size="small" data-testid="ask-user-cancel" @click="handleCancel">
-            取消整轮
-          </n-button>
+          <n-button type="error" ghost size="small" data-testid="ask-user-cancel" @click="handleCancel"> 取消整轮 </n-button>
         </div>
       </div>
     </template>
@@ -112,7 +110,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useMessage } from 'naive-ui';
 import { storeToRefs } from 'pinia';
-import { getHostBridge, haloEventBus } from '@/bridge/hostBridge';
+import { getHostBridge, haloEventBus } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAskUserStore, type AskUserPending } from '@/stores/askUserStore';
 
@@ -135,7 +133,9 @@ const pending = computed<AskUserPending | null>(() => {
 
 const visible = computed<boolean>({
   get: () => modalVisible.value && !!pending.value,
-  set: () => { /* 受控：只经 openModal/closeModal 变更，忽略外部直接关闭 */ },
+  set: () => {
+    /* 受控：只经 openModal/closeModal 变更，忽略外部直接关闭 */
+  },
 });
 
 const totalCount = computed(() => pending.value?.questions.length || 0);
@@ -252,13 +252,21 @@ async function handleSubmit(): Promise<void> {
     const answers = p.questions.map((q) => {
       const d = draftOf(q.id);
       const selected = (d.selected || []).filter(Boolean);
-      const customInput = String(d.customInput || '').trim().slice(0, 2000);
+      const customInput = String(d.customInput || '')
+        .trim()
+        .slice(0, 2000);
       const skipped = selected.length === 0 && !customInput;
       return { id: q.id, selected, customInput, skipped };
     });
     const payload = JSON.stringify({ answers });
     // resolveAskUser 由 D 轨道在 hostBridge.ts 合入；本轨道经可选调用兼容（合入前 toast 保留草稿不断链）
-    const bridge = getHostBridge() as unknown as { resolveAskUser?: (sessionId: string, ticketId: string, answersJson: string) => Promise<{ ok: boolean; code?: string; message?: string }> };
+    const bridge = getHostBridge() as unknown as {
+      resolveAskUser?: (
+        sessionId: string,
+        ticketId: string,
+        answersJson: string
+      ) => Promise<{ ok: boolean; code?: string; message?: string }>;
+    };
     if (typeof bridge.resolveAskUser !== 'function') {
       message.warning('问询提交通道尚未就绪（resolveAskUser 合入中），回答草稿已保留');
       return;
@@ -298,7 +306,9 @@ async function handleCancel(): Promise<void> {
   if (p) {
     try {
       await getHostBridge().cancelAgentTurn(p.sessionId);
-    } catch { /* 忽略，后端超时兜底 */ }
+    } catch {
+      /* 忽略，后端超时兜底 */
+    }
     askUserStore.clearPending(p.sessionId, p.ticketId);
   } else {
     askUserStore.closeModal();
@@ -352,8 +362,16 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  try { unsubRequested?.(); } catch { /* ignore */ }
-  try { unsubResolved?.(); } catch { /* ignore */ }
+  try {
+    unsubRequested?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    unsubResolved?.();
+  } catch {
+    /* ignore */
+  }
   unsubRequested = null;
   unsubResolved = null;
 });

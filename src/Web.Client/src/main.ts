@@ -1,9 +1,9 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import naive from 'naive-ui';
-import './styles/main.css';
+import './shared/ui/main.css';
 import App from './App.vue';
-import { initHostBridge } from './bridge/hostBridge';
+import { initHostBridge } from '@shared/bridge/hostBridge';
 
 /**
  * 显式控制 CSS 注入顺序：
@@ -22,7 +22,12 @@ function ensureNaiveUiStyleMetaAnchor(): void {
 
 async function bootstrap(): Promise<void> {
   ensureNaiveUiStyleMetaAnchor();
-  await initHostBridge();
+  // need21-F02：init 含版本断言；握手失败（版本不一致/无桥）只toast+横幅，不阻断挂载（App 内 negotiate/横幅接管重试）。
+  try {
+    await initHostBridge();
+  } catch (e) {
+    console.error('[bootstrap] initHostBridge failed (mount continues, banner takes over):', e);
+  }
 
   const app = createApp(App);
   const pinia = createPinia();

@@ -1,9 +1,15 @@
 /** need22-P5 J4：Mock 系统域方法（system/storage/network/provider/llm/run；原 createBrowserMockBridge 前半，行为不变）。 */
-import { haloEventBus } from './events';
+import { haloEventBus } from '@shared/bridge/events';
 import { fireMockAskUser } from './mockState';
-import { normalizeVersionedBaseUrlClient } from './client';
+import { normalizeVersionedBaseUrlClient } from '@shared/bridge/api/normalize';
 import type { MockState } from './mockState';
-import type { GlobalNetworkSettings, HostBridgeApi, ProviderConfig, ProvidersConfigDocument, UnifiedLlmRequestDto } from './types';
+import type {
+  GlobalNetworkSettings,
+  HostBridgeApi,
+  ProviderConfig,
+  ProvidersConfigDocument,
+  UnifiedLlmRequestDto,
+} from '@shared/bridge/protocol/types';
 
 export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
   return {
@@ -129,7 +135,9 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       try {
         const link = String(href || '');
         if (/^https?:\/\//i.test(link)) window.open(link, '_blank', 'noopener');
-      } catch (e) { console.warn('[bridge-mock] openExternalLink mock ignored [MOCK]:', (e as Error)?.message ?? e); }
+      } catch (e) {
+        console.warn('[bridge-mock] openExternalLink mock ignored [MOCK]:', (e as Error)?.message ?? e);
+      }
       return { ok: true, data: true };
     },
     async cleanupExpiredLogs() {
@@ -151,8 +159,7 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       };
     },
     async saveNetworkSettings(settings: GlobalNetworkSettings | string) {
-      const parsed: GlobalNetworkSettings =
-        typeof settings === 'string' ? JSON.parse(settings) : JSON.parse(JSON.stringify(settings));
+      const parsed: GlobalNetworkSettings = typeof settings === 'string' ? JSON.parse(settings) : JSON.parse(JSON.stringify(settings));
       if (parsed.customProxy?.password && !parsed.customProxy.password.includes('****')) {
         parsed.customProxy.passwordEncrypted = 'DPAPI_MOCK_PROXY_PWD';
         parsed.customProxy.passwordMasked = '********';
@@ -191,8 +198,8 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
         parsedSettings.mode === 'None'
           ? 'DIRECT (No Proxy)'
           : parsedSettings.mode === 'Custom'
-          ? `CUSTOM (${parsedSettings.customProxy.scheme}://${parsedSettings.customProxy.host}:${parsedSettings.customProxy.port})`
-          : 'SYSTEM (http://127.0.0.1:7890)';
+            ? `CUSTOM (${parsedSettings.customProxy.scheme}://${parsedSettings.customProxy.host}:${parsedSettings.customProxy.port})`
+            : 'SYSTEM (http://127.0.0.1:7890)';
 
       return {
         ok: true,
@@ -215,8 +222,7 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       };
     },
     async saveProvidersConfig(doc: ProvidersConfigDocument | string) {
-      const parsed: ProvidersConfigDocument =
-        typeof doc === 'string' ? JSON.parse(doc) : JSON.parse(JSON.stringify(doc));
+      const parsed: ProvidersConfigDocument = typeof doc === 'string' ? JSON.parse(doc) : JSON.parse(JSON.stringify(doc));
       s.mockProvidersDoc = parsed;
       return {
         ok: true,
@@ -225,12 +231,10 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       };
     },
     async upsertProvider(provider: ProviderConfig | string) {
-      const parsed: ProviderConfig =
-        typeof provider === 'string' ? JSON.parse(provider) : JSON.parse(JSON.stringify(provider));
+      const parsed: ProviderConfig = typeof provider === 'string' ? JSON.parse(provider) : JSON.parse(JSON.stringify(provider));
       if (parsed.apiKey && !parsed.apiKey.includes('****')) {
         parsed.apiKeyEncrypted = 'DPAPI_MOCK_CIPHER';
-        parsed.apiKeyMasked =
-          parsed.apiKey.length > 8 ? `${parsed.apiKey.slice(0, 4)}****${parsed.apiKey.slice(-4)}` : '********';
+        parsed.apiKeyMasked = parsed.apiKey.length > 8 ? `${parsed.apiKey.slice(0, 4)}****${parsed.apiKey.slice(-4)}` : '********';
         parsed.hasApiKey = true;
       }
       delete parsed.apiKey;
@@ -268,8 +272,7 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       };
     },
     async previewProviderResolution(provider: ProviderConfig | string, modelId?: string) {
-      const parsed: ProviderConfig =
-        typeof provider === 'string' ? JSON.parse(provider) : provider;
+      const parsed: ProviderConfig = typeof provider === 'string' ? JSON.parse(provider) : provider;
       const prefix = normalizeVersionedBaseUrlClient(parsed.baseUrl);
       const sessionHash = '9f86d081884c7d65';
       const resolvedHeaders: Record<string, string> = {};
@@ -299,8 +302,8 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
             parsed.proxyMode === 'None'
               ? 'DIRECT (No Proxy)'
               : parsed.proxyMode === 'Custom' && parsed.customProxy
-              ? `CUSTOM (${parsed.customProxy.scheme}://${parsed.customProxy.host}:${parsed.customProxy.port})`
-              : 'SYSTEM (http://127.0.0.1:7890)',
+                ? `CUSTOM (${parsed.customProxy.scheme}://${parsed.customProxy.host}:${parsed.customProxy.port})`
+                : 'SYSTEM (http://127.0.0.1:7890)',
           sessionId: 'sess_stage02_preview',
           sessionHash,
           workspaceName: 'halo-agent',
@@ -332,91 +335,106 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
             outputTokens: 25,
             cachedInputTokens: 80,
             totalTokens: 145,
-           },
-         });
-         haloEventBus.emitLocal('llm:stream-event', {
-           sessionId,
-           kind: 'StreamCompleted',
-         });
-       }, 50);
- 
-       return {
-         ok: true,
-         message: '流式请求已启动 (Mock)',
-         data: sessionId,
-       };
-     },
-    async startAgentTurn(workspaceId: string, sessionId: string, userText: string, providerId?: string, modelId?: string, attachmentsJson?: string, requestId?: string) {
+          },
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'StreamCompleted',
+        });
+      }, 50);
+
+      return {
+        ok: true,
+        message: '流式请求已启动 (Mock)',
+        data: sessionId,
+      };
+    },
+    async startAgentTurn(
+      workspaceId: string,
+      sessionId: string,
+      userText: string,
+      providerId?: string,
+      modelId?: string,
+      attachmentsJson?: string,
+      requestId?: string
+    ) {
       void workspaceId;
       void providerId;
       void modelId;
       void requestId;
-       // need09-04/05 Mock：解析附件数，回放含图轮次
-       let imgCount = 0;
-       try {
-         const raw = String(attachmentsJson || '');
-         if (raw.trim()) {
-           const arr = JSON.parse(raw) as unknown;
-           if (Array.isArray(arr)) imgCount = arr.length;
-         } else {
-           const m = /\[image:[^\]]+\]/g;
-           const hits = String(userText || '').match(m);
-           if (hits) imgCount = hits.length;
-         }
-       } catch (e) { console.warn('[bridge-mock] imgCount parse failed:', (e as Error)?.message ?? e); imgCount = 0; }
-       const withImg = imgCount > 0 ? `（含 ${imgCount} 张图片 Mock）` : '';
+      // need09-04/05 Mock：解析附件数，回放含图轮次
+      let imgCount = 0;
+      try {
+        const raw = String(attachmentsJson || '');
+        if (raw.trim()) {
+          const arr = JSON.parse(raw) as unknown;
+          if (Array.isArray(arr)) imgCount = arr.length;
+        } else {
+          const m = /\[image:[^\]]+\]/g;
+          const hits = String(userText || '').match(m);
+          if (hits) imgCount = hits.length;
+        }
+      } catch (e) {
+        console.warn('[bridge-mock] imgCount parse failed:', (e as Error)?.message ?? e);
+        imgCount = 0;
+      }
+      const withImg = imgCount > 0 ? `（含 ${imgCount} 张图片 Mock）` : '';
       // need09-06 Mock 演示钩子：含 ask/提问/选择关键字时 1s 后回放假问询
       if (/ask|提问|选择|确认/i.test(String(userText || ''))) {
-        setTimeout(() => { fireMockAskUser(s, sessionId); }, 1000);
+        setTimeout(() => {
+          fireMockAskUser(s, sessionId);
+        }, 1000);
       }
-       // 模拟一轮 ReAct：思考增量 -> 文本增量 -> 工具卡片事件 -> 完成
-       setTimeout(() => {
-         haloEventBus.emitLocal('agent:turn-event', {
-           sessionId,
-           kind: 'IterationStarted',
-           payload: { iteration: 1, maxIterations: 25 },
-         });
-         haloEventBus.emitLocal('llm:stream-event', {
-           sessionId,
-           kind: 'ReasoningDelta',
-           textDelta: '正在分析任务，准备调用工具...',
-         });
-         haloEventBus.emitLocal('llm:stream-event', {
-           sessionId,
-           kind: 'TextDelta',
-           textDelta: `收到任务${withImg}（Mock 演示模式），正在编排工具调用。`,
-         });
-         haloEventBus.emitLocal('agent:turn-event', {
-           sessionId,
-           kind: 'ToolCallStarted',
-           payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir' },
-         });
-         haloEventBus.emitLocal('agent:turn-event', {
-           sessionId,
-           kind: 'ToolExecutionCompleted',
-           payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir', success: true, exitCode: 0, durationMs: 8 },
-         });
-         haloEventBus.emitLocal('agent:turn-event', {
-           sessionId,
-           kind: 'TurnCompleted',
-           payload: { iterations: 1, toolExecutions: 1, protocol: 'chat', inputTokens: 120, outputTokens: 25, cachedTokens: 80 },
-         });
-       }, 60);
- 
-       return {
-         ok: true,
-         message: 'Agent 推理已启动 (Mock)',
-         data: sessionId,
-       };
-     },
-     // need09-05 Mock：1px 透明 png 占位缩略图
-     async getImageThumbnail(_workspaceId: string, _sessionId: string, _imageId: string) {
-       void _workspaceId; void _sessionId; void _imageId;
-       return {
-         ok: true,
-         data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-       };
-     },
+      // 模拟一轮 ReAct：思考增量 -> 文本增量 -> 工具卡片事件 -> 完成
+      setTimeout(() => {
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'IterationStarted',
+          payload: { iteration: 1, maxIterations: 25 },
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'ReasoningDelta',
+          textDelta: '正在分析任务，准备调用工具...',
+        });
+        haloEventBus.emitLocal('llm:stream-event', {
+          sessionId,
+          kind: 'TextDelta',
+          textDelta: `收到任务${withImg}（Mock 演示模式），正在编排工具调用。`,
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'ToolCallStarted',
+          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir' },
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'ToolExecutionCompleted',
+          payload: { iteration: 1, callId: 'mock_call_001', functionName: 'list_dir', success: true, exitCode: 0, durationMs: 8 },
+        });
+        haloEventBus.emitLocal('agent:turn-event', {
+          sessionId,
+          kind: 'TurnCompleted',
+          payload: { iterations: 1, toolExecutions: 1, protocol: 'chat', inputTokens: 120, outputTokens: 25, cachedTokens: 80 },
+        });
+      }, 60);
+
+      return {
+        ok: true,
+        message: 'Agent 推理已启动 (Mock)',
+        data: sessionId,
+      };
+    },
+    // need09-05 Mock：1px 透明 png 占位缩略图
+    async getImageThumbnail(_workspaceId: string, _sessionId: string, _imageId: string) {
+      void _workspaceId;
+      void _sessionId;
+      void _imageId;
+      return {
+        ok: true,
+        data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      };
+    },
     // need09-06 Mock：ticket 校验 + 提交回 resolved 事件
     async resolveAskUser(sessionId: string, ticketId: string, _answersJson: string) {
       void _answersJson;
@@ -430,14 +448,14 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
       }, 50);
       return { ok: true, data: true };
     },
-     async cancelSessionRun(_sessionId: string) {
-       return {
-         ok: true,
-         message: '已发送取消指令 (Mock)',
-         data: true,
-       };
-     },
-     async cancelAgentTurn(_sessionId: string) {
+    async cancelSessionRun(_sessionId: string) {
+      return {
+        ok: true,
+        message: '已发送取消指令 (Mock)',
+        data: true,
+      };
+    },
+    async cancelAgentTurn(_sessionId: string) {
       return {
         ok: true,
         message: '已发送取消指令 (Mock)',

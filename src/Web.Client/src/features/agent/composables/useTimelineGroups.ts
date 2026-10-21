@@ -1,5 +1,5 @@
 import { computed, type Ref } from 'vue';
-import type { UnifiedChatMessage } from '@/bridge/hostBridge';
+import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 
 export interface TimelineGroup {
   key: string;

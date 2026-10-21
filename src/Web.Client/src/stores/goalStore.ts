@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { getHostBridge, haloEventBus, type SessionGoalDto } from '@/bridge/hostBridge';
+import { getHostBridge, haloEventBus, type SessionGoalDto } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from './workspaceStore';
 
 export type GoalPanelState = 'expanded' | 'collapsed' | 'mini';
@@ -17,8 +17,13 @@ export const useGoalStore = defineStore('goal', () => {
     const saved = localStorage.getItem('halo-goal-panel-state');
     if (saved === 'expanded' || saved === 'collapsed' || saved === 'mini') panel.value = saved;
     const p = localStorage.getItem('halo-goal-panel-pos');
-    if (p) { const o = JSON.parse(p); if (typeof o.right === 'number' && typeof o.bottom === 'number') pos.value = o; }
-  } catch { /* ignore */ }
+    if (p) {
+      const o = JSON.parse(p);
+      if (typeof o.right === 'number' && typeof o.bottom === 'number') pos.value = o;
+    }
+  } catch {
+    /* ignore */
+  }
 
   const pct = computed(() => goal.value?.percent ?? 0);
   const done = computed(() => (goal.value?.milestones || []).filter((m) => m.done).length);
@@ -26,16 +31,27 @@ export const useGoalStore = defineStore('goal', () => {
 
   function setPanel(s: GoalPanelState) {
     panel.value = s;
-    try { localStorage.setItem('halo-goal-panel-state', s); } catch { /* ignore */ }
+    try {
+      localStorage.setItem('halo-goal-panel-state', s);
+    } catch {
+      /* ignore */
+    }
   }
   function movePos(right: number, bottom: number) {
     pos.value = { right, bottom };
-    try { localStorage.setItem('halo-goal-panel-pos', JSON.stringify(pos.value)); } catch { /* ignore */ }
+    try {
+      localStorage.setItem('halo-goal-panel-pos', JSON.stringify(pos.value));
+    } catch {
+      /* ignore */
+    }
   }
 
   let loadSeq = 0;
   async function load(ws: string, sess: string) {
-    if (!ws || !sess) { goal.value = null; return; }
+    if (!ws || !sess) {
+      goal.value = null;
+      return;
+    }
     const seq = ++loadSeq;
     loading.value = true;
     try {
@@ -46,7 +62,9 @@ export const useGoalStore = defineStore('goal', () => {
         goal.value = res.data;
         corrupted.value = !!res.message && res.message.includes('损坏');
         if (!goal.value.title && !goal.value.description && total.value === 0) {
-          if (panel.value === 'collapsed') { /* keep */ }
+          if (panel.value === 'collapsed') {
+            /* keep */
+          }
         }
         if (!goal.value.title && !goal.value.description && (goal.value.milestones || []).length === 0) {
           if (panel.value !== 'expanded') panel.value = 'mini';
@@ -57,7 +75,9 @@ export const useGoalStore = defineStore('goal', () => {
     } catch {
       if (seq !== loadSeq) return; // need19：过期失败不覆盖
       goal.value = null; // need19：失败兜底为空，面板显示失败态
-    } finally { if (seq === loadSeq) loading.value = false; }
+    } finally {
+      if (seq === loadSeq) loading.value = false;
+    }
   }
 
   async function save(ws: string, sess: string, draft: SessionGoalDto) {
@@ -90,7 +110,9 @@ export const useGoalStore = defineStore('goal', () => {
       goal.value = payload.goal;
       corrupted.value = false;
       updatedFlash.value = true;
-      setTimeout(() => { updatedFlash.value = false; }, 800);
+      setTimeout(() => {
+        updatedFlash.value = false;
+      }, 800);
     }
   }
 
@@ -99,13 +121,38 @@ export const useGoalStore = defineStore('goal', () => {
     if (watchBound) return; // need19：幂等，唯一挂载点在 RightRailDrawer
     watchBound = true;
     const ws = useWorkspaceStore();
-    watch(() => [ws.activeWorkspaceId, ws.activeSessionId] as const, ([nws, nsess]) => {
-      if (nws && nsess) void load(nws, nsess);
-    }, { immediate: true });
+    watch(
+      () => [ws.activeWorkspaceId, ws.activeSessionId] as const,
+      ([nws, nsess]) => {
+        if (nws && nsess) void load(nws, nsess);
+      },
+      { immediate: true }
+    );
     haloEventBus.on('goal:updated', (p: unknown) => {
-      try { applyEvent(p as { sessionId: string; goal: SessionGoalDto }); } catch { /* ignore */ }
+      try {
+        applyEvent(p as { sessionId: string; goal: SessionGoalDto });
+      } catch {
+        /* ignore */
+      }
     });
   }
 
-  return { goal, loading, corrupted, panel, pos, pct, done, total, updatedFlash, setPanel, movePos, load, save, clear, applyEvent, watchSession };
+  return {
+    goal,
+    loading,
+    corrupted,
+    panel,
+    pos,
+    pct,
+    done,
+    total,
+    updatedFlash,
+    setPanel,
+    movePos,
+    load,
+    save,
+    clear,
+    applyEvent,
+    watchSession,
+  };
 });

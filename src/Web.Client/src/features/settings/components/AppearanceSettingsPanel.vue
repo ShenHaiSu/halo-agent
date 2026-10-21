@@ -5,20 +5,12 @@
       <div class="space-y-3">
         <div class="flex items-center gap-2">
           <span class="text-xs text-secondary shrink-0">外观模式</span>
-          <n-radio-group
-            :value="settings.themeMode"
-            data-testid="appearance-theme-mode"
-            @update:value="onThemeModeChange"
-          >
+          <n-radio-group :value="settings.themeMode" data-testid="appearance-theme-mode" @update:value="onThemeModeChange">
             <n-radio value="dark">
-              <span class="inline-flex items-center gap-1 text-xs">
-                <Moon class="w-3.5 h-3.5" />暗黑
-              </span>
+              <span class="inline-flex items-center gap-1 text-xs"> <Moon class="w-3.5 h-3.5" />暗黑 </span>
             </n-radio>
             <n-radio value="light">
-              <span class="inline-flex items-center gap-1 text-xs">
-                <Sun class="w-3.5 h-3.5" />浅色
-              </span>
+              <span class="inline-flex items-center gap-1 text-xs"> <Sun class="w-3.5 h-3.5" />浅色 </span>
             </n-radio>
           </n-radio-group>
         </div>
@@ -36,8 +28,8 @@
               :style="{
                 backgroundColor: preset.value,
                 borderColor: settings.themeColor.toLowerCase() === preset.value ? '#fff' : 'transparent',
-                boxShadow: settings.themeColor.toLowerCase() === preset.value
-                  ? `0 0 0 2px ${preset.value}` : '0 0 0 1px var(--border-subtle)',
+                boxShadow:
+                  settings.themeColor.toLowerCase() === preset.value ? `0 0 0 2px ${preset.value}` : '0 0 0 1px var(--border-subtle)',
               }"
               @click="onPresetColor(preset.value)"
             />
@@ -78,7 +70,9 @@
             data-testid="appearance-font-size"
             @update:value="onFontSizeChange"
           />
-          <div class="flex justify-between text-[11px] text-secondary font-mono select-none" aria-hidden="true"><span>12 小</span><span>16 大</span></div>
+          <div class="flex justify-between text-[11px] text-secondary font-mono select-none" aria-hidden="true">
+            <span>12 小</span><span>16 大</span>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 gap-2.5">
@@ -146,7 +140,7 @@
         >
           <div class="flex justify-center py-1.5">
             <div class="w-full max-w-[120px] h-10 rounded border border-subtle flex items-center justify-center">
-              <div class="w-3/5 h-6 rounded-sm" style="background-color: var(--accent-primary); opacity: 0.55;" />
+              <div class="w-3/5 h-6 rounded-sm" style="background-color: var(--accent-primary); opacity: 0.55" />
             </div>
           </div>
           <div class="text-xs font-medium text-center">限定最大宽度 · 居中</div>
@@ -163,7 +157,7 @@
         >
           <div class="flex justify-center py-1.5">
             <div class="w-full h-10 rounded border border-subtle flex items-center justify-center">
-              <div class="w-full mx-2 h-6 rounded-sm" style="background-color: var(--accent-primary); opacity: 0.55;" />
+              <div class="w-full mx-2 h-6 rounded-sm" style="background-color: var(--accent-primary); opacity: 0.55" />
             </div>
           </div>
           <div class="text-xs font-medium text-center">占满可用宽度</div>
@@ -174,9 +168,7 @@
 
     <!-- 4. 页脚：重置 + 生效摘要 -->
     <div class="flex items-center justify-between gap-2 flex-wrap">
-      <n-button secondary size="small" data-testid="appearance-reset-btn" @click="onReset">
-        重置为默认
-      </n-button>
+      <n-button secondary size="small" data-testid="appearance-reset-btn" @click="onReset"> 重置为默认 </n-button>
       <span class="text-[11px] text-secondary font-mono break-all" data-testid="appearance-summary">
         {{ summaryText }} · 即时生效 · 已自动保存
       </span>
@@ -197,7 +189,7 @@ import {
   normalizeHexColor,
   type ChatWidthMode,
   type ThemeMode,
-} from '@/theme/appearance';
+} from '@shared/ui/appearance';
 
 const message = useMessage();
 const appearanceStore = useAppearanceStore();

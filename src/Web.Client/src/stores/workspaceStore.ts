@@ -8,11 +8,11 @@ import {
   type UnifiedChatMessage,
   type ContextBudgetStatusDto,
   type UiActiveState,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
-import { isBadTime } from '@/utils/timeFormat';
-import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
+import { isBadTime } from '@shared/utils/timeFormat';
+import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();

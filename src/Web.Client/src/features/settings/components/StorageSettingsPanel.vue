@@ -9,11 +9,11 @@
           </template>
           <div class="text-xs leading-relaxed">
             <div>
-              固定引导指针文件位置：<code class="setting-inset px-1.5 py-0.5 font-mono break-all">%LocalAppData%\HaloAgent\bootstrap.json</code>
+              固定引导指针文件位置：<code class="setting-inset px-1.5 py-0.5 font-mono break-all"
+                >%LocalAppData%\HaloAgent\bootstrap.json</code
+              >
             </div>
-            <div class="text-secondary mt-0.5 font-mono break-all">
-              实际路径：{{ storageConfig?.bootstrapFilePath || '加载中...' }}
-            </div>
+            <div class="text-secondary mt-0.5 font-mono break-all">实际路径：{{ storageConfig?.bootstrapFilePath || '加载中...' }}</div>
           </div>
         </n-alert>
 
@@ -21,17 +21,12 @@
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
             <span class="text-xs font-medium text-secondary">当前生效数据根目录 (DataRootPath)</span>
-            <n-tag
-              :type="storageConfig?.isWritable !== false ? 'success' : 'error'"
-              size="small"
-              :bordered="false"
-            >
+            <n-tag :type="storageConfig?.isWritable !== false ? 'success' : 'error'" size="small" :bordered="false">
               <div class="flex items-center gap-1.5">
                 <CheckCircle2 v-if="storageConfig?.isWritable !== false" class="w-3.5 h-3.5" />
                 <AlertTriangle v-else class="w-3.5 h-3.5" />
                 <span>
-                  {{ storageConfig?.isWritable !== false ? '可读写' : '权限受限' }} · 剩余空间
-                  {{ systemStore.diskFreeGbText }} GB
+                  {{ storageConfig?.isWritable !== false ? '可读写' : '权限受限' }} · 剩余空间 {{ systemStore.diskFreeGbText }} GB
                 </span>
               </div>
             </n-tag>
@@ -49,10 +44,7 @@
             </template>
           </n-input>
 
-          <div
-            v-if="storageConfig?.previousDataRootPath"
-            class="text-[11px] text-secondary font-mono flex items-center gap-1.5"
-          >
+          <div v-if="storageConfig?.previousDataRootPath" class="text-[11px] text-secondary font-mono flex items-center gap-1.5">
             <History class="w-3 h-3" />
             <span>上次路径：{{ storageConfig.previousDataRootPath }}</span>
           </div>
@@ -73,23 +65,14 @@
             修改存储目录
           </n-button>
 
-          <n-button
-            secondary
-            size="medium"
-            @click="handleOpenInExplorer(storageConfig?.dataRootPath)"
-          >
+          <n-button secondary size="medium" @click="handleOpenInExplorer(storageConfig?.dataRootPath)">
             <template #icon>
               <ExternalLink class="w-4 h-4" />
             </template>
             在资源管理器中打开数据目录
           </n-button>
 
-          <n-button
-            secondary
-            size="medium"
-            :disabled="isDefaultPath || systemStore.migrating"
-            @click="handleResetToDefaultCDrive"
-          >
+          <n-button secondary size="medium" :disabled="isDefaultPath || systemStore.migrating" @click="handleResetToDefaultCDrive">
             <template #icon>
               <RotateCcw class="w-4 h-4" />
             </template>
@@ -115,12 +98,7 @@
             </template>
             清理过期日志 ({{ storageConfig?.logRetentionDays ?? 14 }}天前)
           </n-button>
-          <n-button
-            size="small"
-            type="primary"
-            ghost
-            @click="handleOpenInExplorer(systemStore.systemInfo?.logsDirectory)"
-          >
+          <n-button size="small" type="primary" ghost @click="handleOpenInExplorer(systemStore.systemInfo?.logsDirectory)">
             <template #icon>
               <FolderOpen class="w-3.5 h-3.5" />
             </template>
@@ -130,11 +108,7 @@
       </template>
 
       <n-descriptions bordered :column="1" size="small" label-placement="top">
-        <n-descriptions-item
-          v-for="ch in displayedLogChannels"
-          :key="ch.channel"
-          :label="ch.label"
-        >
+        <n-descriptions-item v-for="ch in displayedLogChannels" :key="ch.channel" :label="ch.label">
           <div class="space-y-1">
             <div class="font-mono text-xs font-medium text-primary flex items-center justify-between">
               <span>{{ ch.fileName }}</span>
@@ -174,30 +148,16 @@
 
         <div class="space-y-2">
           <div class="text-xs text-secondary font-medium">请选择数据迁移策略：</div>
-          <n-radio-group
-            v-model:value="migrateExistingData"
-            name="migration-mode"
-            :disabled="systemStore.migrating"
-          >
+          <n-radio-group v-model:value="migrateExistingData" name="migration-mode" :disabled="systemStore.migrating">
             <div class="space-y-2.5">
-              <div
-                class="setting-inset p-2.5 cursor-pointer min-w-0"
-                @click="!systemStore.migrating && (migrateExistingData = true)"
-              >
+              <div class="setting-inset p-2.5 cursor-pointer min-w-0" @click="!systemStore.migrating && (migrateExistingData = true)">
                 <n-radio :value="true">
-                  <span class="text-xs font-medium">
-                    将当前目录下的所有历史会话、Provider 配置及日志完整迁移至新路径并切换（推荐）
-                  </span>
+                  <span class="text-xs font-medium"> 将当前目录下的所有历史会话、Provider 配置及日志完整迁移至新路径并切换（推荐） </span>
                 </n-radio>
               </div>
-              <div
-                class="setting-inset p-2.5 cursor-pointer min-w-0"
-                @click="!systemStore.migrating && (migrateExistingData = false)"
-              >
+              <div class="setting-inset p-2.5 cursor-pointer min-w-0" @click="!systemStore.migrating && (migrateExistingData = false)">
                 <n-radio :value="false">
-                  <span class="text-xs font-medium">
-                    仅切换至新路径（初始化空白配置，保留原目录旧文件不动）
-                  </span>
+                  <span class="text-xs font-medium"> 仅切换至新路径（初始化空白配置，保留原目录旧文件不动） </span>
                 </n-radio>
               </div>
             </div>
@@ -205,12 +165,7 @@
         </div>
 
         <div v-if="systemStore.migrating" class="space-y-1.5 pt-1">
-          <n-progress
-            type="line"
-            :percentage="systemStore.migrationPercent"
-            :indicator-placement="'inside'"
-            processing
-          />
+          <n-progress type="line" :percentage="systemStore.migrationPercent" :indicator-placement="'inside'" processing />
           <div class="text-xs text-secondary font-mono">
             {{ systemStore.migrationStatusText }}
           </div>
@@ -219,13 +174,7 @@
 
       <template #action>
         <n-space :size="8">
-          <n-button
-            size="medium"
-            :disabled="systemStore.migrating"
-            @click="showMigrationDialog = false"
-          >
-            取消
-          </n-button>
+          <n-button size="medium" :disabled="systemStore.migrating" @click="showMigrationDialog = false"> 取消 </n-button>
           <n-button
             type="primary"
             size="medium"
@@ -258,7 +207,7 @@ import {
   History,
 } from 'lucide-vue-next';
 import { useSystemStore } from '@/stores/systemStore';
-import { formatSmartBytesShort } from '@/utils/formatSmartBytes';
+import { formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
 
 const systemStore = useSystemStore();
 const message = useMessage();
@@ -355,10 +304,7 @@ async function handleOpenInExplorer(path?: string) {
 
 async function handleWriteDiagnosticLogs() {
   await systemStore.writeTestLogEntry('app', 'diagnostic check: App channel write test.');
-  await systemStore.writeTestLogEntry(
-    'llm',
-    'diagnostic check: Authorization: Bearer sk-1234567890abcdef9876 masking test.'
-  );
+  await systemStore.writeTestLogEntry('llm', 'diagnostic check: Authorization: Bearer sk-1234567890abcdef9876 masking test.');
   await systemStore.writeTestLogEntry('tool', 'diagnostic check: tool channel write test.');
   message.success('已向 App / LLM / Tool 三通道写入诊断日志并自动脱敏');
 }

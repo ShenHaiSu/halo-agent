@@ -1,23 +1,8 @@
 <template>
-  <n-drawer
-    v-model:show="visible"
-    placement="right"
-    :width="1020"
-    style="max-width: 94vw;"
-    :mask-closable="true"
-  >
-    <n-drawer-content
-      title="设置与诊断中心"
-      closable
-      :native-scrollbar="false"
-    >
+  <n-drawer v-model:show="visible" placement="right" :width="1020" style="max-width: 94vw" :mask-closable="true">
+    <n-drawer-content title="设置与诊断中心" closable :native-scrollbar="false">
       <div class="settings-drawer-body min-w-0 max-w-full overflow-x-hidden">
-        <n-tabs
-          v-model:value="activeTab"
-          type="card"
-          placement="left"
-          class="settings-left-tabs"
-        >
+        <n-tabs v-model:value="activeTab" type="card" placement="left" class="settings-left-tabs">
           <n-tab-pane name="appearance" tab="主题和样式">
             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
               <AppearanceSettingsPanel />
@@ -42,54 +27,56 @@
             </div>
           </n-tab-pane>
 
-           <n-tab-pane name="runtime" tab="系统运行环境">
-             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-               <SystemRuntimePanel />
-             </div>
-           </n-tab-pane>
+          <n-tab-pane name="runtime" tab="系统运行环境">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+              <SystemRuntimePanel />
+            </div>
+          </n-tab-pane>
 
-           <n-tab-pane name="prompt" tab="提示词与预发送">
-             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-               <PromptSettingsView />
-             </div>
-           </n-tab-pane>
+          <n-tab-pane name="prompt" tab="提示词与预发送">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+              <PromptSettingsView />
+            </div>
+          </n-tab-pane>
 
-           <n-tab-pane name="agent" tab="智能体行为">
-             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-               <AgentBehaviorView />
-             </div>
-           </n-tab-pane>
+          <n-tab-pane name="agent" tab="智能体行为">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+              <AgentBehaviorView />
+            </div>
+          </n-tab-pane>
 
-           <n-tab-pane name="skill-memory" tab="技能与记忆">
-             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-               <SkillMemoryView />
-             </div>
-           </n-tab-pane>
+          <n-tab-pane name="skill-memory" tab="技能与记忆">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+              <SkillMemoryView />
+            </div>
+          </n-tab-pane>
 
-           <n-tab-pane name="usage" tab="用量分析">
-             <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-               <UsageAnalyticsView v-if="activeTab === 'usage'" ref="usageViewRef" />
-             </div>
-           </n-tab-pane>
-         </n-tabs>
+          <n-tab-pane name="usage" tab="用量分析">
+            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
+              <UsageAnalyticsView v-if="activeTab === 'usage'" ref="usageViewRef" />
+            </div>
+          </n-tab-pane>
+        </n-tabs>
       </div>
-     </n-drawer-content>
-   </n-drawer>
- </template>
+    </n-drawer-content>
+  </n-drawer>
+</template>
 
- <script setup lang="ts">
- import { ref, computed, watch, nextTick } from 'vue';
- import ProviderManagerView from './ProviderManagerView.vue';
- import NetworkProxySettings from './NetworkProxySettings.vue';
- import StorageSettingsPanel from './StorageSettingsPanel.vue';
- import SystemRuntimePanel from './SystemRuntimePanel.vue';
- import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
- import PromptSettingsView from './PromptSettingsView.vue';
- import AgentBehaviorView from './AgentBehaviorView.vue';
- import SkillMemoryView from './SkillMemoryView.vue';
- import { defineAsyncComponent } from 'vue';
- const UsageAnalyticsView = defineAsyncComponent(() => import('./UsageAnalyticsView.vue'));
- export type SettingsCenterTab = 'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory' | 'usage';
+<script setup lang="ts">
+import { ref, computed, watch, nextTick } from 'vue';
+import ProviderManagerView from './ProviderManagerView.vue';
+import NetworkProxySettings from './NetworkProxySettings.vue';
+import StorageSettingsPanel from './StorageSettingsPanel.vue';
+import SystemRuntimePanel from './SystemRuntimePanel.vue';
+import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
+import PromptSettingsView from './PromptSettingsView.vue';
+import AgentBehaviorView from './AgentBehaviorView.vue';
+import SkillMemoryView from './SkillMemoryView.vue';
+import { provideSettingsDrawer } from '../composables/useSettingsDrawer';
+import { defineAsyncComponent } from 'vue';
+const UsageAnalyticsView = defineAsyncComponent(() => import('./UsageAnalyticsView.vue'));
+export type SettingsCenterTab =
+  'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory' | 'usage';
 
 const props = defineProps<{
   show: boolean;
@@ -100,9 +87,7 @@ const emit = defineEmits<{
   (e: 'update:show', value: boolean): void;
 }>();
 
-const activeTab = ref<SettingsCenterTab>(
-  props.defaultTab || 'appearance'
-);
+const activeTab = ref<SettingsCenterTab>(props.defaultTab || 'appearance');
 
 const usageViewRef = ref<{ refresh: () => Promise<void>; resize: () => void } | null>(null);
 
@@ -126,13 +111,24 @@ watch(activeTab, async (val) => {
   if (val === 'usage') {
     await nextTick();
     await nextTick();
-    try { usageViewRef.value?.resize(); } catch { /* ignore */ }
+    try {
+      usageViewRef.value?.resize();
+    } catch {
+      /* ignore */
+    }
   }
 });
 
 const visible = computed({
   get: () => props.show,
   set: (val: boolean) => emit('update:show', val),
+});
+
+// need23：向页内卡片提供"关闭抽屉"通道（如进入子会话后需让出主工作台）
+provideSettingsDrawer({
+  close: () => {
+    visible.value = false;
+  },
 });
 </script>
 <style scoped>

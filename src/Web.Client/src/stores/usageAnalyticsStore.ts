@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { getHostBridge, type UsageFilter, type UsagePreset, type UsageOverview, type UsageTrend, type UsageProviderShareItem, type UsagePage, type UsageFilterOptions } from '@/bridge/hostBridge';
+import {
+  getHostBridge,
+  type UsageFilter,
+  type UsagePreset,
+  type UsageOverview,
+  type UsageTrend,
+  type UsageProviderShareItem,
+  type UsagePage,
+  type UsageFilterOptions,
+} from '@shared/bridge/hostBridge';
 
 export const USAGE_PRESETS: Array<{ key: UsagePreset; label: string; testid: string }> = [
   { key: 'today', label: '今日', testid: 'usage-preset-today' },
@@ -53,7 +62,9 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     try {
       const res = await getHostBridge().getUsageFilterOptions();
       if (res.ok && res.data) options.value = res.data;
-    } catch { /* 降级空选项 */ }
+    } catch {
+      /* 降级空选项 */
+    }
   }
 
   async function refresh(): Promise<void> {
@@ -95,8 +106,26 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   }
 
   return {
-    preset, customRange, providerIds, modelKeys, sources, estimatedOnly, metric, page, pageSize,
-    loading, error, options, overview, trend, share, pageData,
-    filter, modelOptions, loadOptions, refresh, setPreset,
+    preset,
+    customRange,
+    providerIds,
+    modelKeys,
+    sources,
+    estimatedOnly,
+    metric,
+    page,
+    pageSize,
+    loading,
+    error,
+    options,
+    overview,
+    trend,
+    share,
+    pageData,
+    filter,
+    modelOptions,
+    loadOptions,
+    refresh,
+    setPreset,
   };
 });

@@ -1,11 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import {
-  getHostBridge,
-  haloEventBus,
-  type AgentConfigDocument,
-  type BridgeResponse,
-} from '@/bridge/hostBridge';
+import { getHostBridge, haloEventBus, type AgentConfigDocument, type BridgeResponse } from '@shared/bridge/hostBridge';
 
 /** need08：智能体行为配置 store（对标 promptStore/configStore）。 */
 export const useAgentConfigStore = defineStore('agentConfig', () => {
@@ -83,6 +78,7 @@ export const useAgentConfigStore = defineStore('agentConfig', () => {
     if (m.includes('submaxiterations') || message.includes('子轮次')) return 'subMaxIterations';
     if (m.includes('subagentenabled') || message.includes('总开关')) return 'subAgentEnabled';
     if (m.includes('suballow') || message.includes('权限')) return 'subPerms';
+    if (m.includes('turntimeout') || message.includes('单轮最大时间') || message.includes('单轮总体超时')) return 'turnTimeoutMs';
     if (m.includes('maxiterations') || message.includes('轮次')) return 'maxIterations';
     if (m.includes('execmaxtimeoutms') || message.includes('上限')) return 'execMaxTimeoutMs';
     return 'execDefaultTimeoutMs';
