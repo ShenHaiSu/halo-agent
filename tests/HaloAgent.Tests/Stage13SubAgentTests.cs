@@ -205,7 +205,7 @@ public sealed class Stage13SubAgentTests : IDisposable
                 _service,
                 _budgetService,
                 gateway,
-                ToolRegistryFactory.ForMain(new SubPolicySnapshot()),
+                ToolRoleRegistries.ForMainRole(new SubPolicySnapshot()),
                 _storageManager,
                 agentConfigService: _agentService
             );
@@ -244,7 +244,7 @@ public sealed class Stage13SubAgentTests : IDisposable
             _service,
             _budgetService,
             gw,
-            ToolRegistryFactory.ForMain(p),
+            ToolRoleRegistries.ForMainRole(p),
             _storageManager,
             agentConfigService: _agentService,
             coordinator: coord,
