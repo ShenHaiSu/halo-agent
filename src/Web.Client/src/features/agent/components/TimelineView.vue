@@ -14,7 +14,10 @@
             class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
             @contextmenu.prevent="emit('user-menu', $event, item)"
           >
-            {{ item.msg?.content }}
+            <template v-for="(part, pi) in userParts(String(item.msg?.content ?? ''))" :key="pi">
+              <span v-if="part.type === 'text'">{{ part.text }}</span>
+              <SkillPillChip v-else :scope="part.scope" :name="part.name" class="inline-chip" />
+            </template>
             <div v-if="msgImages(item.msg).length" class="mt-1.5 flex flex-wrap gap-1.5" data-testid="msg-images">
               <template v-for="img in msgImages(item.msg)" :key="img.imageId">
                 <n-image
@@ -146,6 +149,9 @@ import type { DisplaySeg } from '../composables/useTimeline';
 import ToolCallCard from './ToolCallCard.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import TurnGroupItem from './TurnGroupItem.vue';
+// need22-F04：user 消息分段渲染（文本段 + skill chip）
+import SkillPillChip from './SkillPillChip.vue';
+import { userParts } from '../utils/userParts';
 
 defineProps<{
   isEmpty: boolean;

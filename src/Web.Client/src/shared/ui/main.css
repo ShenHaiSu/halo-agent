@@ -215,3 +215,53 @@ html.light .toc-bubble--user { background: #eff6ff; }
 @keyframes halo-anchor-flash { 0% { background-color: rgba(59,130,246,.22); } 100% { background-color: transparent; } }
 .timeline-anchor-flash { animation: halo-anchor-flash 1.2s ease-out 1; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) { .timeline-anchor-flash { animation: none; outline: 2px solid var(--accent-primary); } }
+
+/* need22-F04：技能 pill（编辑区 .skill-tag）与 chip（历史 .skill-chip）同源 token
+   scope 徽标：global 紫 / project 蓝（与后端 L0 索引行语义一致） */
+.skill-tag,
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-subtle, #374151);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  background: var(--bg-elevated, #1f2937);
+  vertical-align: middle;
+  margin: 0 1px;
+  user-select: none;
+  white-space: nowrap;
+}
+.skill-tag .skill-scope,
+.skill-chip .skill-chip-scope {
+  font-size: 10px;
+  opacity: 0.7;
+  text-transform: lowercase;
+}
+.skill-tag .skill-scope[data-scope='project'],
+.skill-chip[data-scope='project'] .skill-chip-scope {
+  color: #38bdf8;
+}
+.skill-tag .skill-scope[data-scope='global'],
+.skill-chip[data-scope='global'] .skill-chip-scope {
+  color: #a78bfa;
+}
+.skill-tag .skill-name,
+.skill-chip .skill-chip-name {
+  font-family: var(--font-mono, monospace);
+}
+/* 叉号：复用 .img-x 的样式 */
+.skill-tag .skill-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  color: inherit;
+}
+.skill-tag .skill-x:hover {
+  color: #f43f5e;
+}

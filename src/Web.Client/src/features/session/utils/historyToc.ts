@@ -1,5 +1,7 @@
 /** need19：历史目录纯函数（无 Vue / 无 DOM 依赖，可裸 node 断言） */
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
+// need22-F04：目录摘要 strip skill marker（显示"帮我改代码…"而不是 [[skill:...]]）
+import { stripSkillMarkers } from '../../../shared/utils/skillMarker.ts';
 
 export type TocRole = 'user' | 'assistant' | 'system';
 export interface TocItem {
@@ -41,6 +43,8 @@ const LABEL_MAX = 15;
 export function toDisplayText(raw: string | null | undefined): string {
   let s = String(raw ?? '');
   if (s.length > MAX_SCAN) s = s.slice(0, MAX_SCAN);
+  // 0) need22-F04：去掉技能 marker（目录里不显示 [[skill:...]] 内部语法）
+  s = stripSkillMarkers(s);
   // 1) 去掉图片占位：[image:xxx] / ![alt](path) / <img ...>
   s = s
     .replace(/\[image:[^\]]*\]/gi, ' ')
