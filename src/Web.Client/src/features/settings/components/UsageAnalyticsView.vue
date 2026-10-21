@@ -244,6 +244,23 @@ let pieChart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 const dbStatus = ref<UsageDbStatus | null>(null);
 
+type ChartOption = Parameters<echarts.ECharts['setOption']>[0];
+
+/**
+ * 统一以「整体替换(notMerge)」语义更新图表。
+ *
+ * 背景：ECharts 默认是**合并**语义（echarts.js setOption → Global.mergeOption → normalMerge，
+ * util/model.js prepareResult: "Mode normalMerge: all existings kept"）。
+ * 合并语义下，筛选后被剔除的旧系列不会被移除，而是保留旧 data 继续渲染
+ * （Global.js: 未被映射的旧系列走 mergeOption({}, this)），
+ * 表现为「堆叠趋势图残留已筛掉的模型 + 旧值柱子、legend 仍显示旧模型」。
+ * notMerge:true 才会整体重建 option。
+ */
+function setOptionReplace(chart: echarts.ECharts | null, option: ChartOption): void {
+  if (!chart) return;
+  chart.setOption(option, { notMerge: true });
+}
+
 const providerOptions = computed(() =>
   store.options.providers.map((p) => ({ label: displayProviderName(p.id, p.name, masked.value), value: p.id, realName: p.name }))
 );
@@ -389,7 +406,7 @@ function renderStacked(): void {
     data: s.values,
   }));
   const pointCount = dates.length * Math.max(1, series.length);
-  stackedChart.setOption({
+  setOptionReplace(stackedChart, {
     backgroundColor: 'transparent',
     color: STACK_COLORS,
     textStyle: baseText(),
@@ -446,7 +463,7 @@ function renderStacked(): void {
 function renderHit(): void {
   if (!hitEl.value) return;
   if (!hitChart) hitChart = echarts.init(hitEl.value, null, { renderer: 'canvas' });
-  hitChart.setOption({
+  setOptionReplace(hitChart, {
     backgroundColor: 'transparent',
     textStyle: baseText(),
     tooltip: {
@@ -502,7 +519,7 @@ function renderPie(): void {
   if (!pieEl.value) return;
   if (!pieChart) pieChart = echarts.init(pieEl.value, null, { renderer: 'canvas' });
   const maskOn = masked.value;
-  pieChart.setOption({
+  setOptionReplace(pieChart, {
     backgroundColor: 'transparent',
     color: STACK_COLORS,
     textStyle: baseText(),
@@ -530,7 +547,30 @@ function renderPie(): void {
   });
 }
 
-function renderAll(): void {
+/**
+ * 幂等渲染守卫：只有"决定图表内容的输入"变化时才真正重绘。
+ * 背景：数据变化由 watch 触发渲染，而 refresh() 之后又会 queueRenderAll() 一次；
+ * 合并语义下重复 setOption 无感，notMerge 下会**重播动画**（筛选后图表闪一下）。
+ */
+let lastRenderTrend: unknown = null;
+let lastRenderShare: unknown = null;
+let lastRenderMetric = '';
+let lastRenderMask = false;
+let lastRenderTheme = '';
+
+function renderAll(force = false): void {
+  const same =
+    store.trend === lastRenderTrend &&
+    store.share === lastRenderShare &&
+    store.metric === lastRenderMetric &&
+    masked.value === lastRenderMask &&
+    appearance.themeMode === lastRenderTheme;
+  if (same && !force) return;
+  lastRenderTrend = store.trend;
+  lastRenderShare = store.share;
+  lastRenderMetric = store.metric;
+  lastRenderMask = masked.value;
+  lastRenderTheme = appearance.themeMode;
   try {
     renderStacked();
     renderHit();
@@ -636,7 +676,8 @@ onBeforeUnmount(() => {
   pieChart = null;
 });
 
-defineExpose({ refresh: () => store.refresh(), resize: () => renderAll() });
+// resize：抽屉打开/切 Tab 时强制重绘一次（容器宽度变化后重建 option）
+defineExpose({ refresh: () => store.refresh(), resize: () => renderAll(true) });
 </script>
 
 <style scoped>
