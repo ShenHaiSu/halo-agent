@@ -10,7 +10,7 @@ public sealed partial class HostBridgeFacade
 {
     private UsageMetricsService? _usageMetricsOpt;
 
-    public UsageMetricsService UsageMetricsServiceInternal =>
+    private UsageMetricsService UsageMetricsServiceInternal =>
         _usageMetricsOpt ??= new UsageMetricsService(_storageManager);
 
     private static UsageFilter ParseUsageFilter(string? filterJson)

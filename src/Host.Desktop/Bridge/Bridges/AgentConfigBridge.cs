@@ -19,7 +19,7 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
-            var (doc, isDefault, fallback) = AgentConfigService.LoadWithMeta();
+            var (doc, isDefault, fallback) = _agentConfigService.LoadWithMeta();
             return Task.FromResult(
                 BridgeResponse<AgentConfigWithMeta>.Success(
                     ToAgentWithMeta(doc, isDefault, fallback)
@@ -143,38 +143,6 @@ public sealed partial class HostBridgeFacade
         meta.IsDefault = isDefault;
         meta.FallbackReason = fallback;
         return meta;
-    }
-
-    /// <summary>need09-05：待接入图片暂存（startAgentTurn 落盘 → Orchestrator 轮首 Take 后并入 user 消息 Images）。</summary>
-    public static class PendingSessionImages
-    {
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<
-            string,
-            List<Core.Models.ChatImageRef>
-        > _map = new(StringComparer.Ordinal);
-
-        public static void Put(string sessionId, List<Core.Models.ChatImageRef> refs)
-        {
-            if (string.IsNullOrWhiteSpace(sessionId) || refs == null || refs.Count == 0)
-                return;
-            _map[sessionId.Trim()] = refs;
-        }
-
-        public static List<Core.Models.ChatImageRef> Take(string sessionId)
-        {
-            if (
-                !string.IsNullOrWhiteSpace(sessionId)
-                && _map.TryRemove(sessionId.Trim(), out var refs)
-            )
-                return refs;
-            return new List<Core.Models.ChatImageRef>();
-        }
-
-        public static void Clear(string sessionId)
-        {
-            if (!string.IsNullOrWhiteSpace(sessionId))
-                _map.TryRemove(sessionId.Trim(), out _);
-        }
     }
 
     /// <summary>need09-05：startAgentTurn 附件落盘 + 占位符重写。attachmentsJson: [{fileName,mime?,base64|dataUrl}]；userText 内 [image:i] 按下标替换为[图片：fileName]。</summary>

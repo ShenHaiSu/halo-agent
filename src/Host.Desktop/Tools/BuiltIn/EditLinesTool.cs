@@ -13,10 +13,11 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// 天然免疫缩进 / Tab / 换行 / 超长单行问题，行号口径与 read_file 完全一致；
 /// 支持 expected_hash 防并发覆盖（不符即拒绝），空 new_text 需显式 allow_empty=true。
 /// </summary>
+[HaloAgent.Tools.Tool("edit_lines")]
 public sealed class EditLinesTool : IToolHandler
 {
     /// <summary>R4：成功回吐上限（与 edit_file 一致）。</summary>
-    internal const int MaxSuccessOutputChars = EditFileTool.MaxSuccessOutputChars;
+    internal const int MaxSuccessOutputChars = EditFileHelpers.MaxSuccessOutputChars;
 
     public string Name => "edit_lines";
 
@@ -406,7 +407,7 @@ public sealed class EditLinesTool : IToolHandler
 
                 return Task.FromResult(
                     ToolResult.Ok(
-                        EditFileTool.ClampOutput(preview.ToString(), MaxSuccessOutputChars),
+                        EditFileHelpers.ClampOutput(preview.ToString(), MaxSuccessOutputChars),
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -495,7 +496,7 @@ public sealed class EditLinesTool : IToolHandler
             }
 
             var ok = ToolResult.Ok(
-                EditFileTool.ClampOutput(sb.ToString(), MaxSuccessOutputChars),
+                EditFileHelpers.ClampOutput(sb.ToString(), MaxSuccessOutputChars),
                 durationMs: sw.ElapsedMilliseconds
             );
             try

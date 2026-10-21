@@ -9,6 +9,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// mode=text 走 EditFileTool 引擎；mode=lines 走 EditLinesTool 引擎。老 edit_file/edit_lines 保留。
 /// need17-01：Exposure=Hidden，可执行但不声明；Description 首行 DEPRECATED。
 /// </summary>
+[HaloAgent.Tools.Tool("edit")]
 public sealed class EditTool : IToolHandler
 {
     private readonly EditFileTool _text = new();

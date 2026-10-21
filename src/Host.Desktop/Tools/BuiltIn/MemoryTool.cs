@@ -3,6 +3,7 @@ using Host.Desktop.Tools.Validation;
 namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>need09-07：memory_tool（ facts/偏好持久记忆自主 CRUD，默认 pin=pinned，默认写 project 域）。</summary>
+[HaloAgent.Tools.Tool("memory_tool")]
 public sealed class MemoryTool : IToolHandler
 {
     // NEED17-05 §5.1: Exposure=Direct（编码任务默认不打扰；激活集/preset 裁剪由基础组 01 落子，本文件只定声明）。
@@ -59,5 +60,5 @@ public sealed class MemoryTool : IToolHandler
         ToolCallDto call,
         ToolContext context,
         CancellationToken ct = default
-    ) => SkillToolShared.ExecuteKindAsync(isSkill: false, call, context, ct);
+    ) => SkillDispatcher.ExecuteKindAsync(isSkill: false, call, context, ct);
 }

@@ -7,9 +7,13 @@ using Host.Desktop.Tools.Validation;
 namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>need16 goal_tool：主写子读（子写网关式强拒绝 + [GOAL_DENIED] 前缀）。</summary>
+[HaloAgent.Tools.Tool("goal_tool")]
 public sealed class GoalTool : IToolHandler
 {
     private readonly Func<string, string, Services.GoalService>? _serviceFactory;
+
+    public GoalTool()
+        : this(serviceFactory: null) { }
 
     public GoalTool(Func<string, string, Services.GoalService>? serviceFactory = null)
     {

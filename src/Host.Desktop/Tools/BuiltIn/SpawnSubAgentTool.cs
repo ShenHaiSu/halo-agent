@@ -6,9 +6,13 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// need13：spawn_subagent（仅 Main registry 注册；实际执行由 Orchestrator 分流承接，见 04 §3）。
 /// 此处 ExecuteAsync 只做兜底（防 HostBridgeFacade.ExecuteTool 单跑误调）。
 /// </summary>
+[HaloAgent.Tools.Tool("spawn_subagent")]
 public sealed class SpawnSubAgentTool : IToolHandler
 {
     private readonly bool _enabled;
+
+    public SpawnSubAgentTool()
+        : this(enabled: true) { }
 
     public SpawnSubAgentTool(bool enabled = true)
     {

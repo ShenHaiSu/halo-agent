@@ -89,7 +89,7 @@ public sealed class Stage13SubAgentTests : IDisposable
     [Fact(DisplayName = "S13: 子 skill 写拒")]
     public async Task Sub_SkillWriteDenied()
     {
-        var r = await SkillToolShared.ExecuteKindAsync(
+        var r = await SkillDispatcher.ExecuteKindAsync(
             true,
             new ToolCallDto(
                 "c1",
@@ -106,7 +106,7 @@ public sealed class Stage13SubAgentTests : IDisposable
     [Fact(DisplayName = "S13: 子 skill 读放行")]
     public async Task Sub_SkillReadAllowed()
     {
-        var r = await SkillToolShared.ExecuteKindAsync(
+        var r = await SkillDispatcher.ExecuteKindAsync(
             true,
             new ToolCallDto("c1", "skill_tool", "{\"action\":\"list\",\"scope\":\"project\"}"),
             SubCtx(),
@@ -118,7 +118,7 @@ public sealed class Stage13SubAgentTests : IDisposable
     [Fact(DisplayName = "S13: 子 memory 写拒")]
     public async Task Sub_MemoryWriteDenied()
     {
-        var r = await SkillToolShared.ExecuteKindAsync(
+        var r = await SkillDispatcher.ExecuteKindAsync(
             false,
             new ToolCallDto(
                 "c1",

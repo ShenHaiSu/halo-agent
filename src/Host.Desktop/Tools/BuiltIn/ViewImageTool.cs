@@ -13,6 +13,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤8MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
 /// → ToolResult.Success(摘要文本, Images=[ref])。base64 永不进事件/日志。
 /// </summary>
+[HaloAgent.Tools.Tool("view_image")]
 public sealed class ViewImageTool : IToolHandler
 {
     public const int SummaryMaxChars = 6000;

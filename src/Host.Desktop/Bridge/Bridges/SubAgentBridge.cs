@@ -74,7 +74,7 @@ public sealed partial class HostBridgeFacade
                     .GetResult();
                 string? parent = meta?.ParentSessionId;
                 if (!string.IsNullOrWhiteSpace(parent))
-                    ok = SubCoordinator.CancelSub(parent!, subSessionId.Trim());
+                    ok = _subCoordinator?.CancelSub(parent!, subSessionId.Trim()) ?? false;
             }
             catch { }
             if (ok)
@@ -110,7 +110,7 @@ public sealed partial class HostBridgeFacade
                     Memory = cfg.SubAllowMemoryWrite,
                 },
             };
-            var active = SubCoordinator.GetActive(parentSessionId);
+            var active = _subCoordinator?.GetActive(parentSessionId) ?? Enumerable.Empty<SubHandle>();
             var subs = await _workspaceSessionService
                 .GetSubSessionsAsync(workspaceId, parentSessionId)
                 .ConfigureAwait(false);
@@ -163,7 +163,7 @@ public sealed partial class HostBridgeFacade
             if (string.IsNullOrWhiteSpace(meta.ParentSessionId))
                 return BridgeResponse<SubSessionDetailDto>.Fail("NOT_A_SUB", "该会话不是子会话");
             string parent = meta.ParentSessionId!.Trim();
-            var active = SubCoordinator.GetActive(parent);
+            var active = _subCoordinator?.GetActive(parent) ?? Enumerable.Empty<SubHandle>();
             bool isRunning = active.Any(h =>
                 string.Equals(h.SubSessionId, subSessionId, StringComparison.OrdinalIgnoreCase)
             );

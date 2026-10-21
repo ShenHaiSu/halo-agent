@@ -11,6 +11,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// 模型传 questions（1-4 题，选项 0-6 个）→ Publish agent:ask-user-requested → 阻塞等前端 resolveAskUser；
 /// 超时/取消转 Fail 不挂起；第二并发直接 Fail。返回 answers + 摘要（500 截断）+ json 块。
 /// </summary>
+[HaloAgent.Tools.Tool("ask_user")]
 public sealed class AskUserTool : IToolHandler
 {
     public const int SummaryMaxChars = 500;

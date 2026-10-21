@@ -30,7 +30,7 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
-            var (doc, isDefault, fallback) = PromptConfigService.LoadWithMeta();
+            var (doc, isDefault, fallback) = _promptConfigService.LoadWithMeta();
             return Task.FromResult(
                 BridgeResponse<PromptConfigWithMeta>.Success(ToWithMeta(doc, isDefault, fallback))
             );

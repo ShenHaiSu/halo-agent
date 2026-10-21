@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- need21-B01: 继承 develop/Directory.Build.props (net6.0-windows/Nullable/Version)，此处不重复定义 -->
+</Project>

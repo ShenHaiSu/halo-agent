@@ -12,6 +12,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// P2-1 dry_run；P1-3 hash 回吐。
 /// need22-P0 S1：越界一律拒绝（无警告放行）；S3：NormalizedJson 单次解析；S5：错误回显相对路径。
 /// </summary>
+[HaloAgent.Tools.Tool("write_file")]
 public sealed class WriteFileTool : IToolHandler
 {
     /// <summary>need15 P0-2：默认上限 250KB（约 256_000 字节），可热调。</summary>

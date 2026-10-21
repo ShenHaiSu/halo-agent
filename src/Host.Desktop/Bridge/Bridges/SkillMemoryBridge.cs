@@ -4,47 +4,13 @@ using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
-/// <summary>need10-02：Skill/Memory 只读管理 Bridge DTO。</summary>
-public class SkillMemoryListItemDto
-{
-    public string Name { get; set; } = string.Empty;
-    public string Scope { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public string Summary { get; set; } = string.Empty;
-    public string Pin { get; set; } = string.Empty;
-    public bool Enabled { get; set; }
-    public int Priority { get; set; }
-    public int Version { get; set; }
-    public int EstTokens { get; set; }
-    public int Chars { get; set; }
-    public string Hash { get; set; } = string.Empty;
-    public bool HasAssets { get; set; }
-    public string UpdatedAtUtc { get; set; } = string.Empty;
-    public string DirPath { get; set; } = string.Empty;
-}
 
-/// <summary>need10-02：详情 DTO（正文截断 8000→前 800 字）。</summary>
-public sealed class SkillMemoryDetailDto : SkillMemoryListItemDto
-{
-    public string BodyPreview { get; set; } = string.Empty;
-    public bool Truncated { get; set; }
-    public int BodyTotalChars { get; set; }
-}
-
-/// <summary>need10-02：写操作结果。</summary>
-public sealed class SkillMemoryOpResult
-{
-    public bool Ok { get; set; }
-    public string? BakFileName { get; set; }
-    public string Notice { get; set; } = string.Empty;
-}
-
-/// <summary>need10-02：Skill/Memory 只读/受限写 Bridge（复用 SkillMemoryService，Bridge 只做参数翻译+工作区解析+事件透传）。</summary>
+/// <summary>need21-B02: SkillMemory 垂直切片（DTO 见 SkillMemoryModels；OpenSkillMemoryFolder 已移入 ShellBridge）。</summary>
 public sealed partial class HostBridgeFacade
 {
     private SkillMemoryService? _skillMemoryServiceOpt;
 
-    public SkillMemoryService SkillMemoryServiceInternal =>
+    private SkillMemoryService SkillMemoryServiceInternal =>
         _skillMemoryServiceOpt ??= new SkillMemoryService(_storageManager);
 
     private static SkillMemoryKind ParseSkillKind(string kind)
@@ -396,58 +362,6 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("DeleteSkillMemory failed", ex);
             return BridgeResponse<SkillMemoryOpResult>.Fail("SKILL_BRIDGE_ERROR", ex.Message);
-        }
-    }
-
-    /// <summary>need10-02：打开文件夹。查到 DirPath 后复用 OpenPathInExplorer 打开目录；查不到 → SKILL_NOT_FOUND。</summary>
-    public async Task<BridgeResponse<bool>> OpenSkillMemoryFolder(
-        string kind,
-        string scope,
-        string name,
-        string? workspaceId
-    )
-    {
-        try
-        {
-            var k = ParseSkillKind(kind);
-            string s = (scope ?? string.Empty).Trim().ToLowerInvariant();
-            if (s != "global" && s != "project")
-                return BridgeResponse<bool>.Fail(
-                    "SKILL_VALIDATION",
-                    $"打开文件夹 scope 须为 global|project（收到 '{scope}'）。"
-                );
-            string? wsRoot = await ResolveWorkspaceRootAsync(workspaceId).ConfigureAwait(false);
-            var sc = s == "global" ? SkillMemoryScope.Global : SkillMemoryScope.Project;
-            SkillMemoryEntry? entry;
-            try
-            {
-                entry = SkillMemoryServiceInternal.Get(sc, k, name ?? string.Empty, wsRoot);
-            }
-            catch (SkillMemoryValidationException vex)
-            {
-                return BridgeResponse<bool>.Fail(vex.Code, vex.Message);
-            }
-            if (entry == null || !Directory.Exists(entry.DirPath))
-                return BridgeResponse<bool>.Fail(
-                    "SKILL_NOT_FOUND",
-                    $"条目不存在：{(name ?? string.Empty).Trim()}。"
-                );
-            var res = await OpenPathInExplorer(entry.DirPath).ConfigureAwait(false);
-            if (!res.Ok)
-                return BridgeResponse<bool>.Fail(
-                    res.Code ?? "OPEN_EXPLORER_ERROR",
-                    res.Message ?? "打开文件夹失败"
-                );
-            return BridgeResponse<bool>.Success(true);
-        }
-        catch (SkillMemoryValidationException vex)
-        {
-            return BridgeResponse<bool>.Fail(vex.Code, vex.Message);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Error("OpenSkillMemoryFolder failed", ex);
-            return BridgeResponse<bool>.Fail("SKILL_BRIDGE_ERROR", ex.Message);
         }
     }
 }

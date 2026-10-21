@@ -7,6 +7,9 @@ namespace Host.Desktop.Tools;
 /// need13：主/子角色过滤注册工厂（03 §3.2）。
 /// 主包独占 spawn 真身；子包按策略裁剪（exec/file 可配，skill/memory 只读，ask/spawn 禁用桩）。
 /// </summary>
+[System.Obsolete(
+    "need21-B04: ToolRegistryFactory 将在 B05 物理删除，请改用 ToolRegistry 扫描注册 + ToolPipeline。"
+)]
 public static class ToolRegistryFactory
 {
     public static ToolRegistry ForMain(SubPolicySnapshot policy)
