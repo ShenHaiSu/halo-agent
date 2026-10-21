@@ -243,6 +243,17 @@ public sealed partial class AgentOrchestrator
                 null
             );
         }
+        // need22-B02：user 文本里的 [[skill:scope/name]] 在发包前就地展开为 readme 正文全文；
+        // 落盘历史保持 marker 原文（历史可读），展开只发生在内存里的发包列表。
+        // 顺序：必须在 TruncateToBudget 之前 ⇒ 上下文预算按展开后的真实体积裁剪。
+        try
+        {
+            history = ExpandSkillMarkers(history, ctx.Workspace?.RootPath);
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn("[SkillActivation] 展开阶段异常，已降级为原文发送", ex);
+        }
         // need05-02：budgeted 已是稳定前缀（平时全量、超 92% 高水位才块裁）；requestMessages 顺序即 [system.stable+ephemeral]+历史，不再调序。
         // need09-02：常驻 L0 计入 usedInput 分子（自然推高水位）。
         List<UnifiedChatMessage> budgeted = _budgetService.TruncateToBudget(
@@ -377,6 +388,92 @@ public sealed partial class AgentOrchestrator
         ctx.RequestMessages = requestMessages;
         ctx.RequestId = requestId;
         return (PhaseOutcome.Continue(), new RequestBatch { Request = request });
+    }
+
+    /// <summary>
+    /// need22-B02：把 user 消息里的技能标记就地展开为 readme 正文全文（仅内存，不落盘）。
+    /// 只处理 user 消息（assistant/tool 文本里的 marker 不展开）；拷贝消息而非原地改，
+    /// 显式复制 init 只读属性 Id / CreatedAtUtc（图片引用共享，不深拷贝）。
+    /// </summary>
+    private List<UnifiedChatMessage> ExpandSkillMarkers(
+        List<UnifiedChatMessage> history,
+        string? workspaceRoot
+    )
+    {
+        if (history.Count == 0)
+            return history;
+        var expander = new SkillActivationExpander(
+            (scope, name) => ResolveSkillBody(scope, name, workspaceRoot)
+        );
+        for (int i = 0; i < history.Count; i++)
+        {
+            var msg = history[i];
+            if (msg == null)
+                continue;
+            if (!string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!SkillActivationExpander.HasMarker(msg.Content))
+                continue;
+
+            string expanded = expander.Expand(msg.Content, workspaceRoot);
+            if (string.Equals(expanded, msg.Content, StringComparison.Ordinal))
+                continue;
+
+            // need22-B02：拷贝消息，不改原对象（history 里其它逻辑可能复用同一实例）
+            var copy = new UnifiedChatMessage
+            {
+                Id = msg.Id,
+                Role = msg.Role,
+                Content = expanded,
+                ReasoningContent = msg.ReasoningContent,
+                ToolCalls = msg.ToolCalls,
+                ToolCallId = msg.ToolCallId,
+                Name = msg.Name,
+                Images = msg.Images,
+                CreatedAtUtc = msg.CreatedAtUtc,
+            };
+            history[i] = copy;
+        }
+        return history;
+    }
+
+    /// <summary>
+    /// need22-B02：取技能正文（BodyMarkdown = 去掉 frontmatter 后的 body）。
+    /// 只经 SkillMemoryService.Get 取数（名字合法性/目录逃逸/readme 缺失/正文超限均已在服务内校验）；
+    /// 已停用（Enabled=false）视为不可读；任何异常都吞掉并 Warn ⇒ 轮次不中断。
+    /// </summary>
+    private string? ResolveSkillBody(string scope, string name, string? workspaceRoot)
+    {
+        try
+        {
+            var svc = _skillMemoryService;
+            if (svc == null)
+            {
+                if (_storageManager == null)
+                    return null;
+                svc = _fallbackSkillMemoryService;
+                if (svc == null)
+                {
+                    svc = new SkillMemoryService(_storageManager);
+                    _fallbackSkillMemoryService = svc;
+                }
+            }
+            var sc = string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase)
+                ? SkillMemoryScope.Project
+                : SkillMemoryScope.Global;
+            var entry = svc.Get(sc, SkillMemoryKind.Skill, name, workspaceRoot);
+            if (entry == null || !entry.Enabled)
+                return null; // 不存在或已停用 ⇒ 不展开
+            return entry.BodyMarkdown;
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn(
+                $"[SkillActivation] 读取技能失败：{scope}/{name}",
+                ex
+            );
+            return null;
+        }
     }
 
     private async Task<(PhaseOutcome Outcome, bool ProceedToDispatch)> DecideAsync(

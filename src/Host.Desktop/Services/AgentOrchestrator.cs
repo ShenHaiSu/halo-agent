@@ -44,6 +44,12 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     private readonly ILlmGatewayClient _gatewayClient;
     private readonly ToolRegistry _toolRegistry;
     private readonly StoragePathManager? _storageManager;
+
+    /// <summary>need22-B02：技能记忆服务（可选注入；为 null 时回退 new SkillMemoryService(_storageManager)）。</summary>
+    private readonly SkillMemoryService? _skillMemoryService;
+
+    /// <summary>need22-B02：回退构造的技能记忆服务缓存（避免每次取正文重复初始化目录）。</summary>
+    private SkillMemoryService? _fallbackSkillMemoryService;
     private readonly ProviderConfigService? _providerConfigService;
     private readonly PromptConfigService? _promptConfigService;
     private readonly AgentConfigService? _agentConfigService;
@@ -71,7 +77,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         SubAgentCoordinator? coordinator = null,
         SubPolicySnapshot? subPolicy = null,
         IAgentEventSink? sink = null,
-        string agentRole = "main"
+        string agentRole = "main",
+        SkillMemoryService? skillMemoryService = null
     )
     {
         _sessionService = sessionService ?? throw new ArgumentNullException(nameof(sessionService));
@@ -79,6 +86,7 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
         _toolRegistry = toolRegistry ?? new ToolRegistry();
         _storageManager = storageManager;
+        _skillMemoryService = skillMemoryService;
         _providerConfigService = providerConfigService;
         _promptConfigService = promptConfigService;
         _agentConfigService = agentConfigService;

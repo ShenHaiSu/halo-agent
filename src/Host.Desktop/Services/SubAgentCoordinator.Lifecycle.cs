@@ -54,6 +54,12 @@ public sealed partial class SubAgentCoordinator
         return s.Length > max ? s.Substring(0, max) : s;
     }
 
+    // need22-B02：子代理发包路径说明（契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.3）：
+    // 子代理的 prompt 由主代理构造（不含用户手输的 [[skill:...]] 标记），且子会话标题由
+    // WorkspaceSessionService.AppendSessionMessageAsync 统一生成（标题 strip 已覆盖），
+    // 因此本期不在子代理路径单独接技能展开；若将来子代理支持用户标记，
+    // 其发包复用 AgentOrchestrator/TurnPlanner 时展开会自动生效。
+
     public IReadOnlyList<SubHandle> GetActive(string parentSessionId)
     {
         if (_trees.TryGetValue(parentSessionId, out var list))

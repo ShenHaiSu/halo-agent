@@ -83,7 +83,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             {
                 if (!string.IsNullOrWhiteSpace(message.Content))
                 {
-                    var trimmed = message.Content.Trim();
+                    // need22-B02：技能标记不参与标题生成（否则标题会变成 "[[sk"）
+                    string titleSource = SkillActivationExpander.StripMarkers(message.Content);
+                    var trimmed = titleSource.Trim();
                     var firstLine =
                         trimmed
                             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)

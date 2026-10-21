@@ -267,6 +267,9 @@ public sealed class CompactionService : ICompactionService
                             .Append(' ');
                 }
                 body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
+                // need22-B02：TODO（本期不改，契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.2）：
+                // 压缩摘要里的 [[skill:scope/name]] 标记属于噪音，未来可在此处用
+                // SkillActivationExpander.StripMarkers(m.Content) 去掉；当前 marker 短、语义可接受，保持原样。
             }
         }
 
