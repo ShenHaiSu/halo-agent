@@ -24,6 +24,25 @@ public sealed class AppSettingsConfig
 }
 
 /// <summary>
+/// 位于 &lt;DataRootPath&gt;\config\ui-state.json 的 UI 活跃状态（上次离开时的工作区+会话，只恢复到 main）。
+/// 独立文件：避免与 app-settings.json 多写者读-改-写覆盖；单实例互斥，无跨进程锁需求。
+/// </summary>
+public sealed class UiActiveState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string? LastWorkspaceId { get; set; }
+    public string? LastSessionId { get; set; }
+    public string LastActiveAtUtc { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+}
+
+/// <summary>UI 活跃状态桥接 DTO（只含工作区+会话 ID）。</summary>
+public sealed class UiActiveStateDto
+{
+    public string? WorkspaceId { get; set; }
+    public string? SessionId { get; set; }
+}
+
+/// <summary>
 /// 宿主系统运行环境与诊断信息 DTO。
 /// </summary>
 public sealed class SystemRuntimeInfo

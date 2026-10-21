@@ -644,5 +644,11 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         data: { dbPath: 'mock-usage.db', recordCount: 42, dbSizeBytes: 49152, oldestDate: '2026-10-11', newestDate: '2026-10-17' },
       };
     },
+    async getLastActive() {
+      return { ok: true, data: { workspaceId: null, sessionId: null } };
+    },
+    async setLastActive() {
+      return { ok: true, data: true };
+    },
   };
 }

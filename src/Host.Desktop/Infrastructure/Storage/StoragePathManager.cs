@@ -84,6 +84,8 @@ public sealed class StoragePathManager
      /// <summary>need09-01：标准子目录清单（含 skills/memory）。</summary>
      public static IReadOnlyList<string> ManagedSubDirectoryNames => ManagedSubDirectories;
      public string AppSettingsFilePath => Path.Combine(ConfigDirectory, "app-settings.json");
+    /// <summary>UI 活跃状态文件（独立于 app-settings，避免多写者读-改-写覆盖；随数据根迁移）。</summary>
+    public string UiStateFilePath => Path.Combine(ConfigDirectory, "ui-state.json");
 
     private StoragePathManager(
         string bootstrapFilePath,
@@ -271,6 +273,20 @@ public sealed class StoragePathManager
             var defaultSettings = new AppSettingsConfig();
             AtomicFileWriter.WriteJsonAtomic(AppSettingsFilePath, defaultSettings);
         }
+    }
+
+    /// <summary>读取 UI 活跃状态（无文件/空/坏 JSON 一律回默认空状态，永不抛）。</summary>
+    public UiActiveState LoadUiState()
+    {
+        var state = AtomicFileWriter.ReadJsonOrDefault<UiActiveState>(UiStateFilePath);
+        return state ?? new UiActiveState();
+    }
+
+    /// <summary>保存 UI 活跃状态（切换即写，原子落盘；单实例互斥，无锁需求）。</summary>
+    public async Task SaveUiStateAsync(UiActiveState state, CancellationToken ct = default)
+    {
+        state.LastActiveAtUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        await AtomicFileWriter.WriteJsonAtomicAsync(UiStateFilePath, state, ct).ConfigureAwait(false);
     }
 
     /// <summary>
