@@ -53,7 +53,7 @@ jobs:
         run: build\clean.cmd
 
       - name: Restore
-        run: dotnet restore HaloAgent.sln
+        run: dotnet restore HaloAgent.sln -r win-x64
 
       - name: Format check (csharpier)
         run: |
