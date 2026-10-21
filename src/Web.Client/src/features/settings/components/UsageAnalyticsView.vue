@@ -224,7 +224,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { useUsageAnalyticsStore, USAGE_PRESETS } from '@/stores/usageAnalyticsStore';
 import { usePrivacyStore } from '@/stores/privacyStore';
 import { useAppearanceStore } from '@/stores/appearanceStore';
-import { getHostBridge, type UsageDbStatus } from '@shared/bridge/hostBridge';
+import { getHostBridge, type UsageDbStatus, type UsagePreset } from '@shared/bridge/hostBridge';
 import { formatTokenShort, formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
 import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@shared/utils/maskProvider';
 
@@ -341,11 +341,14 @@ const dbSize = computed(() => {
 });
 
 const rangeTs = ref<[number, number] | null>(null);
+/** 最近一次选中的非 custom 预设：日期框被清空时回落到它（避免"框空了但图表仍按旧区间渲染"） */
+const lastPreset = ref<UsagePreset>('last7');
 let scopeTimer: number | null = null;
 function onScopeChange(): void {
   store.page = 1;
   if (scopeTimer) window.clearTimeout(scopeTimer);
   scopeTimer = window.setTimeout(() => {
+    scopeTimer = null;
     void store.refresh().then(() => queueRenderAll());
   }, 300);
 }
@@ -354,7 +357,11 @@ function onPageSize(): void {
   void store.refresh();
 }
 function onCustomRange(v: [number, number] | null): void {
-  if (!v || v.length !== 2) return;
+  // 清空日期框：回落到最近一次预设（清空前是 custom → 图表口径必须同步回落，不能留着旧区间）
+  if (!v || v.length !== 2) {
+    if (store.preset === 'custom') store.setPreset(lastPreset.value);
+    return;
+  }
   const fmt = (ts: number): string => {
     const d = new Date(ts);
     const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -366,6 +373,20 @@ function onCustomRange(v: [number, number] | null): void {
   store.page = 1;
   void store.refresh().then(() => queueRenderAll());
 }
+
+/**
+ * 预设与日期框双向同步：
+ *  - 切到非 custom 预设 → 清空日期框显示（否则框里还留着旧自定义区间，用户会误判口径）；
+ *  - 切到 custom → 记录最近一次非 custom 预设，供"清空日期框"回退用。
+ */
+watch(
+  () => store.preset,
+  (v) => {
+    if (v === 'custom') return;
+    lastPreset.value = v;
+    rangeTs.value = null;
+  }
+);
 
 const FONT = '"Microsoft YaHei", sans-serif';
 // 与 styles/main.css :root / html.light 同源（暗黑默认）：
@@ -651,6 +672,11 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  // 卸载后不再触发防抖刷新（避免对已销毁组件发请求并回写 store）
+  if (scopeTimer) {
+    window.clearTimeout(scopeTimer);
+    scopeTimer = null;
+  }
   try {
     ro?.disconnect();
   } catch {

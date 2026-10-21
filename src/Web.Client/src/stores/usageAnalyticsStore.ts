@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import {
   getHostBridge,
   type UsageFilter,
@@ -57,6 +57,30 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     if (!providerIds.value.length) return options.value.models;
     return options.value.models.filter((m) => providerIds.value.includes(m.providerId));
   });
+
+  /**
+   * Provider 变更时剔除"不属于所选 Provider"的已选模型。
+   * 背景：后端 ApplyScope 对 provider 与 model 是 AND 关系
+   * （provider_id IN (...) AND (provider_id=P AND model_id=M)），
+   * 若保留跨 Provider 的 modelKeys，条件恒假 → 图表/明细全空。
+   */
+  function pruneModelKeys(): void {
+    const pids = providerIds.value;
+    if (!pids.length) return;
+    const models = options.value.models;
+    if (!models.length) return; // 选项未加载完时不裁剪，避免误删
+    const allowed = new Set(models.filter((m) => pids.includes(m.providerId)).map((m) => m.key));
+    const kept = modelKeys.value.filter((k) => allowed.has(k));
+    if (kept.length !== modelKeys.value.length) modelKeys.value = kept;
+  }
+  // deep：n-select 正常是整体替换数组，但就地改动也要兜住
+  watch(
+    providerIds,
+    () => {
+      pruneModelKeys();
+    },
+    { deep: true }
+  );
 
   async function loadOptions(): Promise<void> {
     try {
