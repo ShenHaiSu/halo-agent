@@ -4,14 +4,8 @@ name: web
 
 on:
   push:
-    paths:
-      - "src/Web.Client/**"
-      - ".github/workflows/web.yml"
-  pull_request:
-    paths:
-      - "src/Web.Client/**"
-      - ".github/workflows/web.yml"
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 jobs:
   web:

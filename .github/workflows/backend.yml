@@ -5,31 +5,8 @@ name: backend
 
 on:
   push:
-    paths:
-      - "src/Host.Desktop/**"
-      - "tests/HaloAgent.Tests/**"
-      - "HaloAgent.sln"
-      - "global.json"
-      - "NuGet.config"
-      - "Directory.Build.props"
-      - "Directory.Packages.props"
-      - "build/**"
-      - ".config/dotnet-tools.json"
-      - ".editorconfig"
-      - ".github/workflows/backend.yml"
-  pull_request:
-    paths:
-      - "src/Host.Desktop/**"
-      - "tests/HaloAgent.Tests/**"
-      - "HaloAgent.sln"
-      - "global.json"
-      - "NuGet.config"
-      - "Directory.Build.props"
-      - "Directory.Packages.props"
-      - "build/**"
-      - ".config/dotnet-tools.json"
-      - ".editorconfig"
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 jobs:
   backend:
