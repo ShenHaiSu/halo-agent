@@ -54,7 +54,6 @@ public sealed class ToolPipeline
     {
         if (!FileTools.Contains(toolName))
             return (true, null, null);
-        string[] keys;
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(

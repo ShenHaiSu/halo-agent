@@ -12,53 +12,6 @@ using Host.Desktop.LlmGateway.Models;
 
 namespace Host.Desktop.Services;
 
-/// <summary>need05-03：上下文压缩结果。</summary>
-public sealed class CompactionResult
-{
-    public bool Success { get; init; }
-    public string? ErrorCode { get; init; }
-    public string? ErrorMessage { get; init; }
-    public int RemovedMessages { get; init; }
-    public int KeptMessages { get; init; }
-
-    /// <summary>摘要首 200 字，事件展示用。</summary>
-    public string SummaryPreview { get; init; } = string.Empty;
-    public string? BackupFileName { get; init; }
-
-    public static CompactionResult Ok(int removed, int kept, string preview, string? backup) =>
-        new()
-        {
-            Success = true,
-            RemovedMessages = removed,
-            KeptMessages = kept,
-            SummaryPreview = preview ?? string.Empty,
-            BackupFileName = backup
-        };
-
-    /// <summary>无事可做（太短无需压缩）：Success 且 Removed==0，前端据此提示。</summary>
-    public static CompactionResult NoOp() => new() { Success = true };
-
-    public static CompactionResult Fail(string code, string message) =>
-        new()
-        {
-            Success = false,
-            ErrorCode = code,
-            ErrorMessage = message
-        };
-}
-
-public interface ICompactionService
-{
-    Task<CompactionResult> CompactAsync(
-        string workspaceId,
-        string sessionId,
-        string? providerId = null,
-        string? modelId = null,
-        int keepLastGroups = 6,
-        CancellationToken ct = default
-    );
-}
-
 /// <summary>
 /// need05-03：/compact 上下文压缩服务（模型摘要 + 原子重写 + 不可中断）。
 /// 学 znaide compact_context（system+摘要+最近 N 条，失败不动，累计不清零），

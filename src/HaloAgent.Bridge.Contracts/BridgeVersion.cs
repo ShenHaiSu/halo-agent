@@ -7,4 +7,7 @@ namespace HaloAgent.Bridge.Contracts;
 public static class BridgeVersion
 {
     public const string Version = "1.0.0";
+
+    /// <summary>need21-B05: 与前端 BRIDGE_VERSION 对齐的数值协议版本（见 bridge/types.ts 与 shared/bridge/protocol/version.ts）。</summary>
+    public const int ProtocolVersion = 2;
 }

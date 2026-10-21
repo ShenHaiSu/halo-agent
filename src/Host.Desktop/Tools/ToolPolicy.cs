@@ -75,3 +75,39 @@ public static class ToolPolicy
         "Error: Python runtime is not detected on this machine. "
         + "Please fall back to 'cmd' runner or ask the user to configure Python path in Settings.";
 }
+
+/// <summary>need21-B05: 角色注册（原角色工厂 ForMain/ForSub 整体搬迁，语义零变化；工厂类物理删除）。</summary>
+public static class ToolRoleRegistries
+{
+    public static ToolRegistry ForMainRole(SubPolicySnapshot policy)
+    {
+        var r = new ToolRegistry(registerBuiltIns: true);
+        r.Register(new BuiltIn.SpawnSubAgentTool(policy.SubAgentEnabled));
+        return r;
+    }
+
+    public static ToolRegistry ForSubRole(SubPolicySnapshot policy)
+    {
+        var r = new ToolRegistry(registerBuiltIns: false);
+        r.Register(new BuiltIn.ReadFileTool());
+        r.Register(new BuiltIn.ListDirTool());
+        r.Register(new BuiltIn.GrepSearchTool());
+        r.Register(new BuiltIn.ViewImageTool());
+        if (policy.SubAllowExecCommand)
+            r.Register(new BuiltIn.ExecCommandTool());
+        if (policy.SubAllowFileWrite)
+        {
+            r.Register(new BuiltIn.WriteFileTool());
+            r.Register(new BuiltIn.EditFileTool());
+            r.Register(new BuiltIn.EditLinesTool());
+            r.Register(new BuiltIn.EditTool());
+            r.Register(new BuiltIn.UndoEditTool());
+        }
+        r.Register(new BuiltIn.SkillTool());
+        r.Register(new BuiltIn.MemoryTool());
+        r.Register(new BuiltIn.GoalTool());
+        r.Register(new BuiltIn.DisabledAskUserTool());
+        r.Register(new BuiltIn.DisabledSpawnTool());
+        return r;
+    }
+}

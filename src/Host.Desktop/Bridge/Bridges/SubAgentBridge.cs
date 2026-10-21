@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Services;
 
@@ -17,8 +18,16 @@ public sealed class SubRuntimeItem
     public string SubId { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+
+    /// <summary>need23：已完成轮次（真实统计，旧实现恒为 0）。</summary>
     public int Iteration { get; set; }
-    public string Tool { get; set; } = string.Empty;
+
+    /// <summary>need23：工具调用总次数（真实统计，旧实现无此字段）。</summary>
+    public int ToolCount { get; set; }
+
+    /// <summary>need23：最近一次工具名（真实统计，旧实现恒为空串）。</summary>
+    public string LastTool { get; set; } = string.Empty;
+
     public long ElapsedMs { get; set; }
 }
 
@@ -110,7 +119,8 @@ public sealed partial class HostBridgeFacade
                     Memory = cfg.SubAllowMemoryWrite,
                 },
             };
-            var active = _subCoordinator?.GetActive(parentSessionId) ?? Enumerable.Empty<SubHandle>();
+            var active =
+                _subCoordinator?.GetActive(parentSessionId) ?? Enumerable.Empty<SubHandle>();
             var subs = await _workspaceSessionService
                 .GetSubSessionsAsync(workspaceId, parentSessionId)
                 .ConfigureAwait(false);
@@ -118,29 +128,78 @@ public sealed partial class HostBridgeFacade
             foreach (var h in active)
             {
                 metaById.TryGetValue(h.SubSessionId, out var meta);
+                // need23：轮次/工具数/最近工具取子会话真实统计（旧实现恒为 0/空串，列是"假数据"）
+                var stats = await GetRuntimeStatsAsync(workspaceId, h.SubSessionId)
+                    .ConfigureAwait(false);
                 info.Subs.Add(
                     new SubRuntimeItem
                     {
                         SubId = h.SubSessionId,
                         Label = h.Label,
                         Status = meta?.SubStatus ?? "running",
-                        Iteration = 0,
-                        Tool = string.Empty,
+                        Iteration = stats.Iterations,
+                        ToolCount = stats.ToolCount,
+                        LastTool = stats.LastTool,
                         ElapsedMs = (long)(DateTime.UtcNow - h.StartedAtUtc).TotalMilliseconds,
                     }
                 );
             }
-            // need16：兼容老 LastRejection + 新 RecentRejections（内存为空即空列表，老前端忽略未知字段）
-            info.RecentRejections =
-                info.LastRejection != null
-                    ? new List<SubRejectionInfo> { info.LastRejection }
-                    : new List<SubRejectionInfo>();
+            // need23：拒绝记录真实来源（Coordinator 环形缓冲）；旧实现 LastRejection 从未赋值 → 恒空
+            var rejections =
+                _subCoordinator?.GetRecentRejections() ?? Array.Empty<SubRejectionRecord>();
+            info.RecentRejections = rejections
+                .Select(r => new SubRejectionInfo
+                {
+                    Code = r.Code,
+                    CallId = r.CallId,
+                    AtUtc = r.AtUtc
+                })
+                .ToList();
+            info.LastRejection = info.RecentRejections.Count > 0 ? info.RecentRejections[0] : null;
             return BridgeResponse<SubRuntimeInfo>.Success(info);
         }
         catch (Exception ex)
         {
             return BridgeResponse<SubRuntimeInfo>.Fail("SUB_RUNTIME_ERROR", ex.Message);
         }
+    }
+
+    /// <summary>need23：运行统计短 TTL 缓存（设置中心 5s 轮询，避免每次都读子会话全量消息）。</summary>
+    private static readonly TimeSpan SubRuntimeStatsTtl = TimeSpan.FromSeconds(3);
+
+    /// <summary>need23：运行统计缓存（key = workspaceId|subSessionId）。</summary>
+    private readonly ConcurrentDictionary<
+        string,
+        (DateTime At, SubRuntimeStats Stats)
+    > _subRuntimeStatsCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<SubRuntimeStats> GetRuntimeStatsAsync(
+        string workspaceId,
+        string subSessionId
+    )
+    {
+        var key = workspaceId + "|" + subSessionId;
+        var now = DateTime.UtcNow;
+        if (
+            _subRuntimeStatsCache.TryGetValue(key, out var hit)
+            && (now - hit.At) < SubRuntimeStatsTtl
+        )
+        {
+            return hit.Stats;
+        }
+        var stats = await SubStatsReader
+            .ReadRuntimeStatsAsync(_workspaceSessionService, workspaceId, subSessionId)
+            .ConfigureAwait(false);
+        _subRuntimeStatsCache[key] = (now, stats);
+        if (_subRuntimeStatsCache.Count > 256)
+        {
+            foreach (var kv in _subRuntimeStatsCache)
+            {
+                if ((now - kv.Value.At) > TimeSpan.FromMinutes(5))
+                    _subRuntimeStatsCache.TryRemove(kv.Key, out _);
+            }
+        }
+        return stats;
     }
 
     public static bool IsSubReadOnly(SessionMetadata? meta) =>

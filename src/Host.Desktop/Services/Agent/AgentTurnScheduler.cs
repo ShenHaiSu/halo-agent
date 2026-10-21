@@ -17,6 +17,7 @@ namespace Host.Desktop.Services;
 /// <summary>need21-B03: 调度器（超时包装 + 流水线装配：Setup→Request→Call→Persist→Decide→Exec）。</summary>
 public sealed partial class AgentOrchestrator
 {
+    /// <summary>单轮最大时间解析：0=无限时间（返回 0，调用方跳过 CTS）；有限值钳制到 [Min, Max=600000即10min]。</summary>
     private int ResolveTurnTimeoutMs()
     {
         try
@@ -24,12 +25,14 @@ public sealed partial class AgentOrchestrator
             if (_agentConfigService != null)
             {
                 int v = _agentConfigService.GetInternal().TurnTimeoutMs;
-                if (v <= 0)
+                if (v == 0)
+                    return 0;
+                if (v < 0)
                     return AgentDefaults.TurnTimeoutMs;
                 return Math.Clamp(
                     v,
                     AgentDefaults.TurnTimeoutMinMs,
-                    AgentDefaults.HardTimeoutCeilMs
+                    AgentDefaults.TurnTimeoutMaxMs
                 );
             }
         }
@@ -40,7 +43,7 @@ public sealed partial class AgentOrchestrator
     }
 
     private static string TurnTimeoutMessage(int ms) =>
-        $"本轮执行超过总体超时（{ms / 1000}s）已终止，已落盘片段予以保留；长任务请拆小步后继续，或调大 config/agent.json 的 turnTimeoutMs（默认 600000 即 10min）。";
+        $"本轮执行超过总体超时（{ms / 1000}s）已终止，已落盘片段予以保留；长任务请拆小步后继续，或到设置与诊断中心·智能体行为调整单轮最大时间（默认 600000 即 10min/600s，0=无限时间）。";
 
     private async Task<AgentTurnResult> RunAgentTurnCoreAsync(
         string workspaceId,

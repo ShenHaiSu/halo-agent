@@ -10,7 +10,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// <summary>need21-B04: edit_file 匹配/落盘/回吐（原 ExecuteAsync 后半 1:1 搬迁）。</summary>
 internal sealed record EditFileRequest(
     string OldString,
-    string? NewString,
+    string NewString,
     bool ReplaceAll,
     string MatchMode,
     EditMatchEngine.MatchOptions Options,

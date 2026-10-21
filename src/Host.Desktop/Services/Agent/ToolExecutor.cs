@@ -295,6 +295,8 @@ public sealed partial class AgentOrchestrator
                         string fail =
                             (vfail ?? "[SUBAGENT_VALIDATION] spawn 参数非法：task 为空。")
                             + HintForTool("spawn_subagent", "SUBAGENT_VALIDATION");
+                        // need23：落拒绝记录（设置中心·子运行监控卡可见）
+                        _coordinator?.RecordRejection("SUBAGENT_VALIDATION", s.CallId, fail);
                         await AppendToolTextAsync(
                                 workspaceId,
                                 sessionId,

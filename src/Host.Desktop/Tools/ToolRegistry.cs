@@ -12,7 +12,7 @@ namespace Host.Desktop.Tools;
 /// 支持 GetDefinitions() 导出 chat/resp 双协议 Schema。
 /// 并发安全（无共享可变状态，处理器均为无状态）。
 /// </summary>
-public sealed class ToolRegistry
+public sealed partial class ToolRegistry
 {
     private readonly Dictionary<string, IToolHandler> _handlers =
         new(StringComparer.OrdinalIgnoreCase);
@@ -138,48 +138,6 @@ public sealed class ToolRegistry
             })
             .OrderBy(d => d.Name, StringComparer.Ordinal)
             .ToList();
-    }
-
-    /// <summary>
-    /// 导出 Chat Completions (chat) 协议 tools JSON 数组字符串。
-    /// </summary>
-    public string GetChatToolsJson()
-    {
-        var defs = GetDefinitions();
-        var sb = new StringBuilder("[");
-        for (int i = 0; i < defs.Count; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append(',');
-            }
-
-            sb.Append(defs[i].ToChatToolJson());
-        }
-
-        sb.Append(']');
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// 导出 Responses API (resp) 协议 tools JSON 数组字符串。
-    /// </summary>
-    public string GetResponsesToolsJson()
-    {
-        var defs = GetDefinitions();
-        var sb = new StringBuilder("[");
-        for (int i = 0; i < defs.Count; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append(',');
-            }
-
-            sb.Append(defs[i].ToResponsesToolJson());
-        }
-
-        sb.Append(']');
-        return sb.ToString();
     }
 
     /// <summary>

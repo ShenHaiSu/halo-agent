@@ -145,6 +145,7 @@ public static class ProgramBoot
                 DomainName = "local",
                 SchemeHandlerFactory = new FolderSchemeHandlerFactory(
                     wwwrootPath,
+                    "app",
                     "local",
                     "index.html"
                 ),

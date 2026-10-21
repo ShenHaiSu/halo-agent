@@ -256,7 +256,7 @@ public sealed class ExecCommandTool : IToolHandler
                     );
                 }
 
-                psi = CommandRunnerProbe.BuildPythonStartInfo(probe!.ExePath, pythonArgs, workDir);
+                psi = CommandRunnerProbe.BuildPythonStartInfo(probe!.ExePath!, pythonArgs, workDir);
             }
 
             // ---- 启动进程（JobObject 护航）----

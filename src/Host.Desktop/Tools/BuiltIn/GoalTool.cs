@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Host.Desktop.Bridge;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.Tools.Validation;
@@ -160,7 +159,7 @@ public sealed class GoalTool : IToolHandler
                 var saved = svc.SaveGoal(ws, sess, next, "main");
                 try
                 {
-                    JsEventDispatcher.Publish(
+                    HaloAgent.Bridge.Contracts.BridgeEvents.Publish(
                         "goal:updated",
                         new { sessionId = sess, goal = SlimObj(saved) }
                     );
