@@ -27,6 +27,36 @@ export function createPillEl(att: ComposerAttachment): HTMLSpanElement {
   span.appendChild(btn);
   return span;
 }
+export function createSkillPillEl(scope: 'global' | 'project', name: string, title?: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'skill-tag';
+  span.contentEditable = 'false';
+  span.setAttribute('data-skill', `${scope}/${name}`);
+  span.setAttribute('data-testid', `skill-pill-${scope}-${name}`);
+  span.setAttribute('aria-label', `技能 ${scope}/${name}`);
+  if (title) span.title = title;
+
+  const badge = document.createElement('span');
+  badge.className = 'skill-scope';
+  badge.setAttribute('data-scope', scope);
+  badge.textContent = scope;
+  span.appendChild(badge);
+
+  const label = document.createElement('span');
+  label.className = 'skill-name';
+  label.textContent = name;
+  span.appendChild(label);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'skill-x';
+  btn.textContent = '×';
+  btn.setAttribute('data-x', `skill:${scope}/${name}`);
+  btn.setAttribute('data-testid', `skill-remove-${scope}-${name}`);
+  btn.setAttribute('aria-label', `移除技能 ${scope}/${name}`);
+  span.appendChild(btn);
+  return span;
+}
 export function readSegments(editor: HTMLElement, hasAtt: (id: string) => boolean): ComposerSegment[] {
   const segments: ComposerSegment[] = [];
   let buf = '';
@@ -48,6 +78,20 @@ export function readSegments(editor: HTMLElement, hasAtt: (id: string) => boolea
       buf += '\n';
       return;
     }
+    // need22-F02：skill pill 分支必须在 data-att 分支之前（否则 pill 内部文字会被当正文读进来）
+    const skillKey = el.getAttribute && el.getAttribute('data-skill');
+    if (skillKey) {
+      const slash = skillKey.indexOf('/');
+      if (slash > 0) {
+        flush();
+        segments.push({
+          kind: 'skill',
+          scope: skillKey.slice(0, slash) === 'project' ? 'project' : 'global',
+          name: skillKey.slice(slash + 1),
+        });
+        return;
+      }
+    }
     const attId = el.getAttribute && el.getAttribute('data-att');
     if (attId && hasAtt(attId)) {
       flush();
@@ -65,7 +109,11 @@ export function readSegments(editor: HTMLElement, hasAtt: (id: string) => boolea
   flush();
   const last = segments.length > 0 ? segments[segments.length - 1] : null;
   if (last && last.kind === 'text') last.text = last.text.replace(/\n+$/, '');
-  return segments.filter((s) => s.kind === 'text' || hasAtt((s as { attId: string }).attId));
+  return segments.filter((s) => {
+    if (s.kind === 'text') return true;
+    if (s.kind === 'skill') return true;
+    return hasAtt((s as { attId: string }).attId);
+  });
 }
 export function textLenOf(segments: ComposerSegment[]): number {
   return segments
@@ -76,14 +124,25 @@ export function textLenOf(segments: ComposerSegment[]): number {
 export function renderText(editor: HTMLElement, text: string): void {
   editor.innerHTML = text ? escapeHtml(text).replace(/\n/g, '<br>') : '';
 }
-export function renderDraft(editor: HTMLElement, text: string, atts: ComposerAttachment[]): void {
+/**
+ * need22-F02：按段序渲染草稿（text / image pill / skill pill），保留原始段序。
+ * 破坏性变更：签名由 (editor, text, atts) 改为 (editor, segments, attachments)。
+ */
+export function renderDraft(editor: HTMLElement, segments: ComposerSegment[], attachments: Record<string, ComposerAttachment>): void {
   editor.innerHTML = '';
-  if (text) {
-    const span = document.createElement('span');
-    span.textContent = text;
-    editor.appendChild(span);
+  for (const s of segments) {
+    if (s.kind === 'text') {
+      if (!s.text) continue;
+      const span = document.createElement('span');
+      span.textContent = s.text;
+      editor.appendChild(span);
+    } else if (s.kind === 'image') {
+      const att = attachments[s.attId];
+      if (att) editor.appendChild(createPillEl(att));
+    } else {
+      editor.appendChild(createSkillPillEl(s.scope, s.name));
+    }
   }
-  for (const att of atts) editor.appendChild(createPillEl(att));
 }
 export function placeCaretAfter(editor: HTMLElement, node: Node): void {
   try {
@@ -122,11 +181,9 @@ export function insertTextFallback(editor: HTMLElement, text: string): boolean {
     return false;
   }
 }
-export function insertPill(editor: HTMLElement, att: ComposerAttachment): void {
-  const pill = createPillEl(att);
+/** need22-F02：pill 插入公共实现（图片 pill 与 skill pill 共用）。 */
+export function insertPillAtRange(editor: HTMLElement, pill: HTMLElement, range: Range | null): void {
   try {
-    const sel = window.getSelection();
-    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
     if (range && editor.contains(range.commonAncestorContainer)) {
       range.deleteContents();
       range.insertNode(pill);
@@ -141,6 +198,31 @@ export function insertPill(editor: HTMLElement, att: ComposerAttachment): void {
     editor.appendChild(pill);
   }
 }
+export function insertPill(editor: HTMLElement, att: ComposerAttachment): void {
+  const pill = createPillEl(att);
+  try {
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    insertPillAtRange(editor, pill, range);
+  } catch {
+    editor.appendChild(pill);
+  }
+}
+/** need22-F03：在当前选区插入 skill pill。 */
+export function insertSkillPill(editor: HTMLElement, scope: 'global' | 'project', name: string, title?: string): void {
+  const pill = createSkillPillEl(scope, name, title);
+  try {
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    insertPillAtRange(editor, pill, range);
+  } catch {
+    editor.appendChild(pill);
+  }
+}
+/** need22-F03：用 pill 替换给定选区（斜杠查询串 → pill）。 */
+export function replaceRangeWithPill(editor: HTMLElement, range: Range, pill: HTMLElement): void {
+  insertPillAtRange(editor, pill, range);
+}
 export function closestRemoveId(target: EventTarget | null): string {
   const t = target as HTMLElement | null;
   const x = t && typeof t.closest === 'function' ? (t.closest('[data-x]') as HTMLElement | null) : null;
@@ -153,15 +235,90 @@ export function backspacePill(editor: HTMLElement): HTMLElement | null {
   if (anchor && anchor.nodeType === 3) {
     if (sel.anchorOffset === 0) {
       const prev = anchor.previousSibling as HTMLElement | null;
-      if (prev && prev.nodeType === 1 && prev.hasAttribute && prev.hasAttribute('data-att')) return prev;
+      if (prev && prev.nodeType === 1 && prev.hasAttribute) {
+        if (prev.hasAttribute('data-att')) return prev;
+        // need22-F02：skill pill 同样整颗删除
+        if (prev.hasAttribute('data-skill')) return prev;
+      }
     }
     return null;
   }
   if (anchor && anchor === (editor as unknown as Node)) {
     const child = editor.childNodes[sel.anchorOffset - 1] as HTMLElement | undefined;
-    if (child && child.nodeType === 1 && child.hasAttribute && child.hasAttribute('data-att')) return child;
+    if (child && child.nodeType === 1 && child.hasAttribute) {
+      if (child.hasAttribute('data-att')) return child;
+      if (child.hasAttribute('data-skill')) return child;
+    }
   }
   return null;
+}
+
+/* ------------------------------------------------------------------ *
+ * need22-F03：偏移工具（偏移口径统一：只累计 nodeType===3 文本节点，
+ * BR / DIV / P 不计长度）——detectSlashTrigger 与 replaceRangeWithPill 同口径。
+ * ------------------------------------------------------------------ */
+
+/** 编辑器纯文本（仅文本节点累计，不含 BR/DIV 换行） */
+export function editorPlainText(editor: HTMLElement): string {
+  try {
+    const r = document.createRange();
+    r.selectNodeContents(editor);
+    return r.toString();
+  } catch {
+    return '';
+  }
+}
+
+/** 编辑器内光标相对"文本节点累计长度"的偏移；不在编辑器内返回 null。 */
+export function caretOffsetInEditor(editor: HTMLElement): number | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const anchor = sel.anchorNode;
+  if (!anchor) return null;
+  if (anchor !== editor && !editor.contains(anchor)) return null;
+  try {
+    const r = document.createRange();
+    r.selectNodeContents(editor);
+    r.setEnd(anchor, sel.anchorOffset);
+    return r.toString().length;
+  } catch {
+    return null;
+  }
+}
+
+function locateTextOffset(editor: HTMLElement, target: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let acc = 0;
+  let last: Text | null = null;
+  let n = walker.nextNode();
+  while (n) {
+    const node = n as Text;
+    const len = (node.textContent || '').length;
+    if (target <= acc + len) return { node, offset: Math.max(0, target - acc) };
+    acc += len;
+    last = node;
+    n = walker.nextNode();
+  }
+  if (last) return { node: last, offset: (last.textContent || '').length };
+  return null;
+}
+
+/** 按文本节点累计偏移构造 Range；越界返回 null。 */
+export function rangeFromTextOffsets(editor: HTMLElement, start: number, end: number): Range | null {
+  const text = editorPlainText(editor);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (start < 0 || end < start || end > text.length) return null;
+  const s = locateTextOffset(editor, start);
+  const e = locateTextOffset(editor, end);
+  if (!s || !e) return null;
+  try {
+    const r = document.createRange();
+    r.setStart(s.node, s.offset);
+    r.setEnd(e.node, e.offset);
+    return r;
+  } catch {
+    return null;
+  }
 }
 export type { ComposerDraft };
 import { firstHtmlImgSrc as _firstImg } from '@shared/utils/clipboardImage';

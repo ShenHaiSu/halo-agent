@@ -1,78 +1,100 @@
 <template>
   <div class="shrink-0 px-6 pb-4 pt-2" data-testid="prompt-composer">
-    <div
-      class="composer-box max-w-4xl mx-auto rounded-xl border border-subtle bg-surface focus-within:border-blue-500/80 focus-within:ring-2 focus-within:ring-blue-500/15 transition-all shadow-lg p-2.5 space-y-2"
-      :class="dragOver ? 'drag-over' : ''"
-      @dragover="emit('drag-over', $event)"
-      @dragleave="emit('drag-leave')"
-      @drop="emit('drop', $event)"
-    >
-      <div v-if="askMasked" class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary">
-        等待回答问题…（输入框已遮罩，提交后恢复）
-      </div>
-      <div
-        v-if="subWaiting"
-        class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary"
-        data-testid="composer-sub-waiting"
-      >
-        子代理执行中（{{ subDone }}/{{ subTotal }}），取消可掐断整树
-        <button data-testid="composer-sub-open" class="text-accent hover:underline" @click="emit('open-sub')">
-          查看子进度（{{ subDone }}/{{ subTotal }}）
-        </button>
-      </div>
-      <div
-        ref="editor"
-        class="composer-editor"
-        :contenteditable="!askMasked && !subWaiting"
-        data-testid="composer-rich-input"
-        aria-label="任务指令输入框，支持粘贴图片"
-        :class="askMasked || subWaiting ? 'masked' : ''"
-        :data-placeholder="subWaiting ? `子代理执行中（${subDone}/${subTotal}），取消可掐断整树` : undefined"
-        @input="emit('editor-input')"
-        @paste="emit('paste', $event)"
-        @keydown="emit('keydown', $event)"
-        @beforeinput="emit('before-input', $event)"
-        @click="emit('editor-click', $event)"
+    <div class="composer-wrap relative max-w-4xl mx-auto">
+      <!-- need22-F03：斜杠候选面板（输入框上方） -->
+      <SlashMenu
+        v-if="!askMasked && !isGenerating && !subWaiting"
+        class="slash-menu-host"
+        :visible="slashVisible"
+        :candidates="slashCandidates"
+        :index="slashIndex"
+        :error="slashError"
+        :loading="slashLoading"
+        @select="emit('slash-select', $event)"
+        @hover="emit('slash-hover', $event)"
+        @close="emit('slash-close')"
       />
-      <n-alert
-        v-if="visionWarn"
-        type="warning"
-        :show-icon="false"
-        size="small"
-        class="composer-vision-warn"
-        data-testid="composer-vision-warn"
+      <div
+        class="composer-box rounded-xl border border-subtle bg-surface focus-within:border-blue-500/80 focus-within:ring-2 focus-within:ring-blue-500/15 transition-all shadow-lg p-2.5 space-y-2"
+        :class="dragOver ? 'drag-over' : ''"
+        @dragover="emit('drag-over', $event)"
+        @dragleave="emit('drag-leave')"
+        @drop="emit('drop', $event)"
       >
-        当前模型不支持看图，发送时将自动忽略图片（文字仍发送）
-      </n-alert>
-      <div v-if="overLimitWarn" class="text-[11px] text-amber-500">图片超限，将只发送最新 {{ maxImages }} 张</div>
-      <div v-if="oversizeWarn" class="text-[11px] text-amber-500">部分图片超过 8MB，发送时将自动跳过（文字仍发送）</div>
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2 min-w-0">
-          <PresetPopover />
+        <div v-if="askMasked" class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary">
+          等待回答问题…（输入框已遮罩，提交后恢复）
         </div>
-        <div class="flex items-center justify-end gap-2">
-          <n-button
-            secondary
-            size="small"
-            data-testid="composer-add-image"
-            :disabled="!canSend || isGenerating || askMasked || subWaiting"
-            @click="emit('open-picker')"
-          >
-            🖼 添加图片
-          </n-button>
-          <input ref="picker" type="file" accept=".jpg,.jpeg,.png,.webp" multiple class="hidden" @change="emit('picker-change')" />
-          <n-button v-if="!isGenerating" type="primary" size="small" data-testid="composer-send" :disabled="!canSend" @click="emit('send')">
-            <template #icon>
-              <SendHorizontal class="w-3.5 h-3.5" />
-            </template>
-            发送 (Enter)
-          </n-button>
-          <n-button v-else type="error" size="small" @click="emit('stop')">
-            <template #icon>
-              <Square class="w-3.5 h-3.5" />
-            </template>
-            停止生成 (Esc)
-          </n-button>
+        <div
+          v-if="subWaiting"
+          class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary"
+          data-testid="composer-sub-waiting"
+        >
+          子代理执行中（{{ subDone }}/{{ subTotal }}），取消可掐断整树
+          <button data-testid="composer-sub-open" class="text-accent hover:underline" @click="emit('open-sub')">
+            查看子进度（{{ subDone }}/{{ subTotal }}）
+          </button>
+        </div>
+        <div
+          ref="editor"
+          class="composer-editor"
+          :contenteditable="!askMasked && !subWaiting"
+          data-testid="composer-rich-input"
+          aria-label="任务指令输入框，支持粘贴图片"
+          :class="askMasked || subWaiting ? 'masked' : ''"
+          :data-placeholder="subWaiting ? `子代理执行中（${subDone}/${subTotal}），取消可掐断整树` : undefined"
+          @input="emit('editor-input')"
+          @paste="emit('paste', $event)"
+          @keydown="emit('keydown', $event)"
+          @beforeinput="emit('before-input', $event)"
+          @click="emit('editor-click', $event)"
+        />
+        <n-alert
+          v-if="visionWarn"
+          type="warning"
+          :show-icon="false"
+          size="small"
+          class="composer-vision-warn"
+          data-testid="composer-vision-warn"
+        >
+          当前模型不支持看图，发送时将自动忽略图片（文字仍发送）
+        </n-alert>
+        <div v-if="overLimitWarn" class="text-[11px] text-amber-500">图片超限，将只发送最新 {{ maxImages }} 张</div>
+        <div v-if="oversizeWarn" class="text-[11px] text-amber-500">部分图片超过 8MB，发送时将自动跳过（文字仍发送）</div>
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <PresetPopover />
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <n-button
+              secondary
+              size="small"
+              data-testid="composer-add-image"
+              :disabled="!canSend || isGenerating || askMasked || subWaiting"
+              @click="emit('open-picker')"
+            >
+              🖼 添加图片
+            </n-button>
+            <input ref="picker" type="file" accept=".jpg,.jpeg,.png,.webp" multiple class="hidden" @change="emit('picker-change')" />
+            <n-button
+              v-if="!isGenerating"
+              type="primary"
+              size="small"
+              data-testid="composer-send"
+              :disabled="!canSend"
+              @click="emit('send')"
+            >
+              <template #icon>
+                <SendHorizontal class="w-3.5 h-3.5" />
+              </template>
+              发送 (Enter)
+            </n-button>
+            <n-button v-else type="error" size="small" @click="emit('stop')">
+              <template #icon>
+                <Square class="w-3.5 h-3.5" />
+              </template>
+              停止生成 (Esc)
+            </n-button>
+          </div>
         </div>
       </div>
     </div>
@@ -82,6 +104,8 @@
 import { onMounted, useTemplateRef } from 'vue';
 import { SendHorizontal, Square } from 'lucide-vue-next';
 import PresetPopover from './PresetPopover.vue';
+import SlashMenu from './SlashMenu.vue';
+import type { SlashCandidate } from '@shared/utils/slashRegistry';
 
 defineProps<{
   canSend: boolean;
@@ -95,6 +119,12 @@ defineProps<{
   overLimitWarn: boolean;
   oversizeWarn: boolean;
   maxImages: number;
+  /** need22-F03：斜杠候选面板 */
+  slashVisible: boolean;
+  slashCandidates: SlashCandidate[];
+  slashIndex: number;
+  slashError: string;
+  slashLoading: boolean;
 }>();
 const emit = defineEmits<{
   ready: [editor: HTMLElement | null, picker: HTMLInputElement | null];
@@ -111,6 +141,9 @@ const emit = defineEmits<{
   send: [];
   stop: [];
   'open-sub': [];
+  'slash-select': [candidate: SlashCandidate];
+  'slash-hover': [index: number];
+  'slash-close': [];
 }>();
 const editor = useTemplateRef<HTMLElement>('editor');
 const picker = useTemplateRef<HTMLInputElement>('picker');

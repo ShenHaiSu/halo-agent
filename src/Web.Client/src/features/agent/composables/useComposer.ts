@@ -11,6 +11,8 @@ import {
   type ComposerAttachment,
   type ComposerDraft,
 } from '@shared/utils/composerModel';
+import { skillMarker } from '@shared/utils/skillMarker';
+import { registerSlashProvider } from '@shared/utils/slashRegistry';
 import {
   backspacePill,
   closestRemoveId,
@@ -23,6 +25,8 @@ import {
 } from './composerEditorDom';
 import { useComposerAttachments } from './useComposerAttachments';
 import { useComposerSession } from './useComposerSession';
+import { useSlashMenu, type SlashMenuApi } from './useSlashMenu';
+import { skillSlashProvider } from './slashProviders/skillProvider';
 export type { SessionSavedDraft as ComposerSavedDraft } from './useComposerSession';
 export interface SendHandlers {
   onSend: () => void;
@@ -40,6 +44,8 @@ export interface ComposerApi {
   overLimitWarn: ComputedRef<boolean>;
   oversizeWarn: ComputedRef<boolean>;
   isGenerating: ComputedRef<boolean>;
+  /** need22-F03：斜杠候选面板状态（容器持有，视图纯展示） */
+  slash: SlashMenuApi;
   bindSend(h: SendHandlers): void;
   getDraft(): ComposerDraft;
   readEditorToDraft(): void;
@@ -158,6 +164,14 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     error: (m) => message.error(m),
     setDragOver: (v) => (dragOver.value = v),
   });
+  // need22-F03：注册默认候选池（skill），幂等；面板状态由 useSlashMenu 持有
+  registerSlashProvider(skillSlashProvider);
+  const slash = useSlashMenu({
+    editorRef,
+    readEditorToDraft,
+    getDraft,
+    notify: (m) => message.warning(m),
+  });
   function onDragOver(e: DragEvent): void {
     e.preventDefault();
     if (!isGenerating.value && !askMasked.value) dragOver.value = true;
@@ -171,13 +185,37 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
   }
   function onEditorInput(): void {
     readEditorToDraft();
+    // need22-F03：每次输入后重算斜杠触发区
+    slash.refresh(editorRef.value);
+  }
+  /** need22-F03：移除 skill pill（点 × 或退格整颗删） */
+  function removeSkillPillEl(el: HTMLElement): void {
+    try {
+      el.parentNode?.removeChild(el);
+    } catch {
+      /* ignore */
+    }
+    readEditorToDraft();
+    editorRef.value?.focus();
   }
   function onEditorClick(e: MouseEvent): void {
-    const attId = closestRemoveId(e.target);
-    if (attId) {
+    const x = closestRemoveId(e.target);
+    if (x && x.startsWith('skill:')) {
       e.preventDefault();
       e.stopPropagation();
-      attachments.removeImage(attId);
+      const raw = x.slice('skill:'.length);
+      const sep = raw.indexOf('/');
+      if (sep <= 0) return;
+      const scope = raw.slice(0, sep) === 'project' ? 'project' : 'global';
+      const name = raw.slice(sep + 1);
+      const pill = editorRef.value?.querySelector(`[data-skill="${scope}/${name}"]`) as HTMLElement | null;
+      if (pill) removeSkillPillEl(pill);
+      return;
+    }
+    if (x) {
+      e.preventDefault();
+      e.stopPropagation();
+      attachments.removeImage(x);
     }
   }
   function onBeforeInput(e: InputEvent): void {
@@ -185,12 +223,20 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     const pill = backspacePill(editorRef.value);
     if (pill) {
       e.preventDefault();
+      // need22-F03：skill pill 整颗删除
+      if (pill.hasAttribute('data-skill')) {
+        removeSkillPillEl(pill);
+        return;
+      }
       const attId = pill.getAttribute('data-att') || '';
       if (attId) attachments.removeImage(attId);
     }
   }
   function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Enter' && !e.shiftKey && !(e as unknown as { isComposing?: boolean }).isComposing) {
+    // need22-F03：IME 组合态不拦；面板优先（Enter = 选中候选，不发送）
+    if ((e as unknown as { isComposing?: boolean }).isComposing) return;
+    if (slash.handleKeydown(e)) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handlers.onSend();
     } else if (e.key === 'Escape' && isGenerating.value) {
@@ -199,9 +245,10 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     }
   }
   function plainTextOfDraft(): string {
+    // need22-F02：文本段 + skill marker（草稿箱快照要保留技能）
     return draft.segments
-      .filter((s) => s.kind === 'text')
-      .map((s) => (s as { kind: 'text'; text: string }).text)
+      .filter((s) => s.kind !== 'image')
+      .map((s) => (s.kind === 'text' ? s.text : skillMarker(s.scope, s.name)))
       .join('');
   }
   function clearDraft(): void {
@@ -214,16 +261,20 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     readEditorToDraft,
     plainTextOfDraft,
     attachments: () => attachmentList.value,
+    // need22-F02：草稿箱快照收集 skill 段
+    skills: () => draft.segments.filter((s) => s.kind === 'skill').map((s) => ({ scope: s.scope, name: s.name })),
     replaceDraft: setDraft,
-    renderSession: (text, atts) => {
+    renderSession: (segments, atts) => {
       const editor = editorRef.value;
-      if (editor) renderDraft(editor, text, atts);
+      if (editor) renderDraft(editor, segments, atts);
     },
     setTextLen: (n) => (textLen.value = n),
   });
   session.bindWatch(getDraft);
   watch(askMasked, (v) => {
     if (editorRef.value) editorRef.value.contentEditable = v ? 'false' : 'true';
+    // need22-F03：askMasked 时关闭候选面板
+    if (v) slash.close();
   });
   return {
     askMasked,
@@ -237,6 +288,7 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     overLimitWarn,
     oversizeWarn,
     isGenerating,
+    slash,
     bindSend: (h: SendHandlers): void => {
       handlers.onSend = h.onSend;
       handlers.onStop = h.onStop;

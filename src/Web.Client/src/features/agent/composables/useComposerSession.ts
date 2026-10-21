@@ -3,22 +3,28 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import {
   cleanupObjectUrls,
   createEmptyDraft,
+  deserialize,
   genAttId,
   type ComposerAttachment,
   type ComposerDraft,
   type ComposerImageMime,
+  type ComposerSegment,
 } from '@shared/utils/composerModel';
 
 export interface SessionSavedDraft {
   text: string;
   images: Array<{ fileName: string; mime: ComposerImageMime }>;
+  /** need22-F02：草稿箱里的 skill（scope/name），恢复时还原为 skill 段 */
+  skills: Array<{ scope: 'global' | 'project'; name: string }>;
 }
 export interface SessionDeps {
   readEditorToDraft(): void;
   plainTextOfDraft(): string;
   attachments(): ComposerAttachment[];
+  /** need22-F02：当前草稿里的 skill 段 */
+  skills(): Array<{ scope: 'global' | 'project'; name: string }>;
   replaceDraft(next: ComposerDraft): void;
-  renderSession(text: string, atts: ComposerAttachment[]): void;
+  renderSession(segments: ComposerSegment[], attachments: Record<string, ComposerAttachment>): void;
   setTextLen(n: number): void;
 }
 const savedDrafts: Record<string, SessionSavedDraft> = {};
@@ -27,12 +33,18 @@ export function useComposerSession(deps: SessionDeps) {
   const workspaceStore = useWorkspaceStore();
   function snapshotCurrent(): SessionSavedDraft {
     deps.readEditorToDraft();
-    return { text: deps.plainTextOfDraft(), images: deps.attachments().map((a) => ({ fileName: a.fileName, mime: a.mime })) };
+    return {
+      text: deps.plainTextOfDraft(),
+      images: deps.attachments().map((a) => ({ fileName: a.fileName, mime: a.mime })),
+      skills: deps.skills(),
+    };
   }
   function restoreDraft(saved: SessionSavedDraft | undefined, current: ComposerDraft): ComposerDraft {
     cleanupObjectUrls(current);
     const next = createEmptyDraft();
-    if (saved?.text) next.segments.push({ kind: 'text', text: saved.text });
+    // need22-F02：文本里含 skill marker ⇒ 直接还原成 skill 段（保持原位置）
+    const parsed = deserialize(saved?.text || '', {});
+    next.segments.push(...parsed.segments);
     if (saved) {
       for (const meta of saved.images) {
         const attId = genAttId();
@@ -55,13 +67,15 @@ export function useComposerSession(deps: SessionDeps) {
         };
         next.segments.push({ kind: 'image', attId });
       }
+      // 草稿箱只存 scope/name（接受"skill 追加到末尾"的限制）；文本里已有同名则不重复
+      for (const s of saved.skills || []) {
+        const exists = next.segments.some((seg) => seg.kind === 'skill' && seg.scope === s.scope && seg.name === s.name);
+        if (exists) continue;
+        next.segments.push({ kind: 'skill', scope: s.scope, name: s.name });
+      }
     }
     deps.replaceDraft(next);
-    const atts = next.segments
-      .filter((s) => s.kind === 'image')
-      .map((s) => next.attachments[(s as { attId: string }).attId])
-      .filter((a): a is ComposerAttachment => !!a);
-    deps.renderSession(saved?.text || '', atts);
+    deps.renderSession(next.segments, next.attachments);
     deps.setTextLen(saved ? saved.text.length : 0);
     return next;
   }

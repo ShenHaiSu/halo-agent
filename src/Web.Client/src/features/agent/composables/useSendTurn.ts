@@ -46,6 +46,8 @@ export function useSendTurn(c: ComposerApi) {
     if (stream.isGenerating || c.askMasked.value) return;
     if (!canSend.value) return;
     c.readEditorToDraft();
+    // need22-F02/F03：仅含 skill 段（无任何文字）也算非空，可发送；
+    // text 里带 [[skill:<scope>/<name>]] marker，原样发给后端（后端在发包前展开正文）。
     if (c.isEmptyDraft()) return;
     const payload = await toSendPayload(c.getDraft());
     const textOnly = payload.text.replace(/\[image:[^\]]+\]/g, '').trim();

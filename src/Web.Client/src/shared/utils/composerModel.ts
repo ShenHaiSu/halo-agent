@@ -1,7 +1,11 @@
 /** need09-04：输入框段模型唯一事实源（纯函数，可单测；禁止调 bridge/DOM）。 */
+import { skillMarker, splitBySkillMarkers } from './skillMarker';
+
 export type ComposerSegment =
   | { kind: 'text'; text: string }
-  | { kind: 'image'; attId: string };
+  | { kind: 'image'; attId: string }
+  /** need22-F02：技能段（scope 与 SlashScope 同形；此处直接写字面量联合，避免耦合） */
+  | { kind: 'skill'; scope: 'global' | 'project'; name: string };
 
 export type AttachmentSource = 'paste' | 'drop' | 'picker';
 export type AttachmentStatus = 'ready' | 'oversize' | 'invalid';
@@ -103,49 +107,93 @@ export function removeAttachment(draft: ComposerDraft, attId: string): ComposerD
     attachments: { ...draft.attachments },
   };
   delete next.attachments[attId];
-  // 悬空引用自愈：仍被引用的非法 attId 不留段
-  next.segments = next.segments.filter((s) => s.kind === 'text' || next.attachments[s.attId]);
+  // 悬空引用自愈：仍被引用的非法 attId 不留段（need22-F02：skill 段恒保留）
+  next.segments = next.segments.filter((s) => s.kind === 'text' || s.kind === 'skill' || next.attachments[s.attId]);
   return next;
 }
 
-/** text 段原文 + image 段→`[image:<attId>]`；仅 ready 且被引用的附件进 attachments（无 base64 的同步版） */
-export function serialize(draft: ComposerDraft): string {
-  let out = '';
-  for (const s of draft.segments) {
-    if (s.kind === 'text') out += s.text;
-    else if (draft.attachments[s.attId]) out += `[image:${s.attId}]`;
+/**
+ * need22-F02（D4）：同一 (scope,name) 在一条消息里只保留一个 marker。
+ * 保留首次出现的位置，后续同名 skill 段丢弃。
+ */
+function dedupeSkillSegments(segments: ComposerSegment[]): ComposerSegment[] {
+  const seen = new Set<string>();
+  const out: ComposerSegment[] = [];
+  for (const s of segments) {
+    if (s.kind === 'skill') {
+      const key = `${s.scope}/${s.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(s);
   }
   return out;
 }
 
-/** 反序列化：占位符还原为 image 段（附件缺失则占位符原文保留为文本） */
+/** text 段原文 + image 段→`[image:<attId>]` + skill 段→marker；同名 skill 只出一个（D4） */
+export function serialize(draft: ComposerDraft): string {
+  let out = '';
+  for (const s of dedupeSkillSegments(draft.segments)) {
+    if (s.kind === 'text') out += s.text;
+    else if (s.kind === 'image') {
+      if (draft.attachments[s.attId]) out += `[image:${s.attId}]`;
+    } else out += skillMarker(s.scope, s.name);
+  }
+  return out;
+}
+
+/** 反序列化：先按 marker 切分，再在文本段内按 `[image:<attId>]` 占位符切分（附件缺失则占位符原文保留为文本） */
 export function deserialize(text: string, attachments: Record<string, ComposerAttachment>): ComposerDraft {
   const next = createEmptyDraft();
   next.attachments = { ...attachments };
   const src = String(text || '');
-  let last = 0;
-  IMAGE_PLACEHOLDER_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = IMAGE_PLACEHOLDER_RE.exec(src)) !== null) {
-    const attId = m[1];
-    if (m.index > last) next.segments.push({ kind: 'text', text: src.slice(last, m.index) });
-    if (next.attachments[attId]) next.segments.push({ kind: 'image', attId });
-    else next.segments.push({ kind: 'text', text: m[0] });
-    last = m.index + m[0].length;
+  for (const part of splitBySkillMarkers(src)) {
+    if (part.type === 'skill') {
+      next.segments.push({ kind: 'skill', scope: part.scope, name: part.name });
+      continue;
+    }
+    const seg = part.text;
+    let last = 0;
+    IMAGE_PLACEHOLDER_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = IMAGE_PLACEHOLDER_RE.exec(seg)) !== null) {
+      const attId = m[1];
+      if (m.index > last) next.segments.push({ kind: 'text', text: seg.slice(last, m.index) });
+      if (next.attachments[attId]) next.segments.push({ kind: 'image', attId });
+      else next.segments.push({ kind: 'text', text: m[0] });
+      last = m.index + m[0].length;
+    }
+    if (last < seg.length) next.segments.push({ kind: 'text', text: seg.slice(last) });
   }
-  if (last < src.length) next.segments.push({ kind: 'text', text: src.slice(last) });
+  // D4：还原出的重复 skill 段同样去重
+  next.segments = dedupeSkillSegments(next.segments);
   return next;
 }
 
-/** I3：去掉占位符后的文本 trim==='' 且无 ready 附件 */
+/** need22-F02：移除某个 skill 段（按 scope+name 移除全部同名段） */
+export function removeSkillSegment(draft: ComposerDraft, scope: 'global' | 'project', name: string): ComposerDraft {
+  const next = cloneDraft(draft);
+  next.segments = next.segments.filter((s) => !(s.kind === 'skill' && s.scope === scope && s.name === name));
+  return next;
+}
+
+/** need22-F02：草稿里是否已含该 skill */
+export function hasSkillSegment(draft: ComposerDraft, scope: 'global' | 'project', name: string): boolean {
+  return draft.segments.some((s) => s.kind === 'skill' && s.scope === scope && s.name === name);
+}
+
+/** I3：去掉占位符后的文本 trim==='' 且无 ready 附件（need22-F02：存在 skill 段 ⇒ 非空） */
 export function isEmpty(draft: ComposerDraft): boolean {
+  if (draft.segments.some((s) => s.kind === 'skill')) return false;
   const text = draft.segments
     .filter((s) => s.kind === 'text')
     .map((s) => (s as { kind: 'text'; text: string }).text)
     .join('')
     .trim();
   if (text !== '') return false;
-  return !Object.values(draft.attachments).some((a) => a.status === 'ready' && draft.segments.some((s) => s.kind === 'image' && s.attId === a.attId));
+  return !Object.values(draft.attachments).some(
+    (a) => a.status === 'ready' && draft.segments.some((s) => s.kind === 'image' && s.attId === a.attId)
+  );
 }
 
 /** 仅 ready 且被引用的附件（发送候选） */
@@ -178,14 +226,16 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** I2：text 占位符与 attachments 数组 1:1（仅 ready 被引用附件转 base64） */
+/** I2：text 占位符与 attachments 数组 1:1（仅 ready 被引用附件转 base64）；need22-F02：skill 段拼 marker（不做 ready 过滤） */
 export async function toSendPayload(draft: ComposerDraft): Promise<SendPayload> {
   const ready = readyAttachments(draft);
   const readyIds = new Set(ready.map((a) => a.attId));
   let text = '';
-  for (const s of draft.segments) {
+  for (const s of dedupeSkillSegments(draft.segments)) {
     if (s.kind === 'text') text += s.text;
-    else if (readyIds.has(s.attId)) text += `[image:${s.attId}]`;
+    else if (s.kind === 'image') {
+      if (readyIds.has(s.attId)) text += `[image:${s.attId}]`;
+    } else text += skillMarker(s.scope, s.name);
   }
   const attachments: SendAttachment[] = [];
   for (const a of ready) {
@@ -204,58 +254,73 @@ export function cleanupObjectUrls(draft: ComposerDraft): void {
     }
   }
 }
- /** need22-P3 G3：缩略图 LRU（20 张）+ URL.createObjectURL 预览，发送才转码，revoke 释放。 */
- export const THUMB_LRU_MAX = 20;
- /** need22-P3 G3：>5MB 预览前压缩阈值（canvas.toBlob）。 */
- export const PREVIEW_COMPRESS_BYTES = 5 * 1024 * 1024;
- const thumbLruOrder: string[] = [];
- function thumbLruTouch(url: string): void {
-   const i = thumbLruOrder.indexOf(url);
-   if (i >= 0) thumbLruOrder.splice(i, 1);
-   thumbLruOrder.push(url);
-   while (thumbLruOrder.length > THUMB_LRU_MAX) {
-     const oldest = thumbLruOrder.shift();
-     if (oldest) {
-       try { URL.revokeObjectURL(oldest); } catch (e) { console.warn('[composer] lru revoke failed:', e); }
-     }
-   }
- }
- /** 预览 URL（objectURL，不转 base64；LRU 满 20 自动 revoke 最旧）。 */
- export function createPreviewUrl(file: File): string {
-   const url = URL.createObjectURL(file);
-   thumbLruTouch(url);
-   return url;
- }
- export function revokePreviewUrl(url: string): void {
-   if (!url) return;
-   const i = thumbLruOrder.indexOf(url);
-   if (i >= 0) thumbLruOrder.splice(i, 1);
-   try { URL.revokeObjectURL(url); } catch (e) { console.warn('[composer] revoke failed:', e); }
- }
- /** need22-P3 G3：>5MB 图片压缩后再预览（canvas.toBlob，长边 ≤1920，jpeg 0.82）；失败回退原文件。 */
- export async function compressImageIfNeeded(file: File): Promise<File> {
-   try {
-     if (file.size <= PREVIEW_COMPRESS_BYTES) return file;
-     if (typeof createImageBitmap === 'undefined' || typeof document === 'undefined') return file;
-     const bitmap = await createImageBitmap(file);
-     const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
-     const w = Math.max(1, Math.round(bitmap.width * scale));
-     const h = Math.max(1, Math.round(bitmap.height * scale));
-     const canvas = document.createElement('canvas');
-     canvas.width = w;
-     canvas.height = h;
-     const ctx = canvas.getContext('2d');
-     if (!ctx) { bitmap.close(); return file; }
-     ctx.drawImage(bitmap, 0, 0, w, h);
-     bitmap.close();
-     const blob = await new Promise<Blob | null>((resolve) => {
-       try { canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.82); }
-       catch (e) { console.warn('[composer] toBlob failed:', e); resolve(null); }
-     });
-     if (!blob) return file;
-     return new File([blob], file.name, { type: 'image/jpeg' });
-   } catch (e) {
-     console.warn('[composer] compress failed, fallback original:', e);
-     return file;
-   }
- }
+/** need22-P3 G3：缩略图 LRU（20 张）+ URL.createObjectURL 预览，发送才转码，revoke 释放。 */
+export const THUMB_LRU_MAX = 20;
+/** need22-P3 G3：>5MB 预览前压缩阈值（canvas.toBlob）。 */
+export const PREVIEW_COMPRESS_BYTES = 5 * 1024 * 1024;
+const thumbLruOrder: string[] = [];
+function thumbLruTouch(url: string): void {
+  const i = thumbLruOrder.indexOf(url);
+  if (i >= 0) thumbLruOrder.splice(i, 1);
+  thumbLruOrder.push(url);
+  while (thumbLruOrder.length > THUMB_LRU_MAX) {
+    const oldest = thumbLruOrder.shift();
+    if (oldest) {
+      try {
+        URL.revokeObjectURL(oldest);
+      } catch (e) {
+        console.warn('[composer] lru revoke failed:', e);
+      }
+    }
+  }
+}
+/** 预览 URL（objectURL，不转 base64；LRU 满 20 自动 revoke 最旧）。 */
+export function createPreviewUrl(file: File): string {
+  const url = URL.createObjectURL(file);
+  thumbLruTouch(url);
+  return url;
+}
+export function revokePreviewUrl(url: string): void {
+  if (!url) return;
+  const i = thumbLruOrder.indexOf(url);
+  if (i >= 0) thumbLruOrder.splice(i, 1);
+  try {
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('[composer] revoke failed:', e);
+  }
+}
+/** need22-P3 G3：>5MB 图片压缩后再预览（canvas.toBlob，长边 ≤1920，jpeg 0.82）；失败回退原文件。 */
+export async function compressImageIfNeeded(file: File): Promise<File> {
+  try {
+    if (file.size <= PREVIEW_COMPRESS_BYTES) return file;
+    if (typeof createImageBitmap === 'undefined' || typeof document === 'undefined') return file;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bitmap.close();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => {
+      try {
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.82);
+      } catch (e) {
+        console.warn('[composer] toBlob failed:', e);
+        resolve(null);
+      }
+    });
+    if (!blob) return file;
+    return new File([blob], file.name, { type: 'image/jpeg' });
+  } catch (e) {
+    console.warn('[composer] compress failed, fallback original:', e);
+    return file;
+  }
+}

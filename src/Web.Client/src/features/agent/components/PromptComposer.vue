@@ -11,6 +11,11 @@
     :over-limit-warn="c.overLimitWarn"
     :oversize-warn="c.oversizeWarn"
     :max-images="c.maxImages"
+    :slash-visible="c.slash.active"
+    :slash-candidates="c.slash.candidates"
+    :slash-index="c.slash.index"
+    :slash-error="c.slash.error"
+    :slash-loading="c.slash.loading"
     @ready="onReady"
     @editor-input="c.onEditorInput()"
     @editor-click="c.onEditorClick($event)"
@@ -25,6 +30,9 @@
     @send="send.handleSend()"
     @stop="send.handleStop()"
     @open-sub="send.openFirstSub()"
+    @slash-select="c.slash.select($event)"
+    @slash-hover="c.slash.index = $event"
+    @slash-close="c.slash.close()"
   />
 </template>
 <script setup lang="ts">
