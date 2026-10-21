@@ -29,7 +29,10 @@ public sealed class Stage13HistoryHealTests : IDisposable
     public Stage13HistoryHealTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage13Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage13Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage13Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -37,7 +40,8 @@ public sealed class Stage13HistoryHealTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
@@ -45,8 +49,14 @@ public sealed class Stage13HistoryHealTests : IDisposable
         string projectDir = Path.Combine(_tempRoot, "Projects", "HealTest");
         Directory.CreateDirectory(projectDir);
 
-        _workspace = _service.AddOrUpdateWorkspaceAsync(projectDir, "愈合测试项目").GetAwaiter().GetResult();
-        _session = _service.CreateSessionAsync(_workspace.Id, "Stage13 验收会话").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(projectDir, "愈合测试项目")
+            .GetAwaiter()
+            .GetResult();
+        _session = _service
+            .CreateSessionAsync(_workspace.Id, "Stage13 验收会话")
+            .GetAwaiter()
+            .GetResult();
     }
 
     public void Dispose()
@@ -67,13 +77,22 @@ public sealed class Stage13HistoryHealTests : IDisposable
     private static UnifiedChatMessage AssistantWithCall(string callId, string name = "read_file") =>
         UnifiedChatMessage.Assistant(
             "正文",
-            new List<UnifiedToolCall> { new UnifiedToolCall(callId, null, name, "{}") });
+            new List<UnifiedToolCall> { new UnifiedToolCall(callId, null, name, "{}") }
+        );
 
     [Fact]
     public async Task Heal_Appends_Synthetic_For_Orphan_Tail_And_Is_Idempotent()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("查文件"));
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, AssistantWithCall("call_orphan_1"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("查文件")
+        );
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            AssistantWithCall("call_orphan_1")
+        );
 
         var r = await _service.HealSessionHistoryAsync(_workspace.Id, _session.Id);
         Assert.True(r.Success);
@@ -99,10 +118,22 @@ public sealed class Stage13HistoryHealTests : IDisposable
     [Fact]
     public async Task Heal_Removes_Orphan_Tool_And_Fills_Missing_Call()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("开始"));
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, AssistantWithCall("call_a"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("开始")
+        );
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            AssistantWithCall("call_a")
+        );
         // c2 无归属 assistant，必须被清理；call_a 缺回包，必须补 synthetic
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.Tool("call_ghost", "输出", "list_dir"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.Tool("call_ghost", "输出", "list_dir")
+        );
 
         var r = await _service.HealSessionHistoryAsync(_workspace.Id, _session.Id);
         Assert.True(r.Success);
@@ -114,15 +145,30 @@ public sealed class Stage13HistoryHealTests : IDisposable
         Assert.Equal("assistant", messages[1].Role);
         Assert.Equal("tool", messages[2].Role);
         Assert.Equal("call_a", messages[2].ToolCallId);
-        Assert.DoesNotContain(messages, m => string.Equals(m.ToolCallId, "call_ghost", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            messages,
+            m => string.Equals(m.ToolCallId, "call_ghost", StringComparison.Ordinal)
+        );
     }
 
     [Fact]
     public async Task Heal_Clean_History_Does_Not_Rewrite()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("读文件"));
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, AssistantWithCall("call_ok"));
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.Tool("call_ok", "内容", "read_file"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("读文件")
+        );
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            AssistantWithCall("call_ok")
+        );
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.Tool("call_ok", "内容", "read_file")
+        );
 
         var r = await _service.HealSessionHistoryAsync(_workspace.Id, _session.Id);
         Assert.True(r.Success);
@@ -135,7 +181,11 @@ public sealed class Stage13HistoryHealTests : IDisposable
     [Fact]
     public async Task Delete_User_Message_Removes_One_Line_With_Backup()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("第一句"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("第一句")
+        );
         var second = UnifiedChatMessage.User("第二句");
         await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, second);
 
@@ -152,8 +202,16 @@ public sealed class Stage13HistoryHealTests : IDisposable
     [Fact]
     public async Task Delete_Tool_Message_Heals_Dangling_Assistant()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("读文件"));
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, AssistantWithCall("call_del", "read_file"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("读文件")
+        );
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            AssistantWithCall("call_del", "read_file")
+        );
         var toolMsg = UnifiedChatMessage.Tool("call_del", "内容", "read_file");
         await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, toolMsg);
 
@@ -165,15 +223,26 @@ public sealed class Stage13HistoryHealTests : IDisposable
         Assert.Equal(3, messages.Count);
         Assert.Equal("assistant", messages[1].Role);
         Assert.Equal("call_del", messages[2].ToolCallId);
-        Assert.StartsWith(WorkspaceSessionService.SyntheticCancelledToolPrefix, messages[2].Content);
+        Assert.StartsWith(
+            WorkspaceSessionService.SyntheticCancelledToolPrefix,
+            messages[2].Content
+        );
     }
 
     [Fact]
     public async Task Delete_Missing_Message_Fails_Without_Touching_Disk()
     {
-        await _service.AppendSessionMessageAsync(_workspace.Id, _session.Id, UnifiedChatMessage.User("留存"));
+        await _service.AppendSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            UnifiedChatMessage.User("留存")
+        );
 
-        var r = await _service.DeleteSessionMessageAsync(_workspace.Id, _session.Id, "msg_not_exist");
+        var r = await _service.DeleteSessionMessageAsync(
+            _workspace.Id,
+            _session.Id,
+            "msg_not_exist"
+        );
         Assert.False(r.Success);
         Assert.Equal("MESSAGE_NOT_FOUND", r.ErrorCode);
 

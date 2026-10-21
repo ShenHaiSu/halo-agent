@@ -45,6 +45,7 @@ public sealed class ToolContext
     /// 测试/上层注入的 Python 探测覆盖（为空则走真实探测）。
     /// </summary>
     public Func<CommandRunnerProbe.ProbeResult>? PythonProbeOverride { get; init; }
+
     /// <summary>
     /// need17-07：Python 可用性快照覆盖（单测/子代理注入；生产为 null→读静态快照）。
     /// </summary>
@@ -56,12 +57,16 @@ public sealed class ToolContext
     /// </summary>
     public int? ExecDefaultTimeoutMsOverride { get; set; }
     public int? ExecMaxTimeoutMsOverride { get; set; }
+
     /// <summary>need22-P0 S2：exec_command 首 token 白名单覆盖（null/空=默认白名单；可配）。</summary>
     public List<string>? AllowedCommandsOverride { get; set; }
+
     /// <summary>need13：main|sub（默认 main，老调用零改动）。</summary>
     public string AgentRole { get; init; } = "main";
+
     /// <summary>need13：sub 寄宿的主会话（main 为 null）。</summary>
     public string? ParentSessionId { get; init; }
+
     /// <summary>need13：轮首策略快照（见 05 §3，Orchestrator 每轮填一次）。</summary>
     public bool SubAgentEnabled { get; set; } = true;
     public int SubMaxParallel { get; set; } = 3;
@@ -71,15 +76,21 @@ public sealed class ToolContext
     public bool SubAllowSkillWrite { get; set; } = false;
     public bool SubAllowMemoryWrite { get; set; } = false;
     public CancellationToken CancellationToken { get; init; } = CancellationToken.None;
+
     /// <summary>need09-07：skill/memory 工具默认写域（模型不填 scope 即写 Project，防污染全局）。</summary>
     public string SkillMemoryScopeDefault { get; init; } = "project";
+
     /// <summary>
     /// 会话临时目录：&lt;DataRoot&gt;/sessions/&lt;ws&gt;/&lt;sess&gt;/tmp
     /// </summary>
     public string SessionTempDir =>
         Path.Combine(
             string.IsNullOrWhiteSpace(DataRoot) ? Path.GetTempPath() : DataRoot,
-            "sessions", WorkspaceId, SessionId, "tmp");
+            "sessions",
+            WorkspaceId,
+            SessionId,
+            "tmp"
+        );
 }
 
 /// <summary>
@@ -99,5 +110,9 @@ public interface IToolHandler
     /// <summary>
     /// 执行工具。实现方不得抛出异常（异常由 ToolRegistry 统一捕获转自愈提示）。
     /// </summary>
-    Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default);
+    Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    );
 }

@@ -10,9 +10,7 @@ public sealed class ToolResult
 {
     private static readonly Regex CodePrefix = new(@"^([A-Z_]{2,})[:：]", RegexOptions.Compiled);
 
-    public ToolResult()
-    {
-    }
+    public ToolResult() { }
 
     /// <summary>是否执行成功。</summary>
     public bool Success { get; set; }
@@ -29,25 +27,37 @@ public sealed class ToolResult
     /// <summary>执行耗时毫秒。</summary>
     public long DurationMs { get; set; }
 
-     /// <summary>超长输出落盘文件绝对路径（未超限为 null）。</summary>
-     public string? SpilledFile { get; set; }
-     /// <summary>need12：文件写入类工具落盘字节数（WriteFileTool 显式回填，前端完成态展示用）。</summary>
-     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-     public long? FileBytes { get; set; }
-     /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
-     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-     public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
+    /// <summary>超长输出落盘文件绝对路径（未超限为 null）。</summary>
+    public string? SpilledFile { get; set; }
+
+    /// <summary>need12：文件写入类工具落盘字节数（WriteFileTool 显式回填，前端完成态展示用）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
+    public long? FileBytes { get; set; }
+
+    /// <summary>need09-05：工具附带的图片引用（view_image 结果；ToolOutputGuard 只截文本不动图片）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
+    public List<Host.Desktop.Core.Models.ChatImageRef>? Images { get; set; }
 
     /// <summary>need15 P0-5：结构化错误码（如 OLD_STRING_NOT_FOUND），成功时为 null。</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
     public string? ErrorCode { get; set; }
 
     /// <summary>need15 P0-5：失配时的 nearest/hint JSON（即 BuildNotFoundDiagnostic 产物），成功时为 null。</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
     public string? ErrorPayloadJson { get; set; }
 
     /// <summary>need17-02：中央校验 warnings（ALIASED_PARAM/DEFAULTED_PARAM/COERCED_TYPE 等，仅提示不判失败；老消费方无感）。</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
     public List<string>? ValidatedWarnings { get; set; }
 
     public static ToolResult Ok(
@@ -55,7 +65,9 @@ public sealed class ToolResult
         int exitCode = 0,
         long durationMs = 0,
         string? spilledFile = null,
-        List<Host.Desktop.Core.Models.ChatImageRef>? images = null) => new()
+        List<Host.Desktop.Core.Models.ChatImageRef>? images = null
+    ) =>
+        new()
         {
             Success = true,
             Output = output ?? string.Empty,
@@ -70,7 +82,8 @@ public sealed class ToolResult
         string? output = null,
         int exitCode = -1,
         long durationMs = 0,
-        string? spilledFile = null)
+        string? spilledFile = null
+    )
     {
         var r = new ToolResult
         {
@@ -96,14 +109,17 @@ public sealed class ToolResult
         string? output = null,
         int exitCode = -1,
         long durationMs = 0,
-        string? spilledFile = null)
+        string? spilledFile = null
+    )
     {
         string msg = message ?? string.Empty;
         string prefix1 = code + "：";
         string prefix2 = code + ":";
-        string error = msg.StartsWith(prefix1, StringComparison.Ordinal) || msg.StartsWith(prefix2, StringComparison.Ordinal)
-            ? msg
-            : $"{code}：{msg}";
+        string error =
+            msg.StartsWith(prefix1, StringComparison.Ordinal)
+            || msg.StartsWith(prefix2, StringComparison.Ordinal)
+                ? msg
+                : $"{code}：{msg}";
         return new ToolResult
         {
             Success = false,

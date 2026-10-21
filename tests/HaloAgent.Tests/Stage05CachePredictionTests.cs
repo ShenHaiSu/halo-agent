@@ -1,36 +1,60 @@
- #nullable enable
- using System.Collections.Generic;
- using Host.Desktop.Core.Models;
- using Host.Desktop.Infrastructure.Network;
- using Host.Desktop.LlmGateway.Models;
- using Host.Desktop.Services;
- using Xunit;
- 
- namespace HaloAgent.Tests;
- 
- /// <summary>need05-06：本地预测 + 分块拼接对比（推测算法与拼接对比算法验收）。</summary>
- public sealed class Stage05CachePredictionTests
- {
-    private static string StableSys(string ephemeral = "2026-01-01") =>
-        "You are Halo-Agent\n## 1. Runtime\n- cmd.exe\n\n## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n- Current Date: " + ephemeral + "\n";
+#nullable enable
+using System.Collections.Generic;
+using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Network;
+using Host.Desktop.LlmGateway.Models;
+using Host.Desktop.Services;
+using Xunit;
 
-    private static UnifiedLlmRequest Req(string sys, List<UnifiedChatMessage> msgs)
-        => new()
+namespace HaloAgent.Tests;
+
+/// <summary>need05-06：本地预测 + 分块拼接对比（推测算法与拼接对比算法验收）。</summary>
+public sealed class Stage05CachePredictionTests
+{
+    private static string StableSys(string ephemeral = "2026-01-01") =>
+        "You are Halo-Agent\n## 1. Runtime\n- cmd.exe\n\n## 4. Session Ephemeral (只供模型参考,不参与前缀命中)\n- Current Date: "
+        + ephemeral
+        + "\n";
+
+    private static UnifiedLlmRequest Req(string sys, List<UnifiedChatMessage> msgs) =>
+        new()
         {
             RequestId = "r",
-            Provider = new ProviderConfig { Id = "p", Name = "P", BaseUrl = "https://x/v1" },
+            Provider = new ProviderConfig
+            {
+                Id = "p",
+                Name = "P",
+                BaseUrl = "https://x/v1"
+            },
             Model = new ModelConfig { Id = "m", Protocol = LlmProtocolType.Chat },
-            HeaderContext = new HeaderResolutionContext("w", "n", "p", "s", "h", "p", "pn", "m", "r"),
+            HeaderContext = new HeaderResolutionContext(
+                "w",
+                "n",
+                "p",
+                "s",
+                "h",
+                "p",
+                "pn",
+                "m",
+                "r"
+            ),
             SystemInstructions = sys,
             Messages = msgs,
-            Tools = new List<UnifiedToolDefinition> { UnifiedToolDefinition.Create("a_tool", "a", "{}") },
+            Tools = new List<UnifiedToolDefinition>
+            {
+                UnifiedToolDefinition.Create("a_tool", "a", "{}")
+            },
         };
 
     [Fact(DisplayName = "S05-06: 全等快照判定 stable，预测沿用实测")]
     public void Identical_Snapshots_Are_Stable()
     {
         PrefixCachePredictor.ClearForTests();
-        var msgs = new List<UnifiedChatMessage> { UnifiedChatMessage.User("hi"), UnifiedChatMessage.Assistant("ok") };
+        var msgs = new List<UnifiedChatMessage>
+        {
+            UnifiedChatMessage.User("hi"),
+            UnifiedChatMessage.Assistant("ok")
+        };
         var s1 = PrefixCachePredictor.BuildSnapshot(StableSys(), msgs, null);
         var s2 = PrefixCachePredictor.BuildSnapshot(StableSys(), msgs, null);
         var diff = PrefixCachePredictor.Compare(s1, s2, 0.75);
@@ -44,8 +68,17 @@
     public void Append_Only_Keeps_Prefix_Stable()
     {
         PrefixCachePredictor.ClearForTests();
-        var prev = new List<UnifiedChatMessage> { UnifiedChatMessage.User("q1"), UnifiedChatMessage.Assistant("a1") };
-        var cur = new List<UnifiedChatMessage> { UnifiedChatMessage.User("q1"), UnifiedChatMessage.Assistant("a1"), UnifiedChatMessage.User("q2") };
+        var prev = new List<UnifiedChatMessage>
+        {
+            UnifiedChatMessage.User("q1"),
+            UnifiedChatMessage.Assistant("a1")
+        };
+        var cur = new List<UnifiedChatMessage>
+        {
+            UnifiedChatMessage.User("q1"),
+            UnifiedChatMessage.Assistant("a1"),
+            UnifiedChatMessage.User("q2")
+        };
         var sPrev = PrefixCachePredictor.BuildSnapshot(StableSys(), prev, null);
         var sCur = PrefixCachePredictor.BuildSnapshot(StableSys(), cur, null);
         var diff = PrefixCachePredictor.Compare(sPrev, sCur);
@@ -72,14 +105,19 @@
     [Fact(DisplayName = "S05-06: 仅日期尾部变化命中率不归零")]
     public void Ephemeral_Only_Change_Keeps_High_Prediction()
     {
-         var msgs = new List<UnifiedChatMessage> { UnifiedChatMessage.User("hi"), UnifiedChatMessage.Assistant("ok") };
-         var sPrev = PrefixCachePredictor.BuildSnapshot(StableSys("2026-01-01"), msgs, null);
-         var sCur = PrefixCachePredictor.BuildSnapshot(StableSys("2026-01-02"), msgs, null);
-         var diff = PrefixCachePredictor.Compare(sPrev, sCur);
-         Assert.Equal("system.ephemeral", diff.DivergenceBlock);
-         Assert.True(diff.StableTokens > 0);
-         Assert.True(diff.ExpectedHitRate > 0.3);
-     }
+        var msgs = new List<UnifiedChatMessage>
+        {
+            UnifiedChatMessage.User("hi"),
+            UnifiedChatMessage.Assistant("ok")
+        };
+        var sPrev = PrefixCachePredictor.BuildSnapshot(StableSys("2026-01-01"), msgs, null);
+        var sCur = PrefixCachePredictor.BuildSnapshot(StableSys("2026-01-02"), msgs, null);
+        var diff = PrefixCachePredictor.Compare(sPrev, sCur);
+        Assert.Equal("system.ephemeral", diff.DivergenceBlock);
+        Assert.True(diff.StableTokens > 0);
+        Assert.True(diff.ExpectedHitRate > 0.3);
+    }
+
     [Fact(DisplayName = "S05-06: 首轮无依据不瞎猜 + 字节 LCP + EWMA")]
     public void First_Round_Null_And_Lcp_Ewma()
     {
@@ -103,7 +141,11 @@
         PrefixCachePredictor.ClearForTests();
         const string sessionHash = "sess-hash-06";
         var m1 = new List<UnifiedChatMessage> { UnifiedChatMessage.User("q1") };
-        var m2 = new List<UnifiedChatMessage> { UnifiedChatMessage.User("q1"), UnifiedChatMessage.User("q2") };
+        var m2 = new List<UnifiedChatMessage>
+        {
+            UnifiedChatMessage.User("q1"),
+            UnifiedChatMessage.User("q2")
+        };
         var s1 = PrefixCachePredictor.BuildSnapshot(StableSys(), m1, null);
         var (hit1, _, _) = PrefixCachePredictor.TrackRequest(sessionHash, "sid", s1);
         Assert.Null(hit1); // 首轮无依据
@@ -117,8 +159,15 @@
 
         var svc = new TokenBudgetService();
         var dto = svc.CalculateBudgetStatus(
-            new ModelConfig { Id = "m", Protocol = LlmProtocolType.Chat, MaxContextTokens = 128000 },
-            new List<UnifiedChatMessage>(), sessionHash);
+            new ModelConfig
+            {
+                Id = "m",
+                Protocol = LlmProtocolType.Chat,
+                MaxContextTokens = 128000
+            },
+            new List<UnifiedChatMessage>(),
+            sessionHash
+        );
         Assert.NotNull(dto.PredictedCacheHitRate);
         Assert.Equal(hit2!.Value, dto.PredictedCacheHitRate!.Value, 6);
         Assert.Equal(div2, dto.PrefixDivergenceBlock);
@@ -140,6 +189,7 @@
         };
         Assert.Equal(
             PrefixCachePredictor.CanonicalToolsHash(t1),
-            PrefixCachePredictor.CanonicalToolsHash(t2));
+            PrefixCachePredictor.CanonicalToolsHash(t2)
+        );
     }
 }

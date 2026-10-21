@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using Host.Desktop.Core.Models;
@@ -60,157 +60,193 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                 writer.WriteNumber("temperature", request.Model.Temperature.Value);
             }
 
-             // FIX(tool-400)：先内存愈合配对再序列化；tool 附图收齐后在整段 output 块尾发一个 user，避免插断 function_call*→output 序列。
-             var sendMessages = ChatPairingGuard.HealForSend(request.Messages);
-             if (sendMessages.Count != (request.Messages?.Count ?? 0))
-             {
-                 try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Warn($"[REQ] reqId={request.RequestId} pairing-healed messages={request.Messages?.Count ?? 0}->{sendMessages.Count}"); } catch { }
-             }
-             var planRequest = new UnifiedLlmRequest
-             {
-                 RequestId = request.RequestId,
-                 Provider = request.Provider,
-                 Model = request.Model,
-                 HeaderContext = request.HeaderContext,
-                 SystemInstructions = request.SystemInstructions,
-                 Messages = sendMessages,
-                 Tools = request.Tools,
-                 ImageResolver = request.ImageResolver,
-             };
-             var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
-             if (mmPlan.Dropped > 0)
-             {
-                 try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info("[REQ] reqId=" + request.RequestId + " model=" + request.Model.Id + " imgTotal=" + mmPlan.Total + " imgTruncated=" + mmPlan.Dropped); } catch { }
-             }
-             string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
-             var pendingToolImages = new List<ResolvedImage>();
-             var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
-             void FlushPendingToolImages()
-             {
-                 if (pendingToolImages.Count == 0) return;
-                 writer.WriteStartObject();
-                 writer.WriteString("type", "message");
-                 writer.WriteString("role", "user");
-                 writer.WriteStartArray("content");
-                 writer.WriteStartObject();
-                 writer.WriteString("type", "input_text");
-                 writer.WriteString("text", ChatCompletionsAdapter.BuildTrailingToolImageText(pendingToolRefs, pendingToolImages.Count));
-                 writer.WriteEndObject();
-                 foreach (var r in pendingToolImages)
-                 {
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "input_image");
-                     writer.WriteString("image_url", r.DataUrl!);
-                     writer.WriteString("detail", visionDetail);
-                     writer.WriteEndObject();
-                 }
-                 writer.WriteEndArray();
-                 writer.WriteEndObject();
-                 pendingToolImages.Clear();
-                 pendingToolRefs.Clear();
-             }
-             int mmIndex = -1;
-             writer.WriteStartArray("input");
-             foreach (var msg in sendMessages)
-             {
-                 mmIndex++;
-                 var kept = mmPlan.Kept[mmIndex].Where(r => !string.IsNullOrWhiteSpace(r.DataUrl)).ToList();
-                 bool isTool = msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
-                 if (!isTool && pendingToolImages.Count > 0) FlushPendingToolImages();
-                 if (msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
-                 {
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "message");
-                     writer.WriteString("role", "user");
-                     writer.WriteStartArray("content");
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "input_text");
-                     writer.WriteString("text", msg.Content ?? string.Empty);
-                     writer.WriteEndObject();
-                      foreach (var r in kept)
-                     {
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "input_image");
-                         writer.WriteString("image_url", r.DataUrl!);
-                         writer.WriteString("detail", visionDetail);
-                         writer.WriteEndObject();
-                     }
-                     writer.WriteEndArray();
-                     writer.WriteEndObject();
-                 }
-                 else if (msg.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
-                 {
-                     // 历史思考链默认随上下文发出；空/开关关则省略零抖动
-                     if (request.Model.IncludeReasoningInHistory && !string.IsNullOrWhiteSpace(msg.ReasoningContent))
-                     {
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "reasoning");
-                         writer.WriteStartArray("summary");
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "summary_text");
-                         writer.WriteString("text", msg.ReasoningContent);
-                         writer.WriteEndObject();
-                         writer.WriteEndArray();
-                         writer.WriteEndObject();
-                     }
-                     if (!string.IsNullOrEmpty(msg.Content))
-                     {
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "message");
-                         writer.WriteString("role", "assistant");
-                         writer.WriteStartArray("content");
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "output_text");
-                         writer.WriteString("text", msg.Content);
-                         writer.WriteEndObject();
-                         writer.WriteEndArray();
-                         writer.WriteEndObject();
-                     }
-                     if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
-                     {
-                         foreach (var tc in msg.ToolCalls)
-                     {
-                             writer.WriteStartObject();
-                             writer.WriteString("type", "function_call");
-                             writer.WriteString("call_id", tc.CallId);
-                             writer.WriteString("name", tc.FunctionName);
-                             writer.WriteString("arguments", tc.ArgumentsJson ?? "{}");
-                             writer.WriteEndObject();
-                     }
-                     }
-                 }
-                 else if (isTool)
-                 {
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "function_call_output");
-                     writer.WriteString("call_id", msg.ToolCallId ?? string.Empty);
-                     writer.WriteString("output", msg.Content ?? string.Empty);
-                     writer.WriteEndObject();
-                     if (kept.Count > 0)
-                     {
-                         pendingToolImages.AddRange(kept);
-                         pendingToolRefs.Add((msg.ToolCallId ?? string.Empty, msg.Name, msg.Content));
-                     }
-                 }
-                 else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
-                 {
-                     // 若有额外 system 消息，作为 developer message 追加至 input
-                     if (pendingToolImages.Count > 0) FlushPendingToolImages();
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "message");
-                     writer.WriteString("role", "developer");
-                     writer.WriteStartArray("content");
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "input_text");
-                     writer.WriteString("text", msg.Content ?? string.Empty);
-                     writer.WriteEndObject();
-                     writer.WriteEndArray();
-                     writer.WriteEndObject();
-                     continue;
-                 }
-             }
-             FlushPendingToolImages();
-             writer.WriteEndArray(); // input
+            // FIX(tool-400)：先内存愈合配对再序列化；tool 附图收齐后在整段 output 块尾发一个 user，避免插断 function_call*→output 序列。
+            var sendMessages = ChatPairingGuard.HealForSend(request.Messages);
+            if (sendMessages.Count != (request.Messages?.Count ?? 0))
+            {
+                try
+                {
+                    Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Warn(
+                        $"[REQ] reqId={request.RequestId} pairing-healed messages={request.Messages?.Count ?? 0}->{sendMessages.Count}"
+                    );
+                }
+                catch { }
+            }
+            var planRequest = new UnifiedLlmRequest
+            {
+                RequestId = request.RequestId,
+                Provider = request.Provider,
+                Model = request.Model,
+                HeaderContext = request.HeaderContext,
+                SystemInstructions = request.SystemInstructions,
+                Messages = sendMessages,
+                Tools = request.Tools,
+                ImageResolver = request.ImageResolver,
+            };
+            var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
+            if (mmPlan.Dropped > 0)
+            {
+                try
+                {
+                    Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info(
+                        "[REQ] reqId="
+                            + request.RequestId
+                            + " model="
+                            + request.Model.Id
+                            + " imgTotal="
+                            + mmPlan.Total
+                            + " imgTruncated="
+                            + mmPlan.Dropped
+                    );
+                }
+                catch { }
+            }
+            string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            var pendingToolImages = new List<ResolvedImage>();
+            var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
+            void FlushPendingToolImages()
+            {
+                if (pendingToolImages.Count == 0)
+                    return;
+                writer.WriteStartObject();
+                writer.WriteString("type", "message");
+                writer.WriteString("role", "user");
+                writer.WriteStartArray("content");
+                writer.WriteStartObject();
+                writer.WriteString("type", "input_text");
+                writer.WriteString(
+                    "text",
+                    ChatCompletionsAdapter.BuildTrailingToolImageText(
+                        pendingToolRefs,
+                        pendingToolImages.Count
+                    )
+                );
+                writer.WriteEndObject();
+                foreach (var r in pendingToolImages)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "input_image");
+                    writer.WriteString("image_url", r.DataUrl!);
+                    writer.WriteString("detail", visionDetail);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                pendingToolImages.Clear();
+                pendingToolRefs.Clear();
+            }
+            int mmIndex = -1;
+            writer.WriteStartArray("input");
+            foreach (var msg in sendMessages)
+            {
+                mmIndex++;
+                var kept = mmPlan
+                    .Kept[mmIndex]
+                    .Where(r => !string.IsNullOrWhiteSpace(r.DataUrl))
+                    .ToList();
+                bool isTool = msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
+                if (!isTool && pendingToolImages.Count > 0)
+                    FlushPendingToolImages();
+                if (msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "message");
+                    writer.WriteString("role", "user");
+                    writer.WriteStartArray("content");
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "input_text");
+                    writer.WriteString("text", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    foreach (var r in kept)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "input_image");
+                        writer.WriteString("image_url", r.DataUrl!);
+                        writer.WriteString("detail", visionDetail);
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+                else if (msg.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 历史思考链默认随上下文发出；空/开关关则省略零抖动
+                    if (
+                        request.Model.IncludeReasoningInHistory
+                        && !string.IsNullOrWhiteSpace(msg.ReasoningContent)
+                    )
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "reasoning");
+                        writer.WriteStartArray("summary");
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "summary_text");
+                        writer.WriteString("text", msg.ReasoningContent);
+                        writer.WriteEndObject();
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+                    if (!string.IsNullOrEmpty(msg.Content))
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "message");
+                        writer.WriteString("role", "assistant");
+                        writer.WriteStartArray("content");
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "output_text");
+                        writer.WriteString("text", msg.Content);
+                        writer.WriteEndObject();
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+                    if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
+                    {
+                        foreach (var tc in msg.ToolCalls)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteString("type", "function_call");
+                            writer.WriteString("call_id", tc.CallId);
+                            writer.WriteString("name", tc.FunctionName);
+                            writer.WriteString("arguments", tc.ArgumentsJson ?? "{}");
+                            writer.WriteEndObject();
+                        }
+                    }
+                }
+                else if (isTool)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "function_call_output");
+                    writer.WriteString("call_id", msg.ToolCallId ?? string.Empty);
+                    writer.WriteString("output", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    if (kept.Count > 0)
+                    {
+                        pendingToolImages.AddRange(kept);
+                        pendingToolRefs.Add(
+                            (msg.ToolCallId ?? string.Empty, msg.Name, msg.Content)
+                        );
+                    }
+                }
+                else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 若有额外 system 消息，作为 developer message 追加至 input
+                    if (pendingToolImages.Count > 0)
+                        FlushPendingToolImages();
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "message");
+                    writer.WriteString("role", "developer");
+                    writer.WriteStartArray("content");
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "input_text");
+                    writer.WriteString("text", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                    continue;
+                }
+            }
+            FlushPendingToolImages();
+            writer.WriteEndArray(); // input
 
             // 7. 扁平化工具定义列表（非嵌套式）
             // need05-02：按 name 升序稳定排序后序列化（内容不动），保证请求前缀后段字节稳定
@@ -238,15 +274,20 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
 
     public async IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(
         Stream responseStream,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default
+    )
     {
         yield return UnifiedStreamEvent.Started();
 
-        var functionCallItems = new Dictionary<string, RespFunctionCallState>(StringComparer.Ordinal);
+        var functionCallItems = new Dictionary<string, RespFunctionCallState>(
+            StringComparer.Ordinal
+        );
         bool streamCompletedEmitted = false;
         bool respIncomplete = false; // NEED17-06联调：response.status=incomplete 或 max_output_tokens 时截断保护（与 chat length 对齐）。
 
-        await foreach (var frame in SseStreamReader.ReadFramesAsync(responseStream, ct).ConfigureAwait(false))
+        await foreach (
+            var frame in SseStreamReader.ReadFramesAsync(responseStream, ct).ConfigureAwait(false)
+        )
         {
             if (string.IsNullOrWhiteSpace(frame.Data))
             {
@@ -261,7 +302,12 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                 {
                     if (state.StartedEmitted && !state.CompletedEmitted)
                     {
-                        yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, state.ArgumentsBuilder.ToString(), state.ItemId);
+                        yield return UnifiedStreamEvent.ToolDone(
+                            state.CallId,
+                            state.Name,
+                            state.ArgumentsBuilder.ToString(),
+                            state.ItemId
+                        );
                         state.CompletedEmitted = true;
                         doneClosed++;
                     }
@@ -295,7 +341,9 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                 string eventType = frame.EventType ?? string.Empty;
 
                 // 若 frame 中未携带显式 event: 头，尝试从 JSON 载荷中的 type 字段读取
-                if (string.IsNullOrEmpty(eventType) && root.TryGetProperty("type", out var typeElem))
+                if (
+                    string.IsNullOrEmpty(eventType) && root.TryGetProperty("type", out var typeElem)
+                )
                 {
                     eventType = typeElem.GetString() ?? string.Empty;
                 }
@@ -309,35 +357,49 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     case "response.reasoning_summary_text.delta":
                     case "response.reasoning_text.delta":
                         if (root.TryGetProperty("delta", out var reasonDeltaElem))
-                    {
+                        {
                             string? delta = reasonDeltaElem.GetString();
                             if (!string.IsNullOrEmpty(delta))
                             {
                                 yield return UnifiedStreamEvent.Reasoning(delta);
                             }
-                    }
+                        }
                         break;
 
                     case "response.output_text.delta":
                         if (root.TryGetProperty("delta", out var outDeltaElem))
-                    {
+                        {
                             string? delta = outDeltaElem.GetString();
                             if (!string.IsNullOrEmpty(delta))
                             {
                                 yield return UnifiedStreamEvent.Text(delta);
                             }
-                    }
+                        }
                         break;
 
                     case "response.output_item.added":
                         if (root.TryGetProperty("item", out var itemElem))
-                    {
-                            string? itemType = itemElem.TryGetProperty("type", out var it) ? it.GetString() : null;
-                            if (string.Equals(itemType, "function_call", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string? itemType = itemElem.TryGetProperty("type", out var it)
+                                ? it.GetString()
+                                : null;
+                            if (
+                                string.Equals(
+                                    itemType,
+                                    "function_call",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
                             {
-                                string itemId = itemElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? string.Empty : string.Empty;
-                                string callId = itemElem.TryGetProperty("call_id", out var cidElem) ? cidElem.GetString() ?? itemId : itemId;
-                                string funcName = itemElem.TryGetProperty("name", out var fnElem) ? fnElem.GetString() ?? string.Empty : string.Empty;
+                                string itemId = itemElem.TryGetProperty("id", out var idElem)
+                                    ? idElem.GetString() ?? string.Empty
+                                    : string.Empty;
+                                string callId = itemElem.TryGetProperty("call_id", out var cidElem)
+                                    ? cidElem.GetString() ?? itemId
+                                    : itemId;
+                                string funcName = itemElem.TryGetProperty("name", out var fnElem)
+                                    ? fnElem.GetString() ?? string.Empty
+                                    : string.Empty;
 
                                 var state = new RespFunctionCallState
                                 {
@@ -347,18 +409,30 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                                     StartedEmitted = true
                                 };
                                 functionCallItems[itemId] = state;
-                                yield return UnifiedStreamEvent.ToolStarted(callId, funcName, itemId);
+                                yield return UnifiedStreamEvent.ToolStarted(
+                                    callId,
+                                    funcName,
+                                    itemId
+                                );
                             }
-                    }
+                        }
                         break;
 
                     case "response.function_call_arguments.delta":
-                    {
-                            string itemId = root.TryGetProperty("item_id", out var idElem) ? idElem.GetString() ?? string.Empty : string.Empty;
+                        {
+                            string itemId = root.TryGetProperty("item_id", out var idElem)
+                                ? idElem.GetString() ?? string.Empty
+                                : string.Empty;
                             if (!functionCallItems.TryGetValue(itemId, out var state))
                             {
-                                string callId = root.TryGetProperty("call_id", out var cid) ? cid.GetString() ?? itemId : itemId;
-                                state = new RespFunctionCallState { ItemId = itemId, CallId = callId };
+                                string callId = root.TryGetProperty("call_id", out var cid)
+                                    ? cid.GetString() ?? itemId
+                                    : itemId;
+                                state = new RespFunctionCallState
+                                {
+                                    ItemId = itemId,
+                                    CallId = callId
+                                };
                                 functionCallItems[itemId] = state;
                             }
 
@@ -368,19 +442,31 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                                 if (!string.IsNullOrEmpty(delta))
                                 {
                                     state.ArgumentsBuilder.Append(delta);
-                                    yield return UnifiedStreamEvent.ToolArgs(state.CallId, delta, state.ItemId);
+                                    yield return UnifiedStreamEvent.ToolArgs(
+                                        state.CallId,
+                                        delta,
+                                        state.ItemId
+                                    );
                                 }
                             }
-                    }
+                        }
                         break;
 
                     case "response.function_call_arguments.done":
-                    {
-                            string itemId = root.TryGetProperty("item_id", out var idElem) ? idElem.GetString() ?? string.Empty : string.Empty;
+                        {
+                            string itemId = root.TryGetProperty("item_id", out var idElem)
+                                ? idElem.GetString() ?? string.Empty
+                                : string.Empty;
                             if (!functionCallItems.TryGetValue(itemId, out var state))
                             {
-                                string callId = root.TryGetProperty("call_id", out var cid) ? cid.GetString() ?? itemId : itemId;
-                                state = new RespFunctionCallState { ItemId = itemId, CallId = callId };
+                                string callId = root.TryGetProperty("call_id", out var cid)
+                                    ? cid.GetString() ?? itemId
+                                    : itemId;
+                                state = new RespFunctionCallState
+                                {
+                                    ItemId = itemId,
+                                    CallId = callId
+                                };
                                 functionCallItems[itemId] = state;
                             }
 
@@ -389,75 +475,139 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                                 : state.ArgumentsBuilder.ToString();
 
                             state.CompletedEmitted = true;
-                            yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, finalArgs, state.ItemId);
-                    }
+                            yield return UnifiedStreamEvent.ToolDone(
+                                state.CallId,
+                                state.Name,
+                                finalArgs,
+                                state.ItemId
+                            );
+                        }
                         break;
 
                     case "response.output_item.done":
                         if (root.TryGetProperty("item", out var doneItemElem))
-                    {
-                            string? itemType = doneItemElem.TryGetProperty("type", out var it) ? it.GetString() : null;
-                            if (string.Equals(itemType, "function_call", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string? itemType = doneItemElem.TryGetProperty("type", out var it)
+                                ? it.GetString()
+                                : null;
+                            if (
+                                string.Equals(
+                                    itemType,
+                                    "function_call",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
                             {
-                                string itemId = doneItemElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? string.Empty : string.Empty;
-                                if (functionCallItems.TryGetValue(itemId, out var state) && !state.CompletedEmitted)
+                                string itemId = doneItemElem.TryGetProperty("id", out var idElem)
+                                    ? idElem.GetString() ?? string.Empty
+                                    : string.Empty;
+                                if (
+                                    functionCallItems.TryGetValue(itemId, out var state)
+                                    && !state.CompletedEmitted
+                                )
                                 {
-                                    string finalArgs = doneItemElem.TryGetProperty("arguments", out var argElem)
+                                    string finalArgs = doneItemElem.TryGetProperty(
+                                        "arguments",
+                                        out var argElem
+                                    )
                                         ? argElem.GetString() ?? state.ArgumentsBuilder.ToString()
                                         : state.ArgumentsBuilder.ToString();
 
                                     state.CompletedEmitted = true;
-                                    yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, finalArgs, state.ItemId);
+                                    yield return UnifiedStreamEvent.ToolDone(
+                                        state.CallId,
+                                        state.Name,
+                                        finalArgs,
+                                        state.ItemId
+                                    );
                                 }
                             }
-                    }
+                        }
                         break;
 
                     case "response.completed":
                         JsonElement usageElem = default;
                         bool hasUsage = false;
-                        if (root.TryGetProperty("response", out var respElem) &&
-                            respElem.ValueKind == JsonValueKind.Object &&
-                            respElem.TryGetProperty("usage", out var u1) &&
-                            u1.ValueKind == JsonValueKind.Object)
-                    {
+                        if (
+                            root.TryGetProperty("response", out var respElem)
+                            && respElem.ValueKind == JsonValueKind.Object
+                            && respElem.TryGetProperty("usage", out var u1)
+                            && u1.ValueKind == JsonValueKind.Object
+                        )
+                        {
                             usageElem = u1;
                             hasUsage = true;
-                    }
-                        else if (root.TryGetProperty("usage", out var u2) &&
-                            u2.ValueKind == JsonValueKind.Object)
-                    {
+                        }
+                        else if (
+                            root.TryGetProperty("usage", out var u2)
+                            && u2.ValueKind == JsonValueKind.Object
+                        )
+                        {
                             usageElem = u2;
                             hasUsage = true;
-                    }
+                        }
 
                         if (hasUsage)
-                    {
+                        {
                             int inTokens = TryGetInt32(usageElem, "input_tokens");
                             int outTokens = TryGetInt32(usageElem, "output_tokens");
-                            int totalTokens = TryGetInt32(usageElem, "total_tokens", inTokens + outTokens);
+                            int totalTokens = TryGetInt32(
+                                usageElem,
+                                "total_tokens",
+                                inTokens + outTokens
+                            );
 
                             int cachedTokens = 0;
-                            if ((usageElem.TryGetProperty("input_tokens_details", out var itd) ||
-                                 usageElem.TryGetProperty("input_token_details", out itd)) &&
-                                itd.ValueKind == JsonValueKind.Object &&
-                                itd.TryGetProperty("cached_tokens", out var ctVal))
+                            if (
+                                (
+                                    usageElem.TryGetProperty("input_tokens_details", out var itd)
+                                    || usageElem.TryGetProperty("input_token_details", out itd)
+                                )
+                                && itd.ValueKind == JsonValueKind.Object
+                                && itd.TryGetProperty("cached_tokens", out var ctVal)
+                            )
                             {
                                 cachedTokens = GetInt32Value(ctVal);
                             }
 
-                            yield return UnifiedStreamEvent.Tokens(inTokens, outTokens, cachedTokens, totalTokens);
-                    }
+                            yield return UnifiedStreamEvent.Tokens(
+                                inTokens,
+                                outTokens,
+                                cachedTokens,
+                                totalTokens
+                            );
+                        }
                         // NEED17-06联调：response.status=incomplete 或 incomplete_details.reason=max_output_tokens → 截断保护。
-                        if (root.TryGetProperty("response", out var stElem) && stElem.ValueKind == JsonValueKind.Object)
-                    {
-                            string? status = stElem.TryGetProperty("status", out var stVal) ? stVal.GetString() : null;
-                            string? reason = stElem.TryGetProperty("incomplete_details", out var ind) && ind.ValueKind == JsonValueKind.Object && ind.TryGetProperty("reason", out var rsn) ? rsn.GetString() : null;
-                            if (string.Equals(status, "incomplete", StringComparison.OrdinalIgnoreCase) || string.Equals(reason, "max_output_tokens", StringComparison.OrdinalIgnoreCase))
+                        if (
+                            root.TryGetProperty("response", out var stElem)
+                            && stElem.ValueKind == JsonValueKind.Object
+                        )
+                        {
+                            string? status = stElem.TryGetProperty("status", out var stVal)
+                                ? stVal.GetString()
+                                : null;
+                            string? reason =
+                                stElem.TryGetProperty("incomplete_details", out var ind)
+                                && ind.ValueKind == JsonValueKind.Object
+                                && ind.TryGetProperty("reason", out var rsn)
+                                    ? rsn.GetString()
+                                    : null;
+                            if (
+                                string.Equals(
+                                    status,
+                                    "incomplete",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                                || string.Equals(
+                                    reason,
+                                    "max_output_tokens",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
                             {
                                 respIncomplete = true;
                             }
-                    }
+                        }
                         yield return UnifiedStreamEvent.Completed();
                         streamCompletedEmitted = true;
                         break;
@@ -468,18 +618,24 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
                     case "response.failed":
                     case "error":
                     {
-                            string code = "RESPONSES_API_ERROR";
-                            string message = "Responses API 执行失败";
+                        string code = "RESPONSES_API_ERROR";
+                        string message = "Responses API 执行失败";
 
-                            if (root.TryGetProperty("error", out var errElem) &&
-                                errElem.ValueKind == JsonValueKind.Object)
-                            {
-                                code = errElem.TryGetProperty("code", out var c) ? c.GetString() ?? code : code;
-                                message = errElem.TryGetProperty("message", out var m) ? m.GetString() ?? message : message;
-                            }
+                        if (
+                            root.TryGetProperty("error", out var errElem)
+                            && errElem.ValueKind == JsonValueKind.Object
+                        )
+                        {
+                            code = errElem.TryGetProperty("code", out var c)
+                                ? c.GetString() ?? code
+                                : code;
+                            message = errElem.TryGetProperty("message", out var m)
+                                ? m.GetString() ?? message
+                                : message;
+                        }
 
-                            yield return UnifiedStreamEvent.Error(code, message);
-                            yield break;
+                        yield return UnifiedStreamEvent.Error(code, message);
+                        yield break;
                     }
                 }
             }
@@ -491,7 +647,12 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
         {
             if (state.StartedEmitted && !state.CompletedEmitted)
             {
-                yield return UnifiedStreamEvent.ToolDone(state.CallId, state.Name, state.ArgumentsBuilder.ToString(), state.ItemId);
+                yield return UnifiedStreamEvent.ToolDone(
+                    state.CallId,
+                    state.Name,
+                    state.ArgumentsBuilder.ToString(),
+                    state.ItemId
+                );
                 state.CompletedEmitted = true;
                 tailClosed++;
             }
@@ -517,19 +678,28 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
         string hint = string.Empty;
         if (statusCode == 404)
         {
-            hint = " [诊断建议]: 上游接口返回 404 (/v1/responses)，该 Provider 可能尚未支持 OpenAI Responses 协议，建议在模型设置中切换为 Chat 协议重试。";
+            hint =
+                " [诊断建议]: 上游接口返回 404 (/v1/responses)，该 Provider 可能尚未支持 OpenAI Responses 协议，建议在模型设置中切换为 Chat 协议重试。";
         }
 
         try
         {
             using var doc = JsonDocument.Parse(raw);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("error", out var errorElem) &&
-                errorElem.ValueKind == JsonValueKind.Object)
+            if (
+                doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var errorElem)
+                && errorElem.ValueKind == JsonValueKind.Object
+            )
             {
-                string msg = errorElem.TryGetProperty("message", out var m) ? m.GetString() ?? raw : raw;
-                string type = errorElem.TryGetProperty("type", out var t) ? t.GetString() ?? string.Empty : string.Empty;
-                string code = errorElem.TryGetProperty("code", out var c) ? c.GetString() ?? string.Empty : string.Empty;
+                string msg = errorElem.TryGetProperty("message", out var m)
+                    ? m.GetString() ?? raw
+                    : raw;
+                string type = errorElem.TryGetProperty("type", out var t)
+                    ? t.GetString() ?? string.Empty
+                    : string.Empty;
+                string code = errorElem.TryGetProperty("code", out var c)
+                    ? c.GetString() ?? string.Empty
+                    : string.Empty;
 
                 return $"[OpenAI Responses] 上游接口返回 HTTP {statusCode} ({type} {code}): {msg}{hint}".Trim();
             }
@@ -544,8 +714,10 @@ public sealed class ResponsesApiAdapter : ILlmProtocolAdapter
 
     private static int TryGetInt32(JsonElement parent, string propertyName, int defaultValue = 0)
     {
-        if (parent.ValueKind != JsonValueKind.Object ||
-            !parent.TryGetProperty(propertyName, out var elem))
+        if (
+            parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(propertyName, out var elem)
+        )
         {
             return defaultValue;
         }

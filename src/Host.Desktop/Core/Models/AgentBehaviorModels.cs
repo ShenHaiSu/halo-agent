@@ -12,11 +12,14 @@ public class AgentConfigDocument
     public int Version { get; set; } = 1;
     public int ExecDefaultTimeoutMs { get; set; } = AgentDefaults.DefaultTimeoutMs;
     public int ExecMaxTimeoutMs { get; set; } = AgentDefaults.MaxTimeoutMs;
-     public int MaxIterations { get; set; } = AgentDefaults.MaxIterations;
-     /// <summary>need22-P1 T3：单轮总体超时毫秒（默认 10min；&lt;=0 读时回默认；老文件缺字段反序列化为 0 同样回默认）。</summary>
-     public int TurnTimeoutMs { get; set; } = AgentDefaults.TurnTimeoutMs;
-     /// <summary>need22-P1 T4：Barrier 总体超时 buffer 毫秒（总额外余量；&lt;=0 读时回默认）。</summary>
-     public int SubBarrierBufferMs { get; set; } = AgentDefaults.SubBarrierBufferMs;
+    public int MaxIterations { get; set; } = AgentDefaults.MaxIterations;
+
+    /// <summary>need22-P1 T3：单轮总体超时毫秒（默认 10min；&lt;=0 读时回默认；老文件缺字段反序列化为 0 同样回默认）。</summary>
+    public int TurnTimeoutMs { get; set; } = AgentDefaults.TurnTimeoutMs;
+
+    /// <summary>need22-P1 T4：Barrier 总体超时 buffer 毫秒（总额外余量；&lt;=0 读时回默认）。</summary>
+    public int SubBarrierBufferMs { get; set; } = AgentDefaults.SubBarrierBufferMs;
+
     // need13：子代理（缺字段=老文件，全部回默认，不算损坏）
     public bool SubAgentEnabled { get; set; } = true;
     public int SubMaxParallel { get; set; } = 3;
@@ -26,14 +29,17 @@ public class AgentConfigDocument
     public bool SubAllowSkillWrite { get; set; } = false;
     public bool SubAllowMemoryWrite { get; set; } = false;
     public bool SubAllowAskUser { get; set; } = false; // v1 锁定 false
+
     // need17-01：网关 strict 发送模式（Prefer 默认；Require 联调用；Off 回滚开关）。
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public StrictToolsMode StrictToolsMode { get; set; } = StrictToolsMode.Prefer;
+
     // need17-01：工具激活集（preset/allowlist/denylist，互斥规则见 ToolPreset；null/空=默认 Coding）。
     public string? ToolsPreset { get; set; }
     public List<string>? ToolsAllowlist { get; set; }
     public List<string>? ToolsDenylist { get; set; }
     public string Scope { get; set; } = "global";
+
     /// <summary>need22-P0 S2：exec_command 首 token 白名单增补（null/空=默认白名单；不校验元素，透传）。</summary>
     public List<string>? AllowedCommands { get; set; }
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
@@ -61,13 +67,16 @@ public static class AgentDefaults
     public const int SubMaxIterationsDefault = 15;
     public const int SubMaxIterationsCeil = 50;
     public const int SubHardParallelCeil = 8;
-     public const int SubHardIterationsCeil = 100;
-     /// <summary>need22-P1 T3：单轮总体超时默认 10min（config/agent.json: turnTimeoutMs 可配）。</summary>
-     public const int TurnTimeoutMs = 600000;
-     /// <summary>need22-P1 T3：单轮总体超时保存下限 1s（测试与极端场景可用；生产建议 ≥60s，默认 10min）。</summary>
-     public const int TurnTimeoutMinMs = 1000;
-     /// <summary>need22-P1 T4：Barrier 总体超时 buffer 默认 30s。</summary>
-     public const int SubBarrierBufferMs = 30000;
+    public const int SubHardIterationsCeil = 100;
+
+    /// <summary>need22-P1 T3：单轮总体超时默认 10min（config/agent.json: turnTimeoutMs 可配）。</summary>
+    public const int TurnTimeoutMs = 600000;
+
+    /// <summary>need22-P1 T3：单轮总体超时保存下限 1s（测试与极端场景可用；生产建议 ≥60s，默认 10min）。</summary>
+    public const int TurnTimeoutMinMs = 1000;
+
+    /// <summary>need22-P1 T4：Barrier 总体超时 buffer 默认 30s。</summary>
+    public const int SubBarrierBufferMs = 30000;
 }
 
 public sealed class AgentConfigValidationException : Exception
@@ -88,7 +97,11 @@ public sealed class AgentConfigValidationException : Exception
 /// </summary>
 public static class AgentTimeoutResolver
 {
-    public static (int EffectiveMs, bool Infinite) Resolve(int? requestedMs, int cfgDefaultMs, int cfgMaxMs)
+    public static (int EffectiveMs, bool Infinite) Resolve(
+        int? requestedMs,
+        int cfgDefaultMs,
+        int cfgMaxMs
+    )
     {
         int d = cfgDefaultMs;
         int m = cfgMaxMs;

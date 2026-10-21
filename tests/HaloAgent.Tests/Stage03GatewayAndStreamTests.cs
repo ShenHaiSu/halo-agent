@@ -31,7 +31,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     public Stage03GatewayAndStreamTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage03Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage03Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage03Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -39,7 +42,8 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
     }
 
     public void Dispose()
@@ -62,13 +66,13 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 验证标准与带注释的 SSE 流解析，以及不同换行符 (\n, \r\n)
         string sseContent =
-            ": keep-alive ping\r\n" +
-            "event: ping\r\n" +
-            "data: {\"time\":1}\r\n\r\n" +
-            ": another comment\n" +
-            "data: line1\n" +
-            "data: line2\n\n" +
-            "data: [DONE]\n\n";
+            ": keep-alive ping\r\n"
+            + "event: ping\r\n"
+            + "data: {\"time\":1}\r\n\r\n"
+            + ": another comment\n"
+            + "data: line1\n"
+            + "data: line2\n\n"
+            + "data: [DONE]\n\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sseContent));
         var frames = new List<SseFrame>();
@@ -95,12 +99,12 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 模拟 OpenAI / DeepSeek / Chat 协议流式 chunk
         string sseStream =
-            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"思考中...\"}}]}\n\n" +
-            "data: {\"choices\":[{\"delta\":{\"content\":\"你好！\"}}]}\n\n" +
-            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc123\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"\"}}]}}]}\n\n" +
-            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"dir\\\"}\"}}]}}]}\n\n" +
-            "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n" +
-            "data: [DONE]\n\n";
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"思考中...\"}}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"你好！\"}}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc123\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"\"}}]}}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"dir\\\"}\"}}]}}]}\n\n"
+            + "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n"
+            + "data: [DONE]\n\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sseStream));
         var adapter = new ChatCompletionsAdapter();
@@ -121,12 +125,16 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         Assert.NotNull(text);
         Assert.Equal("你好！", text.TextDelta);
 
-        var toolStarted = events.FirstOrDefault(e => e.Kind == UnifiedStreamEventKind.ToolCallStarted);
+        var toolStarted = events.FirstOrDefault(e =>
+            e.Kind == UnifiedStreamEventKind.ToolCallStarted
+        );
         Assert.NotNull(toolStarted);
         Assert.Equal("call_abc123", toolStarted.ToolCall?.CallId);
         Assert.Equal("exec_command", toolStarted.ToolCall?.FunctionName);
 
-        var toolCompleted = events.FirstOrDefault(e => e.Kind == UnifiedStreamEventKind.ToolCallCompleted);
+        var toolCompleted = events.FirstOrDefault(e =>
+            e.Kind == UnifiedStreamEventKind.ToolCallCompleted
+        );
         Assert.NotNull(toolCompleted);
         Assert.Equal("call_abc123", toolCompleted.ToolCall?.CallId);
         Assert.Equal("{\"cmd\":\"dir\"}", toolCompleted.ToolCall?.ArgumentsJson);
@@ -147,16 +155,16 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 模拟 OpenAI Responses API /v1/responses 流式事件 (S03-AC02)
         string sseStream =
-            "event: response.created\n" +
-            "data: {\"response\":{\"id\":\"resp_xyz\"}}\n\n" +
-            "event: response.output_text.delta\n" +
-            "data: {\"delta\":\"Halo Responses 流式返回\"}\n\n" +
-            "event: response.output_item.added\n" +
-            "data: {\"item\":{\"type\":\"function_call\",\"id\":\"fc_item_1\",\"call_id\":\"call_resp_999\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n" +
-            "event: response.function_call_arguments.done\n" +
-            "data: {\"call_id\":\"call_resp_999\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"main.cs\\\"}\"}\n\n" +
-            "event: response.completed\n" +
-            "data: {\"usage\":{\"input_tokens\":500,\"output_tokens\":60,\"input_token_details\":{\"cached_tokens\":250}}}\n\n";
+            "event: response.created\n"
+            + "data: {\"response\":{\"id\":\"resp_xyz\"}}\n\n"
+            + "event: response.output_text.delta\n"
+            + "data: {\"delta\":\"Halo Responses 流式返回\"}\n\n"
+            + "event: response.output_item.added\n"
+            + "data: {\"item\":{\"type\":\"function_call\",\"id\":\"fc_item_1\",\"call_id\":\"call_resp_999\",\"name\":\"read_file\",\"arguments\":\"\"}}\n\n"
+            + "event: response.function_call_arguments.done\n"
+            + "data: {\"call_id\":\"call_resp_999\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"main.cs\\\"}\"}\n\n"
+            + "event: response.completed\n"
+            + "data: {\"usage\":{\"input_tokens\":500,\"output_tokens\":60,\"input_token_details\":{\"cached_tokens\":250}}}\n\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sseStream));
         var adapter = new ResponsesApiAdapter();
@@ -173,12 +181,16 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         Assert.NotNull(text);
         Assert.Equal("Halo Responses 流式返回", text.TextDelta);
 
-        var toolStarted = events.FirstOrDefault(e => e.Kind == UnifiedStreamEventKind.ToolCallStarted);
+        var toolStarted = events.FirstOrDefault(e =>
+            e.Kind == UnifiedStreamEventKind.ToolCallStarted
+        );
         Assert.NotNull(toolStarted);
         Assert.Equal("call_resp_999", toolStarted.ToolCall?.CallId);
         Assert.Equal("read_file", toolStarted.ToolCall?.FunctionName);
 
-        var toolCompleted = events.FirstOrDefault(e => e.Kind == UnifiedStreamEventKind.ToolCallCompleted);
+        var toolCompleted = events.FirstOrDefault(e =>
+            e.Kind == UnifiedStreamEventKind.ToolCallCompleted
+        );
         Assert.NotNull(toolCompleted);
         Assert.Equal("call_resp_999", toolCompleted.ToolCall?.CallId);
         Assert.Equal("{\"path\":\"main.cs\"}", toolCompleted.ToolCall?.ArgumentsJson);
@@ -200,26 +212,36 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         var req = new UnifiedLlmRequest
         {
             RequestId = "req_resp_test",
-            Provider = new ProviderConfig { Id = "p1", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1" },
+            Provider = new ProviderConfig
+            {
+                Id = "p1",
+                Name = "OpenAI",
+                BaseUrl = "https://api.openai.com/v1"
+            },
             Model = new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Resp },
             SystemInstructions = "You are a helpful assistant.",
-             Messages = new List<UnifiedChatMessage>
-             {
-                 new() { Role = "user", Content = "List directory contents" },
-                 // FIX-tool-400：tool 必须有归属 assistant，否则发包前守卫会按孤儿丢弃
-                 UnifiedChatMessage.Assistant(null, new List<UnifiedToolCall> { new("call_prev_1", null, "list_dir", "{}") }),
-                 new() {
-                     Role = "tool",
-                     Content = "{\"files\":[\"a.txt\"]}",
-                     ToolCallId = "call_prev_1"
-                 }
-             },
+            Messages = new List<UnifiedChatMessage>
+            {
+                new() { Role = "user", Content = "List directory contents" },
+                // FIX-tool-400：tool 必须有归属 assistant，否则发包前守卫会按孤儿丢弃
+                UnifiedChatMessage.Assistant(
+                    null,
+                    new List<UnifiedToolCall> { new("call_prev_1", null, "list_dir", "{}") }
+                ),
+                new()
+                {
+                    Role = "tool",
+                    Content = "{\"files\":[\"a.txt\"]}",
+                    ToolCallId = "call_prev_1"
+                }
+            },
             Tools = new List<UnifiedToolDefinition>
             {
                 UnifiedToolDefinition.Create(
                     name: "list_dir",
                     description: "List files in directory",
-                    jsonSchema: "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}")
+                    jsonSchema: "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}"
+                )
             }
         };
 
@@ -231,9 +253,9 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         Assert.True(root.GetProperty("stream").GetBoolean());
         Assert.Equal("You are a helpful assistant.", root.GetProperty("instructions").GetString());
 
-         var input = root.GetProperty("input");
-         Assert.Equal(JsonValueKind.Array, input.ValueKind);
-         Assert.Equal(3, input.GetArrayLength());
+        var input = root.GetProperty("input");
+        Assert.Equal(JsonValueKind.Array, input.ValueKind);
+        Assert.Equal(3, input.GetArrayLength());
 
         // 验证 tools 展开为扁平结构
         var tools = root.GetProperty("tools");
@@ -246,7 +268,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     public void ResponsesApiAdapter_404_ProvidesDiagnosisHint()
     {
         var adapter = new ResponsesApiAdapter();
-        string formatted = adapter.FormatErrorResponse(404, "{\"error\":{\"message\":\"Not Found\"}}");
+        string formatted = adapter.FormatErrorResponse(
+            404,
+            "{\"error\":{\"message\":\"Not Found\"}}"
+        );
         Assert.Contains("404", formatted);
         Assert.Contains("切换为 Chat 协议重试", formatted);
     }
@@ -255,8 +280,8 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     public async Task ResponsesApiAdapter_ParsesErrorEvent()
     {
         string sseStream =
-            "event: response.failed\n" +
-            "data: {\"error\":{\"code\":\"server_error\",\"message\":\"Rate limit exceeded\"}}\n\n";
+            "event: response.failed\n"
+            + "data: {\"error\":{\"code\":\"server_error\",\"message\":\"Rate limit exceeded\"}}\n\n";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sseStream));
         var adapter = new ResponsesApiAdapter();
@@ -277,7 +302,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     public void ChatCompletionsAdapter_FormatErrorResponse_ExtractsJsonMessage()
     {
         var adapter = new ChatCompletionsAdapter();
-        string formatted = adapter.FormatErrorResponse(401, "{\"error\":{\"message\":\"Incorrect API key provided\"}}");
+        string formatted = adapter.FormatErrorResponse(
+            401,
+            "{\"error\":{\"message\":\"Incorrect API key provided\"}}"
+        );
         Assert.Contains("401", formatted);
         Assert.Contains("Incorrect API key provided", formatted);
     }
@@ -291,38 +319,53 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         // 先清理队列残留
         while (JsEventDispatcher.DequeueBatchJson() != null) { }
 
-        JsEventDispatcher.Publish("llm:stream-event", new SessionStreamEventDto
-        {
-            SessionId = sessionId,
-            Kind = nameof(UnifiedStreamEventKind.ReasoningDelta),
-            TextDelta = "先"
-        });
-        JsEventDispatcher.Publish("llm:stream-event", new SessionStreamEventDto
-        {
-            SessionId = sessionId,
-            Kind = nameof(UnifiedStreamEventKind.ReasoningDelta),
-            TextDelta = "思考"
-        });
+        JsEventDispatcher.Publish(
+            "llm:stream-event",
+            new SessionStreamEventDto
+            {
+                SessionId = sessionId,
+                Kind = nameof(UnifiedStreamEventKind.ReasoningDelta),
+                TextDelta = "先"
+            }
+        );
+        JsEventDispatcher.Publish(
+            "llm:stream-event",
+            new SessionStreamEventDto
+            {
+                SessionId = sessionId,
+                Kind = nameof(UnifiedStreamEventKind.ReasoningDelta),
+                TextDelta = "思考"
+            }
+        );
 
         // 中间插入一个 TextDelta
-        JsEventDispatcher.Publish("llm:stream-event", new SessionStreamEventDto
-        {
-            SessionId = sessionId,
-            Kind = nameof(UnifiedStreamEventKind.TextDelta),
-            TextDelta = "你"
-        });
-        JsEventDispatcher.Publish("llm:stream-event", new SessionStreamEventDto
-        {
-            SessionId = sessionId,
-            Kind = nameof(UnifiedStreamEventKind.TextDelta),
-            TextDelta = "好"
-        });
-        JsEventDispatcher.Publish("llm:stream-event", new SessionStreamEventDto
-        {
-            SessionId = sessionId,
-            Kind = nameof(UnifiedStreamEventKind.TextDelta),
-            TextDelta = "呀"
-        });
+        JsEventDispatcher.Publish(
+            "llm:stream-event",
+            new SessionStreamEventDto
+            {
+                SessionId = sessionId,
+                Kind = nameof(UnifiedStreamEventKind.TextDelta),
+                TextDelta = "你"
+            }
+        );
+        JsEventDispatcher.Publish(
+            "llm:stream-event",
+            new SessionStreamEventDto
+            {
+                SessionId = sessionId,
+                Kind = nameof(UnifiedStreamEventKind.TextDelta),
+                TextDelta = "好"
+            }
+        );
+        JsEventDispatcher.Publish(
+            "llm:stream-event",
+            new SessionStreamEventDto
+            {
+                SessionId = sessionId,
+                Kind = nameof(UnifiedStreamEventKind.TextDelta),
+                TextDelta = "呀"
+            }
+        );
 
         string? batchJson = JsEventDispatcher.DequeueBatchJson();
         Assert.NotNull(batchJson);
@@ -347,24 +390,26 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 验证 LLM 审计追踪日志 llm-trace-YYYYMMDD.log 的生成、内容格式及 Prompt Cache 命中率 (S03-AC03)
         string fakeSse =
-            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello from Mock LLM\"}}]}\n\n" +
-            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2000,\"completion_tokens\":100,\"prompt_tokens_details\":{\"cached_tokens\":1500}}}\n\n" +
-            "data: [DONE]\n\n";
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello from Mock LLM\"}}]}\n\n"
+            + "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2000,\"completion_tokens\":100,\"prompt_tokens_details\":{\"cached_tokens\":1500}}}\n\n"
+            + "data: [DONE]\n\n";
 
-        var fakeHandler = new FakeHttpMessageHandler((req) =>
-        {
-            // 验证请求中是否带有解析后的自定义 Header (包含 ${session-hash})
-            Assert.True(req.Headers.Contains("X-Session-Hash"));
-            var values = req.Headers.GetValues("X-Session-Hash").ToList();
-            Assert.NotEmpty(values);
-            Assert.NotEqual("${session-hash}", values[0]); // 必须已被变量解析器计算为真实哈希
-
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
+        var fakeHandler = new FakeHttpMessageHandler(
+            (req) =>
             {
-                Content = new StringContent(fakeSse, Encoding.UTF8, "text/event-stream")
-            };
-            return Task.FromResult(response);
-        });
+                // 验证请求中是否带有解析后的自定义 Header (包含 ${session-hash})
+                Assert.True(req.Headers.Contains("X-Session-Hash"));
+                var values = req.Headers.GetValues("X-Session-Hash").ToList();
+                Assert.NotEmpty(values);
+                Assert.NotEqual("${session-hash}", values[0]); // 必须已被变量解析器计算为真实哈希
+
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(fakeSse, Encoding.UTF8, "text/event-stream")
+                };
+                return Task.FromResult(response);
+            }
+        );
 
         using var customHttp = new HttpClient(fakeHandler);
         var gateway = new LlmGatewayClient(_storageManager, customHttpClient: customHttp);
@@ -380,16 +425,25 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
                 EnableCustomHeaders = true,
                 CustomHeaders = new List<CustomHeaderEntry>
                 {
-                    new() { Key = "X-Session-Hash", ValueTemplate = "${session-hash}", Enabled = true }
+                    new()
+                    {
+                        Key = "X-Session-Hash",
+                        ValueTemplate = "${session-hash}",
+                        Enabled = true
+                    }
                 }
             },
             Model = new ModelConfig { Id = "test-model", Protocol = LlmProtocolType.Chat },
-            Messages = new List<UnifiedChatMessage> { new() { Role = "user", Content = "Ping" } },
+            Messages = new List<UnifiedChatMessage>
+            {
+                new() { Role = "user", Content = "Ping" }
+            },
             HeaderContext = HeaderVariableResolver.CreateContext(
                 sessionId: "sess_12345",
                 modelId: "test-model",
                 providerName: "TestProvider",
-                providerId: "p_test")
+                providerId: "p_test"
+            )
         };
 
         var events = new List<UnifiedStreamEvent>();
@@ -398,7 +452,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
             events.Add(evt);
         }
 
-        Assert.Contains(events, e => e.Kind == UnifiedStreamEventKind.TextDelta && e.TextDelta == "Hello from Mock LLM");
+        Assert.Contains(
+            events,
+            e => e.Kind == UnifiedStreamEventKind.TextDelta && e.TextDelta == "Hello from Mock LLM"
+        );
 
         // 检查磁盘上的日志文件 llm-trace-YYYYMMDD.log
         string logDir = _storageManager.LogsDirectory;
@@ -417,29 +474,34 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 验证当 Provider 返回 400 Bad Request（不识别 stream_options）时自动降级重试机制
         int callCount = 0;
-        var fakeHandler = new FakeHttpMessageHandler(async (req) =>
-        {
-            callCount++;
-            string body = await req.Content!.ReadAsStringAsync();
-
-            if (callCount == 1)
+        var fakeHandler = new FakeHttpMessageHandler(
+            async (req) =>
             {
-                // 第一次请求包含 stream_options，模拟服务端报错 400
-                Assert.Contains("stream_options", body);
-                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                callCount++;
+                string body = await req.Content!.ReadAsStringAsync();
+
+                if (callCount == 1)
                 {
-                    Content = new StringContent("{\"error\":{\"message\":\"Unrecognized request argument: stream_options\"}}")
+                    // 第一次请求包含 stream_options，模拟服务端报错 400
+                    Assert.Contains("stream_options", body);
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":{\"message\":\"Unrecognized request argument: stream_options\"}}"
+                        )
+                    };
+                }
+
+                // 第二次降级重试，stream_options 必须已被剔除
+                Assert.DoesNotContain("stream_options", body);
+                string fakeSse =
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Fallback Success\"}}]}\n\ndata: [DONE]\n\n";
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(fakeSse, Encoding.UTF8, "text/event-stream")
                 };
             }
-
-            // 第二次降级重试，stream_options 必须已被剔除
-            Assert.DoesNotContain("stream_options", body);
-            string fakeSse = "data: {\"choices\":[{\"delta\":{\"content\":\"Fallback Success\"}}]}\n\ndata: [DONE]\n\n";
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(fakeSse, Encoding.UTF8, "text/event-stream")
-            };
-        });
+        );
 
         using var customHttp = new HttpClient(fakeHandler);
         var gateway = new LlmGatewayClient(_storageManager, customHttpClient: customHttp);
@@ -447,9 +509,17 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         var request = new UnifiedLlmRequest
         {
             RequestId = "req_fallback_001",
-            Provider = new ProviderConfig { Id = "old_provider", Name = "LegacyProvider", BaseUrl = "https://legacy.ai/v1" },
+            Provider = new ProviderConfig
+            {
+                Id = "old_provider",
+                Name = "LegacyProvider",
+                BaseUrl = "https://legacy.ai/v1"
+            },
             Model = new ModelConfig { Id = "legacy-model", Protocol = LlmProtocolType.Chat },
-            Messages = new List<UnifiedChatMessage> { new() { Role = "user", Content = "Hello" } }
+            Messages = new List<UnifiedChatMessage>
+            {
+                new() { Role = "user", Content = "Hello" }
+            }
         };
 
         var events = new List<UnifiedStreamEvent>();
@@ -459,7 +529,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         }
 
         Assert.Equal(2, callCount);
-        Assert.Contains(events, e => e.Kind == UnifiedStreamEventKind.TextDelta && e.TextDelta == "Fallback Success");
+        Assert.Contains(
+            events,
+            e => e.Kind == UnifiedStreamEventKind.TextDelta && e.TextDelta == "Fallback Success"
+        );
     }
 
     [Fact]
@@ -467,17 +540,21 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
     {
         // 验证随时取消机制：通过 HostBridgeFacade.CancelSessionRun 中断长文流式生成 (S03-AC04)
         var tcs = new TaskCompletionSource<bool>();
-        var fakeHandler = new FakeHttpMessageHandler(async (req) =>
-        {
-            // 模拟长流式响应
-            var ms = new SlowInfiniteMemoryStream(tcs);
-            var res = new HttpResponseMessage(HttpStatusCode.OK)
+        var fakeHandler = new FakeHttpMessageHandler(
+            async (req) =>
             {
-                Content = new StreamContent(ms)
-            };
-            res.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
-            return await Task.FromResult(res);
-        });
+                // 模拟长流式响应
+                var ms = new SlowInfiniteMemoryStream(tcs);
+                var res = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StreamContent(ms)
+                };
+                res.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    "text/event-stream"
+                );
+                return await Task.FromResult(res);
+            }
+        );
 
         using var customHttp = new HttpClient(fakeHandler);
         var gateway = new LlmGatewayClient(_storageManager, customHttpClient: customHttp);
@@ -485,19 +562,29 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         var facade = new HostBridgeFacade(
             mainForm: null,
             storageManager: _storageManager,
-            llmGatewayClient: gateway);
+            llmGatewayClient: gateway
+        );
 
         var req = new UnifiedLlmRequest
         {
             RequestId = "req_cancel_test",
-            Provider = new ProviderConfig { Id = "p1", Name = "P1", BaseUrl = "https://api.test/v1" },
+            Provider = new ProviderConfig
+            {
+                Id = "p1",
+                Name = "P1",
+                BaseUrl = "https://api.test/v1"
+            },
             Model = new ModelConfig { Id = "m1", Protocol = LlmProtocolType.Chat },
-            Messages = new List<UnifiedChatMessage> { new() { Role = "user", Content = "Long story" } },
+            Messages = new List<UnifiedChatMessage>
+            {
+                new() { Role = "user", Content = "Long story" }
+            },
             HeaderContext = HeaderVariableResolver.CreateContext(
                 sessionId: "session_to_cancel",
                 modelId: "m1",
                 providerName: "P1",
-                providerId: "p1")
+                providerId: "p1"
+            )
         };
 
         string requestJson = JsonSerializer.Serialize(req, HaloJsonOptions.IndentedCamelCase);
@@ -516,7 +603,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         Assert.True(cancelRes.Ok);
         Assert.True(cancelRes.Data);
         // S03-AC04: 100ms 内流式输出立即响应取消
-        Assert.True(cancelSw.ElapsedMilliseconds < 100, $"取消响应耗时 {cancelSw.ElapsedMilliseconds}ms 必须在 100ms 内");
+        Assert.True(
+            cancelSw.ElapsedMilliseconds < 100,
+            $"取消响应耗时 {cancelSw.ElapsedMilliseconds}ms 必须在 100ms 内"
+        );
 
         // 验证底层的 Stream 在收到 Cancel 信号后已终止
         tcs.TrySetResult(true);
@@ -531,7 +621,10 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
             _handler = handler;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        )
         {
             return _handler(request);
         }
@@ -551,19 +644,38 @@ public sealed class Stage03GatewayAndStreamTests : IDisposable
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => 0; set => throw new NotSupportedException(); }
-        public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Position
+        {
+            get => 0;
+            set => throw new NotSupportedException();
+        }
 
-        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        )
         {
             if (_count == 0)
             {
                 _count++;
-                byte[] first = Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"Chunk 1\"}}]}\n\n");
+                byte[] first = Encoding.UTF8.GetBytes(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Chunk 1\"}}]}\n\n"
+                );
                 Buffer.BlockCopy(first, 0, buffer, offset, first.Length);
                 return first.Length;
             }

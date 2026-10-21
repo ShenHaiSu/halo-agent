@@ -18,20 +18,28 @@ internal static class EditDiffBuilder
         string oldContentLf,
         string newContentLf,
         int contextLines = DefaultContextLines,
-        int maxChars = DefaultMaxChars)
+        int maxChars = DefaultMaxChars
+    )
     {
         string[] oldLines = oldContentLf.Split('\n');
         string[] newLines = newContentLf.Split('\n');
 
         int prefix = 0;
-        while (prefix < oldLines.Length && prefix < newLines.Length && oldLines[prefix] == newLines[prefix])
+        while (
+            prefix < oldLines.Length
+            && prefix < newLines.Length
+            && oldLines[prefix] == newLines[prefix]
+        )
         {
             prefix++;
         }
 
         int suffix = 0;
-        while (suffix < oldLines.Length - prefix && suffix < newLines.Length - prefix &&
-               oldLines[oldLines.Length - 1 - suffix] == newLines[newLines.Length - 1 - suffix])
+        while (
+            suffix < oldLines.Length - prefix
+            && suffix < newLines.Length - prefix
+            && oldLines[oldLines.Length - 1 - suffix] == newLines[newLines.Length - 1 - suffix]
+        )
         {
             suffix++;
         }
@@ -48,9 +56,15 @@ internal static class EditDiffBuilder
 
         int ctx = Math.Max(0, contextLines);
         int oldCtxStart = Math.Max(1, oldChangeStart - ctx);
-        int oldCtxEnd = Math.Min(oldLines.Length, oldChangeStart + Math.Max(oldChangeCount, 1) - 1 + ctx);
+        int oldCtxEnd = Math.Min(
+            oldLines.Length,
+            oldChangeStart + Math.Max(oldChangeCount, 1) - 1 + ctx
+        );
         int newCtxStart = Math.Max(1, newChangeStart - ctx);
-        int newCtxEnd = Math.Min(newLines.Length, newChangeStart + Math.Max(newChangeCount, 1) - 1 + ctx);
+        int newCtxEnd = Math.Min(
+            newLines.Length,
+            newChangeStart + Math.Max(newChangeCount, 1) - 1 + ctx
+        );
 
         int budget = Math.Max(200, maxChars);
         var sb = new StringBuilder(budget + 256);
@@ -58,8 +72,14 @@ internal static class EditDiffBuilder
 
         sb.Append("--- a/").Append(relativePath).Append('\n');
         sb.Append("+++ b/").Append(relativePath).Append('\n');
-        sb.Append("@@ -").Append(oldCtxStart).Append(',').Append(Math.Max(0, oldCtxEnd - oldCtxStart + 1));
-        sb.Append(" +").Append(newCtxStart).Append(',').Append(Math.Max(0, newCtxEnd - newCtxStart + 1));
+        sb.Append("@@ -")
+            .Append(oldCtxStart)
+            .Append(',')
+            .Append(Math.Max(0, oldCtxEnd - oldCtxStart + 1));
+        sb.Append(" +")
+            .Append(newCtxStart)
+            .Append(',')
+            .Append(Math.Max(0, newCtxEnd - newCtxStart + 1));
         sb.Append(" @@\n");
 
         bool TryAppend(char kind, string line)

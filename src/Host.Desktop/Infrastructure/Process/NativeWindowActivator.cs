@@ -18,9 +18,23 @@ public static class NativeWindowActivator
         try
         {
             bool broadcastOk = false;
-            try { broadcastOk = BroadcastShowMe(); } catch { broadcastOk = false; }
+            try
+            {
+                broadcastOk = BroadcastShowMe();
+            }
+            catch
+            {
+                broadcastOk = false;
+            }
             bool byTitleOk = false;
-            try { byTitleOk = BringByTitle(windowTitle); } catch { byTitleOk = false; }
+            try
+            {
+                byTitleOk = BringByTitle(windowTitle);
+            }
+            catch
+            {
+                byTitleOk = false;
+            }
             bool ok = broadcastOk || byTitleOk;
             Emit(ok ? $"activate-ok broadcast={broadcastOk} title={byTitleOk}" : "activate-failed");
             return ok;
@@ -48,15 +62,22 @@ public static class NativeWindowActivator
     {
         try
         {
-            if (string.IsNullOrEmpty(title)) return false;
+            if (string.IsNullOrEmpty(title))
+                return false;
             var h = FindWindow(null, title);
-            if (h == IntPtr.Zero) return false;
+            if (h == IntPtr.Zero)
+                return false;
             try
             {
-                if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+                if (IsIconic(h))
+                    ShowWindow(h, SW_RESTORE);
             }
             catch { }
-            try { SetForegroundWindow(h); } catch { }
+            try
+            {
+                SetForegroundWindow(h);
+            }
+            catch { }
             return true;
         }
         catch
@@ -67,7 +88,11 @@ public static class NativeWindowActivator
 
     private static void Emit(string line)
     {
-        try { TraceSink?.Invoke(line); } catch { }
+        try
+        {
+            TraceSink?.Invoke(line);
+        }
+        catch { }
     }
 
     private const int SW_RESTORE = 9;

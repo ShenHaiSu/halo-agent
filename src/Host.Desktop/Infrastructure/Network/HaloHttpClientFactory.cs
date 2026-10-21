@@ -45,7 +45,8 @@ public sealed record EffectiveProxyDescriptor(
     /// </summary>
     public string ComputeFingerprint()
     {
-        string raw = $"{Kind}|{ NormalizeScheme(Scheme) }|{Host}:{Port}|{RequiresAuth}|{Username}|{DecryptedPassword}|{BypassList}|{BypassOnLocal}|{SystemProxyUri}|{ConnectTimeoutSeconds}";
+        string raw =
+            $"{Kind}|{NormalizeScheme(Scheme)}|{Host}:{Port}|{RequiresAuth}|{Username}|{DecryptedPassword}|{BypassList}|{BypassOnLocal}|{SystemProxyUri}|{ConnectTimeoutSeconds}";
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(hash)[..24].ToLowerInvariant();
     }
@@ -58,9 +59,10 @@ public sealed record EffectiveProxyDescriptor(
         return Kind switch
         {
             EffectiveProxyKind.None => "DIRECT (No Proxy)",
-            EffectiveProxyKind.System => !string.IsNullOrWhiteSpace(SystemProxyUri)
-                ? $"SYSTEM ({SystemProxyUri})"
-                : "DIRECT (System No Proxy)",
+            EffectiveProxyKind.System
+                => !string.IsNullOrWhiteSpace(SystemProxyUri)
+                    ? $"SYSTEM ({SystemProxyUri})"
+                    : "DIRECT (System No Proxy)",
             EffectiveProxyKind.Custom => $"CUSTOM ({NormalizeScheme(Scheme)}://{Host}:{Port})",
             _ => "DIRECT (No Proxy)"
         };
@@ -93,9 +95,14 @@ public sealed record EffectiveProxyDescriptor(
 /// </summary>
 public sealed class HaloHttpClientFactory : IDisposable
 {
-    private sealed record CachedHandlerEntry(SocketsHttpHandler Handler, EffectiveProxyDescriptor Descriptor, DateTime CreatedAtUtc);
+    private sealed record CachedHandlerEntry(
+        SocketsHttpHandler Handler,
+        EffectiveProxyDescriptor Descriptor,
+        DateTime CreatedAtUtc
+    );
 
-    private readonly ConcurrentDictionary<string, CachedHandlerEntry> _handlerPool = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CachedHandlerEntry> _handlerPool =
+        new(StringComparer.Ordinal);
     private readonly object _settingsLock = new();
     private GlobalNetworkSettings _globalSettings;
     private bool _disposed;
@@ -135,20 +142,24 @@ public sealed class HaloHttpClientFactory : IDisposable
     /// <summary>
     /// 全局唯一获取 HttpClient 的标准入口
     /// </summary>
-    public HttpClient CreateClient(ProviderConfig? provider = null, GlobalNetworkSettings? overrideGlobalSettings = null)
+    public HttpClient CreateClient(
+        ProviderConfig? provider = null,
+        GlobalNetworkSettings? overrideGlobalSettings = null
+    )
     {
         var global = overrideGlobalSettings ?? GetGlobalSettings();
         var effectiveProxy = ResolveEffectiveProxy(provider, global);
         string fingerprint = effectiveProxy.ComputeFingerprint();
 
-         var entry = _handlerPool.GetOrAdd(fingerprint, _ => CreateHandlerEntry(effectiveProxy));
-         // need22-P1 T3：单次 HTTP 超时上限 120s（hung 网关不再跟随进程；配置更大值同样钳制到 120s）。
-         int requestTimeoutSec = global.DefaultRequestTimeoutSeconds <= 0 ? 120 : global.DefaultRequestTimeoutSeconds;
-         var client = new HttpClient(entry.Handler, disposeHandler: false)
-         {
-             Timeout = TimeSpan.FromSeconds(Math.Clamp(requestTimeoutSec, 5, 120))
-         };
-         return client;
+        var entry = _handlerPool.GetOrAdd(fingerprint, _ => CreateHandlerEntry(effectiveProxy));
+        // need22-P1 T3：单次 HTTP 超时上限 120s（hung 网关不再跟随进程；配置更大值同样钳制到 120s）。
+        int requestTimeoutSec =
+            global.DefaultRequestTimeoutSeconds <= 0 ? 120 : global.DefaultRequestTimeoutSeconds;
+        var client = new HttpClient(entry.Handler, disposeHandler: false)
+        {
+            Timeout = TimeSpan.FromSeconds(Math.Clamp(requestTimeoutSec, 5, 120))
+        };
+        return client;
     }
 
     /// <summary>
@@ -156,13 +167,18 @@ public sealed class HaloHttpClientFactory : IDisposable
     /// </summary>
     public EffectiveProxyDescriptor ResolveEffectiveProxy(
         ProviderConfig? provider = null,
-        GlobalNetworkSettings? overrideGlobalSettings = null)
+        GlobalNetworkSettings? overrideGlobalSettings = null
+    )
     {
         var global = overrideGlobalSettings ?? GetGlobalSettings();
         int connectTimeout = Math.Clamp(global.DefaultConnectTimeoutSeconds, 3, 120);
 
         // 1. Provider 显式指定 Custom 独立代理
-        if (provider != null && provider.ProxyMode == ProviderProxyMode.Custom && provider.CustomProxy != null)
+        if (
+            provider != null
+            && provider.ProxyMode == ProviderProxyMode.Custom
+            && provider.CustomProxy != null
+        )
         {
             return BuildCustomDescriptor(provider.CustomProxy, connectTimeout);
         }
@@ -172,15 +188,18 @@ public sealed class HaloHttpClientFactory : IDisposable
         {
             return new EffectiveProxyDescriptor(
                 Kind: EffectiveProxyKind.None,
-                ConnectTimeoutSeconds: connectTimeout);
+                ConnectTimeoutSeconds: connectTimeout
+            );
         }
 
         // 3. Provider 为 Inherit（或未指定 Provider），继承全局代理设置
         return global.Mode switch
         {
-            GlobalProxyMode.None => new EffectiveProxyDescriptor(
-                Kind: EffectiveProxyKind.None,
-                ConnectTimeoutSeconds: connectTimeout),
+            GlobalProxyMode.None
+                => new EffectiveProxyDescriptor(
+                    Kind: EffectiveProxyKind.None,
+                    ConnectTimeoutSeconds: connectTimeout
+                ),
 
             GlobalProxyMode.Custom => BuildCustomDescriptor(global.CustomProxy, connectTimeout),
 
@@ -197,7 +216,8 @@ public sealed class HaloHttpClientFactory : IDisposable
         ProviderConfig? provider = null,
         string? sessionId = null,
         string? workspacePath = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default
+    )
     {
         string resolvedTargetUrl = ResolveProbeTargetUrl(targetUrl, provider);
         var global = overrideGlobalSettings ?? GetGlobalSettings();
@@ -208,7 +228,9 @@ public sealed class HaloHttpClientFactory : IDisposable
         try
         {
             using var client = CreateClient(provider, global);
-            client.Timeout = TimeSpan.FromSeconds(Math.Clamp(global.DefaultConnectTimeoutSeconds, 5, 30));
+            client.Timeout = TimeSpan.FromSeconds(
+                Math.Clamp(global.DefaultConnectTimeoutSeconds, 5, 30)
+            );
 
             using var request = new HttpRequestMessage(HttpMethod.Get, resolvedTargetUrl);
             request.Headers.UserAgent.ParseAdd("HaloAgent/1.0 (Win7-Win11; CefSharp109)");
@@ -216,9 +238,10 @@ public sealed class HaloHttpClientFactory : IDisposable
             // 若传入了 Provider，自动附带 Authorization 与自定义请求头，以便同时验证自定义 Header 与上游网关
             if (provider != null)
             {
-                string apiKey = !string.IsNullOrWhiteSpace(provider.ApiKey) && !provider.ApiKey.Contains("****")
-                    ? provider.ApiKey
-                    : SecretProtector.Unprotect(provider.ApiKeyEncrypted);
+                string apiKey =
+                    !string.IsNullOrWhiteSpace(provider.ApiKey) && !provider.ApiKey.Contains("****")
+                        ? provider.ApiKey
+                        : SecretProtector.Unprotect(provider.ApiKeyEncrypted);
 
                 if (!string.IsNullOrWhiteSpace(apiKey))
                 {
@@ -230,15 +253,15 @@ public sealed class HaloHttpClientFactory : IDisposable
                     sessionId: sessionId ?? "probe-session",
                     providerId: provider.Id,
                     providerName: provider.Name,
-                    modelId: provider.Models.FirstOrDefault()?.Id ?? "probe-model");
+                    modelId: provider.Models.FirstOrDefault()?.Id ?? "probe-model"
+                );
 
                 HeaderVariableResolver.ApplyCustomHeaders(request, provider, headerCtx);
             }
 
-            using var response = await client.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+            using var response = await client
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
 
             sw.Stop();
             int statusCode = (int)response.StatusCode;
@@ -274,7 +297,9 @@ public sealed class HaloHttpClientFactory : IDisposable
         {
             sw.Stop();
             var (category, friendlyError) = ClassifyNetworkException(ex, descriptor);
-            HaloLogger.App.Warn($"Proxy connectivity probe failed -> Target: {resolvedTargetUrl}, Proxy: {effectiveSummary}, Category: {category}, Error: {ex.Message}");
+            HaloLogger.App.Warn(
+                $"Proxy connectivity probe failed -> Target: {resolvedTargetUrl}, Proxy: {effectiveSummary}, Category: {category}, Error: {ex.Message}"
+            );
 
             return new ProxyConnectivityTestResult
             {
@@ -305,11 +330,15 @@ public sealed class HaloHttpClientFactory : IDisposable
         return "https://api.openai.com/v1/models";
     }
 
-    private static EffectiveProxyDescriptor BuildCustomDescriptor(ManualProxyConfig custom, int connectTimeout)
+    private static EffectiveProxyDescriptor BuildCustomDescriptor(
+        ManualProxyConfig custom,
+        int connectTimeout
+    )
     {
-        string? decryptedPwd = !string.IsNullOrEmpty(custom.Password) && !custom.Password.Contains("****")
-            ? custom.Password
-            : SecretProtector.Unprotect(custom.PasswordEncrypted);
+        string? decryptedPwd =
+            !string.IsNullOrEmpty(custom.Password) && !custom.Password.Contains("****")
+                ? custom.Password
+                : SecretProtector.Unprotect(custom.PasswordEncrypted);
 
         return new EffectiveProxyDescriptor(
             Kind: EffectiveProxyKind.Custom,
@@ -325,11 +354,15 @@ public sealed class HaloHttpClientFactory : IDisposable
         );
     }
 
-    private static EffectiveProxyDescriptor ResolveSystemProxyDescriptor(string? targetUrl, int connectTimeout)
+    private static EffectiveProxyDescriptor ResolveSystemProxyDescriptor(
+        string? targetUrl,
+        int connectTimeout
+    )
     {
-        string probeUrl = !string.IsNullOrWhiteSpace(targetUrl) && targetUrl.Contains("://")
-            ? targetUrl
-            : "https://api.openai.com";
+        string probeUrl =
+            !string.IsNullOrWhiteSpace(targetUrl) && targetUrl.Contains("://")
+                ? targetUrl
+                : "https://api.openai.com";
 
         var snapshot = SystemProxyInspector.InspectCurrentSystemProxy(probeUrl);
         return new EffectiveProxyDescriptor(
@@ -346,8 +379,13 @@ public sealed class HaloHttpClientFactory : IDisposable
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-            ConnectTimeout = TimeSpan.FromSeconds(Math.Clamp(descriptor.ConnectTimeoutSeconds, 3, 120)),
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+            ConnectTimeout = TimeSpan.FromSeconds(
+                Math.Clamp(descriptor.ConnectTimeoutSeconds, 3, 120)
+            ),
+            AutomaticDecompression =
+                DecompressionMethods.GZip
+                | DecompressionMethods.Deflate
+                | DecompressionMethods.Brotli
         };
 
         switch (descriptor.Kind)
@@ -362,7 +400,10 @@ public sealed class HaloHttpClientFactory : IDisposable
                 if (!string.IsNullOrWhiteSpace(descriptor.SystemProxyUri))
                 {
                     handler.UseProxy = true;
-                    handler.Proxy = new WebProxy(new Uri(descriptor.SystemProxyUri), BypassOnLocal: true);
+                    handler.Proxy = new WebProxy(
+                        new Uri(descriptor.SystemProxyUri),
+                        BypassOnLocal: true
+                    );
                 }
                 else
                 {
@@ -390,7 +431,10 @@ public sealed class HaloHttpClientFactory : IDisposable
 
                 if (descriptor.RequiresAuth && !string.IsNullOrWhiteSpace(descriptor.Username))
                 {
-                    webProxy.Credentials = new NetworkCredential(descriptor.Username, descriptor.DecryptedPassword ?? string.Empty);
+                    webProxy.Credentials = new NetworkCredential(
+                        descriptor.Username,
+                        descriptor.DecryptedPassword ?? string.Empty
+                    );
                 }
 
                 handler.Proxy = webProxy;
@@ -410,12 +454,18 @@ public sealed class HaloHttpClientFactory : IDisposable
             return Array.Empty<string>();
         }
 
-        var items = bypassList.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var items = bypassList.Split(
+            new[] { ';', ',' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+        );
         var result = new List<string>();
 
         foreach (var raw in items)
         {
-            if (string.IsNullOrWhiteSpace(raw) || raw.Equals("<local>", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.IsNullOrWhiteSpace(raw)
+                || raw.Equals("<local>", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
@@ -436,7 +486,10 @@ public sealed class HaloHttpClientFactory : IDisposable
         return result.ToArray();
     }
 
-    private static (string Category, string FriendlyMessage) ClassifyNetworkException(Exception ex, EffectiveProxyDescriptor descriptor)
+    private static (string Category, string FriendlyMessage) ClassifyNetworkException(
+        Exception ex,
+        EffectiveProxyDescriptor descriptor
+    )
     {
         if (ex is TaskCanceledException or TimeoutException)
         {
@@ -452,10 +505,14 @@ public sealed class HaloHttpClientFactory : IDisposable
         {
             if (sockEx.SocketErrorCode == SocketError.ConnectionRefused)
             {
-                string targetDesc = descriptor.Kind == EffectiveProxyKind.None
-                    ? "目标服务器"
-                    : $"代理服务器 ({descriptor.ToDisplaySummary()})";
-                return ("ProxyConnectionRefused", $"{targetDesc} 拒绝连接 (SocketError: ConnectionRefused / 10061)，请确认代理软件已启动且端口正确");
+                string targetDesc =
+                    descriptor.Kind == EffectiveProxyKind.None
+                        ? "目标服务器"
+                        : $"代理服务器 ({descriptor.ToDisplaySummary()})";
+                return (
+                    "ProxyConnectionRefused",
+                    $"{targetDesc} 拒绝连接 (SocketError: ConnectionRefused / 10061)，请确认代理软件已启动且端口正确"
+                );
             }
 
             if (sockEx.SocketErrorCode == SocketError.HostNotFound)
@@ -466,15 +523,22 @@ public sealed class HaloHttpClientFactory : IDisposable
             return ("SocketError", $"底层套接字网络异常 ({sockEx.SocketErrorCode}): {sockEx.Message}");
         }
 
-        if (ex is HttpRequestException httpEx && httpEx.Message.Contains("407", StringComparison.OrdinalIgnoreCase))
+        if (
+            ex is HttpRequestException httpEx
+            && httpEx.Message.Contains("407", StringComparison.OrdinalIgnoreCase)
+        )
         {
-            return ("ProxyAuthRequired", $"代理认证失败 (407 Proxy Authentication Required): {httpEx.Message}");
+            return (
+                "ProxyAuthRequired",
+                $"代理认证失败 (407 Proxy Authentication Required): {httpEx.Message}"
+            );
         }
 
         return ("NetworkError", $"网络请求失败: {ex.Message}");
     }
 
-    private static T? FindInnerException<T>(Exception? ex) where T : Exception
+    private static T? FindInnerException<T>(Exception? ex)
+        where T : Exception
     {
         while (ex != null)
         {

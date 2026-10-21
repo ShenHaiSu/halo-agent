@@ -34,14 +34,21 @@ public sealed class ProviderConfigService
     private readonly HaloHttpClientFactory _httpClientFactory;
     private readonly object _syncLock = new();
 
-    public string NetworkConfigFilePath => Path.Combine(_storagePathManager.ConfigDirectory, "network.json");
+    public string NetworkConfigFilePath =>
+        Path.Combine(_storagePathManager.ConfigDirectory, "network.json");
 
-    public string ProvidersConfigFilePath => Path.Combine(_storagePathManager.ConfigDirectory, "providers.json");
+    public string ProvidersConfigFilePath =>
+        Path.Combine(_storagePathManager.ConfigDirectory, "providers.json");
 
-    public ProviderConfigService(StoragePathManager storagePathManager, HaloHttpClientFactory httpClientFactory)
+    public ProviderConfigService(
+        StoragePathManager storagePathManager,
+        HaloHttpClientFactory httpClientFactory
+    )
     {
-        _storagePathManager = storagePathManager ?? throw new ArgumentNullException(nameof(storagePathManager));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _storagePathManager =
+            storagePathManager ?? throw new ArgumentNullException(nameof(storagePathManager));
+        _httpClientFactory =
+            httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
 
         EnsureInitialized();
     }
@@ -97,21 +104,39 @@ public sealed class ProviderConfigService
 
         lock (_syncLock)
         {
-            var existing = AtomicFileWriter.ReadJsonOrDefault<GlobalNetworkSettings>(NetworkConfigFilePath);
+            var existing = AtomicFileWriter.ReadJsonOrDefault<GlobalNetworkSettings>(
+                NetworkConfigFilePath
+            );
             var toSave = incoming.Clone();
             toSave.CustomProxy ??= new ManualProxyConfig();
-            toSave.CustomProxy.Scheme = EffectiveProxyDescriptor.NormalizeScheme(toSave.CustomProxy.Scheme);
-            toSave.CustomProxy.Host = string.IsNullOrWhiteSpace(toSave.CustomProxy.Host) ? "127.0.0.1" : toSave.CustomProxy.Host.Trim();
-            toSave.CustomProxy.Port = toSave.CustomProxy.Port is > 0 and <= 65535 ? toSave.CustomProxy.Port : 7890;
-            toSave.DefaultConnectTimeoutSeconds = Math.Clamp(toSave.DefaultConnectTimeoutSeconds, 3, 120);
-            toSave.DefaultRequestTimeoutSeconds = Math.Clamp(toSave.DefaultRequestTimeoutSeconds, 5, 3600);
+            toSave.CustomProxy.Scheme = EffectiveProxyDescriptor.NormalizeScheme(
+                toSave.CustomProxy.Scheme
+            );
+            toSave.CustomProxy.Host = string.IsNullOrWhiteSpace(toSave.CustomProxy.Host)
+                ? "127.0.0.1"
+                : toSave.CustomProxy.Host.Trim();
+            toSave.CustomProxy.Port = toSave.CustomProxy.Port is > 0 and <= 65535
+                ? toSave.CustomProxy.Port
+                : 7890;
+            toSave.DefaultConnectTimeoutSeconds = Math.Clamp(
+                toSave.DefaultConnectTimeoutSeconds,
+                3,
+                120
+            );
+            toSave.DefaultRequestTimeoutSeconds = Math.Clamp(
+                toSave.DefaultRequestTimeoutSeconds,
+                5,
+                3600
+            );
 
             NormalizeProxySecretForStorage(toSave.CustomProxy, existing?.CustomProxy);
 
             AtomicFileWriter.WriteJsonAtomic(NetworkConfigFilePath, toSave);
             _httpClientFactory.UpdateGlobalSettings(toSave);
 
-            HaloLogger.App.Info($"Global network proxy settings saved: Mode={toSave.Mode}, Custom={toSave.CustomProxy.Scheme}://{toSave.CustomProxy.Host}:{toSave.CustomProxy.Port}");
+            HaloLogger.App.Info(
+                $"Global network proxy settings saved: Mode={toSave.Mode}, Custom={toSave.CustomProxy.Scheme}://{toSave.CustomProxy.Host}:{toSave.CustomProxy.Port}"
+            );
             return SanitizeNetworkSettingsForClient(toSave);
         }
     }
@@ -152,7 +177,11 @@ public sealed class ProviderConfigService
         lock (_syncLock)
         {
             var doc = LoadProvidersDocumentInternal();
-            return doc.Providers.FirstOrDefault(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase))?.Clone();
+            return doc
+                .Providers.FirstOrDefault(p =>
+                    string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase)
+                )
+                ?.Clone();
         }
     }
 
@@ -168,10 +197,13 @@ public sealed class ProviderConfigService
 
         lock (_syncLock)
         {
-            var existingDoc = AtomicFileWriter.ReadJsonOrDefault<ProvidersConfigDocument>(ProvidersConfigFilePath);
-            var existingMap = existingDoc?.Providers?
-                .Where(p => !string.IsNullOrWhiteSpace(p.Id))
-                .ToDictionary(p => p.Id, p => p, StringComparer.OrdinalIgnoreCase)
+            var existingDoc = AtomicFileWriter.ReadJsonOrDefault<ProvidersConfigDocument>(
+                ProvidersConfigFilePath
+            );
+            var existingMap =
+                existingDoc
+                    ?.Providers?.Where(p => !string.IsNullOrWhiteSpace(p.Id))
+                    .ToDictionary(p => p.Id, p => p, StringComparer.OrdinalIgnoreCase)
                 ?? new Dictionary<string, ProviderConfig>(StringComparer.OrdinalIgnoreCase);
 
             var normalizedProviders = new List<ProviderConfig>();
@@ -192,17 +224,26 @@ public sealed class ProviderConfigService
 
             if (normalizedProviders.Count > 0)
             {
-                var activeProvider = normalizedProviders.FirstOrDefault(p =>
-                    string.Equals(p.Id, activeProviderId, StringComparison.OrdinalIgnoreCase))
+                var activeProvider =
+                    normalizedProviders.FirstOrDefault(p =>
+                        string.Equals(p.Id, activeProviderId, StringComparison.OrdinalIgnoreCase)
+                    )
                     ?? normalizedProviders.FirstOrDefault(p => p.Enabled)
                     ?? normalizedProviders[0];
 
                 activeProviderId = activeProvider.Id;
 
-                if (activeProvider.Models.Count > 0 &&
-                    !activeProvider.Models.Any(m => string.Equals(m.Id, activeModelId, StringComparison.OrdinalIgnoreCase)))
+                if (
+                    activeProvider.Models.Count > 0
+                    && !activeProvider.Models.Any(m =>
+                        string.Equals(m.Id, activeModelId, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
                 {
-                    activeModelId = (activeProvider.Models.FirstOrDefault(m => m.Enabled) ?? activeProvider.Models[0]).Id;
+                    activeModelId = (
+                        activeProvider.Models.FirstOrDefault(m => m.Enabled)
+                        ?? activeProvider.Models[0]
+                    ).Id;
                 }
             }
 
@@ -214,7 +255,9 @@ public sealed class ProviderConfigService
             };
 
             AtomicFileWriter.WriteJsonAtomic(ProvidersConfigFilePath, docToSave);
-            HaloLogger.App.Info($"Providers config saved: Count={normalizedProviders.Count}, ActiveProvider={activeProviderId}, ActiveModel={activeModelId}");
+            HaloLogger.App.Info(
+                $"Providers config saved: Count={normalizedProviders.Count}, ActiveProvider={activeProviderId}, ActiveModel={activeModelId}"
+            );
 
             return SanitizeProvidersDocumentForClient(docToSave);
         }
@@ -233,7 +276,9 @@ public sealed class ProviderConfigService
         lock (_syncLock)
         {
             var doc = LoadProvidersDocumentInternal();
-            int idx = doc.Providers.FindIndex(p => string.Equals(p.Id, incomingProvider.Id, StringComparison.OrdinalIgnoreCase));
+            int idx = doc.Providers.FindIndex(p =>
+                string.Equals(p.Id, incomingProvider.Id, StringComparison.OrdinalIgnoreCase)
+            );
             ProviderConfig? previous = idx >= 0 ? doc.Providers[idx] : null;
 
             var normalized = NormalizeProviderForStorage(incomingProvider, previous);
@@ -251,15 +296,25 @@ public sealed class ProviderConfigService
                 doc.ActiveProviderId = normalized.Id;
             }
 
-            if (string.Equals(doc.ActiveProviderId, normalized.Id, StringComparison.OrdinalIgnoreCase) &&
-                normalized.Models.Count > 0 &&
-                !normalized.Models.Any(m => string.Equals(m.Id, doc.ActiveModelId, StringComparison.OrdinalIgnoreCase)))
+            if (
+                string.Equals(
+                    doc.ActiveProviderId,
+                    normalized.Id,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && normalized.Models.Count > 0
+                && !normalized.Models.Any(m =>
+                    string.Equals(m.Id, doc.ActiveModelId, StringComparison.OrdinalIgnoreCase)
+                )
+            )
             {
                 doc.ActiveModelId = normalized.Models[0].Id;
             }
 
             AtomicFileWriter.WriteJsonAtomic(ProvidersConfigFilePath, doc);
-            HaloLogger.App.Info($"Provider upserted: Id={normalized.Id}, Name={normalized.Name}, Models={normalized.Models.Count}");
+            HaloLogger.App.Info(
+                $"Provider upserted: Id={normalized.Id}, Name={normalized.Name}, Models={normalized.Models.Count}"
+            );
             return SanitizeProvidersDocumentForClient(doc);
         }
     }
@@ -272,11 +327,14 @@ public sealed class ProviderConfigService
         lock (_syncLock)
         {
             var doc = LoadProvidersDocumentInternal();
-            doc.Providers.RemoveAll(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase));
+            doc.Providers.RemoveAll(p =>
+                string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase)
+            );
 
             if (string.Equals(doc.ActiveProviderId, providerId, StringComparison.OrdinalIgnoreCase))
             {
-                var nextActive = doc.Providers.FirstOrDefault(p => p.Enabled) ?? doc.Providers.FirstOrDefault();
+                var nextActive =
+                    doc.Providers.FirstOrDefault(p => p.Enabled) ?? doc.Providers.FirstOrDefault();
                 doc.ActiveProviderId = nextActive?.Id ?? string.Empty;
                 doc.ActiveModelId = nextActive?.Models.FirstOrDefault()?.Id ?? string.Empty;
             }
@@ -295,12 +353,16 @@ public sealed class ProviderConfigService
         lock (_syncLock)
         {
             var doc = LoadProvidersDocumentInternal();
-            var targetProvider = doc.Providers.FirstOrDefault(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase));
+            var targetProvider = doc.Providers.FirstOrDefault(p =>
+                string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase)
+            );
             if (targetProvider != null)
             {
                 doc.ActiveProviderId = targetProvider.Id;
-                var targetModel = targetProvider.Models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase))
-                                  ?? targetProvider.Models.FirstOrDefault();
+                var targetModel =
+                    targetProvider.Models.FirstOrDefault(m =>
+                        string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase)
+                    ) ?? targetProvider.Models.FirstOrDefault();
                 doc.ActiveModelId = targetModel?.Id ?? modelId ?? string.Empty;
                 AtomicFileWriter.WriteJsonAtomic(ProvidersConfigFilePath, doc);
             }
@@ -319,7 +381,10 @@ public sealed class ProviderConfigService
             return string.Empty;
         }
 
-        if (!string.IsNullOrWhiteSpace(provider.ApiKey) && !provider.ApiKey.Contains("****", StringComparison.Ordinal))
+        if (
+            !string.IsNullOrWhiteSpace(provider.ApiKey)
+            && !provider.ApiKey.Contains("****", StringComparison.Ordinal)
+        )
         {
             return provider.ApiKey.Trim();
         }
@@ -330,7 +395,9 @@ public sealed class ProviderConfigService
         }
 
         var persisted = GetProviderById(provider.Id);
-        return persisted != null ? SecretProtector.Unprotect(persisted.ApiKeyEncrypted) : string.Empty;
+        return persisted != null
+            ? SecretProtector.Unprotect(persisted.ApiKeyEncrypted)
+            : string.Empty;
     }
 
     /// <summary>
@@ -340,7 +407,8 @@ public sealed class ProviderConfigService
         ProviderConfig provider,
         string? modelId = null,
         string? sessionId = null,
-        string? workspacePath = null)
+        string? workspacePath = null
+    )
     {
         string effectiveModelId = !string.IsNullOrWhiteSpace(modelId)
             ? modelId.Trim()
@@ -351,19 +419,35 @@ public sealed class ProviderConfigService
             sessionId: sessionId ?? "sess_stage02_preview",
             providerId: provider.Id,
             providerName: provider.Name,
-            modelId: effectiveModelId);
+            modelId: effectiveModelId
+        );
 
-        using var dummyRequest = new HttpRequestMessage(HttpMethod.Post, HeaderVariableResolver.ResolveEndpointUrl(provider.BaseUrl, LlmProtocolType.Chat));
-        var resolvedHeaders = HeaderVariableResolver.ApplyCustomHeaders(dummyRequest, provider, ctx);
+        using var dummyRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            HeaderVariableResolver.ResolveEndpointUrl(provider.BaseUrl, LlmProtocolType.Chat)
+        );
+        var resolvedHeaders = HeaderVariableResolver.ApplyCustomHeaders(
+            dummyRequest,
+            provider,
+            ctx
+        );
 
         var effectiveProxy = _httpClientFactory.ResolveEffectiveProxy(provider);
 
         return new ProviderEndpointPreviewDto
         {
             BaseUrl = provider.BaseUrl,
-            NormalizedVersionPrefix = HeaderVariableResolver.NormalizeVersionedPrefix(provider.BaseUrl),
-            ChatEndpointUrl = HeaderVariableResolver.ResolveEndpointUrl(provider.BaseUrl, LlmProtocolType.Chat),
-            RespEndpointUrl = HeaderVariableResolver.ResolveEndpointUrl(provider.BaseUrl, LlmProtocolType.Resp),
+            NormalizedVersionPrefix = HeaderVariableResolver.NormalizeVersionedPrefix(
+                provider.BaseUrl
+            ),
+            ChatEndpointUrl = HeaderVariableResolver.ResolveEndpointUrl(
+                provider.BaseUrl,
+                LlmProtocolType.Chat
+            ),
+            RespEndpointUrl = HeaderVariableResolver.ResolveEndpointUrl(
+                provider.BaseUrl,
+                LlmProtocolType.Resp
+            ),
             ModelsEndpointUrl = HeaderVariableResolver.ResolveModelsEndpointUrl(provider.BaseUrl),
             EffectiveProxySummary = effectiveProxy.ToDisplaySummary(),
             SessionId = ctx.SessionId,
@@ -376,7 +460,9 @@ public sealed class ProviderConfigService
 
     private GlobalNetworkSettings LoadNetworkSettingsInternal()
     {
-        var loaded = AtomicFileWriter.ReadJsonOrDefault<GlobalNetworkSettings>(NetworkConfigFilePath);
+        var loaded = AtomicFileWriter.ReadJsonOrDefault<GlobalNetworkSettings>(
+            NetworkConfigFilePath
+        );
         if (loaded != null)
         {
             loaded.CustomProxy ??= new ManualProxyConfig();
@@ -396,7 +482,7 @@ public sealed class ProviderConfigService
                 BypassOnLocal = true
             },
             DefaultConnectTimeoutSeconds = 15,
-             DefaultRequestTimeoutSeconds = 120 // need22-P1 T3：新装默认 120s（老文件沿用旧值，HttpClient 侧统一钳制 120s 上限）
+            DefaultRequestTimeoutSeconds = 120 // need22-P1 T3：新装默认 120s（老文件沿用旧值，HttpClient 侧统一钳制 120s 上限）
         };
 
         AtomicFileWriter.WriteJsonAtomic(NetworkConfigFilePath, defaults);
@@ -405,7 +491,9 @@ public sealed class ProviderConfigService
 
     private ProvidersConfigDocument LoadProvidersDocumentInternal()
     {
-        var loaded = AtomicFileWriter.ReadJsonOrDefault<ProvidersConfigDocument>(ProvidersConfigFilePath);
+        var loaded = AtomicFileWriter.ReadJsonOrDefault<ProvidersConfigDocument>(
+            ProvidersConfigFilePath
+        );
         if (loaded != null && loaded.Providers != null)
         {
             return loaded;
@@ -509,15 +597,25 @@ public sealed class ProviderConfigService
         };
     }
 
-    private static ProviderConfig NormalizeProviderForStorage(ProviderConfig incoming, ProviderConfig? existing)
+    private static ProviderConfig NormalizeProviderForStorage(
+        ProviderConfig incoming,
+        ProviderConfig? existing
+    )
     {
         var clone = incoming.Clone();
-        clone.Id = string.IsNullOrWhiteSpace(clone.Id) ? Guid.NewGuid().ToString("N") : clone.Id.Trim();
+        clone.Id = string.IsNullOrWhiteSpace(clone.Id)
+            ? Guid.NewGuid().ToString("N")
+            : clone.Id.Trim();
         clone.Name = string.IsNullOrWhiteSpace(clone.Name) ? "Unnamed Provider" : clone.Name.Trim();
-        clone.BaseUrl = string.IsNullOrWhiteSpace(clone.BaseUrl) ? "https://api.openai.com/v1" : clone.BaseUrl.Trim();
+        clone.BaseUrl = string.IsNullOrWhiteSpace(clone.BaseUrl)
+            ? "https://api.openai.com/v1"
+            : clone.BaseUrl.Trim();
 
         // 处理 API Key 加密逻辑：绝不保存明文 ApiKey
-        if (!string.IsNullOrWhiteSpace(clone.ApiKey) && !clone.ApiKey.Contains("****", StringComparison.Ordinal))
+        if (
+            !string.IsNullOrWhiteSpace(clone.ApiKey)
+            && !clone.ApiKey.Contains("****", StringComparison.Ordinal)
+        )
         {
             clone.ApiKeyEncrypted = SecretProtector.Protect(clone.ApiKey.Trim());
         }
@@ -529,7 +627,11 @@ public sealed class ProviderConfigService
                 clone.ApiKeyEncrypted = SecretProtector.Protect(clone.ApiKeyEncrypted.Trim());
             }
         }
-        else if (existing != null && !string.IsNullOrWhiteSpace(existing.ApiKeyEncrypted) && clone.ApiKey == null)
+        else if (
+            existing != null
+            && !string.IsNullOrWhiteSpace(existing.ApiKeyEncrypted)
+            && clone.ApiKey == null
+        )
         {
             clone.ApiKeyEncrypted = existing.ApiKeyEncrypted;
         }
@@ -540,9 +642,15 @@ public sealed class ProviderConfigService
 
         if (clone.CustomProxy != null)
         {
-            clone.CustomProxy.Scheme = EffectiveProxyDescriptor.NormalizeScheme(clone.CustomProxy.Scheme);
-            clone.CustomProxy.Host = string.IsNullOrWhiteSpace(clone.CustomProxy.Host) ? "127.0.0.1" : clone.CustomProxy.Host.Trim();
-            clone.CustomProxy.Port = clone.CustomProxy.Port is > 0 and <= 65535 ? clone.CustomProxy.Port : 7890;
+            clone.CustomProxy.Scheme = EffectiveProxyDescriptor.NormalizeScheme(
+                clone.CustomProxy.Scheme
+            );
+            clone.CustomProxy.Host = string.IsNullOrWhiteSpace(clone.CustomProxy.Host)
+                ? "127.0.0.1"
+                : clone.CustomProxy.Host.Trim();
+            clone.CustomProxy.Port = clone.CustomProxy.Port is > 0 and <= 65535
+                ? clone.CustomProxy.Port
+                : 7890;
             NormalizeProxySecretForStorage(clone.CustomProxy, existing?.CustomProxy);
         }
 
@@ -563,6 +671,7 @@ public sealed class ProviderConfigService
             .ToList();
         return clone;
     }
+
     /// <summary>need09-03：模型 vision 能力位校验（maxImages 0..16 else PROVIDER_VALIDATION；detail 缺失/非法回退 high；老 json 缺字段即默认值）。</summary>
     private static ModelConfig NormalizeModelForStorage(ModelConfig m)
     {
@@ -573,7 +682,9 @@ public sealed class ProviderConfigService
         return new ModelConfig
         {
             Id = m.Id.Trim(),
-            DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id.Trim() : m.DisplayName.Trim(),
+            DisplayName = string.IsNullOrWhiteSpace(m.DisplayName)
+                ? m.Id.Trim()
+                : m.DisplayName.Trim(),
             Protocol = m.Protocol,
             MaxContextTokens = m.MaxContextTokens > 0 ? m.MaxContextTokens : 128000,
             MaxOutputTokens = m.MaxOutputTokens > 0 ? m.MaxOutputTokens : 4096,
@@ -586,9 +697,15 @@ public sealed class ProviderConfigService
         };
     }
 
-    private static void NormalizeProxySecretForStorage(ManualProxyConfig target, ManualProxyConfig? existing)
+    private static void NormalizeProxySecretForStorage(
+        ManualProxyConfig target,
+        ManualProxyConfig? existing
+    )
     {
-        if (!string.IsNullOrWhiteSpace(target.Password) && !target.Password.Contains("****", StringComparison.Ordinal))
+        if (
+            !string.IsNullOrWhiteSpace(target.Password)
+            && !target.Password.Contains("****", StringComparison.Ordinal)
+        )
         {
             target.PasswordEncrypted = SecretProtector.Protect(target.Password);
         }
@@ -599,7 +716,11 @@ public sealed class ProviderConfigService
                 target.PasswordEncrypted = SecretProtector.Protect(target.PasswordEncrypted);
             }
         }
-        else if (existing != null && !string.IsNullOrWhiteSpace(existing.PasswordEncrypted) && target.Password == null)
+        else if (
+            existing != null
+            && !string.IsNullOrWhiteSpace(existing.PasswordEncrypted)
+            && target.Password == null
+        )
         {
             target.PasswordEncrypted = existing.PasswordEncrypted;
         }
@@ -608,7 +729,9 @@ public sealed class ProviderConfigService
         target.PasswordMasked = null;
     }
 
-    private static GlobalNetworkSettings SanitizeNetworkSettingsForClient(GlobalNetworkSettings source)
+    private static GlobalNetworkSettings SanitizeNetworkSettingsForClient(
+        GlobalNetworkSettings source
+    )
     {
         var copy = source.Clone();
         copy.CustomProxy ??= new ManualProxyConfig();
@@ -619,7 +742,9 @@ public sealed class ProviderConfigService
         return copy;
     }
 
-    private static ProvidersConfigDocument SanitizeProvidersDocumentForClient(ProvidersConfigDocument source)
+    private static ProvidersConfigDocument SanitizeProvidersDocumentForClient(
+        ProvidersConfigDocument source
+    )
     {
         return new ProvidersConfigDocument
         {

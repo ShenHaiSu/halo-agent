@@ -8,9 +8,17 @@ public sealed class PassThroughToolHook : IToolHook
 {
     public static readonly PassThroughToolHook Instance = new();
 
-    public Task<ToolHookDecision> BeforeAsync(ToolCallDto call, string normalizedArgsJson, ToolContext ctx, CancellationToken ct)
-        => Task.FromResult(ToolHookDecision.Proceed());
+    public Task<ToolHookDecision> BeforeAsync(
+        ToolCallDto call,
+        string normalizedArgsJson,
+        ToolContext ctx,
+        CancellationToken ct
+    ) => Task.FromResult(ToolHookDecision.Proceed());
 
-    public Task<ToolResult> AfterAsync(ToolCallDto call, ToolResult result, ToolContext ctx, CancellationToken ct)
-        => Task.FromResult(result ?? ToolResult.Fail($"工具 '{call?.Name}' 返回空结果，请重试。"));
+    public Task<ToolResult> AfterAsync(
+        ToolCallDto call,
+        ToolResult result,
+        ToolContext ctx,
+        CancellationToken ct
+    ) => Task.FromResult(result ?? ToolResult.Fail($"工具 '{call?.Name}' 返回空结果，请重试。"));
 }

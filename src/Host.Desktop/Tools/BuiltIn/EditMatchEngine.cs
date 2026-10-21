@@ -221,7 +221,8 @@ internal static class EditMatchEngine
         string rawContent,
         string needle,
         MatchOptions options,
-        int topN = 3)
+        int topN = 3
+    )
     {
         var results = new List<NearestCandidate>();
         string[] fileLines = SplitLfLines(rawContent);
@@ -277,9 +278,16 @@ internal static class EditMatchEngine
         {
             int idx = prefilter[i].Index;
             int take = Math.Min(blockLen, fileLines.Length - idx);
-            double score = take <= 1
-                ? prefilter[i].Score
-                : Dice(needleBlock, string.Join('\n', Enumerable.Range(idx, take).Select(k => LineKey(fileLines[k], options))));
+            double score =
+                take <= 1
+                    ? prefilter[i].Score
+                    : Dice(
+                        needleBlock,
+                        string.Join(
+                            '\n',
+                            Enumerable.Range(idx, take).Select(k => LineKey(fileLines[k], options))
+                        )
+                    );
             refined.Add((idx, Math.Max(score, prefilter[i].Score * 0.99)));
         }
 
@@ -293,13 +301,15 @@ internal static class EditMatchEngine
                 lead++;
             }
 
-            results.Add(new NearestCandidate
-            {
-                Line = index + 1,
-                Score = score,
-                Preview = VisualizeWhitespace(line),
-                LeadingHasTab = line.AsSpan(0, lead).IndexOf('\t') >= 0,
-            });
+            results.Add(
+                new NearestCandidate
+                {
+                    Line = index + 1,
+                    Score = score,
+                    Preview = VisualizeWhitespace(line),
+                    LeadingHasTab = line.AsSpan(0, lead).IndexOf('\t') >= 0,
+                }
+            );
         }
 
         return results;

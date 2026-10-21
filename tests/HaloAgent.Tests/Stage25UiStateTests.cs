@@ -19,7 +19,10 @@ public sealed class Stage25UiStateTests : IDisposable
     public Stage25UiStateTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage25Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage25Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage25Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -27,7 +30,8 @@ public sealed class Stage25UiStateTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
     }
 
     public void Dispose()
@@ -53,7 +57,9 @@ public sealed class Stage25UiStateTests : IDisposable
     [Fact(DisplayName = "S25-02: 读写往返")]
     public async Task AC02_Roundtrip()
     {
-        await _storageManager.SaveUiStateAsync(new UiActiveState { LastWorkspaceId = "ws_1", LastSessionId = "sess_1" });
+        await _storageManager.SaveUiStateAsync(
+            new UiActiveState { LastWorkspaceId = "ws_1", LastSessionId = "sess_1" }
+        );
         var s = _storageManager.LoadUiState();
         Assert.Equal("ws_1", s.LastWorkspaceId);
         Assert.Equal("sess_1", s.LastSessionId);
@@ -73,7 +79,9 @@ public sealed class Stage25UiStateTests : IDisposable
     [Fact(DisplayName = "S25-04: 空参清零")]
     public async Task AC04_Clear_With_Null()
     {
-        await _storageManager.SaveUiStateAsync(new UiActiveState { LastWorkspaceId = "ws_1", LastSessionId = "sess_1" });
+        await _storageManager.SaveUiStateAsync(
+            new UiActiveState { LastWorkspaceId = "ws_1", LastSessionId = "sess_1" }
+        );
         var bridge = new HostBridgeFacade(null, _storageManager);
         var setRes = await bridge.SetLastActive(null, null);
         Assert.True(setRes.Ok);

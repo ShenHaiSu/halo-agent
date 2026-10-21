@@ -10,7 +10,7 @@ namespace Host.Desktop.Core.Models;
 public enum LlmProtocolType
 {
     Chat = 0, // OpenAI Chat Completions 协议 (/v1/chat/completions)
-    Resp = 1  // OpenAI Responses API 协议 (/v1/responses)
+    Resp = 1 // OpenAI Responses API 协议 (/v1/responses)
 }
 
 /// <summary>
@@ -18,7 +18,11 @@ public enum LlmProtocolType
 /// </summary>
 public sealed class LlmProtocolTypeJsonConverter : JsonConverter<LlmProtocolType>
 {
-    public override LlmProtocolType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override LlmProtocolType Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
     {
         if (reader.TokenType == JsonTokenType.String)
         {
@@ -38,7 +42,11 @@ public sealed class LlmProtocolTypeJsonConverter : JsonConverter<LlmProtocolType
         return LlmProtocolType.Chat;
     }
 
-    public override void Write(Utf8JsonWriter writer, LlmProtocolType value, JsonSerializerOptions options)
+    public override void Write(
+        Utf8JsonWriter writer,
+        LlmProtocolType value,
+        JsonSerializerOptions options
+    )
     {
         writer.WriteStringValue(value == LlmProtocolType.Resp ? "resp" : "chat");
     }
@@ -96,10 +104,11 @@ public sealed class ModelConfig
     /// need09-03：图片清晰度透传（chat image_url.detail）。auto|low|high，缺失/非法网关回退 high（不拒绝，原图 base64 直发不压缩）。
     /// </summary>
     public string? VisionDetail { get; set; } = "high";
-     /// <summary>
-     /// 历史是否携带思考链：true=assistant.ReasoningContent 随上下文发出（默认开；空则省略零抖动）。
-     /// </summary>
-     public bool IncludeReasoningInHistory { get; set; } = true;
+
+    /// <summary>
+    /// 历史是否携带思考链：true=assistant.ReasoningContent 随上下文发出（默认开；空则省略零抖动）。
+    /// </summary>
+    public bool IncludeReasoningInHistory { get; set; } = true;
 
     public ModelConfig Clone()
     {
@@ -127,12 +136,14 @@ public static class VisionDefaults
 {
     /// <summary>默认每轮图片数（MaxImagesPerTurn=0 即此值，非无限）。</summary>
     public const int DefaultMaxImages = 4;
+
     /// <summary>每轮图片数上限（含 0 哨兵在内合法区间为 0..16）。</summary>
     public const int MaxAllowedImages = 16;
     public const string DefaultDetail = "high";
 
     /// <summary>0/负数 → 默认 4；正数原样返回（上限由校验层拒绝，不在此钳制）。</summary>
-    public static int ResolveMaxImages(int configured) => configured <= 0 ? DefaultMaxImages : configured;
+    public static int ResolveMaxImages(int configured) =>
+        configured <= 0 ? DefaultMaxImages : configured;
 
     /// <summary>auto|low|high 通过（大小写不敏感，显式 auto 保留），缺失/非法一律回退 high（不拒绝）。</summary>
     public static string NormalizeDetail(string? detail)

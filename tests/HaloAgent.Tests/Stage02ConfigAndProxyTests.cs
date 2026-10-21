@@ -25,7 +25,10 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
     public Stage02ConfigAndProxyTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage02Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage02Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage02Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
     }
@@ -209,7 +212,8 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
             byte[] buffer = new byte[1024];
             _ = await stream.ReadAsync(buffer, 0, buffer.Length);
 
-            string response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"data\":[]}\r\n\r\n";
+            string response =
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"data\":[]}\r\n\r\n";
             byte[] respBytes = Encoding.UTF8.GetBytes(response);
             await stream.WriteAsync(respBytes, 0, respBytes.Length);
             await stream.FlushAsync();
@@ -227,7 +231,8 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
 
             var result = await proxyHub.TestProxyConnectivityAsync(
                 targetUrl: $"http://127.0.0.1:{port}/v1/models",
-                overrideGlobalSettings: directGlobal);
+                overrideGlobalSettings: directGlobal
+            );
 
             Assert.True(result.Success, $"Connectivity test failed: {result.ErrorMessage}");
             Assert.Equal(200, result.StatusCode);
@@ -262,8 +267,18 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
             EnableCustomHeaders = true,
             CustomHeaders = new List<CustomHeaderEntry>
             {
-                new() { Key = "X-Session-Hash", ValueTemplate = "sess_${session-hash}", Enabled = true },
-                new() { Key = "X-Trace-Workspace", ValueTemplate = "${workspace-id}:${model-id}", Enabled = true }
+                new()
+                {
+                    Key = "X-Session-Hash",
+                    ValueTemplate = "sess_${session-hash}",
+                    Enabled = true
+                },
+                new()
+                {
+                    Key = "X-Trace-Workspace",
+                    ValueTemplate = "${workspace-id}:${model-id}",
+                    Enabled = true
+                }
             },
             Models = new List<ModelConfig>
             {
@@ -291,7 +306,9 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
         };
 
         var updatedDoc = configService.UpsertProvider(newProvider);
-        var savedClientView = updatedDoc.Providers.FirstOrDefault(p => p.Id == "provider-deepseek-custom");
+        var savedClientView = updatedDoc.Providers.FirstOrDefault(p =>
+            p.Id == "provider-deepseek-custom"
+        );
         Assert.NotNull(savedClientView);
         Assert.True(savedClientView!.HasApiKey);
         Assert.Null(savedClientView.ApiKey);
@@ -327,14 +344,16 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
             sessionId: sessionId,
             providerId: "prov-openai",
             providerName: "OpenAI Gateway",
-            modelId: "gpt-4o");
+            modelId: "gpt-4o"
+        );
 
         var ctxTrailingSlash = HeaderVariableResolver.CreateContext(
             workspacePath: workspacePath + "\\",
             sessionId: sessionId,
             providerId: "prov-openai",
             providerName: "OpenAI Gateway",
-            modelId: "gpt-4o");
+            modelId: "gpt-4o"
+        );
 
         Assert.Equal(16, ctx.SessionHash.Length);
         Assert.Equal(ctx.SessionHash, ctxTrailingSlash.SessionHash); // Trailing slash normalized
@@ -347,13 +366,31 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
             EnableCustomHeaders = true,
             CustomHeaders = new List<CustomHeaderEntry>
             {
-                new() { Key = "X-Session-Affinity", ValueTemplate = "affinity-${session-hash}", Enabled = true },
-                new() { Key = "X-Halo-Context", ValueTemplate = "${workspace-name}/${model-id}/${provider-id}", Enabled = true },
-                new() { Key = "X-Disabled-Header", ValueTemplate = "should-not-appear", Enabled = false }
+                new()
+                {
+                    Key = "X-Session-Affinity",
+                    ValueTemplate = "affinity-${session-hash}",
+                    Enabled = true
+                },
+                new()
+                {
+                    Key = "X-Halo-Context",
+                    ValueTemplate = "${workspace-name}/${model-id}/${provider-id}",
+                    Enabled = true
+                },
+                new()
+                {
+                    Key = "X-Disabled-Header",
+                    ValueTemplate = "should-not-appear",
+                    Enabled = false
+                }
             }
         };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://api.openai.com/v1/chat/completions"
+        );
         var applied = HeaderVariableResolver.ApplyCustomHeaders(req, provider, ctx);
 
         Assert.Equal(2, applied.Count);
@@ -362,10 +399,34 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
         Assert.False(applied.ContainsKey("X-Disabled-Header"));
 
         // Verify URL Normalization & Protocol Endpoint Resolution (Chat vs Resp vs '#' raw prefix)
-        Assert.Equal("https://api.openai.com/v1/chat/completions", HeaderVariableResolver.ResolveEndpointUrl("https://api.openai.com", LlmProtocolType.Chat));
-        Assert.Equal("https://api.openai.com/v1/responses", HeaderVariableResolver.ResolveEndpointUrl("https://api.openai.com/v1/", LlmProtocolType.Resp));
-        Assert.Equal("https://custom.gateway.internal/v2/openai/chat/completions", HeaderVariableResolver.ResolveEndpointUrl("https://custom.gateway.internal/v2/openai#", LlmProtocolType.Chat));
-        Assert.Equal("https://custom.gateway.internal/v2/openai/responses", HeaderVariableResolver.ResolveEndpointUrl("https://custom.gateway.internal/v2/openai#", LlmProtocolType.Resp));
+        Assert.Equal(
+            "https://api.openai.com/v1/chat/completions",
+            HeaderVariableResolver.ResolveEndpointUrl(
+                "https://api.openai.com",
+                LlmProtocolType.Chat
+            )
+        );
+        Assert.Equal(
+            "https://api.openai.com/v1/responses",
+            HeaderVariableResolver.ResolveEndpointUrl(
+                "https://api.openai.com/v1/",
+                LlmProtocolType.Resp
+            )
+        );
+        Assert.Equal(
+            "https://custom.gateway.internal/v2/openai/chat/completions",
+            HeaderVariableResolver.ResolveEndpointUrl(
+                "https://custom.gateway.internal/v2/openai#",
+                LlmProtocolType.Chat
+            )
+        );
+        Assert.Equal(
+            "https://custom.gateway.internal/v2/openai/responses",
+            HeaderVariableResolver.ResolveEndpointUrl(
+                "https://custom.gateway.internal/v2/openai#",
+                LlmProtocolType.Resp
+            )
+        );
     }
 
     [Fact]
@@ -376,7 +437,13 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
         var storage = StoragePathManager.Initialize(bootstrapFile, dataRoot, dataRoot);
         var proxyHub = new HaloHttpClientFactory();
         var configService = new ProviderConfigService(storage, proxyHub);
-        var bridge = new HostBridgeFacade(null, storage, gpuDisabled: false, proxyHub, configService);
+        var bridge = new HostBridgeFacade(
+            null,
+            storage,
+            gpuDisabled: false,
+            proxyHub,
+            configService
+        );
 
         // 1. GetProvidersConfig
         var providersResp = await bridge.GetProvidersConfig();
@@ -393,8 +460,16 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
         Assert.Equal(firstModel.Id, setActiveResp.Data.ActiveModelId);
 
         // 3. PreviewProviderResolution
-        string providerJson = JsonSerializer.Serialize(firstProvider, HaloJsonOptions.IndentedCamelCase);
-        var previewResp = await bridge.PreviewProviderResolution(providerJson, firstModel.Id, "sess-bridge-01", @"F:\MyProgram\CSharp\halo-agent");
+        string providerJson = JsonSerializer.Serialize(
+            firstProvider,
+            HaloJsonOptions.IndentedCamelCase
+        );
+        var previewResp = await bridge.PreviewProviderResolution(
+            providerJson,
+            firstModel.Id,
+            "sess-bridge-01",
+            @"F:\MyProgram\CSharp\halo-agent"
+        );
         Assert.True(previewResp.Ok);
         Assert.NotNull(previewResp.Data);
         Assert.EndsWith("/v1/chat/completions", previewResp.Data!.ChatEndpointUrl);

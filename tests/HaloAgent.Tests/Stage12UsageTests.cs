@@ -20,30 +20,39 @@ public sealed class Stage12UsageTests : IDisposable
     public Stage12UsageTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage12Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage12Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage12Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
         string bootstrapFile = Path.Combine(_bootstrapRoot, "bootstrap.json");
         _storage = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
-        catch { /* ignore */ }
+        catch
+        { /* ignore */
+        }
     }
 
     private UsageMetricsService NewService(DateTime? now = null)
     {
         var svc = new UsageMetricsService(_storage);
-        if (now.HasValue) svc.NowLocal = () => now.Value;
+        if (now.HasValue)
+            svc.NowLocal = () => now.Value;
         return svc;
     }
 
@@ -52,7 +61,8 @@ public sealed class Stage12UsageTests : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < timeoutMs)
         {
-            if (cond()) return;
+            if (cond())
+                return;
             Thread.Sleep(100);
         }
     }
@@ -61,12 +71,43 @@ public sealed class Stage12UsageTests : IDisposable
     public void HitRate_ZeroInputIsZero_Weighted()
     {
         using var svc = NewService(new DateTime(2026, 10, 17, 12, 0, 0));
-        svc.EnqueueFlush(new List<PendingUsageRow>
-        {
-            new() { ProviderId = "p1", ProviderName = "P1", ModelId = "m1", RequestId = "r1", Input = 0, Output = 0, Cached = 0 },
-            new() { ProviderId = "p1", ProviderName = "P1", ModelId = "m1", RequestId = "r2", Input = 100, Output = 10, Cached = 50 },
-            new() { ProviderId = "p1", ProviderName = "P1", ModelId = "m1", RequestId = "r3", Input = 300, Output = 10, Cached = 30 },
-        }, "s1", "w1");
+        svc.EnqueueFlush(
+            new List<PendingUsageRow>
+            {
+                new()
+                {
+                    ProviderId = "p1",
+                    ProviderName = "P1",
+                    ModelId = "m1",
+                    RequestId = "r1",
+                    Input = 0,
+                    Output = 0,
+                    Cached = 0
+                },
+                new()
+                {
+                    ProviderId = "p1",
+                    ProviderName = "P1",
+                    ModelId = "m1",
+                    RequestId = "r2",
+                    Input = 100,
+                    Output = 10,
+                    Cached = 50
+                },
+                new()
+                {
+                    ProviderId = "p1",
+                    ProviderName = "P1",
+                    ModelId = "m1",
+                    RequestId = "r3",
+                    Input = 300,
+                    Output = 10,
+                    Cached = 30
+                },
+            },
+            "s1",
+            "w1"
+        );
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests == 3);
         var ov = svc.GetOverview(new UsageFilter { Preset = "today" });
         Assert.Equal(3, ov.TotalRequests);
@@ -84,7 +125,16 @@ public sealed class Stage12UsageTests : IDisposable
     public void Dedup_SameRequestIdOnce()
     {
         using var svc = NewService(new DateTime(2026, 10, 17, 12, 0, 0));
-        var row = new PendingUsageRow { ProviderId = "p1", ProviderName = "P1", ModelId = "m1", RequestId = "dup-1", Input = 10, Output = 1, Cached = 5 };
+        var row = new PendingUsageRow
+        {
+            ProviderId = "p1",
+            ProviderName = "P1",
+            ModelId = "m1",
+            RequestId = "dup-1",
+            Input = 10,
+            Output = 1,
+            Cached = 5
+        };
         svc.EnqueueFlush(new List<PendingUsageRow> { row }, "s1", "w1");
         svc.EnqueueFlush(new List<PendingUsageRow> { row }, "s1", "w1");
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests >= 1);
@@ -110,20 +160,56 @@ public sealed class Stage12UsageTests : IDisposable
         // 跨月 trend 补零：9 天窗口应有 9 个桶
         var tr = svc.GetTrend(new UsageFilter { Preset = "last7" }, "total");
         Assert.Equal(7, tr.Dates.Count);
-        Assert.Throws<ArgumentException>(() => svc.ResolveRange(new UsageFilter { Preset = "custom", StartDate = "2026-10-05" }));
-        Assert.Throws<ArgumentException>(() => svc.ResolveRange(new UsageFilter { Preset = "custom", StartDate = "2026-10-09", EndDate = "2026-10-01" }));
-        Assert.Throws<ArgumentException>(() => svc.ResolveRange(new UsageFilter { Preset = "nope" }));
+        Assert.Throws<ArgumentException>(
+            () => svc.ResolveRange(new UsageFilter { Preset = "custom", StartDate = "2026-10-05" })
+        );
+        Assert.Throws<ArgumentException>(
+            () =>
+                svc.ResolveRange(
+                    new UsageFilter
+                    {
+                        Preset = "custom",
+                        StartDate = "2026-10-09",
+                        EndDate = "2026-10-01"
+                    }
+                )
+        );
+        Assert.Throws<ArgumentException>(
+            () => svc.ResolveRange(new UsageFilter { Preset = "nope" })
+        );
     }
 
     [Fact(DisplayName = "S12: 同名模型按 (provider,model) 隔离 + 分页上限 200")]
     public void SameModelName_IsolatedByProvider_PageClamped()
     {
         using var svc = NewService(new DateTime(2026, 10, 17, 12, 0, 0));
-        svc.EnqueueFlush(new List<PendingUsageRow>
-        {
-            new() { ProviderId = "pa", ProviderName = "PA", ModelId = "gpt-4o", RequestId = "a1", Input = 100, Output = 10, Cached = 10 },
-            new() { ProviderId = "pb", ProviderName = "PB", ModelId = "gpt-4o", RequestId = "b1", Input = 200, Output = 20, Cached = 20 },
-        }, "s1", "w1");
+        svc.EnqueueFlush(
+            new List<PendingUsageRow>
+            {
+                new()
+                {
+                    ProviderId = "pa",
+                    ProviderName = "PA",
+                    ModelId = "gpt-4o",
+                    RequestId = "a1",
+                    Input = 100,
+                    Output = 10,
+                    Cached = 10
+                },
+                new()
+                {
+                    ProviderId = "pb",
+                    ProviderName = "PB",
+                    ModelId = "gpt-4o",
+                    RequestId = "b1",
+                    Input = 200,
+                    Output = 20,
+                    Cached = 20
+                },
+            },
+            "s1",
+            "w1"
+        );
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests == 2);
         var tr = svc.GetTrend(new UsageFilter { Preset = "today" }, "total");
         Assert.Equal(2, tr.PerModel.Count); // 同名不同 provider → 两个系列

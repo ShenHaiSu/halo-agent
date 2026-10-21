@@ -31,12 +31,16 @@ public sealed partial class HostBridgeFacade
         try
         {
             var (doc, isDefault, fallback) = PromptConfigService.LoadWithMeta();
-            return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Success(ToWithMeta(doc, isDefault, fallback)));
+            return Task.FromResult(
+                BridgeResponse<PromptConfigWithMeta>.Success(ToWithMeta(doc, isDefault, fallback))
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetPromptConfig failed", ex);
-            return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_GET_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_GET_ERROR", ex.Message)
+            );
         }
     }
 
@@ -45,32 +49,54 @@ public sealed partial class HostBridgeFacade
         try
         {
             if (string.IsNullOrWhiteSpace(configJson))
-                return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", "配置 JSON 不能为空"));
-             PromptConfigDocument? incoming;
-             try
-             {
-                 incoming = PromptJsonOptions.DeserializeConfigDocument(configJson);
-             }
-             catch (Exception ex)
-             {
-                 return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", "配置 JSON 解析失败：" + ex.Message));
-             }
-             if (incoming == null)
-                 return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", "配置 JSON 解析为空"));
-             try {
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", "配置 JSON 不能为空")
+                );
+            PromptConfigDocument? incoming;
+            try
+            {
+                incoming = PromptJsonOptions.DeserializeConfigDocument(configJson);
+            }
+            catch (Exception ex)
+            {
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Fail(
+                        "PROMPT_VALIDATION",
+                        "配置 JSON 解析失败：" + ex.Message
+                    )
+                );
+            }
+            if (incoming == null)
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", "配置 JSON 解析为空")
+                );
+            try
+            {
                 var saved = _promptConfigService.SavePromptConfig(incoming);
                 JsEventDispatcher.Publish("config:prompt-changed", saved);
-                return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Success(ToWithMeta(saved, false, null), "提示词配置已保存，下一轮对话起生效"));
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Success(
+                        ToWithMeta(saved, false, null),
+                        "提示词配置已保存，下一轮对话起生效"
+                    )
+                );
             }
             catch (PromptConfigValidationException vex)
             {
-                return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", $"块 [{vex.BlockId}]：{vex.Message}"));
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Fail(
+                        "PROMPT_VALIDATION",
+                        $"块 [{vex.BlockId}]：{vex.Message}"
+                    )
+                );
             }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("SavePromptConfig failed", ex);
-            return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_SAVE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_SAVE_ERROR", ex.Message)
+            );
         }
     }
 
@@ -82,17 +108,29 @@ public sealed partial class HostBridgeFacade
             {
                 var reset = _promptConfigService.ResetPromptConfig(blockId);
                 JsEventDispatcher.Publish("config:prompt-changed", reset);
-                return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Success(ToWithMeta(reset, false, null), "已恢复默认"));
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Success(
+                        ToWithMeta(reset, false, null),
+                        "已恢复默认"
+                    )
+                );
             }
             catch (PromptConfigValidationException vex)
             {
-                return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_VALIDATION", $"块 [{vex.BlockId}]：{vex.Message}"));
+                return Task.FromResult(
+                    BridgeResponse<PromptConfigWithMeta>.Fail(
+                        "PROMPT_VALIDATION",
+                        $"块 [{vex.BlockId}]：{vex.Message}"
+                    )
+                );
             }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("ResetPromptConfig failed", ex);
-            return Task.FromResult(BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_RESET_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<PromptConfigWithMeta>.Fail("PROMPT_RESET_ERROR", ex.Message)
+            );
         }
     }
 
@@ -103,19 +141,28 @@ public sealed partial class HostBridgeFacade
             var (doc, isDefault, fallback) = _promptConfigService.LoadWithMeta();
             WorkspaceInfo? ws = null;
             if (!string.IsNullOrWhiteSpace(workspaceId))
-                ws = await _workspaceSessionService.GetWorkspaceAsync(workspaceId.Trim()).ConfigureAwait(false);
+                ws = await _workspaceSessionService
+                    .GetWorkspaceAsync(workspaceId.Trim())
+                    .ConfigureAwait(false);
             if (ws == null)
             {
                 if (string.IsNullOrWhiteSpace(workspaceId))
                 {
-                    ws = new WorkspaceInfo { Name = "workspace", RootPath = Environment.CurrentDirectory };
+                    ws = new WorkspaceInfo
+                    {
+                        Name = "workspace",
+                        RootPath = Environment.CurrentDirectory
+                    };
                     fallback = string.IsNullOrWhiteSpace(fallback)
                         ? "当前无工作区，为中性预览"
                         : fallback + "；当前无工作区，为中性预览";
                 }
                 else
                 {
-                    return BridgeResponse<PromptPreviewDto>.Fail("WORKSPACE_NOT_FOUND", $"工作区不存在：'{workspaceId}'");
+                    return BridgeResponse<PromptPreviewDto>.Fail(
+                        "WORKSPACE_NOT_FOUND",
+                        $"工作区不存在：'{workspaceId}'"
+                    );
                 }
             }
             var preview = SystemPromptBuilder.BuildPreview(doc, ws, null, null, ws.Id);
@@ -130,23 +177,35 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-     public async Task<BridgeResponse<PromptDiagnosticsDto>> GetPromptDiagnostics(string workspaceId, string? sessionId)
-     {
-         try
-         {
-             var previewRes = await PreviewPrompt(workspaceId).ConfigureAwait(false);
-             if (!previewRes.Ok || previewRes.Data == null)
-                 return BridgeResponse<PromptDiagnosticsDto>.Fail(previewRes.Code ?? "PROMPT_PREVIEW_ERROR", previewRes.Message ?? "预览失败");
+    public async Task<BridgeResponse<PromptDiagnosticsDto>> GetPromptDiagnostics(
+        string workspaceId,
+        string? sessionId
+    )
+    {
+        try
+        {
+            var previewRes = await PreviewPrompt(workspaceId).ConfigureAwait(false);
+            if (!previewRes.Ok || previewRes.Data == null)
+                return BridgeResponse<PromptDiagnosticsDto>.Fail(
+                    previewRes.Code ?? "PROMPT_PREVIEW_ERROR",
+                    previewRes.Message ?? "预览失败"
+                );
             var last = PromptLastSentStore.Get(sessionId);
-            bool equals = last != null
-                && string.Equals(last.PrefixHash, previewRes.Data.PrefixHash, StringComparison.Ordinal);
+            bool equals =
+                last != null
+                && string.Equals(
+                    last.PrefixHash,
+                    previewRes.Data.PrefixHash,
+                    StringComparison.Ordinal
+                );
             var dto = new PromptDiagnosticsDto
             {
                 CurrentPreview = previewRes.Data,
                 LastSent = last,
                 PreviewEqualsLastSent = equals,
-                 CompressorPromptPreview = Services.CompactionService.CompressorSystemPrompt,
-                TitlePromptPreview = "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。（对话正文已脱除）",
+                CompressorPromptPreview = Services.CompactionService.CompressorSystemPrompt,
+                TitlePromptPreview =
+                    "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。（对话正文已脱除）",
             };
             return BridgeResponse<PromptDiagnosticsDto>.Success(dto);
         }
@@ -157,11 +216,18 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    private static PromptConfigWithMeta ToWithMeta(PromptConfigDocument doc, bool isDefault, string? fallback)
+    private static PromptConfigWithMeta ToWithMeta(
+        PromptConfigDocument doc,
+        bool isDefault,
+        string? fallback
+    )
     {
         string json = JsonSerializer.Serialize(doc, HaloJsonOptions.IndentedCamelCase);
-        var meta = JsonSerializer.Deserialize<PromptConfigWithMeta>(json, HaloJsonOptions.IndentedCamelCase)
-            ?? new PromptConfigWithMeta();
+        var meta =
+            JsonSerializer.Deserialize<PromptConfigWithMeta>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? new PromptConfigWithMeta();
         meta.IsDefault = isDefault;
         meta.FallbackReason = fallback;
         return meta;

@@ -18,31 +18,52 @@ public sealed class GrepSearchTool : IToolHandler
     public const int MaxFileSizeBytes = 5 * 1024 * 1024;
     public const int MaxLineDisplayChars = 300;
 
-    private static readonly HashSet<string> ExcludedDirNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".git", "node_modules", "bin", "obj", "dist", "__pycache__", ".vs",
-    };
+    private static readonly HashSet<string> ExcludedDirNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".git",
+            "node_modules",
+            "bin",
+            "obj",
+            "dist",
+            "__pycache__",
+            ".vs",
+        };
 
     public string Name => "grep_search";
 
     // NEED17 PromptBrief: Search file contents with regex
     public string Description =>
-        "Search file contents in the workspace with a regular expression. " +
-        "Returns up to 100 matches as relative_path:line_number: matched_line. " +
-        "Directories .git/node_modules/bin/obj/dist are skipped. Long lines cut at 300 chars; use read_file for the full line. " +
-        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
+        "Search file contents in the workspace with a regular expression. "
+        + "Returns up to 100 matches as relative_path:line_number: matched_line. "
+        + "Directories .git/node_modules/bin/obj/dist are skipped. Long lines cut at 300 chars; use read_file for the full line. "
+        + "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
     public ToolDefinition GetDefinition()
     {
         string schema = new ToolSchemaBuilder()
-            .AddString("pattern", "Regular expression to search. Returns relative_path:line_number:matched_line, up to 100 matches. Empty result is normal (no match), not an error.", required: true)
-            .AddString("path", "Optional subdirectory or file to search in. Defaults to workspace root. Directories .git/node_modules/bin/obj/dist are skipped.")
-            .AddString("include_glob", "Optional file filter like \"*.cs\" (multiple patterns separated by ';', e.g. *.cs;*.ts).")
+            .AddString(
+                "pattern",
+                "Regular expression to search. Returns relative_path:line_number:matched_line, up to 100 matches. Empty result is normal (no match), not an error.",
+                required: true
+            )
+            .AddString(
+                "path",
+                "Optional subdirectory or file to search in. Defaults to workspace root. Directories .git/node_modules/bin/obj/dist are skipped."
+            )
+            .AddString(
+                "include_glob",
+                "Optional file filter like \"*.cs\" (multiple patterns separated by ';', e.g. *.cs;*.ts)."
+            )
             .Build();
         return new(Name, Description, schema);
     }
 
-    public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public async Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         try
@@ -72,14 +93,16 @@ public sealed class GrepSearchTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"参数 JSON 解析失败：{ex.Message}。请检查 pattern/path/include_glob 字段后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             if (string.IsNullOrWhiteSpace(pattern))
             {
                 return ToolResult.Fail(
                     "缺少必需参数 'pattern'（正则表达式）。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             Regex regex;
@@ -91,7 +114,8 @@ public sealed class GrepSearchTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"正则表达式非法：{ex.Message}。请修正 pattern 后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
@@ -101,7 +125,9 @@ public sealed class GrepSearchTool : IToolHandler
             string startPath;
             {
                 var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
-                    workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+                    workspaceRoot,
+                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg
+                );
                 if (!ok)
                 {
                     return ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds);
@@ -122,7 +148,8 @@ public sealed class GrepSearchTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"搜索路径不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, startPath)}'。请用 list_dir 确认路径后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             List<Regex> globFilters = BuildGlobFilters(includeGlob);
@@ -131,7 +158,10 @@ public sealed class GrepSearchTool : IToolHandler
             int scannedFiles = 0;
             int totalHits = 0;
 
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, context.CancellationToken);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                ct,
+                context.CancellationToken
+            );
 
             var options = new ParallelOptions
             {
@@ -141,76 +171,104 @@ public sealed class GrepSearchTool : IToolHandler
 
             try
             {
-                await Parallel.ForEachAsync(files, options, async (file, token) =>
-                {
-                    if (Volatile.Read(ref totalHits) >= MaxMatches)
-                    {
-                        return;
-                    }
-
-                    if (!IsGlobMatch(Path.GetFileName(file), globFilters))
-                    {
-                        return;
-                    }
-
-                    try
-                    {
-                        var info = new FileInfo(file);
-                        if (info.Length > MaxFileSizeBytes || FileToolShared.LooksBinary(file))
+                await Parallel
+                    .ForEachAsync(
+                        files,
+                        options,
+                        async (file, token) =>
                         {
-                            return;
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        return;
-                    }
-
-                    List<(int Line, string Text)>? fileHits = await ScanFileAsync(file, regex, token).ConfigureAwait(false);
-                    if (fileHits == null || fileHits.Count == 0)
-                    {
-                        Interlocked.Increment(ref scannedFiles);
-                        return;
-                    }
-
-                    Interlocked.Increment(ref scannedFiles);
-                    string rel = PathSafetyValidator.GetWorkspaceRelativePath(workspaceRoot, file);
-                    lock (matchesLock)
-                    {
-                        foreach (var hit in fileHits)
-                        {
-                            if (totalHits >= MaxMatches)
+                            if (Volatile.Read(ref totalHits) >= MaxMatches)
                             {
-                                break;
+                                return;
                             }
 
-                            matches.Add((rel, hit.Line, hit.Text));
-                            totalHits++;
+                            if (!IsGlobMatch(Path.GetFileName(file), globFilters))
+                            {
+                                return;
+                            }
+
+                            try
+                            {
+                                var info = new FileInfo(file);
+                                if (
+                                    info.Length > MaxFileSizeBytes
+                                    || FileToolShared.LooksBinary(file)
+                                )
+                                {
+                                    return;
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                return;
+                            }
+
+                            List<(int Line, string Text)>? fileHits = await ScanFileAsync(
+                                    file,
+                                    regex,
+                                    token
+                                )
+                                .ConfigureAwait(false);
+                            if (fileHits == null || fileHits.Count == 0)
+                            {
+                                Interlocked.Increment(ref scannedFiles);
+                                return;
+                            }
+
+                            Interlocked.Increment(ref scannedFiles);
+                            string rel = PathSafetyValidator.GetWorkspaceRelativePath(
+                                workspaceRoot,
+                                file
+                            );
+                            lock (matchesLock)
+                            {
+                                foreach (var hit in fileHits)
+                                {
+                                    if (totalHits >= MaxMatches)
+                                    {
+                                        break;
+                                    }
+
+                                    matches.Add((rel, hit.Line, hit.Text));
+                                    totalHits++;
+                                }
+                            }
                         }
-                    }
-                }).ConfigureAwait(false);
+                    )
+                    .ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
+                when (ct.IsCancellationRequested
+                    || context.CancellationToken.IsCancellationRequested
+                )
             {
                 return ToolResult.Fail("搜索已被取消。", durationMs: sw.ElapsedMilliseconds);
             }
 
-            matches.Sort((a, b) =>
-            {
-                int c = string.Compare(a.Rel, b.Rel, StringComparison.OrdinalIgnoreCase);
-                return c != 0 ? c : a.Line.CompareTo(b.Line);
-            });
+            matches.Sort(
+                (a, b) =>
+                {
+                    int c = string.Compare(a.Rel, b.Rel, StringComparison.OrdinalIgnoreCase);
+                    return c != 0 ? c : a.Line.CompareTo(b.Line);
+                }
+            );
 
             var sb = new StringBuilder();
             if (matches.Count == 0)
             {
-                sb.Append($"未找到匹配 '{pattern}' 的内容（已扫描 {scannedFiles} 个文件）。可放宽 include_glob 或检查正则后重试。");
+                sb.Append(
+                    $"未找到匹配 '{pattern}' 的内容（已扫描 {scannedFiles} 个文件）。可放宽 include_glob 或检查正则后重试。"
+                );
             }
             else
             {
                 foreach (var m in matches)
                 {
-                    sb.Append(m.Rel).Append(':').Append(m.Line).Append(": ").AppendLine(TruncateLine(m.Text));
+                    sb.Append(m.Rel)
+                        .Append(':')
+                        .Append(m.Line)
+                        .Append(": ")
+                        .AppendLine(TruncateLine(m.Text));
                 }
 
                 sb.Append($"共 {matches.Count} 处匹配");
@@ -228,7 +286,8 @@ public sealed class GrepSearchTool : IToolHandler
         {
             return ToolResult.Fail(
                 $"grep_search 执行异常：{ex.Message}。请修正参数后重试。",
-                durationMs: sw.ElapsedMilliseconds);
+                durationMs: sw.ElapsedMilliseconds
+            );
         }
         catch (OperationCanceledException)
         {
@@ -297,7 +356,10 @@ public sealed class GrepSearchTool : IToolHandler
             return result;
         }
 
-        string[] parts = includeGlob.Split(new[] { ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries);
+        string[] parts = includeGlob.Split(
+            new[] { ';', ',', '|' },
+            StringSplitOptions.RemoveEmptyEntries
+        );
         foreach (string raw in parts)
         {
             string glob = raw.Trim();
@@ -307,10 +369,13 @@ public sealed class GrepSearchTool : IToolHandler
             }
 
             // 简易 glob → 正则：* → .*, ? → .
-            string regexText = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            string regexText =
+                "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
             try
             {
-                result.Add(new Regex(regexText, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
+                result.Add(
+                    new Regex(regexText, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                );
             }
             catch (ArgumentException)
             {
@@ -339,7 +404,11 @@ public sealed class GrepSearchTool : IToolHandler
         return false;
     }
 
-    private static async Task<List<(int Line, string Text)>?> ScanFileAsync(string file, Regex regex, CancellationToken ct)
+    private static async Task<List<(int Line, string Text)>?> ScanFileAsync(
+        string file,
+        Regex regex,
+        CancellationToken ct
+    )
     {
         try
         {
@@ -352,7 +421,9 @@ public sealed class GrepSearchTool : IToolHandler
             string[] lines = content.Split('\n');
             for (int i = 0; i < lines.Length; i++)
             {
-                string line = lines[i].EndsWith("\r") ? lines[i].Substring(0, lines[i].Length - 1) : lines[i];
+                string line = lines[i].EndsWith("\r")
+                    ? lines[i].Substring(0, lines[i].Length - 1)
+                    : lines[i];
                 bool isMatch;
                 try
                 {

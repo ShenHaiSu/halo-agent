@@ -18,7 +18,8 @@ public sealed class ExternalNavigationRequestHandler : CefSharp.Handler.RequestH
         IFrame frame,
         IRequest request,
         bool userGesture,
-        bool isRedirect)
+        bool isRedirect
+    )
     {
         try
         {
@@ -35,16 +36,14 @@ public sealed class ExternalNavigationRequestHandler : CefSharp.Handler.RequestH
             }
 
             // 外部 http(s)：交系统浏览器
-            if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            if (
+                url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 try
                 {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = url,
-                        UseShellExecute = true
-                    });
+                    Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
                 }
                 catch (Exception ex)
                 {

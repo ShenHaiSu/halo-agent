@@ -22,25 +22,31 @@ public sealed class CustomLifeSpanHandler : ILifeSpanHandler
         IWindowInfo windowInfo,
         IBrowserSettings browserSettings,
         ref bool noJavascriptAccess,
-        out IWebBrowser? newBrowser)
+        out IWebBrowser? newBrowser
+    )
     {
         newBrowser = null;
 
-        if (!string.IsNullOrWhiteSpace(targetUrl) &&
-            (targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-             targetUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+        if (
+            !string.IsNullOrWhiteSpace(targetUrl)
+            && (
+                targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || targetUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            )
+        )
         {
             try
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = targetUrl,
-                    UseShellExecute = true
-                });
+                Process.Start(
+                    new ProcessStartInfo { FileName = targetUrl, UseShellExecute = true }
+                );
             }
             catch (Exception ex)
             {
-                HaloLogger.App.Warn($"Failed to open external URL in system browser: {targetUrl}", ex);
+                HaloLogger.App.Warn(
+                    $"Failed to open external URL in system browser: {targetUrl}",
+                    ex
+                );
             }
         }
 
@@ -48,16 +54,12 @@ public sealed class CustomLifeSpanHandler : ILifeSpanHandler
         return true;
     }
 
-    public void OnAfterCreated(IWebBrowser chromiumWebBrowser, IBrowser browser)
-    {
-    }
+    public void OnAfterCreated(IWebBrowser chromiumWebBrowser, IBrowser browser) { }
 
     public bool DoClose(IWebBrowser chromiumWebBrowser, IBrowser browser)
     {
         return false;
     }
 
-    public void OnBeforeClose(IWebBrowser chromiumWebBrowser, IBrowser browser)
-    {
-    }
+    public void OnBeforeClose(IWebBrowser chromiumWebBrowser, IBrowser browser) { }
 }

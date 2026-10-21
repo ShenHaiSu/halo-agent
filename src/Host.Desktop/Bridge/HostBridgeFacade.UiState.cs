@@ -11,16 +11,22 @@ public sealed partial class HostBridgeFacade
         try
         {
             var s = _storageManager.LoadUiState();
-            return Task.FromResult(BridgeResponse<UiActiveStateDto>.Success(new UiActiveStateDto
-            {
-                WorkspaceId = s.LastWorkspaceId,
-                SessionId = s.LastSessionId,
-            }));
+            return Task.FromResult(
+                BridgeResponse<UiActiveStateDto>.Success(
+                    new UiActiveStateDto
+                    {
+                        WorkspaceId = s.LastWorkspaceId,
+                        SessionId = s.LastSessionId,
+                    }
+                )
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetLastActive failed", ex);
-            return Task.FromResult(BridgeResponse<UiActiveStateDto>.Fail(ex.Message, "UISTATE_ERROR"));
+            return Task.FromResult(
+                BridgeResponse<UiActiveStateDto>.Fail(ex.Message, "UISTATE_ERROR")
+            );
         }
     }
 

@@ -9,8 +9,10 @@ namespace Host.Desktop.Tools.Process;
 /// </summary>
 public static class SmartConsoleDecoder
 {
-    private static readonly Encoding StrictUtf8 =
-        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true
+    );
 
     private static readonly object ProviderLock = new();
     private static bool _providerRegistered;

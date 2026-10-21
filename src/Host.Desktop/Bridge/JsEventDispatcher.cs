@@ -18,11 +18,13 @@ public static class JsEventDispatcher
 {
     private const int ThrottleIntervalMs = 16;
     private const int MaxBatchSize = 128;
+
     /// <summary>need22-P1 T6：事件队列上限（渲染慢时堆积不再无界增长）。</summary>
     internal const int MaxQueueSize = 1000;
 
     private static readonly ConcurrentQueue<HostEventEnvelope> EventQueue = new();
     private static readonly object TimerLock = new();
+
     /// <summary>need22-P1 T6：背压逐出锁（Publish/逐出/排空互斥，避免与 Flush 并发错乱）。</summary>
     private static readonly object BackpressureLock = new();
     private static System.Threading.Timer? _flushTimer;
@@ -55,7 +57,8 @@ public static class JsEventDispatcher
                 static _ => FlushPendingEventsToBrowser(),
                 null,
                 ThrottleIntervalMs,
-                ThrottleIntervalMs);
+                ThrottleIntervalMs
+            );
         }
     }
 
@@ -69,7 +72,8 @@ public static class JsEventDispatcher
         var envelope = new HostEventEnvelope(
             eventType,
             payload,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        );
 
         lock (BackpressureLock)
         {
@@ -95,7 +99,8 @@ public static class JsEventDispatcher
     /// <summary>need22-P1 T6：关键事件判定（轮生命周期必达，如 TurnCompleted/TurnError/TurnCancelled/Compact*）。</summary>
     internal static bool IsCritical(HostEventEnvelope envelope)
     {
-        if (envelope.Type == null) return false;
+        if (envelope.Type == null)
+            return false;
         // llm:stream-event 为高频增量（TextDelta/ReasoningDelta），可丢可重放；
         // 其余（agent:turn-event/config:*/Compact*）视为关键。
         return !string.Equals(envelope.Type, "llm:stream-event", StringComparison.Ordinal);
@@ -117,7 +122,8 @@ public static class JsEventDispatcher
             }
             kept.Add(item);
         }
-        foreach (var k in kept) EventQueue.Enqueue(k);
+        foreach (var k in kept)
+            EventQueue.Enqueue(k);
         return dropped;
     }
 
@@ -165,15 +171,20 @@ public static class JsEventDispatcher
             var last = result[^1];
 
             // 检查是否为同类型的 session 流式事件
-            if (last.Type == item.Type &&
-                last.Payload is LlmGateway.Models.SessionStreamEventDto lastDto &&
-                item.Payload is LlmGateway.Models.SessionStreamEventDto currDto &&
-                lastDto.SessionId == currDto.SessionId &&
-                lastDto.Kind == currDto.Kind &&
-                (currDto.Kind == nameof(LlmGateway.Models.UnifiedStreamEventKind.TextDelta) ||
-                 currDto.Kind == nameof(LlmGateway.Models.UnifiedStreamEventKind.ReasoningDelta)) &&
-                lastDto.TextDelta != null &&
-                currDto.TextDelta != null)
+            if (
+                last.Type == item.Type
+                && last.Payload is LlmGateway.Models.SessionStreamEventDto lastDto
+                && item.Payload is LlmGateway.Models.SessionStreamEventDto currDto
+                && lastDto.SessionId == currDto.SessionId
+                && lastDto.Kind == currDto.Kind
+                && (
+                    currDto.Kind == nameof(LlmGateway.Models.UnifiedStreamEventKind.TextDelta)
+                    || currDto.Kind
+                        == nameof(LlmGateway.Models.UnifiedStreamEventKind.ReasoningDelta)
+                )
+                && lastDto.TextDelta != null
+                && currDto.TextDelta != null
+            )
             {
                 // 合并增量文本
                 lastDto.TextDelta += currDto.TextDelta;
@@ -197,7 +208,12 @@ public static class JsEventDispatcher
         }
 
         var browser = _browser;
-        if (browser == null || browser.IsDisposed || !browser.IsBrowserInitialized || !browser.CanExecuteJavascriptInMainFrame)
+        if (
+            browser == null
+            || browser.IsDisposed
+            || !browser.IsBrowserInitialized
+            || !browser.CanExecuteJavascriptInMainFrame
+        )
         {
             return;
         }
@@ -215,7 +231,8 @@ public static class JsEventDispatcher
                 return;
             }
 
-            var script = $"if (typeof window.__haloReceiveHostEvents === 'function') {{ window.__haloReceiveHostEvents({jsonBatch}); }}";
+            var script =
+                $"if (typeof window.__haloReceiveHostEvents === 'function') {{ window.__haloReceiveHostEvents({jsonBatch}); }}";
             browser.ExecuteScriptAsync(script);
         }
         catch (Exception ex)
@@ -240,25 +257,36 @@ public static class JsEventDispatcher
         try
         {
             var browser = _browser;
-            if (browser != null && !browser.IsDisposed && browser.IsBrowserInitialized && browser.CanExecuteJavascriptInMainFrame)
+            if (
+                browser != null
+                && !browser.IsDisposed
+                && browser.IsBrowserInitialized
+                && browser.CanExecuteJavascriptInMainFrame
+            )
             {
                 for (int i = 0; i < (MaxQueueSize / MaxBatchSize) + 2; i++)
                 {
                     string? jsonBatch;
                     lock (BackpressureLock)
                     {
-                        if (EventQueue.IsEmpty) break;
+                        if (EventQueue.IsEmpty)
+                            break;
                         jsonBatch = DequeueBatchJson();
                     }
-                    if (string.IsNullOrEmpty(jsonBatch)) break;
+                    if (string.IsNullOrEmpty(jsonBatch))
+                        break;
                     try
                     {
-                        var script = $"if (typeof window.__haloReceiveHostEvents === 'function') {{ window.__haloReceiveHostEvents({jsonBatch}); }}";
+                        var script =
+                            $"if (typeof window.__haloReceiveHostEvents === 'function') {{ window.__haloReceiveHostEvents({jsonBatch}); }}";
                         browser.ExecuteScriptAsync(script);
                     }
                     catch (Exception ex)
                     {
-                        HaloLogger.App.Warn("JsEventDispatcher failed to drain batch on shutdown.", ex);
+                        HaloLogger.App.Warn(
+                            "JsEventDispatcher failed to drain batch on shutdown.",
+                            ex
+                        );
                         break;
                     }
                 }
@@ -272,9 +300,7 @@ public static class JsEventDispatcher
             }
             lock (BackpressureLock)
             {
-                while (EventQueue.TryDequeue(out _))
-                {
-                }
+                while (EventQueue.TryDequeue(out _)) { }
             }
         }
     }

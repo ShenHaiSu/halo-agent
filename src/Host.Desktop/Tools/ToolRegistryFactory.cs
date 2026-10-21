@@ -16,32 +16,33 @@ public static class ToolRegistryFactory
         return r;
     }
 
-     public static ToolRegistry ForSub(SubPolicySnapshot policy)
-     {
-         var r = new ToolRegistry(registerBuiltIns: false);
-         r.Register(new ReadFileTool());
-         r.Register(new ListDirTool());
-         r.Register(new GrepSearchTool());
-         r.Register(new ViewImageTool());
-         if (policy.SubAllowExecCommand) r.Register(new ExecCommandTool());
-         if (policy.SubAllowFileWrite)
-         {
-             r.Register(new WriteFileTool());
-             r.Register(new EditFileTool());
-             r.Register(new EditLinesTool());
-             r.Register(new EditTool());
-             r.Register(new UndoEditTool());
-         }
-         // skill/memory 真身（写动作由 SkillToolShared 内鉴权拦截，见 03 §3.3）
-         r.Register(new SkillTool());
-         r.Register(new MemoryTool());
-         // need16：goal_tool 子只读（同一 GoalTool 靠 AgentRole 内鉴权；description 已含只读注记）
-         r.Register(new GoalTool());
-         // ask/spawn 禁用桩
-         r.Register(new DisabledAskUserTool());
-         r.Register(new DisabledSpawnTool());
-         return r;
-     }
+    public static ToolRegistry ForSub(SubPolicySnapshot policy)
+    {
+        var r = new ToolRegistry(registerBuiltIns: false);
+        r.Register(new ReadFileTool());
+        r.Register(new ListDirTool());
+        r.Register(new GrepSearchTool());
+        r.Register(new ViewImageTool());
+        if (policy.SubAllowExecCommand)
+            r.Register(new ExecCommandTool());
+        if (policy.SubAllowFileWrite)
+        {
+            r.Register(new WriteFileTool());
+            r.Register(new EditFileTool());
+            r.Register(new EditLinesTool());
+            r.Register(new EditTool());
+            r.Register(new UndoEditTool());
+        }
+        // skill/memory 真身（写动作由 SkillToolShared 内鉴权拦截，见 03 §3.3）
+        r.Register(new SkillTool());
+        r.Register(new MemoryTool());
+        // need16：goal_tool 子只读（同一 GoalTool 靠 AgentRole 内鉴权；description 已含只读注记）
+        r.Register(new GoalTool());
+        // ask/spawn 禁用桩
+        r.Register(new DisabledAskUserTool());
+        r.Register(new DisabledSpawnTool());
+        return r;
+    }
 }
 
 /// <summary>need13：轮首策略快照（05 §3：Orchestrator 每轮一次拷贝，本轮内 spawn/skill/memory 判定全用它）。</summary>
@@ -55,13 +56,12 @@ public sealed class SubPolicySnapshot
     public bool SubAllowSkillWrite { get; init; } = false;
     public bool SubAllowMemoryWrite { get; init; } = false;
 
-    public SubPolicySnapshot()
-    {
-    }
+    public SubPolicySnapshot() { }
 
     public SubPolicySnapshot(AgentConfigDocument cfg)
     {
-        if (cfg == null) return;
+        if (cfg == null)
+            return;
         SubAgentEnabled = cfg.SubAgentEnabled;
         SubMaxParallel = cfg.SubMaxParallel;
         SubMaxIterations = cfg.SubMaxIterations;

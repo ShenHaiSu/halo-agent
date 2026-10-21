@@ -19,7 +19,13 @@ public sealed class Stage05StablePrefixTests
     private readonly TokenBudgetService _budgetService = new();
 
     private static ModelConfig SmallModel() =>
-        new() { Id = "small", Protocol = LlmProtocolType.Chat, MaxContextTokens = 8192, MaxOutputTokens = 2048 };
+        new()
+        {
+            Id = "small",
+            Protocol = LlmProtocolType.Chat,
+            MaxContextTokens = 8192,
+            MaxOutputTokens = 2048
+        };
 
     [Fact(DisplayName = "S05-02: 未达高水位原样返回，前缀零抖动")]
     public void Truncate_Below_HighWater_Returns_Identical_Reference()
@@ -41,7 +47,10 @@ public sealed class Stage05StablePrefixTests
         var messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User("锚点：分析项目代码") };
         for (int i = 0; i < 30; i++)
         {
-            var calls = new List<UnifiedToolCall> { new($"call_{i}", null, "read_file", "{\"p\":1}") };
+            var calls = new List<UnifiedToolCall>
+            {
+                new($"call_{i}", null, "read_file", "{\"p\":1}")
+            };
             messages.Add(UnifiedChatMessage.Assistant($"scan {i}", calls));
             messages.Add(UnifiedChatMessage.Tool($"call_{i}", new string('x', 200), "read_file"));
         }
@@ -53,10 +62,15 @@ public sealed class Stage05StablePrefixTests
         var result = _budgetService.TruncateToBudget(SmallModel(), messages);
         // 含锚点 + notice + 最新组
         Assert.Equal("锚点：分析项目代码", result[0].Content);
-        Assert.Contains(result, m => m.Role == "system" && m.Content != null && m.Content.Contains("较早的历史对话已自动折叠省略"));
+        Assert.Contains(
+            result,
+            m => m.Role == "system" && m.Content != null && m.Content.Contains("较早的历史对话已自动折叠省略")
+        );
         Assert.Equal("最新结论：给出补丁", result[^1].Content);
         // tool 组无孤儿
-        var remainingCalls = result.Where(m => m.ToolCalls != null && m.ToolCalls.Count > 0).ToList();
+        var remainingCalls = result
+            .Where(m => m.ToolCalls != null && m.ToolCalls.Count > 0)
+            .ToList();
         var remainingResults = result.Where(m => m.Role == "tool").ToList();
         if (remainingCalls.Count == 0)
         {
@@ -64,7 +78,10 @@ public sealed class Stage05StablePrefixTests
         }
         else
         {
-            var callIds = remainingCalls.SelectMany(m => m.ToolCalls!).Select(c => c.CallId).ToHashSet();
+            var callIds = remainingCalls
+                .SelectMany(m => m.ToolCalls!)
+                .Select(c => c.CallId)
+                .ToHashSet();
             var resCallIds = remainingResults.Select(r => r.ToolCallId!).ToHashSet();
             Assert.Subset(callIds, resCallIds);
         }
@@ -98,9 +115,24 @@ public sealed class Stage05StablePrefixTests
         var request = new UnifiedLlmRequest
         {
             RequestId = "r1",
-            Provider = new ProviderConfig { Id = "p", Name = "P", BaseUrl = "https://x/v1" },
+            Provider = new ProviderConfig
+            {
+                Id = "p",
+                Name = "P",
+                BaseUrl = "https://x/v1"
+            },
             Model = new ModelConfig { Id = "m", Protocol = LlmProtocolType.Chat },
-            HeaderContext = new HeaderResolutionContext("w", "n", "p", "s", "h", "p", "pn", "m", "r1"),
+            HeaderContext = new HeaderResolutionContext(
+                "w",
+                "n",
+                "p",
+                "s",
+                "h",
+                "p",
+                "pn",
+                "m",
+                "r1"
+            ),
             SystemInstructions = "sys",
             Messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User("hi") },
             Tools = tools,
@@ -109,16 +141,22 @@ public sealed class Stage05StablePrefixTests
         string chatJson = new ChatCompletionsAdapter().SerializeRequest(request);
         using (var doc = JsonDocument.Parse(chatJson))
         {
-            var names = doc.RootElement.GetProperty("tools").EnumerateArray()
-                .Select(t => t.GetProperty("function").GetProperty("name").GetString()).ToList();
+            var names = doc
+                .RootElement.GetProperty("tools")
+                .EnumerateArray()
+                .Select(t => t.GetProperty("function").GetProperty("name").GetString())
+                .ToList();
             Assert.Equal(new[] { "alpha_tool", "mid_tool", "zeta_tool" }, names);
         }
 
         string respJson = new ResponsesApiAdapter().SerializeRequest(request);
         using (var doc = JsonDocument.Parse(respJson))
         {
-            var names = doc.RootElement.GetProperty("tools").EnumerateArray()
-                .Select(t => t.GetProperty("name").GetString()).ToList();
+            var names = doc
+                .RootElement.GetProperty("tools")
+                .EnumerateArray()
+                .Select(t => t.GetProperty("name").GetString())
+                .ToList();
             Assert.Equal(new[] { "alpha_tool", "mid_tool", "zeta_tool" }, names);
         }
     }

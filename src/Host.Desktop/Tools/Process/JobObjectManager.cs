@@ -66,7 +66,8 @@ public sealed class JobObjectManager : IDisposable
                 handle,
                 NativeMethods.JOBOBJECTINFORMATIONCLASS.JobObjectExtendedLimitInformation,
                 ref limitInfo,
-                (uint)Marshal.SizeOf<NativeMethods.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>());
+                (uint)Marshal.SizeOf<NativeMethods.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()
+            );
 
             if (!ok)
             {
@@ -177,7 +178,8 @@ public sealed class JobObjectManager : IDisposable
             IntPtr hJob,
             JOBOBJECTINFORMATIONCLASS JobObjectInformationClass,
             ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION lpJobObjectInformation,
-            uint cbJobObjectInformationLength);
+            uint cbJobObjectInformationLength
+        );
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

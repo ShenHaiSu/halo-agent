@@ -1,6 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using System.Collections.Generic;
 using Host.Desktop.Core.Models;
 using Host.Desktop.LlmGateway.Models;
 
@@ -29,7 +29,10 @@ public interface ILlmProtocolAdapter
     /// <summary>
     /// 将底层 HTTP 响应数据流解析为统一的 UnifiedStreamEvent 流
     /// </summary>
-    IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(Stream responseStream, CancellationToken ct = default);
+    IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(
+        Stream responseStream,
+        CancellationToken ct = default
+    );
 
     /// <summary>
     /// 诊断并格式化非 200 HTTP 错误响应

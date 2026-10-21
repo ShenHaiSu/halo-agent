@@ -43,7 +43,12 @@ internal static class BackupStore
 
     /// <summary>落盘前备份原文件。返回 (bak绝对路径, meta绝对路径, 原文件hash)。文件不存在则返回 (null,null,null)。</summary>
     internal static (string? BakPath, string? MetaPath, string? Hash) WriteBackup(
-        string fullPath, string dataRoot, string workspaceId, string sessionId, string? tool = null)
+        string fullPath,
+        string dataRoot,
+        string workspaceId,
+        string sessionId,
+        string? tool = null
+    )
     {
         if (!File.Exists(fullPath))
         {
@@ -67,14 +72,16 @@ internal static class BackupStore
                 try
                 {
                     HaloLogger.App.Warn(
-                        $"[Backup] {QuotaExceededCode}：全局备份已用 {used} 字节，本次 +{bytes.Length} 将超配额 {GlobalQuotaBytes}。写入已阻塞。");
+                        $"[Backup] {QuotaExceededCode}：全局备份已用 {used} 字节，本次 +{bytes.Length} 将超配额 {GlobalQuotaBytes}。写入已阻塞。"
+                    );
                 }
                 catch
                 {
                     // 日志失败不影响拒绝语义
                 }
                 throw new InvalidOperationException(
-                    $"{QuotaExceededCode}：备份配额超限（已用 {used} 字节/配额 {GlobalQuotaBytes} 字节）。已拒绝本次备份，写盘已中止以防无退路覆盖；请清理 <DataRoot>/backups 后重试。");
+                    $"{QuotaExceededCode}：备份配额超限（已用 {used} 字节/配额 {GlobalQuotaBytes} 字节）。已拒绝本次备份，写盘已中止以防无退路覆盖；请清理 <DataRoot>/backups 后重试。"
+                );
             }
 
             // need22-P0 S4：文件名定长 hex（stamp + 内容 hash16，不再嵌入 basename，消除 GuessOriginal 歧义）
@@ -117,14 +124,17 @@ internal static class BackupStore
                 // 二进制内容跳过文本扫描
             }
 
-            AppendIndex(dir, new BackupIndexEntry
-            {
-                Bak = Path.GetFileName(bakPath),
-                Src = fullPath,
-                Sha256 = hash,
-                Tool = tool,
-                At = meta.At,
-            });
+            AppendIndex(
+                dir,
+                new BackupIndexEntry
+                {
+                    Bak = Path.GetFileName(bakPath),
+                    Src = fullPath,
+                    Sha256 = hash,
+                    Tool = tool,
+                    At = meta.At,
+                }
+            );
 
             Prune(dir, KeepPerSession);
             return (bakPath, metaPath, hash);
@@ -151,14 +161,32 @@ internal static class BackupStore
         }
 
         // need22-P0 S4：按 mtime（非文件名字典序）删旧
-        Array.Sort(baks, (a, b) =>
-        {
-            DateTime ta, tb;
-            try { ta = File.GetLastWriteTimeUtc(a); } catch { ta = DateTime.MinValue; }
-            try { tb = File.GetLastWriteTimeUtc(b); } catch { tb = DateTime.MinValue; }
-            int c = ta.CompareTo(tb);
-            return c != 0 ? c : string.Compare(a, b, StringComparison.Ordinal);
-        });
+        Array.Sort(
+            baks,
+            (a, b) =>
+            {
+                DateTime ta,
+                    tb;
+                try
+                {
+                    ta = File.GetLastWriteTimeUtc(a);
+                }
+                catch
+                {
+                    ta = DateTime.MinValue;
+                }
+                try
+                {
+                    tb = File.GetLastWriteTimeUtc(b);
+                }
+                catch
+                {
+                    tb = DateTime.MinValue;
+                }
+                int c = ta.CompareTo(tb);
+                return c != 0 ? c : string.Compare(a, b, StringComparison.Ordinal);
+            }
+        );
         var doomed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int remove = baks.Length - keep;
         for (int i = 0; i < remove; i++)
@@ -168,9 +196,7 @@ internal static class BackupStore
             {
                 File.Delete(baks[i]);
             }
-            catch
-            {
-            }
+            catch { }
 
             try
             {
@@ -180,9 +206,7 @@ internal static class BackupStore
                     File.Delete(meta);
                 }
             }
-            catch
-            {
-            }
+            catch { }
         }
 
         if (doomed.Count > 0)
@@ -207,7 +231,9 @@ internal static class BackupStore
             List<BackupIndexEntry>? list;
             try
             {
-                list = JsonSerializer.Deserialize<List<BackupIndexEntry>>(File.ReadAllText(indexPath));
+                list = JsonSerializer.Deserialize<List<BackupIndexEntry>>(
+                    File.ReadAllText(indexPath)
+                );
             }
             catch
             {
@@ -225,8 +251,10 @@ internal static class BackupStore
                 {
                     continue;
                 }
-                if (string.Equals(el.Bak, want, StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrWhiteSpace(el.Src))
+                if (
+                    string.Equals(el.Bak, want, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(el.Src)
+                )
                 {
                     return el.Src;
                 }
@@ -243,9 +271,12 @@ internal static class BackupStore
     internal static string SessionBackupDir(string dataRoot, string workspaceId, string sessionId)
     {
         string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot;
-        return Path.Combine(root, "backups",
+        return Path.Combine(
+            root,
+            "backups",
             string.IsNullOrWhiteSpace(workspaceId) ? "ws" : workspaceId,
-            string.IsNullOrWhiteSpace(sessionId) ? "sess" : sessionId);
+            string.IsNullOrWhiteSpace(sessionId) ? "sess" : sessionId
+        );
     }
 
     internal static long GetGlobalBackupBytes(string dataRoot)
@@ -253,16 +284,30 @@ internal static class BackupStore
         try
         {
             string backupsRoot = Path.Combine(
-                string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot, "backups");
+                string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot,
+                "backups"
+            );
             if (!Directory.Exists(backupsRoot))
             {
                 return 0;
             }
 
             long total = 0;
-            foreach (string f in Directory.EnumerateFiles(backupsRoot, "*.bak", SearchOption.AllDirectories))
+            foreach (
+                string f in Directory.EnumerateFiles(
+                    backupsRoot,
+                    "*.bak",
+                    SearchOption.AllDirectories
+                )
+            )
             {
-                try { total += new FileInfo(f).Length; } catch { /* 忽略竞态 */ }
+                try
+                {
+                    total += new FileInfo(f).Length;
+                }
+                catch
+                { /* 忽略竞态 */
+                }
                 if (total > GlobalQuotaBytes)
                 {
                     break;
@@ -287,8 +332,16 @@ internal static class BackupStore
         string tempPath = finalPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var fs = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write,
-                FileShare.None, bufferSize: 4096, FileOptions.WriteThrough))
+            using (
+                var fs = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.WriteThrough
+                )
+            )
             {
                 fs.Write(payload, 0, payload.Length);
                 fs.Flush(flushToDisk: true);
@@ -327,8 +380,10 @@ internal static class BackupStore
             {
                 try
                 {
-                    var old = JsonSerializer.Deserialize<System.Collections.Generic.List<BackupIndexEntry>>(
-                        File.ReadAllText(indexPath));
+                    var old =
+                        JsonSerializer.Deserialize<System.Collections.Generic.List<BackupIndexEntry>>(
+                            File.ReadAllText(indexPath)
+                        );
                     if (old != null)
                     {
                         list = old;
@@ -360,7 +415,9 @@ internal static class BackupStore
         try
         {
             var removedNames = new HashSet<string>(
-                removedFullPaths.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
+                removedFullPaths.Select(Path.GetFileName)!,
+                StringComparer.OrdinalIgnoreCase
+            );
             string indexPath = Path.Combine(sessionDir, "index.json");
             if (!File.Exists(indexPath))
             {
@@ -370,8 +427,10 @@ internal static class BackupStore
             System.Collections.Generic.List<BackupIndexEntry>? list;
             try
             {
-                list = JsonSerializer.Deserialize<System.Collections.Generic.List<BackupIndexEntry>>(
-                    File.ReadAllText(indexPath));
+                list =
+                    JsonSerializer.Deserialize<System.Collections.Generic.List<BackupIndexEntry>>(
+                        File.ReadAllText(indexPath)
+                    );
             }
             catch
             {

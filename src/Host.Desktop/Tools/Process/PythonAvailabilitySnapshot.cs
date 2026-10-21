@@ -20,19 +20,21 @@ public sealed class PythonAvailabilitySnapshot
     public DateTimeOffset ProbedAtUtc { get; init; }
 
     private static readonly object Sync = new();
+
     // 注意：不可用 = Unknown 做字段初始化（静态初始化顺序下 Unknown 尚为 null）；
     // _current 为 null 时 getter 回落到 Unknown。
     private static PythonAvailabilitySnapshot? _current;
     private static PythonAvailabilitySnapshot? _testOverride;
 
     /// <summary>启动前初始值：未探测 == 未检测到（fail-closed，秒拒先生效）。</summary>
-    public static PythonAvailabilitySnapshot Unknown { get; } = new()
-    {
-        Found = false,
-        ExePath = null,
-        DisplayName = "(未检测到 Python)",
-        ProbedAtUtc = DateTimeOffset.MinValue,
-    };
+    public static PythonAvailabilitySnapshot Unknown { get; } =
+        new()
+        {
+            Found = false,
+            ExePath = null,
+            DisplayName = "(未检测到 Python)",
+            ProbedAtUtc = DateTimeOffset.MinValue,
+        };
 
     /// <summary>当前快照（测试注入期间返回注入值）。</summary>
     public static PythonAvailabilitySnapshot Current

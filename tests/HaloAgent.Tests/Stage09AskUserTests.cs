@@ -27,20 +27,23 @@ public sealed class Stage09AskUserTests : IDisposable
         AskUserGate.ClearAll();
     }
 
-    private static ToolContext Ctx(string session) => new()
-    {
-        WorkspaceRoot = string.Empty,
-        WorkspaceId = "ws",
-        SessionId = session,
-        DataRoot = System.IO.Path.GetTempPath(),
-    };
+    private static ToolContext Ctx(string session) =>
+        new()
+        {
+            WorkspaceRoot = string.Empty,
+            WorkspaceId = "ws",
+            SessionId = session,
+            DataRoot = System.IO.Path.GetTempPath(),
+        };
 
     [Fact(DisplayName = "S09-A1: YAML 糖与 JSON 等价")]
     public void Yaml_Equals_Json()
     {
-        string json = "{\"questions\":[{\"id\":\"fw\",\"question\":\"用哪个框架？\",\"options\":[{\"label\":\"React\",\"description\":\"生态大\"},{\"label\":\"Vue\"}],\"allowCustom\":true},{\"id\":\"open\",\"question\":\"补充说明？\"}]}";
+        string json =
+            "{\"questions\":[{\"id\":\"fw\",\"question\":\"用哪个框架？\",\"options\":[{\"label\":\"React\",\"description\":\"生态大\"},{\"label\":\"Vue\"}],\"allowCustom\":true},{\"id\":\"open\",\"question\":\"补充说明？\"}]}";
         var (jq, _) = AskUserTool.ParseArguments(json, 300);
-        string yaml = @"
+        string yaml =
+            @"
 # 问卷注释
 questions:
   - id: fw
@@ -69,7 +72,10 @@ questions:
     [Fact(DisplayName = "S09-A2: question 单数别名 + 顶层数组兼容")]
     public void SingularAlias_And_TopArray_Compat()
     {
-        var (one, _) = AskUserTool.ParseArguments("{\"question\":{\"id\":\"q1\",\"question\":\"继续吗？\"}}", 300);
+        var (one, _) = AskUserTool.ParseArguments(
+            "{\"question\":{\"id\":\"q1\",\"question\":\"继续吗？\"}}",
+            300
+        );
         Assert.Single(one);
         Assert.Equal("q1", one[0].Id);
         var (arr, _) = AskUserTool.ParseArguments("[{\"id\":\"a\",\"question\":\"A？\"}]", 300);
@@ -81,7 +87,8 @@ questions:
     public async Task FiveQuestions_Rejected_NoPending()
     {
         string session = "sess_" + Guid.NewGuid().ToString("N")[..8];
-        string args = "{\"questions\":["
+        string args =
+            "{\"questions\":["
             + "{\"id\":\"q1\",\"question\":\"1？\"},{\"id\":\"q2\",\"question\":\"2？\"},"
             + "{\"id\":\"q3\",\"question\":\"3？\"},{\"id\":\"q4\",\"question\":\"4？\"},"
             + "{\"id\":\"q5\",\"question\":\"5？\"}]}";
@@ -111,7 +118,11 @@ questions:
         Assert.Equal("ASK_TICKET_MISMATCH", code);
         Assert.True(AskUserGate.HasPending(session));
 
-        var (ok, _, _) = AskUserGate.TryResolve(session, ticket1, "{\"answers\":[{\"id\":\"q1\",\"selected\":[],\"customInput\":\"\",\"skipped\":true}]}");
+        var (ok, _, _) = AskUserGate.TryResolve(
+            session,
+            ticket1,
+            "{\"answers\":[{\"id\":\"q1\",\"selected\":[],\"customInput\":\"\",\"skipped\":true}]}"
+        );
         Assert.True(ok);
         Assert.False(AskUserGate.HasPending(session));
     }
@@ -124,8 +135,13 @@ questions:
         var tool = new AskUserTool();
         var sw = Stopwatch.StartNew();
         var result = await tool.ExecuteAsync(
-            new ToolCallDto("c1", "ask_user", "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}]}"),
-            Ctx(session));
+            new ToolCallDto(
+                "c1",
+                "ask_user",
+                "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}]}"
+            ),
+            Ctx(session)
+        );
         sw.Stop();
         Assert.False(result.Success);
         Assert.Contains("超时", result.Error);
@@ -139,8 +155,13 @@ questions:
         string session = "sess_" + Guid.NewGuid().ToString("N")[..8];
         var tool = new AskUserTool();
         var task = tool.ExecuteAsync(
-            new ToolCallDto("c1", "ask_user", "{\"questions\":[{\"id\":\"fw\",\"question\":\"用哪个框架？\",\"options\":[{\"label\":\"React\"},{\"label\":\"Vue\"}]}]}"),
-            Ctx(session));
+            new ToolCallDto(
+                "c1",
+                "ask_user",
+                "{\"questions\":[{\"id\":\"fw\",\"question\":\"用哪个框架？\",\"options\":[{\"label\":\"React\"},{\"label\":\"Vue\"}]}]}"
+            ),
+            Ctx(session)
+        );
         string? ticket = null;
         for (int i = 0; i < 100 && ticket == null; i++)
         {
@@ -148,8 +169,11 @@ questions:
             ticket = AskUserGate.TryGetTicket(session);
         }
         Assert.NotNull(ticket);
-        var (ok, _, _) = AskUserGate.TryResolve(session, ticket!,
-            "{\"answers\":[{\"id\":\"fw\",\"selected\":[\"React\"],\"customInput\":\"\",\"skipped\":false}]}");
+        var (ok, _, _) = AskUserGate.TryResolve(
+            session,
+            ticket!,
+            "{\"answers\":[{\"id\":\"fw\",\"selected\":[\"React\"],\"customInput\":\"\",\"skipped\":false}]}"
+        );
         Assert.True(ok);
         var result = await task;
         Assert.True(result.Success, result.Error);
@@ -166,8 +190,14 @@ questions:
         var tool = new AskUserTool();
         using var cts = new CancellationTokenSource();
         var task = tool.ExecuteAsync(
-            new ToolCallDto("c1", "ask_user", "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}]}"),
-            Ctx(session), cts.Token);
+            new ToolCallDto(
+                "c1",
+                "ask_user",
+                "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}]}"
+            ),
+            Ctx(session),
+            cts.Token
+        );
         for (int i = 0; i < 100 && !AskUserGate.HasPending(session); i++)
             await Task.Delay(50);
         Assert.True(AskUserGate.HasPending(session));
@@ -179,5 +209,7 @@ questions:
     }
 
     private static string JsonEscape(string s) =>
-        "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
+        "\""
+        + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n")
+        + "\"";
 }

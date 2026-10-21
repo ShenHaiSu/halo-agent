@@ -19,7 +19,8 @@ public sealed class SessionGoal
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     public string UpdatedBy { get; set; } = "main"; // main|user|sub-read
 
-    public bool HasContent => !string.IsNullOrWhiteSpace(Title)
+    public bool HasContent =>
+        !string.IsNullOrWhiteSpace(Title)
         || !string.IsNullOrWhiteSpace(Description)
         || Milestones.Count > 0;
 
@@ -30,5 +31,10 @@ public sealed class SessionGoal
 public sealed class GoalCorruptException : Exception
 {
     public string FilePath { get; }
-    public GoalCorruptException(string path, string message) : base(message) { FilePath = path ?? string.Empty; }
+
+    public GoalCorruptException(string path, string message)
+        : base(message)
+    {
+        FilePath = path ?? string.Empty;
+    }
 }

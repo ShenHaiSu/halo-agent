@@ -16,24 +16,53 @@ public sealed partial class HostBridgeFacade
     private static UsageFilter ParseUsageFilter(string? filterJson)
     {
         var f = new UsageFilter { Preset = "last7" };
-        if (string.IsNullOrWhiteSpace(filterJson)) return f;
+        if (string.IsNullOrWhiteSpace(filterJson))
+            return f;
         try
         {
             using var doc = JsonDocument.Parse(filterJson);
             var root = doc.RootElement;
-            if (root.TryGetProperty("preset", out var p) && p.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(p.GetString()))
+            if (
+                root.TryGetProperty("preset", out var p)
+                && p.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(p.GetString())
+            )
                 f.Preset = p.GetString()!.Trim();
             if (root.TryGetProperty("startDate", out var s) && s.ValueKind == JsonValueKind.String)
                 f.StartDate = s.GetString();
             if (root.TryGetProperty("endDate", out var e) && e.ValueKind == JsonValueKind.String)
                 f.EndDate = e.GetString();
-            if (root.TryGetProperty("providerIds", out var pids) && pids.ValueKind == JsonValueKind.Array)
-                f.ProviderIds = pids.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-            if (root.TryGetProperty("modelKeys", out var mks) && mks.ValueKind == JsonValueKind.Array)
-                f.ModelKeys = mks.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-            if (root.TryGetProperty("sources", out var srcs) && srcs.ValueKind == JsonValueKind.Array)
-                f.Sources = srcs.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-            if (root.TryGetProperty("estimatedOnly", out var eo) && (eo.ValueKind == JsonValueKind.True || eo.ValueKind == JsonValueKind.False))
+            if (
+                root.TryGetProperty("providerIds", out var pids)
+                && pids.ValueKind == JsonValueKind.Array
+            )
+                f.ProviderIds = pids.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String)
+                    .Select(x => x.GetString()!)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+            if (
+                root.TryGetProperty("modelKeys", out var mks)
+                && mks.ValueKind == JsonValueKind.Array
+            )
+                f.ModelKeys = mks.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String)
+                    .Select(x => x.GetString()!)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+            if (
+                root.TryGetProperty("sources", out var srcs)
+                && srcs.ValueKind == JsonValueKind.Array
+            )
+                f.Sources = srcs.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String)
+                    .Select(x => x.GetString()!)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+            if (
+                root.TryGetProperty("estimatedOnly", out var eo)
+                && (eo.ValueKind == JsonValueKind.True || eo.ValueKind == JsonValueKind.False)
+            )
                 f.EstimatedOnly = eo.GetBoolean();
         }
         catch
@@ -67,12 +96,16 @@ public sealed partial class HostBridgeFacade
         }
         catch (ArgumentException aex)
         {
-            return Task.FromResult(BridgeResponse<UsageOverviewDto>.Fail("USAGE_BAD_FILTER", aex.Message));
+            return Task.FromResult(
+                BridgeResponse<UsageOverviewDto>.Fail("USAGE_BAD_FILTER", aex.Message)
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Warn("[Usage] GetUsageOverview 失败", ex);
-            return Task.FromResult(BridgeResponse<UsageOverviewDto>.Fail("BRIDGE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<UsageOverviewDto>.Fail("BRIDGE_ERROR", ex.Message)
+            );
         }
     }
 
@@ -86,7 +119,9 @@ public sealed partial class HostBridgeFacade
         }
         catch (ArgumentException aex)
         {
-            return Task.FromResult(BridgeResponse<UsageTrendDto>.Fail("USAGE_BAD_FILTER", aex.Message));
+            return Task.FromResult(
+                BridgeResponse<UsageTrendDto>.Fail("USAGE_BAD_FILTER", aex.Message)
+            );
         }
         catch (Exception ex)
         {
@@ -95,7 +130,9 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public Task<BridgeResponse<List<UsageProviderShareItem>>> GetUsageProviderShare(string? filterJson)
+    public Task<BridgeResponse<List<UsageProviderShareItem>>> GetUsageProviderShare(
+        string? filterJson
+    )
     {
         try
         {
@@ -105,12 +142,16 @@ public sealed partial class HostBridgeFacade
         }
         catch (ArgumentException aex)
         {
-            return Task.FromResult(BridgeResponse<List<UsageProviderShareItem>>.Fail("USAGE_BAD_FILTER", aex.Message));
+            return Task.FromResult(
+                BridgeResponse<List<UsageProviderShareItem>>.Fail("USAGE_BAD_FILTER", aex.Message)
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Warn("[Usage] GetUsageProviderShare 失败", ex);
-            return Task.FromResult(BridgeResponse<List<UsageProviderShareItem>>.Fail("BRIDGE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<List<UsageProviderShareItem>>.Fail("BRIDGE_ERROR", ex.Message)
+            );
         }
     }
 
@@ -119,13 +160,23 @@ public sealed partial class HostBridgeFacade
         try
         {
             var f = ParseUsageFilter(filterJson);
-            if (pageSize < 1 || pageSize > 200) pageSize = Math.Clamp(pageSize <= 0 ? 50 : pageSize, 1, 200);
-            if (page < 1) page = 1;
+            if (pageSize < 1 || pageSize > 200)
+                pageSize = Math.Clamp(pageSize <= 0 ? 50 : pageSize, 1, 200);
+            if (page < 1)
+                page = 1;
             var (total, rows) = UsageMetricsServiceInternal.QueryPage(f, page, pageSize);
             long pages = (total + pageSize - 1) / Math.Max(1, pageSize);
             if (total > 0 && page > pages)
-                return Task.FromResult(BridgeResponse<object>.Fail("USAGE_PAGE_OVERFLOW", $"页码超界（共 {pages} 页）。"));
-            object data = new { total, page, pageSize, rows };
+                return Task.FromResult(
+                    BridgeResponse<object>.Fail("USAGE_PAGE_OVERFLOW", $"页码超界（共 {pages} 页）。")
+                );
+            object data = new
+            {
+                total,
+                page,
+                pageSize,
+                rows
+            };
             return Task.FromResult(BridgeResponse<object>.Success(data));
         }
         catch (ArgumentException aex)

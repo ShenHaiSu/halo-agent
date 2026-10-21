@@ -11,8 +11,18 @@ public sealed class BridgeResponse<T>
     public T? Data { get; init; }
 
     public static BridgeResponse<T> Success(T data, string? message = null) =>
-        new() { Ok = true, Data = data, Message = message };
+        new()
+        {
+            Ok = true,
+            Data = data,
+            Message = message
+        };
 
     public static BridgeResponse<T> Fail(string code, string message) =>
-        new() { Ok = false, Code = code, Message = message };
+        new()
+        {
+            Ok = false,
+            Code = code,
+            Message = message
+        };
 }

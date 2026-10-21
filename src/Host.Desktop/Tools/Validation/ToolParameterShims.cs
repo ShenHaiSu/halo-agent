@@ -22,9 +22,15 @@ public static class ToolParameterShims
         string tool = (toolName ?? string.Empty).Trim();
 
         // 全工具：path(string)→file_path 搬运（后者缺失时）。
-        if (dict.TryGetValue("path", out var pathEl)
+        if (
+            dict.TryGetValue("path", out var pathEl)
             && pathEl.ValueKind == JsonValueKind.String
-            && (!dict.TryGetValue("file_path", out var fpEl) || fpEl.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(fpEl.GetString())))
+            && (
+                !dict.TryGetValue("file_path", out var fpEl)
+                || fpEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(fpEl.GetString())
+            )
+        )
         {
             dict["file_path"] = pathEl;
             warnings.Add("ALIASED_PARAM：别名 'path' 已搬运为 'file_path'，请改用 'file_path'。");
@@ -33,8 +39,13 @@ public static class ToolParameterShims
         if (tool.Equals("exec_command", StringComparison.OrdinalIgnoreCase))
         {
             // cmd→command。
-            if (dict.TryGetValue("cmd", out var cmdEl)
-                && (!dict.TryGetValue("command", out var cmdHas) || cmdHas.ValueKind != JsonValueKind.String))
+            if (
+                dict.TryGetValue("cmd", out var cmdEl)
+                && (
+                    !dict.TryGetValue("command", out var cmdHas)
+                    || cmdHas.ValueKind != JsonValueKind.String
+                )
+            )
             {
                 dict["command"] = cmdEl;
                 warnings.Add("ALIASED_PARAM：别名 'cmd' 已搬运为 'command'，请改用 'command'。");
@@ -54,8 +65,12 @@ public static class ToolParameterShims
                 long? ms = ParseTimeoutMs(timeoutSrc.Value);
                 if (ms.HasValue)
                 {
-                    dict["timeout_ms"] = JsonDocument.Parse(ms.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)).RootElement.Clone();
-                    warnings.Add("ALIASED_PARAM：别名 'timeout'/'timeoutMs' 已归一为 'timeout_ms'（毫秒），请改用 'timeout_ms'。");
+                    dict["timeout_ms"] = JsonDocument
+                        .Parse(ms.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        .RootElement.Clone();
+                    warnings.Add(
+                        "ALIASED_PARAM：别名 'timeout'/'timeoutMs' 已归一为 'timeout_ms'（毫秒），请改用 'timeout_ms'。"
+                    );
                 }
             }
         }
@@ -77,7 +92,11 @@ public static class ToolParameterShims
         if (tool.Equals("edit", StringComparison.OrdinalIgnoreCase))
         {
             // 缺 mode→默认 text + warning（老调用不断）；mode 非法→ENUM_VIOLATION（Validator 统一拒）。
-            if (!dict.TryGetValue("mode", out var modeEl) || modeEl.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(modeEl.GetString()))
+            if (
+                !dict.TryGetValue("mode", out var modeEl)
+                || modeEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(modeEl.GetString())
+            )
             {
                 dict["mode"] = JsonDocument.Parse("\"text\"").RootElement.Clone();
                 warnings.Add("DEFAULTED_PARAM：缺失 'mode'，已默认按 'text'（edit_file 引擎）执行；请显式传 mode。");
@@ -87,10 +106,21 @@ public static class ToolParameterShims
         return new ShimResult { Args = dict, Warnings = warnings };
     }
 
-    private static void Rename(Dictionary<string, JsonElement> dict, List<string> warnings, string from, string to)
+    private static void Rename(
+        Dictionary<string, JsonElement> dict,
+        List<string> warnings,
+        string from,
+        string to
+    )
     {
-        if (dict.TryGetValue(from, out var el)
-            && (!dict.TryGetValue(to, out var has) || has.ValueKind == JsonValueKind.Null || has.ValueKind == JsonValueKind.Undefined))
+        if (
+            dict.TryGetValue(from, out var el)
+            && (
+                !dict.TryGetValue(to, out var has)
+                || has.ValueKind == JsonValueKind.Null
+                || has.ValueKind == JsonValueKind.Undefined
+            )
+        )
         {
             dict[to] = el;
             warnings.Add($"ALIASED_PARAM：别名 '{from}' 已搬运为 '{to}'，请改用 '{to}'。");
@@ -123,7 +153,15 @@ public static class ToolParameterShims
             {
                 return ms;
             }
-            if (s.EndsWith("s") && double.TryParse(s[..^1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double sec))
+            if (
+                s.EndsWith("s")
+                && double.TryParse(
+                    s[..^1].Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out double sec
+                )
+            )
             {
                 return (long)(sec * 1000);
             }

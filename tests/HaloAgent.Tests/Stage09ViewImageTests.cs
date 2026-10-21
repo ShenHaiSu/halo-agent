@@ -27,21 +27,30 @@ public sealed class Stage09ViewImageTests : IDisposable
         _dataRoot = Path.Combine(_tempRoot, "data");
         Directory.CreateDirectory(_workspace);
         Directory.CreateDirectory(_dataRoot);
-        File.WriteAllBytes(Path.Combine(_workspace, "a.png"), Convert.FromBase64String(Png1x1Base64));
+        File.WriteAllBytes(
+            Path.Combine(_workspace, "a.png"),
+            Convert.FromBase64String(Png1x1Base64)
+        );
     }
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true); } catch { }
+        try
+        {
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+        }
+        catch { }
     }
 
-    private ToolContext Ctx() => new()
-    {
-        WorkspaceRoot = _workspace,
-        WorkspaceId = "ws_test",
-        SessionId = "sess_test",
-        DataRoot = _dataRoot,
-    };
+    private ToolContext Ctx() =>
+        new()
+        {
+            WorkspaceRoot = _workspace,
+            WorkspaceId = "ws_test",
+            SessionId = "sess_test",
+            DataRoot = _dataRoot,
+        };
 
     private static ToolCallDto Call(string argsJson) => new("call_1", "view_image", argsJson);
 
@@ -60,8 +69,13 @@ public sealed class Stage09ViewImageTests : IDisposable
         Assert.Equal(1, img.Width);
         Assert.Equal(1, img.Height);
         Assert.Contains("已读取", result.Output);
-        string abs = Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test",
-            img.RelPath.Replace('/', Path.DirectorySeparatorChar));
+        string abs = Path.Combine(
+            _dataRoot,
+            "sessions",
+            "ws_test",
+            "sess_test",
+            img.RelPath.Replace('/', Path.DirectorySeparatorChar)
+        );
         Assert.True(File.Exists(abs));
         Assert.DoesNotContain("base64", result.Output);
     }
@@ -71,12 +85,19 @@ public sealed class Stage09ViewImageTests : IDisposable
     {
         var tool = new ViewImageTool();
         var r1 = await tool.ExecuteAsync(Call("{\"path\":\"a.png\"}"), Ctx());
-        File.Copy(Path.Combine(_workspace, "a.png"), Path.Combine(_workspace, "b.png"), overwrite: true);
+        File.Copy(
+            Path.Combine(_workspace, "a.png"),
+            Path.Combine(_workspace, "b.png"),
+            overwrite: true
+        );
         var r2 = await tool.ExecuteAsync(Call("{\"path\":\"b.png\"}"), Ctx());
         Assert.True(r1.Success && r2.Success);
         Assert.Equal(r1.Images![0].ImageId, r2.Images![0].ImageId);
         string[] files = Directory.GetFiles(
-            Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test", "attachments"), "*", SearchOption.AllDirectories);
+            Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test", "attachments"),
+            "*",
+            SearchOption.AllDirectories
+        );
         Assert.Single(files);
     }
 
@@ -92,7 +113,22 @@ public sealed class Stage09ViewImageTests : IDisposable
     [Fact(DisplayName = "S09-VI4: gif 类型拒绝（扩展名+魔数）")]
     public async Task GifType_Rejected()
     {
-        byte[] gif = new byte[] { (byte)'G', (byte)'I', (byte)'F', (byte)'8', (byte)'9', (byte)'a', 1, 0, 1, 0, 0, 0, 0 };
+        byte[] gif = new byte[]
+        {
+            (byte)'G',
+            (byte)'I',
+            (byte)'F',
+            (byte)'8',
+            (byte)'9',
+            (byte)'a',
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+        };
         File.WriteAllBytes(Path.Combine(_workspace, "a.gif"), gif);
         var tool = new ViewImageTool();
         var result = await tool.ExecuteAsync(Call("{\"path\":\"a.gif\"}"), Ctx());
@@ -114,7 +150,10 @@ public sealed class Stage09ViewImageTests : IDisposable
     public async Task SystemDirectory_Rejected()
     {
         var tool = new ViewImageTool();
-        var result = await tool.ExecuteAsync(Call("{\"path\":\"C:\\\\Windows\\\\System32\\\\x.png\"}"), Ctx());
+        var result = await tool.ExecuteAsync(
+            Call("{\"path\":\"C:\\\\Windows\\\\System32\\\\x.png\"}"),
+            Ctx()
+        );
         Assert.False(result.Success);
         Assert.Contains("系统关键目录", result.Error);
     }
@@ -123,7 +162,10 @@ public sealed class Stage09ViewImageTests : IDisposable
     public async Task IndexFile_Rejected()
     {
         var tool = new ViewImageTool();
-        var result = await tool.ExecuteAsync(Call("{\"path\":\".haloagent/skills/_index.json\"}"), Ctx());
+        var result = await tool.ExecuteAsync(
+            Call("{\"path\":\".haloagent/skills/_index.json\"}"),
+            Ctx()
+        );
         Assert.False(result.Success);
         Assert.Contains("PATH_TRAVERSAL", result.Error);
     }
@@ -138,50 +180,85 @@ public sealed class Stage09ViewImageTests : IDisposable
         var missing = await tool.ExecuteAsync(Call("{\"path\":\"nope.png\"}"), Ctx());
         Assert.False(missing.Success);
         Assert.Contains("文件不存在", missing.Error);
-     }
-     [Fact(DisplayName = "S09-VI9: 超 2048 长边图无损直存（字节一致，重读命中缓存）")]
-     public async Task LargeImage_Lossless_AndCacheHit()
-     {
-         byte[] png = BuildMinimalPng(3000, 8);
-         File.WriteAllBytes(Path.Combine(_workspace, "big.png"), png);
-         var tool = new ViewImageTool();
-         var r1 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\",\"detail\":\"high\"}"), Ctx());
-         Assert.True(r1.Success, r1.Error);
-         var img = r1.Images![0];
-         Assert.Equal(3000, img.Width);
-         Assert.Equal(8, img.Height);
-         Assert.Equal(Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.ComputeSha16(png), img.Sha16);
-         string abs = Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test",
-             img.RelPath.Replace('/', Path.DirectorySeparatorChar));
-         Assert.Equal(png, File.ReadAllBytes(abs));
-         var r2 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\"}"), Ctx());
-         Assert.True(r2.Success, r2.Error);
-         Assert.Equal(img.ImageId, r2.Images![0].ImageId);
-         string[] files = Directory.GetFiles(
-             Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test", "attachments"), "*", SearchOption.AllDirectories);
-         Assert.Single(files);
-     }
+    }
 
-     private static byte[] BuildMinimalPng(int width, int height)
-     {
-         using var ms = new MemoryStream();
-         ms.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
-         WriteChunk(ms, "IHDR", new byte[]
-         {
-             (byte)(width >> 24), (byte)(width >> 16), (byte)(width >> 8), (byte)width,
-             (byte)(height >> 24), (byte)(height >> 16), (byte)(height >> 8), (byte)height,
-             8, 2, 0, 0, 0,
-         });
-         WriteChunk(ms, "IDAT", Array.Empty<byte>());
-         WriteChunk(ms, "IEND", Array.Empty<byte>());
-         return ms.ToArray();
-     }
+    [Fact(DisplayName = "S09-VI9: 超 2048 长边图无损直存（字节一致，重读命中缓存）")]
+    public async Task LargeImage_Lossless_AndCacheHit()
+    {
+        byte[] png = BuildMinimalPng(3000, 8);
+        File.WriteAllBytes(Path.Combine(_workspace, "big.png"), png);
+        var tool = new ViewImageTool();
+        var r1 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\",\"detail\":\"high\"}"), Ctx());
+        Assert.True(r1.Success, r1.Error);
+        var img = r1.Images![0];
+        Assert.Equal(3000, img.Width);
+        Assert.Equal(8, img.Height);
+        Assert.Equal(
+            Host.Desktop.Infrastructure.Storage.ImageAttachmentStore.ComputeSha16(png),
+            img.Sha16
+        );
+        string abs = Path.Combine(
+            _dataRoot,
+            "sessions",
+            "ws_test",
+            "sess_test",
+            img.RelPath.Replace('/', Path.DirectorySeparatorChar)
+        );
+        Assert.Equal(png, File.ReadAllBytes(abs));
+        var r2 = await tool.ExecuteAsync(Call("{\"path\":\"big.png\"}"), Ctx());
+        Assert.True(r2.Success, r2.Error);
+        Assert.Equal(img.ImageId, r2.Images![0].ImageId);
+        string[] files = Directory.GetFiles(
+            Path.Combine(_dataRoot, "sessions", "ws_test", "sess_test", "attachments"),
+            "*",
+            SearchOption.AllDirectories
+        );
+        Assert.Single(files);
+    }
 
-     private static void WriteChunk(MemoryStream ms, string type, byte[] data)
-     {
-         ms.Write(new byte[] { (byte)(data.Length >> 24), (byte)(data.Length >> 16), (byte)(data.Length >> 8), (byte)data.Length });
-         foreach (char c in type) ms.WriteByte((byte)c);
-         ms.Write(data, 0, data.Length);
-         ms.Write(new byte[] { 0, 0, 0, 0 });
-     }
+    private static byte[] BuildMinimalPng(int width, int height)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        WriteChunk(
+            ms,
+            "IHDR",
+            new byte[]
+            {
+                (byte)(width >> 24),
+                (byte)(width >> 16),
+                (byte)(width >> 8),
+                (byte)width,
+                (byte)(height >> 24),
+                (byte)(height >> 16),
+                (byte)(height >> 8),
+                (byte)height,
+                8,
+                2,
+                0,
+                0,
+                0,
+            }
+        );
+        WriteChunk(ms, "IDAT", Array.Empty<byte>());
+        WriteChunk(ms, "IEND", Array.Empty<byte>());
+        return ms.ToArray();
+    }
+
+    private static void WriteChunk(MemoryStream ms, string type, byte[] data)
+    {
+        ms.Write(
+            new byte[]
+            {
+                (byte)(data.Length >> 24),
+                (byte)(data.Length >> 16),
+                (byte)(data.Length >> 8),
+                (byte)data.Length
+            }
+        );
+        foreach (char c in type)
+            ms.WriteByte((byte)c);
+        ms.Write(data, 0, data.Length);
+        ms.Write(new byte[] { 0, 0, 0, 0 });
+    }
 }

@@ -23,15 +23,18 @@ public sealed class ToolArgs : IDisposable
     public static ToolArgs Parse(string? argumentsJson)
     {
         var doc = JsonDocument.Parse(
-            string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
+        );
         return new ToolArgs(doc);
     }
 
     public string? GetString(string name)
     {
-        if (Root.ValueKind == JsonValueKind.Object
+        if (
+            Root.ValueKind == JsonValueKind.Object
             && Root.TryGetProperty(name, out JsonElement el)
-            && el.ValueKind == JsonValueKind.String)
+            && el.ValueKind == JsonValueKind.String
+        )
         {
             return el.GetString();
         }
@@ -42,10 +45,12 @@ public sealed class ToolArgs : IDisposable
     public bool TryGetInt32(string name, out int value)
     {
         value = 0;
-        if (Root.ValueKind == JsonValueKind.Object
+        if (
+            Root.ValueKind == JsonValueKind.Object
             && Root.TryGetProperty(name, out JsonElement el)
             && el.ValueKind == JsonValueKind.Number
-            && el.TryGetInt32(out int v))
+            && el.TryGetInt32(out int v)
+        )
         {
             value = v;
             return true;
@@ -57,9 +62,11 @@ public sealed class ToolArgs : IDisposable
     public bool TryGetBool(string name, out bool value)
     {
         value = false;
-        if (Root.ValueKind == JsonValueKind.Object
+        if (
+            Root.ValueKind == JsonValueKind.Object
             && Root.TryGetProperty(name, out JsonElement el)
-            && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False))
+            && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False)
+        )
         {
             value = el.GetBoolean();
             return true;

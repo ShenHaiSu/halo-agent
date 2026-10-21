@@ -14,11 +14,13 @@ public sealed class PromptConfigService
     private readonly StoragePathManager _storagePathManager;
     private readonly object _syncLock = new();
 
-    public string PromptConfigFilePath => Path.Combine(_storagePathManager.ConfigDirectory, "prompt.json");
+    public string PromptConfigFilePath =>
+        Path.Combine(_storagePathManager.ConfigDirectory, "prompt.json");
 
     public PromptConfigService(StoragePathManager storagePathManager)
     {
-        _storagePathManager = storagePathManager ?? throw new ArgumentNullException(nameof(storagePathManager));
+        _storagePathManager =
+            storagePathManager ?? throw new ArgumentNullException(nameof(storagePathManager));
         EnsureInitialized();
     }
 
@@ -37,13 +39,15 @@ public sealed class PromptConfigService
 
     public PromptConfigDocument GetPromptConfigInternal() => LoadWithMeta().Document;
 
-    public (PromptConfigDocument Document, bool IsDefault, string? FallbackReason) LoadWithMeta() => LoadInternal();
+    public (PromptConfigDocument Document, bool IsDefault, string? FallbackReason) LoadWithMeta() =>
+        LoadInternal();
 
     public Infrastructure.Storage.StoragePathManager StorageManager => _storagePathManager;
 
     public PromptConfigDocument SavePromptConfig(PromptConfigDocument incoming)
     {
-        if (incoming == null) throw new ArgumentNullException(nameof(incoming));
+        if (incoming == null)
+            throw new ArgumentNullException(nameof(incoming));
         lock (_syncLock)
         {
             var normalized = NormalizeAndValidate(incoming, forSave: true);
@@ -121,7 +125,13 @@ public sealed class PromptConfigService
         if (!File.Exists(path))
         {
             var def = PromptDefaults.CreateDefault();
-            try { AtomicFileWriter.WriteJsonAtomic(path, def); } catch { /* ignore */ }
+            try
+            {
+                AtomicFileWriter.WriteJsonAtomic(path, def);
+            }
+            catch
+            { /* ignore */
+            }
             return (Clone(def), true, null);
         }
         string raw;
@@ -142,14 +152,27 @@ public sealed class PromptConfigService
         PromptConfigDocument? doc;
         try
         {
-            doc = JsonSerializer.Deserialize<PromptConfigDocument>(raw, HaloJsonOptions.IndentedCamelCase);
+            doc = JsonSerializer.Deserialize<PromptConfigDocument>(
+                raw,
+                HaloJsonOptions.IndentedCamelCase
+            );
         }
         catch (Exception ex)
         {
             string corruptPath = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-            try { File.Copy(path, corruptPath, overwrite: false); } catch { /* ignore */ }
+            try
+            {
+                File.Copy(path, corruptPath, overwrite: false);
+            }
+            catch
+            { /* ignore */
+            }
             HaloLogger.App.Warn("[Prompt] prompt.json 损坏，已回退默认（原文件保留为 " + corruptPath + "）", ex);
-            return (PromptDefaults.CreateDefault(), true, "prompt.json 损坏，已回退默认（原文件保留为 prompt.json.corrupt-<timestamp>）");
+            return (
+                PromptDefaults.CreateDefault(),
+                true,
+                "prompt.json 损坏，已回退默认（原文件保留为 prompt.json.corrupt-<timestamp>）"
+            );
         }
         if (doc == null)
         {
@@ -176,11 +199,16 @@ public sealed class PromptConfigService
     private static PromptConfigDocument Clone(PromptConfigDocument src)
     {
         string json = JsonSerializer.Serialize(src, HaloJsonOptions.IndentedCamelCase);
-        return JsonSerializer.Deserialize<PromptConfigDocument>(json, HaloJsonOptions.IndentedCamelCase)
-            ?? PromptDefaults.CreateDefault();
+        return JsonSerializer.Deserialize<PromptConfigDocument>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? PromptDefaults.CreateDefault();
     }
 
-    private static PromptConfigDocument NormalizeAndValidate(PromptConfigDocument incoming, bool forSave)
+    private static PromptConfigDocument NormalizeAndValidate(
+        PromptConfigDocument incoming,
+        bool forSave
+    )
     {
         var doc = new PromptConfigDocument
         {
@@ -192,7 +220,13 @@ public sealed class PromptConfigService
             EnableToolGuide = incoming.EnableToolGuide,
             EnableEphemeral = incoming.EnableEphemeral,
             EnableCustom = incoming.EnableCustom,
-            CustomPlacement = string.Equals(incoming.CustomPlacement, "head", StringComparison.OrdinalIgnoreCase) ? "head" : "tail",
+            CustomPlacement = string.Equals(
+                incoming.CustomPlacement,
+                "head",
+                StringComparison.OrdinalIgnoreCase
+            )
+                ? "head"
+                : "tail",
             CustomText = incoming.CustomText ?? string.Empty,
             IdentityText = incoming.IdentityText ?? string.Empty,
             RuntimeTemplate = incoming.RuntimeTemplate ?? string.Empty,
@@ -200,7 +234,8 @@ public sealed class PromptConfigService
             ToolGuideTemplate = incoming.ToolGuideTemplate ?? string.Empty,
             EphemeralTemplate = incoming.EphemeralTemplate ?? string.Empty,
             Scope = "global",
-            UpdatedAtUtc = incoming.UpdatedAtUtc == default ? DateTime.UtcNow : incoming.UpdatedAtUtc,
+            UpdatedAtUtc =
+                incoming.UpdatedAtUtc == default ? DateTime.UtcNow : incoming.UpdatedAtUtc,
         };
 
         CheckBlock("identity", doc.IdentityText);
@@ -213,7 +248,10 @@ public sealed class PromptConfigService
         int assembledLen = EstimateAssembledLength(doc);
         if (assembledLen > PromptDefaults.MaxAssembledChars)
         {
-            throw new PromptConfigValidationException("assembled", $"拼装后总长度 {assembledLen} 超过上限 {PromptDefaults.MaxAssembledChars}，请缩减各块文本");
+            throw new PromptConfigValidationException(
+                "assembled",
+                $"拼装后总长度 {assembledLen} 超过上限 {PromptDefaults.MaxAssembledChars}，请缩减各块文本"
+            );
         }
         return doc;
     }
@@ -222,31 +260,42 @@ public sealed class PromptConfigService
     {
         if ((text?.Length ?? 0) > PromptDefaults.MaxBlockChars)
         {
-            throw new PromptConfigValidationException(blockId, $"提示词块 [{blockId}] 长度 {(text?.Length ?? 0)} 超过上限 {PromptDefaults.MaxBlockChars}");
+            throw new PromptConfigValidationException(
+                blockId,
+                $"提示词块 [{blockId}] 长度 {(text?.Length ?? 0)} 超过上限 {PromptDefaults.MaxBlockChars}"
+            );
         }
     }
 
     private static int EstimateAssembledLength(PromptConfigDocument doc)
     {
-        if (!doc.EnableHaloPrefix) return 0;
+        if (!doc.EnableHaloPrefix)
+            return 0;
         int len = 0;
         int blocks = 0;
         void Add(string? t, bool on)
         {
-            if (!on || string.IsNullOrWhiteSpace(t)) return;
+            if (!on || string.IsNullOrWhiteSpace(t))
+                return;
             len += (t ?? string.Empty).TrimEnd().Length;
             blocks++;
         }
         string custom = doc.CustomText ?? string.Empty;
         bool hasCustom = doc.EnableCustom && !string.IsNullOrWhiteSpace(custom);
-        if (hasCustom) { len += custom.TrimEnd().Length; blocks++; }
+        if (hasCustom)
+        {
+            len += custom.TrimEnd().Length;
+            blocks++;
+        }
         Add(doc.IdentityText, doc.EnableIdentity);
         Add(doc.RuntimeTemplate, doc.EnableRuntime);
         Add(doc.CmdPythonText, doc.EnableCmdPython);
         Add(doc.ToolGuideTemplate, doc.EnableToolGuide);
         Add(doc.EphemeralTemplate, doc.EnableEphemeral);
-        if (blocks > 1) len += (blocks - 1) * 2;
-        if (len > 0) len += 1;
+        if (blocks > 1)
+            len += (blocks - 1) * 2;
+        if (len > 0)
+            len += 1;
         return len;
     }
 }

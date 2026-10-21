@@ -27,7 +27,8 @@ internal sealed record LogEntry(
     string Message,
     Exception? Exception,
     DateTime TimestampLocal,
-    TaskCompletionSource<bool>? FlushSignal = null);
+    TaskCompletionSource<bool>? FlushSignal = null
+);
 
 /// <summary>
 /// 单通道日志门面（App / Llm / Tool）。
@@ -41,10 +42,17 @@ public sealed class ChannelLogger
         _channel = channel;
     }
 
-    public void Debug(string message) => HaloLogger.Enqueue(_channel, HaloLogLevel.Debug, message, null);
-    public void Info(string message) => HaloLogger.Enqueue(_channel, HaloLogLevel.Info, message, null);
-    public void Warn(string message, Exception? ex = null) => HaloLogger.Enqueue(_channel, HaloLogLevel.Warn, message, ex);
-    public void Error(string message, Exception? ex = null) => HaloLogger.Enqueue(_channel, HaloLogLevel.Error, message, ex);
+    public void Debug(string message) =>
+        HaloLogger.Enqueue(_channel, HaloLogLevel.Debug, message, null);
+
+    public void Info(string message) =>
+        HaloLogger.Enqueue(_channel, HaloLogLevel.Info, message, null);
+
+    public void Warn(string message, Exception? ex = null) =>
+        HaloLogger.Enqueue(_channel, HaloLogLevel.Warn, message, ex);
+
+    public void Error(string message, Exception? ex = null) =>
+        HaloLogger.Enqueue(_channel, HaloLogLevel.Error, message, ex);
 }
 
 /// <summary>
@@ -66,17 +74,20 @@ public static class HaloLogger
     private static volatile bool _initialized;
 
     // 匹配 Authorization: Bearer xxx 或常见 sk-xxx / api-key / secret 头部值
-    private static readonly Regex BearerTokenRegex = new(
-        @"(Authorization\s*:\s*Bearer\s+)([^\s""',;]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex =
+        new(
+            @"(Authorization\s*:\s*Bearer\s+)([^\s""',;]+)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
 
-    private static readonly Regex SkTokenRegex = new(
-        @"\b(sk-[A-Za-z0-9_\-]{8,})\b",
-        RegexOptions.Compiled);
+    private static readonly Regex SkTokenRegex =
+        new(@"\b(sk-[A-Za-z0-9_\-]{8,})\b", RegexOptions.Compiled);
 
-    private static readonly Regex SecretHeaderRegex = new(
-        @"((?:x-api-key|api-key|apikey|secret|token|password)\s*[""']?\s*[:=]\s*[""']?)([^""'\s,;}{]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SecretHeaderRegex =
+        new(
+            @"((?:x-api-key|api-key|apikey|secret|token|password)\s*[""']?\s*[:=]\s*[""']?)([^""'\s,;}{]+)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
 
     public static ChannelLogger App { get; } = new(HaloLogChannel.App);
     public static ChannelLogger Llm { get; } = new(HaloLogChannel.Llm);
@@ -110,19 +121,24 @@ public static class HaloLogger
             Directory.CreateDirectory(_logsDirectory);
 
             _cts = new CancellationTokenSource();
-            _channel = Channel.CreateUnbounded<LogEntry>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false
-            });
+            _channel = Channel.CreateUnbounded<LogEntry>(
+                new UnboundedChannelOptions
+                {
+                    SingleReader = true,
+                    SingleWriter = false,
+                    AllowSynchronousContinuations = false
+                }
+            );
 
             _initialized = true;
-            _consumerTask = Task.Factory.StartNew(
-                () => ProcessQueueAsync(_channel.Reader, _cts.Token),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default).Unwrap();
+            _consumerTask = Task
+                .Factory.StartNew(
+                    () => ProcessQueueAsync(_channel.Reader, _cts.Token),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default
+                )
+                .Unwrap();
 
             CleanupExpiredLogs(retentionDays);
         }
@@ -143,7 +159,12 @@ public static class HaloLogger
         _logsDirectory = fullPath;
     }
 
-    internal static void Enqueue(HaloLogChannel channel, HaloLogLevel level, string message, Exception? exception)
+    internal static void Enqueue(
+        HaloLogChannel channel,
+        HaloLogLevel level,
+        string message,
+        Exception? exception
+    )
     {
         var activeChannel = _channel;
         if (!_initialized || activeChannel == null)
@@ -166,8 +187,17 @@ public static class HaloLogger
             return;
         }
 
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sentinel = new LogEntry(HaloLogChannel.App, HaloLogLevel.Debug, string.Empty, null, DateTime.Now, tcs);
+        var tcs = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var sentinel = new LogEntry(
+            HaloLogChannel.App,
+            HaloLogLevel.Debug,
+            string.Empty,
+            null,
+            DateTime.Now,
+            tcs
+        );
         if (!activeChannel.Writer.TryWrite(sentinel))
         {
             return;
@@ -231,21 +261,27 @@ public static class HaloLogger
             return string.Empty;
         }
 
-        var masked = BearerTokenRegex.Replace(input, match =>
-        {
-            var prefix = match.Groups[1].Value;
-            var token = match.Groups[2].Value;
-            return prefix + MaskTokenValue(token);
-        });
+        var masked = BearerTokenRegex.Replace(
+            input,
+            match =>
+            {
+                var prefix = match.Groups[1].Value;
+                var token = match.Groups[2].Value;
+                return prefix + MaskTokenValue(token);
+            }
+        );
 
         masked = SkTokenRegex.Replace(masked, match => MaskTokenValue(match.Groups[1].Value));
 
-        masked = SecretHeaderRegex.Replace(masked, match =>
-        {
-            var prefix = match.Groups[1].Value;
-            var secret = match.Groups[2].Value;
-            return prefix + MaskTokenValue(secret);
-        });
+        masked = SecretHeaderRegex.Replace(
+            masked,
+            match =>
+            {
+                var prefix = match.Groups[1].Value;
+                var secret = match.Groups[2].Value;
+                return prefix + MaskTokenValue(secret);
+            }
+        );
 
         return masked;
     }
@@ -287,13 +323,21 @@ public static class HaloLogger
 
         try
         {
-            foreach (var file in Directory.EnumerateFiles(dir, "*.log", SearchOption.TopDirectoryOnly))
+            foreach (
+                var file in Directory.EnumerateFiles(dir, "*.log", SearchOption.TopDirectoryOnly)
+            )
             {
                 try
                 {
                     var fileName = Path.GetFileName(file);
                     // 不删除当前活动的 cef-native.log
-                    if (string.Equals(fileName, "cef-native.log", StringComparison.OrdinalIgnoreCase))
+                    if (
+                        string.Equals(
+                            fileName,
+                            "cef-native.log",
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
                     {
                         continue;
                     }
@@ -333,10 +377,15 @@ public static class HaloLogger
         return Path.Combine(_logsDirectory, $"{prefix}-{targetDate}.log");
     }
 
-    private static async Task ProcessQueueAsync(ChannelReader<LogEntry> reader, CancellationToken ct)
+    private static async Task ProcessQueueAsync(
+        ChannelReader<LogEntry> reader,
+        CancellationToken ct
+    )
     {
         var batch = new List<LogEntry>(64);
-        var groupedBuilders = new Dictionary<string, StringBuilder>(StringComparer.OrdinalIgnoreCase);
+        var groupedBuilders = new Dictionary<string, StringBuilder>(
+            StringComparer.OrdinalIgnoreCase
+        );
 
         try
         {
@@ -366,7 +415,11 @@ public static class HaloLogger
                         continue;
                     }
 
-                    var filePath = GetLogFilePathForDirectory(currentDir, entry.Channel, entry.TimestampLocal);
+                    var filePath = GetLogFilePathForDirectory(
+                        currentDir,
+                        entry.Channel,
+                        entry.TimestampLocal
+                    );
                     if (!groupedBuilders.TryGetValue(filePath, out var sb))
                     {
                         sb = new StringBuilder(512);
@@ -389,7 +442,11 @@ public static class HaloLogger
         }
     }
 
-    private static string GetLogFilePathForDirectory(string logsDir, HaloLogChannel channel, DateTime timestampLocal)
+    private static string GetLogFilePathForDirectory(
+        string logsDir,
+        HaloLogChannel channel,
+        DateTime timestampLocal
+    )
     {
         var datePart = timestampLocal.ToString("yyyyMMdd");
         var prefix = channel switch
@@ -416,18 +473,17 @@ public static class HaloLogger
         };
 
         sb.Append('[')
-          .Append(entry.TimestampLocal.ToString("yyyy-MM-dd HH:mm:ss.fff"))
-          .Append("] [")
-          .Append(levelTag)
-          .Append("] [")
-          .Append(entry.Channel.ToString().ToUpperInvariant())
-          .Append("] ")
-          .AppendLine(sanitizedMessage);
+            .Append(entry.TimestampLocal.ToString("yyyy-MM-dd HH:mm:ss.fff"))
+            .Append("] [")
+            .Append(levelTag)
+            .Append("] [")
+            .Append(entry.Channel.ToString().ToUpperInvariant())
+            .Append("] ")
+            .AppendLine(sanitizedMessage);
 
         if (entry.Exception != null)
         {
-            sb.Append("  Exception: ")
-              .AppendLine(MaskSensitiveText(entry.Exception.ToString()));
+            sb.Append("  Exception: ").AppendLine(MaskSensitiveText(entry.Exception.ToString()));
         }
     }
 
@@ -453,7 +509,8 @@ public static class HaloLogger
                     FileMode.Append,
                     FileAccess.Write,
                     FileShare.ReadWrite,
-                    bufferSize: 4096);
+                    bufferSize: 4096
+                );
                 using var sw = new StreamWriter(fs, Utf8NoBom);
                 sw.Write(sb.ToString());
                 sw.Flush();

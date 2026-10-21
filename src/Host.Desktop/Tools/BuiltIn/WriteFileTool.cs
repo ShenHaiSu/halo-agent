@@ -25,24 +25,48 @@ public sealed class WriteFileTool : IToolHandler
     // NEED17 PromptBrief: Create or fully overwrite a file
     // NEED17 PromptRules: write_file for new/full rewrite only.
     public string Description =>
-        "Create a new file, or fully overwrite an existing file ONLY when allow_overwrite:true is passed. " +
-        "For partial edits prefer edit_file/edit_lines. Overwrites are backed up. " +
-        "Example: {\"file_path\":\"src/new.ts\",\"content\":\"export const x = 1;\\n\"} (new file)";
+        "Create a new file, or fully overwrite an existing file ONLY when allow_overwrite:true is passed. "
+        + "For partial edits prefer edit_file/edit_lines. Overwrites are backed up. "
+        + "Example: {\"file_path\":\"src/new.ts\",\"content\":\"export const x = 1;\\n\"} (new file)";
 
     public ToolDefinition GetDefinition()
     {
         string schema = new ToolSchemaBuilder()
-            .AddString("file_path", "Relative path from workspace root or absolute file path.", required: true)
-            .AddString("content", "Full file content (not a patch). Existing files >250KB must use edit_* instead; truncated content is rejected. Overwriting an existing file requires allow_overwrite:true.", required: true, minLength: 1)
-            .AddBoolean("allow_overwrite", "Required true to overwrite an existing file.", defaultValue: false)
-            .AddString("expected_hash", "Optional sha256 of the existing file bytes; mismatch rejects the overwrite.")
-            .AddInteger("max_bytes", "Optional override of the size cap (bytes). Must not exceed 1000000 (HardMaxWriteBytes).", maximum: 1000000)
+            .AddString(
+                "file_path",
+                "Relative path from workspace root or absolute file path.",
+                required: true
+            )
+            .AddString(
+                "content",
+                "Full file content (not a patch). Existing files >250KB must use edit_* instead; truncated content is rejected. Overwriting an existing file requires allow_overwrite:true.",
+                required: true,
+                minLength: 1
+            )
+            .AddBoolean(
+                "allow_overwrite",
+                "Required true to overwrite an existing file.",
+                defaultValue: false
+            )
+            .AddString(
+                "expected_hash",
+                "Optional sha256 of the existing file bytes; mismatch rejects the overwrite."
+            )
+            .AddInteger(
+                "max_bytes",
+                "Optional override of the size cap (bytes). Must not exceed 1000000 (HardMaxWriteBytes).",
+                maximum: 1000000
+            )
             .AddBoolean("dry_run", "If true, only validate and preview without writing.")
             .Build();
         return new(Name, Description, schema);
     }
 
-    public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         try
@@ -62,7 +86,10 @@ public sealed class WriteFileTool : IToolHandler
                 {
                     filePathArg = args.GetString("file_path");
 
-                    if (root.TryGetProperty("content", out JsonElement contentEl) && contentEl.ValueKind == JsonValueKind.String)
+                    if (
+                        root.TryGetProperty("content", out JsonElement contentEl)
+                        && contentEl.ValueKind == JsonValueKind.String
+                    )
                     {
                         content = contentEl.GetString();
                         hasContent = true;
@@ -88,31 +115,39 @@ public sealed class WriteFileTool : IToolHandler
             }
             catch (JsonException ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。请检查 file_path/content 字段后重试。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        $"参数 JSON 解析失败：{ex.Message}。请检查 file_path/content 字段后重试。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             if (string.IsNullOrWhiteSpace(filePathArg))
             {
-                return Task.FromResult(ToolResult.Fail(
-                    "缺少必需参数 'file_path'。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail("缺少必需参数 'file_path'。", durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
             if (!hasContent || content == null)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    "缺少必需参数 'content'（如需清空文件请传空字符串 \"\"）。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        "缺少必需参数 'content'（如需清空文件请传空字符串 \"\"）。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
                 ? Directory.GetCurrentDirectory()
                 : context.WorkspaceRoot;
             // need22-P0 S1：越界一律拒绝（无警告放行分支）
-            var (allowed, error, fullPath, _) =
-                PathSafetyValidator.ValidateWrite(workspaceRoot, filePathArg);
+            var (allowed, error, fullPath, _) = PathSafetyValidator.ValidateWrite(
+                workspaceRoot,
+                filePathArg
+            );
             if (!allowed)
             {
                 return Task.FromResult(ToolResult.Fail(error!, durationMs: sw.ElapsedMilliseconds));
@@ -124,9 +159,13 @@ public sealed class WriteFileTool : IToolHandler
             {
                 if (maxBytesReq.Value > HardMaxWriteBytes)
                 {
-                    return Task.FromResult(ToolResult.FailCode("CONTENT_TOO_LARGE",
-                        $"CONTENT_TOO_LARGE：max_bytes={maxBytesReq.Value} 超过硬上限 {HardMaxWriteBytes}。请改用 edit_file/edit_lines 分片改。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            "CONTENT_TOO_LARGE",
+                            $"CONTENT_TOO_LARGE：max_bytes={maxBytesReq.Value} 超过硬上限 {HardMaxWriteBytes}。请改用 edit_file/edit_lines 分片改。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
                 if (maxBytesReq.Value > 0)
@@ -156,18 +195,25 @@ public sealed class WriteFileTool : IToolHandler
                 }
                 catch (Exception ex)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        $"读取原文件编码失败，写入已中止以防损坏：{ex.Message}",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Fail(
+                            $"读取原文件编码失败，写入已中止以防损坏：{ex.Message}",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
                 // P0-2 按序校验：size → allow_overwrite → expected_hash
                 long contentBytes = encoding.GetByteCount(payload) + preamble.Length;
                 if (contentBytes > effectiveMax)
                 {
-                    return Task.FromResult(ToolResult.FailCode("CONTENT_TOO_LARGE",
-                        $"CONTENT_TOO_LARGE：全量内容 {contentBytes} 字节超过上限 {effectiveMax} 字节（默认 256000）。请改用 edit_file/edit_lines 分片改。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            "CONTENT_TOO_LARGE",
+                            $"CONTENT_TOO_LARGE：全量内容 {contentBytes} 字节超过上限 {effectiveMax} 字节（默认 256000）。请改用 edit_file/edit_lines 分片改。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
                 if (!allowOverwrite)
@@ -180,7 +226,10 @@ public sealed class WriteFileTool : IToolHandler
                         byte[] curRaw = File.ReadAllBytes(fullPath);
                         curBytes = curRaw.Length;
                         curHash = FileToolShared.ComputeHash(curRaw);
-                        curLines = detected.Content.Length == 0 ? 0 : detected.Content.Replace("\r\n", "\n").Split('\n').Length;
+                        curLines =
+                            detected.Content.Length == 0
+                                ? 0
+                                : detected.Content.Replace("\r\n", "\n").Split('\n').Length;
                     }
                     catch
                     {
@@ -189,9 +238,13 @@ public sealed class WriteFileTool : IToolHandler
                         curLines = -1;
                     }
 
-                    return Task.FromResult(ToolResult.FailCode("NEED_CONFIRM_OVERWRITE",
-                        $"NEED_CONFIRM_OVERWRITE：目标已存在（{curLines} 行/{curBytes} 字节/hash:{FileToolShared.TruncateHash(curHash)}，完整 hash 请用 read_file 查看）。确认全量覆盖请重调并传 allow_overwrite:true；局部改请用 edit_file/edit_lines。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            "NEED_CONFIRM_OVERWRITE",
+                            $"NEED_CONFIRM_OVERWRITE：目标已存在（{curLines} 行/{curBytes} 字节/hash:{FileToolShared.TruncateHash(curHash)}，完整 hash 请用 read_file 查看）。确认全量覆盖请重调并传 allow_overwrite:true；局部改请用 edit_file/edit_lines。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
                 if (!string.IsNullOrWhiteSpace(expectedHash))
@@ -209,9 +262,13 @@ public sealed class WriteFileTool : IToolHandler
                     string want = NormalizeHash(expectedHash);
                     if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Task.FromResult(ToolResult.FailCode("EXPECTED_HASH_MISMATCH",
-                            $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
-                            durationMs: sw.ElapsedMilliseconds));
+                        return Task.FromResult(
+                            ToolResult.FailCode(
+                                "EXPECTED_HASH_MISMATCH",
+                                $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
+                                durationMs: sw.ElapsedMilliseconds
+                            )
+                        );
                     }
                 }
             }
@@ -221,29 +278,45 @@ public sealed class WriteFileTool : IToolHandler
                 long contentBytes = Encoding.UTF8.GetByteCount(content);
                 if (contentBytes > HardMaxWriteBytes)
                 {
-                    return Task.FromResult(ToolResult.FailCode("CONTENT_TOO_LARGE",
-                        $"CONTENT_TOO_LARGE：全量内容 {contentBytes} 字节超过硬上限 {HardMaxWriteBytes}。请分片写入。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            "CONTENT_TOO_LARGE",
+                            $"CONTENT_TOO_LARGE：全量内容 {contentBytes} 字节超过硬上限 {HardMaxWriteBytes}。请分片写入。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
             }
 
             // P2-1 dry_run：校验通过，只预览不写盘
             if (dryRun)
             {
-                string previewHash = detected != null
-                    ? FileToolShared.ComputeTextHash(payload, detected)
-                    : FileToolShared.ComputeHash(encoding.GetBytes(payload));
-                int lineCount = string.IsNullOrEmpty(payload) ? 0 : payload.Replace("\r\n", "\n").Split('\n').Length;
+                string previewHash =
+                    detected != null
+                        ? FileToolShared.ComputeTextHash(payload, detected)
+                        : FileToolShared.ComputeHash(encoding.GetBytes(payload));
+                int lineCount = string.IsNullOrEmpty(payload)
+                    ? 0
+                    : payload.Replace("\r\n", "\n").Split('\n').Length;
                 long byteSize = encoding.GetByteCount(payload) + preamble.Length;
                 var preview = new StringBuilder();
-                preview.Append("DRY_RUN：").Append(isNew ? "新建" : "覆盖").Append("预览（未写盘），")
-                    .Append(lineCount).Append(" 行/").Append(byteSize).Append(" 字节，hash_preview: ").AppendLine(previewHash);
+                preview
+                    .Append("DRY_RUN：")
+                    .Append(isNew ? "新建" : "覆盖")
+                    .Append("预览（未写盘），")
+                    .Append(lineCount)
+                    .Append(" 行/")
+                    .Append(byteSize)
+                    .Append(" 字节，hash_preview: ")
+                    .AppendLine(previewHash);
                 if (!isNew)
                 {
                     preview.AppendLine("（dry_run 不产生备份；实写时将自动备份原文件。）");
                 }
 
-                return Task.FromResult(ToolResult.Ok(preview.ToString(), durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Ok(preview.ToString(), durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
             // P0-2/P2-2：落盘前备份（覆盖场景；备份失败阻塞）
@@ -252,7 +325,13 @@ public sealed class WriteFileTool : IToolHandler
             {
                 try
                 {
-                    var (bakPath, _, _) = BackupStore.WriteBackup(fullPath, context.DataRoot, context.WorkspaceId, context.SessionId, "write_file");
+                    var (bakPath, _, _) = BackupStore.WriteBackup(
+                        fullPath,
+                        context.DataRoot,
+                        context.WorkspaceId,
+                        context.SessionId,
+                        "write_file"
+                    );
                     if (bakPath != null)
                     {
                         backupShown = GetBackupDisplay(context.DataRoot, bakPath);
@@ -260,9 +339,12 @@ public sealed class WriteFileTool : IToolHandler
                 }
                 catch (Exception ex)
                 {
-                    return Task.FromResult(ToolResult.Fail(
-                        $"备份失败，写入已中止以防无退路覆盖：{ex.Message}。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Fail(
+                            $"备份失败，写入已中止以防无退路覆盖：{ex.Message}。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
             }
 
@@ -278,12 +360,14 @@ public sealed class WriteFileTool : IToolHandler
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"文件写入失败：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail($"文件写入失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
-            int finalLines = string.IsNullOrEmpty(payload) ? 0 : payload.Replace("\r\n", "\n").Split('\n').Length;
+            int finalLines = string.IsNullOrEmpty(payload)
+                ? 0
+                : payload.Replace("\r\n", "\n").Split('\n').Length;
             long byteSizeFinal = new FileInfo(fullPath).Length;
             string display = PathSafetyValidator.GetWorkspaceRelativePath(workspaceRoot, fullPath);
             string action = isNew ? "已创建新文件" : "已覆盖文件";
@@ -294,15 +378,27 @@ public sealed class WriteFileTool : IToolHandler
             }
             catch
             {
-                finalHash = detected != null ? FileToolShared.ComputeTextHash(payload, detected) : "unknown";
+                finalHash =
+                    detected != null
+                        ? FileToolShared.ComputeTextHash(payload, detected)
+                        : "unknown";
             }
 
             var sb = new StringBuilder();
-            sb.Append(action).Append(" '").Append(display).Append("'：")
-              .Append(finalLines).Append(" 行 / ").Append(byteSizeFinal).Append(" 字节")
-              .Append(" (Encoding: ").Append(encodingLabel)
-              .Append(", LineEndings: ").Append(newLineLabel)
-              .Append(", hash: ").Append(finalHash);
+            sb.Append(action)
+                .Append(" '")
+                .Append(display)
+                .Append("'：")
+                .Append(finalLines)
+                .Append(" 行 / ")
+                .Append(byteSizeFinal)
+                .Append(" 字节")
+                .Append(" (Encoding: ")
+                .Append(encodingLabel)
+                .Append(", LineEndings: ")
+                .Append(newLineLabel)
+                .Append(", hash: ")
+                .Append(finalHash);
             if (backupShown != null)
             {
                 sb.Append(", backup: ").Append(backupShown);
@@ -310,15 +406,18 @@ public sealed class WriteFileTool : IToolHandler
 
             sb.Append(')');
 
-             var ok = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
-             ok.FileBytes = byteSizeFinal;
-             return Task.FromResult(ok);
+            var ok = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
+            ok.FileBytes = byteSizeFinal;
+            return Task.FromResult(ok);
         }
         catch (Exception ex)
         {
-            return Task.FromResult(ToolResult.Fail(
-                $"write_file 执行异常：{ex.Message}。请修正参数后重试。",
-                durationMs: sw.ElapsedMilliseconds));
+            return Task.FromResult(
+                ToolResult.Fail(
+                    $"write_file 执行异常：{ex.Message}。请修正参数后重试。",
+                    durationMs: sw.ElapsedMilliseconds
+                )
+            );
         }
         finally
         {
@@ -341,16 +440,16 @@ public sealed class WriteFileTool : IToolHandler
     {
         try
         {
-            string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : Path.GetFullPath(dataRoot);
+            string root = string.IsNullOrWhiteSpace(dataRoot)
+                ? Path.GetTempPath()
+                : Path.GetFullPath(dataRoot);
             string rel = Path.GetRelativePath(root, bakAbsPath);
             if (!rel.StartsWith("..", StringComparison.Ordinal))
             {
                 return rel;
             }
         }
-        catch
-        {
-        }
+        catch { }
 
         return bakAbsPath;
     }

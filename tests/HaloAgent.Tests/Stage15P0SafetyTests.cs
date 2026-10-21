@@ -38,23 +38,35 @@ public sealed class Stage15P0SafetyTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: Path.Combine(_bootstrapRoot, "bootstrap.json"),
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
         _registry = new ToolRegistry();
         _projectDir = Path.Combine(_tempRoot, "Projects", "Need15P0");
         Directory.CreateDirectory(_projectDir);
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "need15 P0").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "need15 P0")
+            .GetAwaiter()
+            .GetResult();
         _session = _service.CreateSessionAsync(_workspace.Id, "p0").GetAwaiter().GetResult();
-        _context = new ToolContext { WorkspaceRoot = _projectDir, WorkspaceId = _workspace.Id, SessionId = _session.Id, DataRoot = _tempRoot };
+        _context = new ToolContext
+        {
+            WorkspaceRoot = _projectDir,
+            WorkspaceId = _workspace.Id,
+            SessionId = _session.Id,
+            DataRoot = _tempRoot
+        };
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -63,8 +75,21 @@ public sealed class Stage15P0SafetyTests : IDisposable
     public async Task P0_1a_RegexDollar_IsLiteral()
     {
         const string f = "dollar.cs";
-        File.WriteAllText(Abs(f), "price = \"$5\";\nvar s = $\"v={100}\";\n// anchor-target-line\n", new UTF8Encoding(false));
-        var r = await Call("edit_file", new { file_path = f, old_string = "// anchor-target-line", new_string = "price = \"$9\"; // $PATH ${HOME} $$", match_mode = "regex" });
+        File.WriteAllText(
+            Abs(f),
+            "price = \"$5\";\nvar s = $\"v={100}\";\n// anchor-target-line\n",
+            new UTF8Encoding(false)
+        );
+        var r = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "// anchor-target-line",
+                new_string = "price = \"$9\"; // $PATH ${HOME} $$",
+                match_mode = "regex"
+            }
+        );
         Assert.True(r.Success, r.Error);
         string after = File.ReadAllText(Abs(f), Encoding.UTF8);
         Assert.Contains("price = \"$9\"; // $PATH ${HOME} $$", after);
@@ -76,12 +101,31 @@ public sealed class Stage15P0SafetyTests : IDisposable
     {
         const string f = "expand.cs";
         File.WriteAllText(Abs(f), "aaa-111-bbb\n", new UTF8Encoding(false));
-        var r = await Call("edit_file", new { file_path = f, old_string = "(aaa)-(111)", new_string = "$2$1", match_mode = "regex", regex_expand_groups = true });
+        var r = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "(aaa)-(111)",
+                new_string = "$2$1",
+                match_mode = "regex",
+                regex_expand_groups = true
+            }
+        );
         Assert.True(r.Success, r.Error);
         Assert.Contains("111aaa", File.ReadAllText(Abs(f), Encoding.UTF8));
         // 默认字面：同样模式不展开
         File.WriteAllText(Abs(f), "aaa-111-bbb\n", new UTF8Encoding(false));
-        var r2 = await Call("edit_file", new { file_path = f, old_string = "(aaa)-(111)", new_string = "$2$1", match_mode = "regex" });
+        var r2 = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "(aaa)-(111)",
+                new_string = "$2$1",
+                match_mode = "regex"
+            }
+        );
         Assert.True(r2.Success, r2.Error);
         Assert.Contains("$2$1", File.ReadAllText(Abs(f), Encoding.UTF8));
     }
@@ -105,7 +149,15 @@ public sealed class Stage15P0SafetyTests : IDisposable
         const string f = "big.txt";
         File.WriteAllText(Abs(f), "small\n", new UTF8Encoding(false));
         string big = new string('x', 300 * 1024);
-        var r = await Call("write_file", new { file_path = f, content = big, allow_overwrite = true });
+        var r = await Call(
+            "write_file",
+            new
+            {
+                file_path = f,
+                content = big,
+                allow_overwrite = true
+            }
+        );
         Assert.False(r.Success);
         Assert.StartsWith("CONTENT_TOO_LARGE", r.Error ?? string.Empty);
         Assert.Equal("small\n", File.ReadAllText(Abs(f), Encoding.UTF8));
@@ -117,12 +169,30 @@ public sealed class Stage15P0SafetyTests : IDisposable
         const string f = "hashguard.txt";
         File.WriteAllText(Abs(f), "version-one-line-content\n", new UTF8Encoding(false));
         byte[] oldBytes = File.ReadAllBytes(Abs(f));
-        var bad = await Call("write_file", new { file_path = f, content = "new-content-line-here\n", allow_overwrite = true, expected_hash = new string('0', 64) });
+        var bad = await Call(
+            "write_file",
+            new
+            {
+                file_path = f,
+                content = "new-content-line-here\n",
+                allow_overwrite = true,
+                expected_hash = new string('0', 64)
+            }
+        );
         Assert.False(bad.Success);
         Assert.StartsWith("EXPECTED_HASH_MISMATCH", bad.Error ?? string.Empty);
         Assert.Equal(oldBytes, File.ReadAllBytes(Abs(f)));
         string goodHash = Sha256Hex(oldBytes);
-        var ok = await Call("write_file", new { file_path = f, content = "new-content-line-here\n", allow_overwrite = true, expected_hash = goodHash });
+        var ok = await Call(
+            "write_file",
+            new
+            {
+                file_path = f,
+                content = "new-content-line-here\n",
+                allow_overwrite = true,
+                expected_hash = goodHash
+            }
+        );
         Assert.True(ok.Success, ok.Error);
         Assert.True(ok.FileBytes > 0);
         string? bakDir = FindBackupDir();
@@ -136,7 +206,10 @@ public sealed class Stage15P0SafetyTests : IDisposable
     [Fact(DisplayName = "P0_2d: 新建文件无 flag 一次成功")]
     public async Task P0_2d_NewFile_NoFlag_Ok()
     {
-        var r = await Call("write_file", new { file_path = "sub/new15.txt", content = "hello-need15\n" });
+        var r = await Call(
+            "write_file",
+            new { file_path = "sub/new15.txt", content = "hello-need15\n" }
+        );
         Assert.True(r.Success, r.Error);
         Assert.True(File.Exists(Abs("sub/new15.txt")));
     }
@@ -147,7 +220,10 @@ public sealed class Stage15P0SafetyTests : IDisposable
         const string f = "nolimit.txt";
         const string orig = "a1-line-content\nb2-line-content\n";
         File.WriteAllText(Abs(f), orig, new UTF8Encoding(false));
-        var r = await CallRaw("edit_lines", "{\"file_path\":\"" + f + "\",\"offset\":1,\"new_text\":\"X\"}");
+        var r = await CallRaw(
+            "edit_lines",
+            "{\"file_path\":\"" + f + "\",\"offset\":1,\"new_text\":\"X\"}"
+        );
         Assert.False(r.Success);
         Assert.StartsWith("MISSING_LIMIT", r.Error ?? string.Empty);
         Assert.Equal("MISSING_LIMIT", r.ErrorCode);
@@ -159,9 +235,21 @@ public sealed class Stage15P0SafetyTests : IDisposable
     {
         const string f = "insert0.txt";
         File.WriteAllText(Abs(f), "line-one-content\nline-two-content\n", new UTF8Encoding(false));
-        var r = await Call("edit_lines", new { file_path = f, offset = 1, limit = 0, new_text = "inserted-marker-line" });
+        var r = await Call(
+            "edit_lines",
+            new
+            {
+                file_path = f,
+                offset = 1,
+                limit = 0,
+                new_text = "inserted-marker-line"
+            }
+        );
         Assert.True(r.Success, r.Error);
-        Assert.StartsWith("inserted-marker-line", File.ReadAllText(Abs(f), Encoding.UTF8).Replace("\r\n", "\n"));
+        Assert.StartsWith(
+            "inserted-marker-line",
+            File.ReadAllText(Abs(f), Encoding.UTF8).Replace("\r\n", "\n")
+        );
     }
 
     [Fact(DisplayName = "P0_4a: 5 处同锚点 → ANCHOR_AMBIGUOUS 含行号")]
@@ -170,11 +258,20 @@ public sealed class Stage15P0SafetyTests : IDisposable
         const string f = "ambig.cs";
         var sb = new StringBuilder();
         sb.Append("class Wrapper {\n");
-        for (int i = 0; i < 5; i++) sb.Append("  void M" + i + "() {\n    return true;\n  }\n");
+        for (int i = 0; i < 5; i++)
+            sb.Append("  void M" + i + "() {\n    return true;\n  }\n");
         sb.Append("}\n");
         File.WriteAllText(Abs(f), sb.ToString(), new UTF8Encoding(false));
         string before = File.ReadAllText(Abs(f), Encoding.UTF8);
-        var r = await Call("edit_file", new { file_path = f, old_string = "    return true;", new_string = "    return false;" });
+        var r = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "    return true;",
+                new_string = "    return false;"
+            }
+        );
         Assert.False(r.Success);
         Assert.StartsWith("ANCHOR_AMBIGUOUS", r.Error ?? string.Empty);
         Assert.Equal("ANCHOR_AMBIGUOUS", r.ErrorCode);
@@ -188,25 +285,49 @@ public sealed class Stage15P0SafetyTests : IDisposable
     {
         const string f = "bulk.txt";
         var sb = new StringBuilder();
-        for (int i = 0; i < 25; i++) sb.Append("prefix-keep-" + i.ToString("D2") + "-suffix-line\n");
+        for (int i = 0; i < 25; i++)
+            sb.Append("prefix-keep-" + i.ToString("D2") + "-suffix-line\n");
         File.WriteAllText(Abs(f), sb.ToString(), new UTF8Encoding(false));
-        var r = await Call("edit_file", new { file_path = f, old_string = "prefix-keep-", new_string = "prefix-KEEP-", replace_all = true });
+        var r = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "prefix-keep-",
+                new_string = "prefix-KEEP-",
+                replace_all = true
+            }
+        );
         Assert.True(r.Success, r.Error);
         Assert.Contains("WARN_BULK_EDITS", r.Output ?? string.Empty);
     }
 
     private string Abs(string n) => Path.Combine(_projectDir, n);
+
     private Task<ToolResult> Call(string name, object args) =>
-        _registry.DispatchAsync(new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)), _context);
+        _registry.DispatchAsync(
+            new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)),
+            _context
+        );
+
     private Task<ToolResult> CallRaw(string name, string json) =>
-        _registry.DispatchAsync(new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, json), _context);
+        _registry.DispatchAsync(
+            new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, json),
+            _context
+        );
+
     private static string Args(object o) =>
-        JsonSerializer.Serialize(o, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        JsonSerializer.Serialize(
+            o,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+        );
+
     private static string Sha256Hex(byte[] b)
     {
         using var sha = SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(b)).ToLowerInvariant();
     }
+
     private string? FindBackupDir()
     {
         string dir = Path.Combine(_tempRoot, "backups", _workspace.Id, _session.Id);

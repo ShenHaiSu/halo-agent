@@ -11,25 +11,37 @@ namespace HaloAgent.Tests;
 /// <summary>历史思考链默认随上下文发出（chat: reasoning_content；resp: reasoning.summary）。</summary>
 public sealed class Stage23ReasoningContextTests
 {
-    private static UnifiedLlmRequest ChatReq(ModelConfig model, List<UnifiedChatMessage> messages) => new()
-    {
-        RequestId = "req_reason",
-        Provider = new ProviderConfig { Id = "p1", Name = "T", BaseUrl = "https://api.openai.com/v1" },
-        Model = model,
-        SystemInstructions = string.Empty,
-        Messages = messages,
-        Tools = System.Array.Empty<UnifiedToolDefinition>(),
-    };
+    private static UnifiedLlmRequest ChatReq(
+        ModelConfig model,
+        List<UnifiedChatMessage> messages
+    ) =>
+        new()
+        {
+            RequestId = "req_reason",
+            Provider = new ProviderConfig
+            {
+                Id = "p1",
+                Name = "T",
+                BaseUrl = "https://api.openai.com/v1"
+            },
+            Model = model,
+            SystemInstructions = string.Empty,
+            Messages = messages,
+            Tools = System.Array.Empty<UnifiedToolDefinition>(),
+        };
 
     [Fact(DisplayName = "S23-R1: chat 默认带 reasoning_content")]
     public void Chat_Default_EmitsReasoningContent()
     {
         var model = new ModelConfig { Id = "deepseek-chat", Protocol = LlmProtocolType.Chat };
-        var req = ChatReq(model, new List<UnifiedChatMessage>
-        {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done", null, "think-step"),
-        });
+        var req = ChatReq(
+            model,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done", null, "think-step"),
+            }
+        );
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         using var doc = JsonDocument.Parse(payload);
         var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
@@ -41,11 +53,14 @@ public sealed class Stage23ReasoningContextTests
     public void Chat_EmptyReasoning_Omitted()
     {
         var model = new ModelConfig { Id = "deepseek-chat", Protocol = LlmProtocolType.Chat };
-        var req = ChatReq(model, new List<UnifiedChatMessage>
-        {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done"),
-        });
+        var req = ChatReq(
+            model,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done"),
+            }
+        );
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         Assert.DoesNotContain("reasoning_content", payload);
     }
@@ -53,12 +68,20 @@ public sealed class Stage23ReasoningContextTests
     [Fact(DisplayName = "S23-R3: chat 关开关不发 reasoning_content")]
     public void Chat_OptOut_Omitted()
     {
-        var model = new ModelConfig { Id = "deepseek-chat", Protocol = LlmProtocolType.Chat, IncludeReasoningInHistory = false };
-        var req = ChatReq(model, new List<UnifiedChatMessage>
+        var model = new ModelConfig
         {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done", null, "think-step"),
-        });
+            Id = "deepseek-chat",
+            Protocol = LlmProtocolType.Chat,
+            IncludeReasoningInHistory = false
+        };
+        var req = ChatReq(
+            model,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done", null, "think-step"),
+            }
+        );
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         Assert.DoesNotContain("reasoning_content", payload);
     }
@@ -68,11 +91,14 @@ public sealed class Stage23ReasoningContextTests
     {
         var model = new ModelConfig { Id = "deepseek-chat", Protocol = LlmProtocolType.Chat };
         var calls = new List<UnifiedToolCall> { new UnifiedToolCall("c1", null, "fn", "{}") };
-        var req = ChatReq(model, new List<UnifiedChatMessage>
-        {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("", calls, "think-step"),
-        });
+        var req = ChatReq(
+            model,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("", calls, "think-step"),
+            }
+        );
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         using var doc = JsonDocument.Parse(payload);
         var assistant = doc.RootElement.GetProperty("messages").EnumerateArray().ToList()[1];
@@ -84,11 +110,14 @@ public sealed class Stage23ReasoningContextTests
     public void Resp_Default_EmitsReasoningItem()
     {
         var model = new ModelConfig { Id = "o3-mini", Protocol = LlmProtocolType.Resp };
-        var req = ChatReq(model, new List<UnifiedChatMessage>
-        {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done", null, "think-step"),
-        });
+        var req = ChatReq(
+            model,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done", null, "think-step"),
+            }
+        );
         string payload = new ResponsesApiAdapter().SerializeRequest(req);
         using var doc = JsonDocument.Parse(payload);
         var input = doc.RootElement.GetProperty("input").EnumerateArray().ToList();
@@ -102,19 +131,33 @@ public sealed class Stage23ReasoningContextTests
     public void Resp_EmptyOrOptOut_Omitted()
     {
         var modelOn = new ModelConfig { Id = "o3-mini", Protocol = LlmProtocolType.Resp };
-        var emptyReq = ChatReq(modelOn, new List<UnifiedChatMessage>
-        {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done"),
-        });
-        Assert.DoesNotContain("\"reasoning\"", new ResponsesApiAdapter().SerializeRequest(emptyReq));
+        var emptyReq = ChatReq(
+            modelOn,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done"),
+            }
+        );
+        Assert.DoesNotContain(
+            "\"reasoning\"",
+            new ResponsesApiAdapter().SerializeRequest(emptyReq)
+        );
 
-        var modelOff = new ModelConfig { Id = "o3-mini", Protocol = LlmProtocolType.Resp, IncludeReasoningInHistory = false };
-        var offReq = ChatReq(modelOff, new List<UnifiedChatMessage>
+        var modelOff = new ModelConfig
         {
-            UnifiedChatMessage.User("hi"),
-            UnifiedChatMessage.Assistant("done", null, "think-step"),
-        });
+            Id = "o3-mini",
+            Protocol = LlmProtocolType.Resp,
+            IncludeReasoningInHistory = false
+        };
+        var offReq = ChatReq(
+            modelOff,
+            new List<UnifiedChatMessage>
+            {
+                UnifiedChatMessage.User("hi"),
+                UnifiedChatMessage.Assistant("done", null, "think-step"),
+            }
+        );
         Assert.DoesNotContain("\"reasoning\"", new ResponsesApiAdapter().SerializeRequest(offReq));
     }
 }

@@ -118,10 +118,16 @@ public static class PathSafetyValidator
     /// 越界一律 (Allowed=false, PATH_OUTSIDE_WORKSPACE)；无“警告放行”分支。
     /// 返回 (Allowed 是否允许, Error 拒绝原因, FullPath 解析后绝对路径, OutsideWorkspace 是否超出工作区)。
     /// </summary>
-    public static (bool Allowed, string? Error, string FullPath, bool OutsideWorkspace) ValidateWrite(
+    public static (
+        bool Allowed,
+        string? Error,
+        string FullPath,
+        bool OutsideWorkspace
+    ) ValidateWrite(
         string workspaceRoot,
         string? inputPath,
-        IEnumerable<string>? allowedRoots = null)
+        IEnumerable<string>? allowedRoots = null
+    )
     {
         string fullPath;
         try
@@ -136,20 +142,24 @@ public static class PathSafetyValidator
         // 高危系统路径写保护
         if (IsProtectedSystemPath(fullPath))
         {
-            return (false,
+            return (
+                false,
                 $"拒绝写入系统关键目录：'{ToDisplayPath(workspaceRoot, fullPath)}'。write_file / edit_file 严禁修改 C:\\Windows、C:\\Program Files、C:\\Program Files (x86) 下的任何文件。",
                 fullPath,
-                true);
+                true
+            );
         }
 
         var (resolved, fallback) = NormalizeAndResolve(fullPath);
         EmitSymlinkFallbackAudit(workspaceRoot, fullPath, fallback);
         if (IsOutsideWorkspace(workspaceRoot, resolved, allowedRoots))
         {
-            return (false,
+            return (
+                false,
                 $"{Codes.OutsideWorkspace}：拒绝工作区之外的写入：'{ToDisplayPath(workspaceRoot, resolved)}'。请使用工作区内相对路径后重试。",
                 resolved,
-                true);
+                true
+            );
         }
 
         return (true, null, resolved, false);
@@ -159,10 +169,16 @@ public static class PathSafetyValidator
     /// need22-P0 S1：校验读取类操作（read_file / list_dir / grep_search / view_image）的目标路径。
     /// 越界一律 (Allowed=false, PATH_OUTSIDE_WORKSPACE)；allowedRoots 为只读豁免根（如 DataRoot/backups）。
     /// </summary>
-    public static (bool Allowed, string? Error, string FullPath, bool OutsideWorkspace) ValidateRead(
+    public static (
+        bool Allowed,
+        string? Error,
+        string FullPath,
+        bool OutsideWorkspace
+    ) ValidateRead(
         string workspaceRoot,
         string? inputPath,
-        IEnumerable<string>? allowedRoots = null)
+        IEnumerable<string>? allowedRoots = null
+    )
     {
         string fullPath;
         try
@@ -178,10 +194,12 @@ public static class PathSafetyValidator
         EmitSymlinkFallbackAudit(workspaceRoot, fullPath, fallback);
         if (IsOutsideWorkspace(workspaceRoot, resolved, allowedRoots))
         {
-            return (false,
+            return (
+                false,
                 $"{Codes.OutsideWorkspace}：拒绝工作区之外的读取：'{ToDisplayPath(workspaceRoot, resolved)}'。请使用工作区内相对路径后重试。",
                 resolved,
-                true);
+                true
+            );
         }
 
         return (true, null, resolved, false);
@@ -197,13 +215,24 @@ public static class PathSafetyValidator
             return false;
         }
 
-        string normalized = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalized = fullPath.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar
+        );
 
         foreach (string root in ProtectedWriteRoots)
         {
-            if (string.Equals(normalized, root, StringComparison.OrdinalIgnoreCase) ||
-                normalized.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-                normalized.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(normalized, root, StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith(
+                    root + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || normalized.StartsWith(
+                    root + Path.AltDirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 return true;
             }
@@ -223,9 +252,17 @@ public static class PathSafetyValidator
                 continue;
             }
 
-            string normRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (string.Equals(normalized, normRoot, StringComparison.OrdinalIgnoreCase) ||
-                normalized.StartsWith(normRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            string normRoot = root.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar
+            );
+            if (
+                string.Equals(normalized, normRoot, StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith(
+                    normRoot + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 return true;
             }
@@ -237,20 +274,31 @@ public static class PathSafetyValidator
     /// <summary>
     /// 判断绝对路径是否落在工作区之外（allowedRoots 豁免，大小写不敏感、按分隔符边界匹配）。
     /// </summary>
-    public static bool IsOutsideWorkspace(string workspaceRoot, string fullPath, IEnumerable<string>? allowedRoots = null)
+    public static bool IsOutsideWorkspace(
+        string workspaceRoot,
+        string fullPath,
+        IEnumerable<string>? allowedRoots = null
+    )
     {
         try
         {
-            string baseRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(workspaceRoot)
-                ? Directory.GetCurrentDirectory()
-                : workspaceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            string baseRoot =
+                Path.GetFullPath(
+                        string.IsNullOrWhiteSpace(workspaceRoot)
+                            ? Directory.GetCurrentDirectory()
+                            : workspaceRoot
+                    )
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                 + Path.DirectorySeparatorChar;
 
             string normalized = Path.GetFullPath(fullPath);
-            if (string.Equals(
+            if (
+                string.Equals(
                     normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                     baseRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 return false;
             }
@@ -272,19 +320,31 @@ public static class PathSafetyValidator
                     string allowRoot;
                     try
                     {
-                        allowRoot = Path.GetFullPath(extra).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                            + Path.DirectorySeparatorChar;
+                        allowRoot =
+                            Path.GetFullPath(extra)
+                                .TrimEnd(
+                                    Path.DirectorySeparatorChar,
+                                    Path.AltDirectorySeparatorChar
+                                ) + Path.DirectorySeparatorChar;
                     }
                     catch
                     {
                         continue;
                     }
 
-                    if (string.Equals(
-                            normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                            allowRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                            StringComparison.OrdinalIgnoreCase) ||
-                        normalized.StartsWith(allowRoot, StringComparison.OrdinalIgnoreCase))
+                    if (
+                        string.Equals(
+                            normalized.TrimEnd(
+                                Path.DirectorySeparatorChar,
+                                Path.AltDirectorySeparatorChar
+                            ),
+                            allowRoot.TrimEnd(
+                                Path.DirectorySeparatorChar,
+                                Path.AltDirectorySeparatorChar
+                            ),
+                            StringComparison.OrdinalIgnoreCase
+                        ) || normalized.StartsWith(allowRoot, StringComparison.OrdinalIgnoreCase)
+                    )
                     {
                         return false;
                     }
@@ -299,39 +359,49 @@ public static class PathSafetyValidator
         }
     }
 
-     /// <summary>need15 P2-2：校验 backup_path 位于 &lt;DataRoot&gt;/backups/ 下，防任意读。</summary>
-     public static (bool Allowed, string? Error, string FullPath) ValidateBackupRead(string dataRoot, string? inputPath)
-     {
-         string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : Path.GetFullPath(dataRoot);
-         string backupsRoot = Path.GetFullPath(Path.Combine(root, "backups")) + Path.DirectorySeparatorChar;
-         string full;
-         try
-         {
-             if (string.IsNullOrWhiteSpace(inputPath))
-             {
-                 return (false, "缺少必需参数 'backup_path'。", string.Empty);
-             }
+    /// <summary>need15 P2-2：校验 backup_path 位于 &lt;DataRoot&gt;/backups/ 下，防任意读。</summary>
+    public static (bool Allowed, string? Error, string FullPath) ValidateBackupRead(
+        string dataRoot,
+        string? inputPath
+    )
+    {
+        string root = string.IsNullOrWhiteSpace(dataRoot)
+            ? Path.GetTempPath()
+            : Path.GetFullPath(dataRoot);
+        string backupsRoot =
+            Path.GetFullPath(Path.Combine(root, "backups")) + Path.DirectorySeparatorChar;
+        string full;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(inputPath))
+            {
+                return (false, "缺少必需参数 'backup_path'。", string.Empty);
+            }
 
-             full = Path.GetFullPath(inputPath);
-         }
-         catch (Exception ex)
-         {
-             return (false, $"路径格式非法，无法解析为有效路径：{ex.Message}", inputPath ?? string.Empty);
-         }
+            full = Path.GetFullPath(inputPath);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"路径格式非法，无法解析为有效路径：{ex.Message}", inputPath ?? string.Empty);
+        }
 
-         var (resolved, _) = NormalizeAndResolve(full);
-         if (!resolved.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
-         {
-             return (false, $"拒绝读取备份目录之外的路径：'{resolved}'。backup_path 必须位于 <DataRoot>/backups/ 下。", resolved);
-         }
+        var (resolved, _) = NormalizeAndResolve(full);
+        if (!resolved.StartsWith(backupsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return (
+                false,
+                $"拒绝读取备份目录之外的路径：'{resolved}'。backup_path 必须位于 <DataRoot>/backups/ 下。",
+                resolved
+            );
+        }
 
-         if (!File.Exists(resolved))
-         {
-             return (false, $"备份文件不存在：'{resolved}'。", resolved);
-         }
+        if (!File.Exists(resolved))
+        {
+            return (false, $"备份文件不存在：'{resolved}'。", resolved);
+        }
 
-         return (true, null, resolved);
-     }
+        return (true, null, resolved);
+    }
 
     /// <summary>
     /// need22-P0 S5：错误回显去绝对路径（工作区内显示相对路径，区外显示叶名 + 父目录提示）。
@@ -341,8 +411,13 @@ public static class PathSafetyValidator
         try
         {
             string relative = Path.GetRelativePath(
-                Path.GetFullPath(string.IsNullOrWhiteSpace(workspaceRoot) ? Directory.GetCurrentDirectory() : workspaceRoot),
-                Path.GetFullPath(fullPath));
+                Path.GetFullPath(
+                    string.IsNullOrWhiteSpace(workspaceRoot)
+                        ? Directory.GetCurrentDirectory()
+                        : workspaceRoot
+                ),
+                Path.GetFullPath(fullPath)
+            );
             if (!relative.StartsWith("..", StringComparison.Ordinal))
             {
                 return relative;
@@ -371,7 +446,9 @@ public static class PathSafetyValidator
         try
         {
             string relative = Path.GetRelativePath(
-                Path.GetFullPath(workspaceRoot), Path.GetFullPath(fullPath));
+                Path.GetFullPath(workspaceRoot),
+                Path.GetFullPath(fullPath)
+            );
             if (relative.StartsWith("..", StringComparison.Ordinal))
             {
                 return Path.GetFullPath(fullPath);
@@ -391,7 +468,11 @@ public static class PathSafetyValidator
     /// need22-P0 S1：symlink 解析降级审计（已存在路径仍走 GetFullPath 时记 SYMLINK_RESOLVE_FALLBACK 告警码）。
     /// 不存在路径的降级属预期行为，不打扰。
     /// </summary>
-    private static void EmitSymlinkFallbackAudit(string workspaceRoot, string fullPath, bool fallback)
+    private static void EmitSymlinkFallbackAudit(
+        string workspaceRoot,
+        string fullPath,
+        bool fallback
+    )
     {
         if (!fallback)
         {
@@ -406,7 +487,8 @@ public static class PathSafetyValidator
             }
 
             Infrastructure.Logging.HaloLogger.App.Warn(
-                $"[PathSafety] {Codes.SymlinkFallback}：'{ToDisplayPath(workspaceRoot, fullPath)}' symlink 解析降级为 GetFullPath（API 不可用），已按字面路径校验。");
+                $"[PathSafety] {Codes.SymlinkFallback}：'{ToDisplayPath(workspaceRoot, fullPath)}' symlink 解析降级为 GetFullPath（API 不可用），已按字面路径校验。"
+            );
         }
         catch
         {
@@ -422,13 +504,22 @@ public static class PathSafetyValidator
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFileW(
-        string lpFileName, uint dwDesiredAccess, uint dwShareMode,
-        IntPtr lpSecurityAttributes, uint dwCreationDisposition,
-        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile
+    );
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern uint GetFinalPathNameByHandleW(
-        IntPtr hFile, [Out] char[] lpszFilePath, uint cchFilePath, uint dwFlags);
+        IntPtr hFile,
+        [Out] char[] lpszFilePath,
+        uint cchFilePath,
+        uint dwFlags
+    );
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -455,9 +546,15 @@ public static class PathSafetyValidator
         IntPtr handle = IntPtr.Zero;
         try
         {
-            handle = CreateFileW(fullPath, GENERIC_READ,
-                FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero,
-                OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
+            handle = CreateFileW(
+                fullPath,
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                IntPtr.Zero,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                IntPtr.Zero
+            );
             if (handle == IntPtr.Zero || handle.ToInt64() == -1)
             {
                 return null;

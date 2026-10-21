@@ -24,18 +24,60 @@ public sealed class ExecCommandTool : IToolHandler
     /// <summary>need22-P0 S2：默认外部可执行白名单（可经 ToolContext.AllowedCommandsOverride / agent.json AllowedCommands 增补）。</summary>
     public static readonly string[] DefaultAllowedCommands =
     {
-        "git", "node", "pnpm", "npm", "npx", "python", "py", "pip", "pip3",
-        "dotnet", "uv", "cargo", "go",
+        "git",
+        "node",
+        "pnpm",
+        "npm",
+        "npx",
+        "python",
+        "py",
+        "pip",
+        "pip3",
+        "dotnet",
+        "uv",
+        "cargo",
+        "go",
     };
 
     /// <summary>need22-P0 S2：cmd 内建命令白名单（大小写不敏感；默认拒绝其余一切首 token）。</summary>
     public static readonly string[] CmdBuiltinCommands =
     {
-        "echo", "dir", "type", "more", "where", "ver", "cd", "chdir",
-        "mkdir", "md", "rmdir", "rd", "copy", "xcopy", "robocopy",
-        "move", "ren", "rename", "ping", "tracert", "ipconfig", "tasklist",
-        "timeout", "choice", "find", "findstr", "sort", "fc", "comp",
-        "cls", "vol", "hostname", "whoami", "for", "if", "rem",
+        "echo",
+        "dir",
+        "type",
+        "more",
+        "where",
+        "ver",
+        "cd",
+        "chdir",
+        "mkdir",
+        "md",
+        "rmdir",
+        "rd",
+        "copy",
+        "xcopy",
+        "robocopy",
+        "move",
+        "ren",
+        "rename",
+        "ping",
+        "tracert",
+        "ipconfig",
+        "tasklist",
+        "timeout",
+        "choice",
+        "find",
+        "findstr",
+        "sort",
+        "fc",
+        "comp",
+        "cls",
+        "vol",
+        "hostname",
+        "whoami",
+        "for",
+        "if",
+        "rem",
     };
 
     private static readonly Regex AbsPathProbe =
@@ -45,43 +87,58 @@ public sealed class ExecCommandTool : IToolHandler
         new(@"(^|[^\d\w])\d?\s*>>?\s*(""[^""]+""|\S+)", RegexOptions.Compiled);
 
     public const string PythonMissingMessage =
-        "Error: Python runtime is not detected on this machine. " +
-        "Please fall back to 'cmd' runner or ask the user to configure Python path in Settings.";
+        "Error: Python runtime is not detected on this machine. "
+        + "Please fall back to 'cmd' runner or ask the user to configure Python path in Settings.";
 
     public string Name => "exec_command";
 
     public string Description =>
-        "Execute a command or inline script in the workspace. " +
-        "IMPORTANT FOR WIN7/WIN10/WIN11 COMPATIBILITY: Always prefer 'cmd' (default Windows Command Prompt) " +
-        "for shell operations, file management, and build commands. " +
-        "Secondarily prefer 'python' ('py') for complex text processing, calculation, or scripting. " +
-        "Avoid PowerShell because PowerShell versions differ drastically across Windows 7 (PS 2.0) and Windows 10/11. " +
-        "Only whitelisted executables may run (git/node/pnpm/npm/python/pip/dotnet + safe cmd builtins); others are rejected. " +
-        "Output keeps the TAIL (last lines) on truncation; full text beyond the budget is spilled to a log file. " +
-        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
+        "Execute a command or inline script in the workspace. "
+        + "IMPORTANT FOR WIN7/WIN10/WIN11 COMPATIBILITY: Always prefer 'cmd' (default Windows Command Prompt) "
+        + "for shell operations, file management, and build commands. "
+        + "Secondarily prefer 'python' ('py') for complex text processing, calculation, or scripting. "
+        + "Avoid PowerShell because PowerShell versions differ drastically across Windows 7 (PS 2.0) and Windows 10/11. "
+        + "Only whitelisted executables may run (git/node/pnpm/npm/python/pip/dotnet + safe cmd builtins); others are rejected. "
+        + "Output keeps the TAIL (last lines) on truncation; full text beyond the budget is spilled to a log file. "
+        + "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
     public ToolDefinition GetDefinition()
     {
         string desc = Description;
         const string NoPyNote = " (注意：当前环境未检测到 Python，runner:'python' 不可用，请使用 'cmd')";
         string runnerNote = PythonAvailabilitySnapshot.Current.Found ? string.Empty : NoPyNote;
-        if (runnerNote.Length > 0) { desc += NoPyNote; }
-        return new ToolDefinition(Name, desc,
-        "{\"type\":\"object\",\"properties\":{"
-        + "\"command\":{\"type\":\"string\",\"description\":\"Full command line (runner cmd) or Python code/script args (runner python). Runs in workspace root; stdout+stderr merged. Max 8192 chars; cmd runner only allows whitelisted executables.\"},"
-        + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"default\":\"cmd\",\"description\":\"cmd first. python for text processing. No PowerShell." + runnerNote + "\"},"
-        + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional dir relative to workspace root. Defaults to workspace root. Must stay inside the workspace; missing dir fails fast.\"},"
-        + "\"timeout_ms\":{\"type\":\"integer\",\"minimum\":1,\"default\":60000,\"maximum\":300000,\"description\":\"Optional timeout in ms. Must be >=1. Defaults 60000. Capped 300000.\"}"
-        + "},\"required\":[\"command\"],\"additionalProperties\":false}");
+        if (runnerNote.Length > 0)
+        {
+            desc += NoPyNote;
+        }
+        return new ToolDefinition(
+            Name,
+            desc,
+            "{\"type\":\"object\",\"properties\":{"
+                + "\"command\":{\"type\":\"string\",\"description\":\"Full command line (runner cmd) or Python code/script args (runner python). Runs in workspace root; stdout+stderr merged. Max 8192 chars; cmd runner only allows whitelisted executables.\"},"
+                + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"default\":\"cmd\",\"description\":\"cmd first. python for text processing. No PowerShell."
+                + runnerNote
+                + "\"},"
+                + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional dir relative to workspace root. Defaults to workspace root. Must stay inside the workspace; missing dir fails fast.\"},"
+                + "\"timeout_ms\":{\"type\":\"integer\",\"minimum\":1,\"default\":60000,\"maximum\":300000,\"description\":\"Optional timeout in ms. Must be >=1. Defaults 60000. Capped 300000.\"}"
+                + "},\"required\":[\"command\"],\"additionalProperties\":false}"
+        );
     }
 
-    public async Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public async Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         string? tempScriptPath = null;
         try
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, context.CancellationToken);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                ct,
+                context.CancellationToken
+            );
             CancellationToken token = linkedCts.Token;
 
             // ---- 参数解析（need22-P0 S3：统一走 NormalizedJson 单次解析）----
@@ -112,28 +169,33 @@ public sealed class ExecCommandTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"参数 JSON 解析失败：{ex.Message}。请检查 command/runner/workdir/timeout_ms 字段后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
             if (string.IsNullOrWhiteSpace(command))
             {
                 return ToolResult.Fail(
                     "缺少必需参数 'command'。cmd 示例：{\"command\": \"dir /b\"}；python 示例：{\"command\": \"print('hi')\", \"runner\": \"python\"}。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             if (runner != "cmd" && runner != "python")
             {
                 return ToolResult.Fail(
                     $"不支持的 runner '{runner}'，仅支持 'cmd'（默认首选）与 'python'（次选）。请修正 runner 后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             // need22-P0 S2：长度上限 8K
             if (command.Length > MaxCommandChars)
             {
-                return ToolResult.FailCode("COMMAND_TOO_LONG",
+                return ToolResult.FailCode(
+                    "COMMAND_TOO_LONG",
                     $"COMMAND_TOO_LONG：command 长 {command.Length} 字符，超过上限 {MaxCommandChars}。请拆小命令后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             string workspaceRoot = string.IsNullOrWhiteSpace(context.WorkspaceRoot)
@@ -143,12 +205,17 @@ public sealed class ExecCommandTool : IToolHandler
             // need22-P0 S2：workdir 强制 ValidateWrite（越界即 PATH_OUTSIDE_WORKSPACE）
             string workDir;
             {
-                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(workspaceRoot, workdirArg);
+                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(
+                    workspaceRoot,
+                    workdirArg
+                );
                 if (!ok)
                 {
                     return ToolResult.FailCode(
-                        PathSafetyValidator.Codes.OutsideWorkspace, err!,
-                        durationMs: sw.ElapsedMilliseconds);
+                        PathSafetyValidator.Codes.OutsideWorkspace,
+                        err!,
+                        durationMs: sw.ElapsedMilliseconds
+                    );
                 }
                 workDir = full;
             }
@@ -156,7 +223,8 @@ public sealed class ExecCommandTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"工作目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, workDir)}'。请使用 read_file/list_dir 确认路径后重试（workdir 为空默认使用工作区根）。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             // need22-P0 S2：cmd runner 白名单 + 路径/重定向收敛（python runner 为代码形态，跳过 shell 校验）
@@ -172,13 +240,20 @@ public sealed class ExecCommandTool : IToolHandler
             // need22-P0 S2：超时默认 60s、上限 300s；timeout_ms<=0 非法（删除 0=无限语义）
             if (parsedTimeout.HasValue && parsedTimeout.Value <= 0)
             {
-                return ToolResult.FailCode("INVALID_TIMEOUT",
+                return ToolResult.FailCode(
+                    "INVALID_TIMEOUT",
                     $"INVALID_TIMEOUT：timeout_ms 非法（{parsedTimeout.Value}），必须 ≥1（默认 {DefaultTimeoutMs}，上限 {MaxTimeoutMs}）。不允许无限等待。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
-            int cfgD = context.ExecDefaultTimeoutMsOverride is int d && d > 0 ? d : DefaultTimeoutMs;
+            int cfgD =
+                context.ExecDefaultTimeoutMsOverride is int d && d > 0 ? d : DefaultTimeoutMs;
             int cfgM = context.ExecMaxTimeoutMsOverride is int m && m > 0 ? m : MaxTimeoutMs;
-            var (timeoutMs, _) = Host.Desktop.Core.Models.AgentTimeoutResolver.Resolve(parsedTimeout, cfgD, cfgM);
+            var (timeoutMs, _) = Host.Desktop.Core.Models.AgentTimeoutResolver.Resolve(
+                parsedTimeout,
+                cfgD,
+                cfgM
+            );
             if (timeoutMs <= 0)
             {
                 timeoutMs = DefaultTimeoutMs;
@@ -188,9 +263,11 @@ public sealed class ExecCommandTool : IToolHandler
             try
             {
                 var (scrubbed, _) = SecretScrubber.Scrub(command);
-                string preview = scrubbed.Length > 500 ? scrubbed.Substring(0, 500) + "..." : scrubbed;
+                string preview =
+                    scrubbed.Length > 500 ? scrubbed.Substring(0, 500) + "..." : scrubbed;
                 Infrastructure.Logging.HaloLogger.Tool.Info(
-                    $"exec_command audit (call {call.Id}) runner={runner} timeout={timeoutMs}ms workdir={PathSafetyValidator.ToDisplayPath(workspaceRoot, workDir)} cmd={preview}");
+                    $"exec_command audit (call {call.Id}) runner={runner} timeout={timeoutMs}ms workdir={PathSafetyValidator.ToDisplayPath(workspaceRoot, workDir)} cmd={preview}"
+                );
             }
             catch
             {
@@ -204,7 +281,8 @@ public sealed class ExecCommandTool : IToolHandler
                 {
                     return ToolResult.Fail(
                         "runner 'cmd' 仅支持 Windows 平台。当前系统非 Windows，请改用 'python' runner。",
-                        durationMs: sw.ElapsedMilliseconds);
+                        durationMs: sw.ElapsedMilliseconds
+                    );
                 }
 
                 psi = CommandRunnerProbe.BuildCmdStartInfo(command, workDir);
@@ -215,9 +293,12 @@ public sealed class ExecCommandTool : IToolHandler
                 {
                     return PythonAvailabilityGate.Fail(sw.ElapsedMilliseconds);
                 }
-                CommandRunnerProbe.ProbeResult probe = context.PythonProbeOverride != null
-                    ? context.PythonProbeOverride()
-                    : CommandRunnerProbe.ProbePython(configuredPath: context.ConfiguredPythonPath);
+                CommandRunnerProbe.ProbeResult probe =
+                    context.PythonProbeOverride != null
+                        ? context.PythonProbeOverride()
+                        : CommandRunnerProbe.ProbePython(
+                            configuredPath: context.ConfiguredPythonPath
+                        );
                 if (!probe.Found || string.IsNullOrWhiteSpace(probe.ExePath))
                 {
                     return PythonAvailabilityGate.Fail(sw.ElapsedMilliseconds);
@@ -232,10 +313,21 @@ public sealed class ExecCommandTool : IToolHandler
                 {
                     // 多行/内联代码 → 落盘为 UTF-8 临时脚本后 -u 执行，规避引号转义地狱
                     Directory.CreateDirectory(context.SessionTempDir);
-                    tempScriptPath = Path.Combine(context.SessionTempDir, $"exec_{SanitizeId(call.Id)}.py");
-                    await File.WriteAllTextAsync(tempScriptPath, command, new System.Text.UTF8Encoding(false), token)
+                    tempScriptPath = Path.Combine(
+                        context.SessionTempDir,
+                        $"exec_{SanitizeId(call.Id)}.py"
+                    );
+                    await File.WriteAllTextAsync(
+                            tempScriptPath,
+                            command,
+                            new System.Text.UTF8Encoding(false),
+                            token
+                        )
                         .ConfigureAwait(false);
-                    pythonArgs = CommandRunnerProbe.BuildPythonArguments(probe, "-u \"" + tempScriptPath + "\"");
+                    pythonArgs = CommandRunnerProbe.BuildPythonArguments(
+                        probe,
+                        "-u \"" + tempScriptPath + "\""
+                    );
                 }
 
                 psi = CommandRunnerProbe.BuildPythonStartInfo(probe.ExePath, pythonArgs, workDir);
@@ -243,7 +335,11 @@ public sealed class ExecCommandTool : IToolHandler
 
             // ---- 启动进程（JobObject 护航）----
             using var job = JobObjectManager.Create();
-            using var process = new System.Diagnostics.Process { StartInfo = psi, EnableRaisingEvents = false };
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = psi,
+                EnableRaisingEvents = false
+            };
 
             bool started;
             try
@@ -254,18 +350,25 @@ public sealed class ExecCommandTool : IToolHandler
             {
                 return ToolResult.Fail(
                     $"进程启动失败：{ex.Message}。请检查命令与工作目录后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             if (!started)
             {
-                return ToolResult.Fail("进程启动失败（Process.Start 返回 false）。", durationMs: sw.ElapsedMilliseconds);
+                return ToolResult.Fail(
+                    "进程启动失败（Process.Start 返回 false）。",
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
 
             job.Assign(process);
 
             // 异步原始字节读取（BaseStream 直读，避免编码死锁）
-            Task<byte[]> stdoutTask = ReadStreamBytesAsync(process.StandardOutput.BaseStream, token);
+            Task<byte[]> stdoutTask = ReadStreamBytesAsync(
+                process.StandardOutput.BaseStream,
+                token
+            );
             Task<byte[]> stderrTask = ReadStreamBytesAsync(process.StandardError.BaseStream, token);
 
             using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token))
@@ -280,10 +383,17 @@ public sealed class ExecCommandTool : IToolHandler
                     // 超时：关闭 Job 句柄即原子强杀整棵进程树，再兜底 Kill
                     job.Dispose();
                     TryKill(process);
-                    string partial = await CollectPartialAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                    string partial = await CollectPartialAsync(stdoutTask, stderrTask)
+                        .ConfigureAwait(false);
                     var (timeoutDisplay, timeoutSpill) = ToolOutputGuard.ApplyGuard(
-                        partial, context.DataRoot, context.WorkspaceId, context.SessionId, call.Id);
-                    string timeoutMsg = $"命令执行超时（{timeoutMs}ms），进程树已强制终止。请拆小命令、增大 timeout_ms（最大 {cfgM}）后重试。";
+                        partial,
+                        context.DataRoot,
+                        context.WorkspaceId,
+                        context.SessionId,
+                        call.Id
+                    );
+                    string timeoutMsg =
+                        $"命令执行超时（{timeoutMs}ms），进程树已强制终止。请拆小命令、增大 timeout_ms（最大 {cfgM}）后重试。";
                     return new ToolResult
                     {
                         Success = false,
@@ -301,15 +411,24 @@ public sealed class ExecCommandTool : IToolHandler
             byte[] stderrBytes;
             try
             {
-                await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(TimeSpan.FromSeconds(15), token)
+                await Task.WhenAll(stdoutTask, stderrTask)
+                    .WaitAsync(TimeSpan.FromSeconds(15), token)
                     .ConfigureAwait(false);
-                stdoutBytes = stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : Array.Empty<byte>();
-                stderrBytes = stderrTask.IsCompletedSuccessfully ? stderrTask.Result : Array.Empty<byte>();
+                stdoutBytes = stdoutTask.IsCompletedSuccessfully
+                    ? stdoutTask.Result
+                    : Array.Empty<byte>();
+                stderrBytes = stderrTask.IsCompletedSuccessfully
+                    ? stderrTask.Result
+                    : Array.Empty<byte>();
             }
             catch (Exception)
             {
-                stdoutBytes = stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : Array.Empty<byte>();
-                stderrBytes = stderrTask.IsCompletedSuccessfully ? stderrTask.Result : Array.Empty<byte>();
+                stdoutBytes = stdoutTask.IsCompletedSuccessfully
+                    ? stdoutTask.Result
+                    : Array.Empty<byte>();
+                stderrBytes = stderrTask.IsCompletedSuccessfully
+                    ? stderrTask.Result
+                    : Array.Empty<byte>();
             }
 
             int exitCode;
@@ -327,8 +446,10 @@ public sealed class ExecCommandTool : IToolHandler
             string combined = stdoutText;
             if (!string.IsNullOrWhiteSpace(stderrText))
             {
-                combined += (combined.Length > 0 && !combined.EndsWith("\n") ? "\n" : string.Empty)
-                    + "[stderr]\n" + stderrText;
+                combined +=
+                    (combined.Length > 0 && !combined.EndsWith("\n") ? "\n" : string.Empty)
+                    + "[stderr]\n"
+                    + stderrText;
             }
 
             if (string.IsNullOrWhiteSpace(combined))
@@ -337,7 +458,12 @@ public sealed class ExecCommandTool : IToolHandler
             }
 
             var (display, spilled) = ToolOutputGuard.ApplyGuard(
-                combined, context.DataRoot, context.WorkspaceId, context.SessionId, call.Id);
+                combined,
+                context.DataRoot,
+                context.WorkspaceId,
+                context.SessionId,
+                call.Id
+            );
 
             return new ToolResult
             {
@@ -353,7 +479,8 @@ public sealed class ExecCommandTool : IToolHandler
         {
             return ToolResult.Fail(
                 $"exec_command 执行异常：{ex.Message}。请修正参数后重试。",
-                durationMs: sw.ElapsedMilliseconds);
+                durationMs: sw.ElapsedMilliseconds
+            );
         }
         catch (OperationCanceledException)
         {
@@ -385,7 +512,12 @@ public sealed class ExecCommandTool : IToolHandler
     /// 通过返回 null；拒绝返回 FailCode 结果。
     /// </summary>
     internal static ToolResult? CheckCmdPolicy(
-        string command, string workDir, string workspaceRoot, ToolContext context, Stopwatch sw)
+        string command,
+        string workDir,
+        string workspaceRoot,
+        ToolContext context,
+        Stopwatch sw
+    )
     {
         HashSet<string> allowed = new(StringComparer.OrdinalIgnoreCase);
         if (context.AllowedCommandsOverride != null && context.AllowedCommandsOverride.Count > 0)
@@ -400,8 +532,10 @@ public sealed class ExecCommandTool : IToolHandler
         }
         else
         {
-            foreach (string c in DefaultAllowedCommands) allowed.Add(c);
-            foreach (string c in CmdBuiltinCommands) allowed.Add(c);
+            foreach (string c in DefaultAllowedCommands)
+                allowed.Add(c);
+            foreach (string c in CmdBuiltinCommands)
+                allowed.Add(c);
         }
 
         // 按 & | ; 切分命令段（双引号内不切），每段首 token 都必须在白名单
@@ -416,9 +550,11 @@ public sealed class ExecCommandTool : IToolHandler
             string name = NormalizeExeName(first);
             if (!allowed.Contains(name))
             {
-                return ToolResult.FailCode("COMMAND_NOT_ALLOWED",
+                return ToolResult.FailCode(
+                    "COMMAND_NOT_ALLOWED",
                     $"COMMAND_NOT_ALLOWED：命令首 token '{first}' 不在白名单（允许：{string.Join("/", DefaultAllowedCommands)} + 安全 cmd 内建；可经 AllowedCommands 配置增补）。请改用白名单命令后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
         }
 
@@ -441,9 +577,11 @@ public sealed class ExecCommandTool : IToolHandler
             var (resolved, _) = PathSafetyValidator.NormalizeAndResolve(abs);
             if (PathSafetyValidator.IsOutsideWorkspace(workDir, resolved))
             {
-                return ToolResult.FailCode(PathSafetyValidator.Codes.OutsideWorkspace,
+                return ToolResult.FailCode(
+                    PathSafetyValidator.Codes.OutsideWorkspace,
                     $"{PathSafetyValidator.Codes.OutsideWorkspace}：命令含工作区外绝对路径：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, resolved)}'。请改用工作区内相对路径后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
         }
 
@@ -456,8 +594,10 @@ public sealed class ExecCommandTool : IToolHandler
                 continue; // 句柄合并（2>&1）放行
             }
 
-            if (string.Equals(target, "nul", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(target, "con", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(target, "nul", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(target, "con", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }
@@ -476,9 +616,11 @@ public sealed class ExecCommandTool : IToolHandler
 
             if (PathSafetyValidator.IsOutsideWorkspace(workDir, abs))
             {
-                return ToolResult.FailCode("COMMAND_REDIRECT_OUTSIDE",
+                return ToolResult.FailCode(
+                    "COMMAND_REDIRECT_OUTSIDE",
                     $"COMMAND_REDIRECT_OUTSIDE：重定向目标在工作区外：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, abs)}'。文件写出请改用 write_file 后重试。",
-                    durationMs: sw.ElapsedMilliseconds);
+                    durationMs: sw.ElapsedMilliseconds
+                );
             }
         }
 
@@ -529,14 +671,23 @@ public sealed class ExecCommandTool : IToolHandler
         }
 
         int i = 0;
-        while (i < s.Length && !char.IsWhiteSpace(s[i]) && s[i] != '/' && s[i] != '&' && s[i] != '|')
+        while (
+            i < s.Length && !char.IsWhiteSpace(s[i]) && s[i] != '/' && s[i] != '&' && s[i] != '|'
+        )
         {
             // 首 token 允许含 :（盘符）与 \（路径），遇空白/开关分隔即止；/ 仅当非首字符时截断
             if (s[i] == '/' && i == 0)
             {
                 break;
             }
-            if (s[i] == '/' && i > 0 && (s.StartsWith("for", StringComparison.OrdinalIgnoreCase) || s.StartsWith("if", StringComparison.OrdinalIgnoreCase)))
+            if (
+                s[i] == '/'
+                && i > 0
+                && (
+                    s.StartsWith("for", StringComparison.OrdinalIgnoreCase)
+                    || s.StartsWith("if", StringComparison.OrdinalIgnoreCase)
+                )
+            )
             {
                 break;
             }
@@ -587,11 +738,19 @@ public sealed class ExecCommandTool : IToolHandler
         {
             i++;
             start = i;
-            while (i < command.Length && command[i] != '"') i++;
+            while (i < command.Length && command[i] != '"')
+                i++;
             return command.Substring(start, Math.Max(0, i - start));
         }
-        while (i < command.Length && !char.IsWhiteSpace(command[i])
-            && command[i] != '"' && command[i] != '&' && command[i] != '|' && command[i] != '<' && command[i] != '>')
+        while (
+            i < command.Length
+            && !char.IsWhiteSpace(command[i])
+            && command[i] != '"'
+            && command[i] != '&'
+            && command[i] != '|'
+            && command[i] != '<'
+            && command[i] != '>'
+        )
         {
             i++;
         }
@@ -613,8 +772,11 @@ public sealed class ExecCommandTool : IToolHandler
         }
 
         // 首个 token 为已存在的 .py 文件
-        string firstToken = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault()?.Trim('"') ?? string.Empty;
+        string firstToken =
+            trimmed
+                .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()
+                ?.Trim('"') ?? string.Empty;
         if (firstToken.EndsWith(".py", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -644,7 +806,9 @@ public sealed class ExecCommandTool : IToolHandler
             byte[] buffer = new byte[8192];
             while (true)
             {
-                int read = await stream.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false);
+                int read = await stream
+                    .ReadAsync(buffer, 0, buffer.Length, ct)
+                    .ConfigureAwait(false);
                 if (read <= 0)
                 {
                     break;
@@ -665,19 +829,28 @@ public sealed class ExecCommandTool : IToolHandler
         }
     }
 
-    private static async Task<string> CollectPartialAsync(Task<byte[]> stdoutTask, Task<byte[]> stderrTask)
+    private static async Task<string> CollectPartialAsync(
+        Task<byte[]> stdoutTask,
+        Task<byte[]> stderrTask
+    )
     {
         try
         {
-            await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await Task.WhenAll(stdoutTask, stderrTask)
+                .WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
         }
         catch (Exception)
         {
             // 忽略部分收集阶段的等待异常
         }
 
-        byte[] outBytes = stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : Array.Empty<byte>();
-        byte[] errBytes = stderrTask.IsCompletedSuccessfully ? stderrTask.Result : Array.Empty<byte>();
+        byte[] outBytes = stdoutTask.IsCompletedSuccessfully
+            ? stdoutTask.Result
+            : Array.Empty<byte>();
+        byte[] errBytes = stderrTask.IsCompletedSuccessfully
+            ? stderrTask.Result
+            : Array.Empty<byte>();
         string text = SmartConsoleDecoder.DecodeBytes(outBytes);
         string err = SmartConsoleDecoder.DecodeBytes(errBytes);
         if (!string.IsNullOrWhiteSpace(err))

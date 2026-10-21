@@ -20,7 +20,8 @@ public static class SseStreamReader
 {
     public static async IAsyncEnumerable<SseFrame> ReadFramesAsync(
         Stream responseStream,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default
+    )
     {
         if (responseStream == null)
         {
@@ -32,20 +33,22 @@ public static class SseStreamReader
             Encoding.UTF8,
             detectEncodingFromByteOrderMarks: false,
             bufferSize: 8192,
-            leaveOpen: true);
+            leaveOpen: true
+        );
 
         string? currentEvent = null;
         var dataBuilder = new StringBuilder();
 
-         while (true)
-         {
-             // need22-P1 T2：取消全链透传（循环入口即检查并优雅退出；ReadLineAsync 经 WaitAsync(ct) 可中断等待）。
-             if (ct.IsCancellationRequested) yield break;
-             string? line;
-             try
-             {
-                 line = await reader.ReadLineAsync().WaitAsync(ct).ConfigureAwait(false);
-             }
+        while (true)
+        {
+            // need22-P1 T2：取消全链透传（循环入口即检查并优雅退出；ReadLineAsync 经 WaitAsync(ct) 可中断等待）。
+            if (ct.IsCancellationRequested)
+                yield break;
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync().WaitAsync(ct).ConfigureAwait(false);
+            }
             catch (OperationCanceledException)
             {
                 yield break;

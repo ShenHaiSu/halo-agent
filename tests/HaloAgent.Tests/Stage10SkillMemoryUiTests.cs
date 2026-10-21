@@ -24,7 +24,10 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     public Stage10SkillMemoryUiTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage10Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage10Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage10Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -32,12 +35,18 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
         _storage = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _skills = new SkillMemoryService(_storage);
         var repo = new SessionRepository(_storage);
         _wsService = new WorkspaceSessionService(repo);
-        _bridge = new HostBridgeFacade(null, _storage, workspaceSessionService: _wsService, skillMemoryService: _skills);
+        _bridge = new HostBridgeFacade(
+            null,
+            _storage,
+            workspaceSessionService: _wsService,
+            skillMemoryService: _skills
+        );
 
         _projectDir = Path.Combine(_tempRoot, "Projects", "SkillMemUi");
         Directory.CreateDirectory(_projectDir);
@@ -47,8 +56,10 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -62,7 +73,12 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     [Fact(DisplayName = "T1: List_all_无工作区只返Global")]
     public async Task T1_ListAll_NoWorkspace_ReturnsGlobalOnly()
     {
-        _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Skill, "t1-demo", "# T1\nbody one");
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Global,
+            SkillMemoryKind.Skill,
+            "t1-demo",
+            "# T1\nbody one"
+        );
         var res = await _bridge.ListSkillMemory("skill", "all", null);
         Assert.True(res.Ok);
         Assert.Contains(res.Data!, d => d.Name == "t1-demo" && d.Scope == "global");
@@ -75,7 +91,12 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     [Fact(DisplayName = "T2: Scope_all_写拒绝")]
     public async Task T2_WriteWithScopeAll_Rejected()
     {
-        _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Skill, "t2-demo", "# T2\nbody");
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Global,
+            SkillMemoryKind.Skill,
+            "t2-demo",
+            "# T2\nbody"
+        );
         var set = await _bridge.SetSkillMemoryEnabled("skill", "all", "t2-demo", false, null);
         Assert.False(set.Ok);
         Assert.Equal("SKILL_VALIDATION", set.Code);
@@ -102,13 +123,21 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     [Fact(DisplayName = "T4: 删除留bak")]
     public async Task T4_Delete_KeepsBak()
     {
-        _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Skill, "t4-demo", "# T4\nbye");
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Global,
+            SkillMemoryKind.Skill,
+            "t4-demo",
+            "# T4\nbye"
+        );
         var del = await _bridge.DeleteSkillMemory("skill", "global", "t4-demo", null);
         Assert.True(del.Ok);
         Assert.NotNull(del.Data!.BakFileName);
         Assert.Contains(".deleted-", del.Data!.BakFileName);
         Assert.Contains(".bak", del.Data!.BakFileName);
-        var baks = Directory.GetFileSystemEntries(_storage.GlobalSkillsDirectory, "t4-demo.deleted-*.bak");
+        var baks = Directory.GetFileSystemEntries(
+            _storage.GlobalSkillsDirectory,
+            "t4-demo.deleted-*.bak"
+        );
         Assert.Single(baks);
         var list = await _bridge.ListSkillMemory("skill", "global", null);
         Assert.DoesNotContain(list.Data!, d => d.Name == "t4-demo");
@@ -117,7 +146,12 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
     [Fact(DisplayName = "T5: 开关保留正文")]
     public async Task T5_SetEnabled_KeepsBody()
     {
-        _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Memory, "t5-demo", "# T5\nkeep me");
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Global,
+            SkillMemoryKind.Memory,
+            "t5-demo",
+            "# T5\nkeep me"
+        );
         var before = _skills.Get(SkillMemoryScope.Global, SkillMemoryKind.Memory, "t5-demo", null)!;
         var off = await _bridge.SetSkillMemoryEnabled("memory", "global", "t5-demo", false, null);
         Assert.True(off.Ok);
@@ -138,15 +172,32 @@ public sealed class Stage10SkillMemoryUiTests : IDisposable
         string wsId = await AddWorkspaceAsync();
         var ws = await _wsService.GetWorkspaceAsync(wsId);
         Assert.NotNull(ws);
-        _skills.CreateOrUpdate(SkillMemoryScope.Global, SkillMemoryKind.Skill, "dup-name", "# G\nfrom global");
-        _skills.CreateOrUpdate(SkillMemoryScope.Project, SkillMemoryKind.Skill, "dup-name", "# P\nfrom project", ws!.RootPath);
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Global,
+            SkillMemoryKind.Skill,
+            "dup-name",
+            "# G\nfrom global"
+        );
+        _skills.CreateOrUpdate(
+            SkillMemoryScope.Project,
+            SkillMemoryKind.Skill,
+            "dup-name",
+            "# P\nfrom project",
+            ws!.RootPath
+        );
         var all = await _bridge.ListSkillMemory("skill", "all", wsId);
         Assert.True(all.Ok);
         var dups = all.Data!.Where(d => d.Name == "dup-name").ToList();
         Assert.Single(dups);
         Assert.Equal("project", dups[0].Scope);
         // E3：无工作区 + project 写 → SKILL_VALIDATION
-        var badWrite = await _bridge.SetSkillMemoryEnabled("skill", "project", "dup-name", false, null);
+        var badWrite = await _bridge.SetSkillMemoryEnabled(
+            "skill",
+            "project",
+            "dup-name",
+            false,
+            null
+        );
         Assert.False(badWrite.Ok);
         Assert.Equal("SKILL_VALIDATION", badWrite.Code);
         // E6：删除不存在条目 → SKILL_NOT_FOUND

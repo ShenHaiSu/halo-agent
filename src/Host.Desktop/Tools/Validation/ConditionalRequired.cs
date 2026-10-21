@@ -16,7 +16,10 @@ public static class ConditionalRequired
     /// <summary>
     /// 返回指定工具在当前参数下额外要求的必填字段（已去重、保持稳定顺序）。
     /// </summary>
-    public static IReadOnlyList<string> GetAdditionalRequired(string toolName, Dictionary<string, JsonElement> args)
+    public static IReadOnlyList<string> GetAdditionalRequired(
+        string toolName,
+        Dictionary<string, JsonElement> args
+    )
     {
         string tool = (toolName ?? string.Empty).Trim();
         if (string.Equals(tool, "edit", StringComparison.OrdinalIgnoreCase))
@@ -57,13 +60,18 @@ public static class ConditionalRequired
 
     private static IReadOnlyList<string> MemoryBranch(Dictionary<string, JsonElement> args)
     {
-        if (!args.TryGetValue("action", out var actionEl) || actionEl.ValueKind != JsonValueKind.String)
+        if (
+            !args.TryGetValue("action", out var actionEl)
+            || actionEl.ValueKind != JsonValueKind.String
+        )
         {
             return Array.Empty<string>();
         }
         string act = (actionEl.GetString() ?? string.Empty).Trim().ToLowerInvariant();
-        if (string.Equals(act, "set", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(act, "create", StringComparison.OrdinalIgnoreCase))
+        if (
+            string.Equals(act, "set", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(act, "create", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return MemoryBodyRequired(args);
         }
@@ -92,7 +100,10 @@ public static class ConditionalRequired
 
     private static IReadOnlyList<string> SkillBranch(Dictionary<string, JsonElement> args)
     {
-        if (!args.TryGetValue("action", out var actionEl) || actionEl.ValueKind != JsonValueKind.String)
+        if (
+            !args.TryGetValue("action", out var actionEl)
+            || actionEl.ValueKind != JsonValueKind.String
+        )
         {
             return Array.Empty<string>();
         }
@@ -120,7 +131,10 @@ public static class ConditionalRequired
 
     private static IReadOnlyList<string> GoalBranch(Dictionary<string, JsonElement> args)
     {
-        if (!args.TryGetValue("action", out var actionEl) || actionEl.ValueKind != JsonValueKind.String)
+        if (
+            !args.TryGetValue("action", out var actionEl)
+            || actionEl.ValueKind != JsonValueKind.String
+        )
         {
             return Array.Empty<string>();
         }
