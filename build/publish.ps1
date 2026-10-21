@@ -11,9 +11,15 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    try { $tag = (git -C $RepoRoot describe --tags --abbrev=0 2>$null) } catch { $tag = "" }
+    try { $tag = (git -C $RepoRoot describe --tags "--match" "v*" --abbrev=0 2>$null) } catch { $tag = "" }
     if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.0" }
-    $Version = $tag.TrimStart("v")
+    $Version = $tag -replace '^[vV]', ''
+    if ($Version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
+        Write-Warning "Git tag '$tag' is not a valid version. Fallback to 0.6.0. Use -Version to override."
+        $Version = "0.6.0"
+    }
+} elseif ($Version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
+    throw "Invalid -Version '$Version'. Expected like 0.6.0."
 }
 Write-Host "==> Version: $Version (tag-aligned, E6)" -ForegroundColor Cyan
 
