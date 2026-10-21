@@ -18,7 +18,10 @@ public static class SecretScrubber
         new(@"AKIA[0-9A-Z]{16}", RegexOptions.Compiled),
         new(@"aws_secret_access_key\s*[:=]\s*\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase),
         // 通用赋值形态：api_key / apikey / secret / password / passwd / token = 值
-        new(@"(?i)(api[_-]?key|secret|password|passwd|pwd|access[_-]?token)\s*[:=]\s*['""]?[^\s'"";,}]+", RegexOptions.Compiled),
+        new(
+            @"(?i)(api[_-]?key|secret|password|passwd|pwd|access[_-]?token)\s*[:=]\s*['""]?[^\s'"";,}]+",
+            RegexOptions.Compiled
+        ),
         // xox-（Slack）、ghp-/github_pat_（GitHub）、AIza（Google）
         new(@"xox[baprs]-[A-Za-z0-9\-]+", RegexOptions.Compiled),
         new(@"ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+", RegexOptions.Compiled),
@@ -68,11 +71,14 @@ public static class SecretScrubber
         {
             try
             {
-                result = re.Replace(result, m =>
-                {
-                    hits++;
-                    return "[REDACTED_SECRET]";
-                });
+                result = re.Replace(
+                    result,
+                    m =>
+                    {
+                        hits++;
+                        return "[REDACTED_SECRET]";
+                    }
+                );
             }
             catch
             {

@@ -4,14 +4,8 @@ name: web
 
 on:
   push:
-    paths:
-      - "src/Web.Client/**"
-      - ".github/workflows/web.yml"
-  pull_request:
-    paths:
-      - "src/Web.Client/**"
-      - ".github/workflows/web.yml"
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 jobs:
   web:
@@ -28,13 +22,12 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 11
+          run_install: false
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
           node-version-file: src/Web.Client/.nvmrc
-          cache: pnpm
-          cache-dependency-path: src/Web.Client/pnpm-lock.yaml
 
       - name: Install (--frozen-lockfile)
         run: pnpm install --frozen-lockfile

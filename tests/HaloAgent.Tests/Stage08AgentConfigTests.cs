@@ -38,7 +38,10 @@ public sealed class Stage08AgentConfigTests : IDisposable
     public Stage08AgentConfigTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage08Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage08Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage08Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -46,7 +49,8 @@ public sealed class Stage08AgentConfigTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _agentService = new AgentConfigService(_storageManager);
         _repository = new SessionRepository(_storageManager);
@@ -56,8 +60,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
         _projectDir = Path.Combine(_tempRoot, "Projects", "AgentCfgTest");
         Directory.CreateDirectory(_projectDir);
 
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "Agent配置测试项目").GetAwaiter().GetResult();
-        _session = _service.CreateSessionAsync(_workspace.Id, "Stage08 验收会话").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "Agent配置测试项目")
+            .GetAwaiter()
+            .GetResult();
+        _session = _service
+            .CreateSessionAsync(_workspace.Id, "Stage08 验收会话")
+            .GetAwaiter()
+            .GetResult();
     }
 
     public void Dispose()
@@ -79,7 +89,8 @@ public sealed class Stage08AgentConfigTests : IDisposable
     public void Defaults_CreateAndLoad()
     {
         string path = _agentService.AgentConfigFilePath;
-        if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(path))
+            File.Delete(path);
         var (doc, isDefault, _) = _agentService.LoadWithMeta();
         Assert.True(File.Exists(path));
         Assert.Equal(30000, doc.ExecDefaultTimeoutMs);
@@ -91,36 +102,90 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: 负数保存均被拒绝且 field 定位正确")]
     public void Validation_NegativeRejected()
     {
-        var exD = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = -1, ExecMaxTimeoutMs = 300000, MaxIterations = 25 }));
+        var exD = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = -1,
+                        ExecMaxTimeoutMs = 300000,
+                        MaxIterations = 25
+                    }
+                )
+        );
         Assert.Equal("execDefaultTimeoutMs", exD.Field);
 
-        var exM = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = -5, MaxIterations = 25 }));
+        var exM = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = 30000,
+                        ExecMaxTimeoutMs = -5,
+                        MaxIterations = 25
+                    }
+                )
+        );
         Assert.Equal("execMaxTimeoutMs", exM.Field);
 
-        var exN = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = -1 }));
+        var exN = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = 30000,
+                        ExecMaxTimeoutMs = 300000,
+                        MaxIterations = -1
+                    }
+                )
+        );
         Assert.Equal("maxIterations", exN.Field);
     }
 
     [Fact(DisplayName = "S08: 超硬顶保存被拒绝")]
     public void Validation_CeilRejected()
     {
-        var exD = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 3600001, ExecMaxTimeoutMs = 3600001, MaxIterations = 25 }));
+        var exD = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = 3600001,
+                        ExecMaxTimeoutMs = 3600001,
+                        MaxIterations = 25
+                    }
+                )
+        );
         Assert.Equal("execDefaultTimeoutMs", exD.Field);
 
-        var exN = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 501 }));
+        var exN = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = 30000,
+                        ExecMaxTimeoutMs = 300000,
+                        MaxIterations = 501
+                    }
+                )
+        );
         Assert.Equal("maxIterations", exN.Field);
     }
 
     [Fact(DisplayName = "S08: D>M 被拒绝且 msg 含指引")]
     public void Validation_DefaultGtMaxRejected()
     {
-        var ex = Assert.Throws<AgentConfigValidationException>(() =>
-            _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 300000, ExecMaxTimeoutMs = 60000, MaxIterations = 25 }));
+        var ex = Assert.Throws<AgentConfigValidationException>(
+            () =>
+                _agentService.SaveAgentConfig(
+                    new AgentConfigDocument
+                    {
+                        ExecDefaultTimeoutMs = 300000,
+                        ExecMaxTimeoutMs = 60000,
+                        MaxIterations = 25
+                    }
+                )
+        );
         Assert.Equal("execDefaultTimeoutMs", ex.Field);
         Assert.Contains("默认超时不得大于上限", ex.Message);
     }
@@ -128,7 +193,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: 三项 0 均可保存落盘")]
     public void Validation_ZeroAccepted()
     {
-        var saved = _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 0, ExecMaxTimeoutMs = 0, MaxIterations = 0 });
+        var saved = _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 0,
+                ExecMaxTimeoutMs = 0,
+                MaxIterations = 0
+            }
+        );
         Assert.Equal(0, saved.ExecDefaultTimeoutMs);
         Assert.Equal(0, saved.ExecMaxTimeoutMs);
         Assert.Equal(0, saved.MaxIterations);
@@ -142,7 +214,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: 按项恢复只回该项")]
     public void Reset_FieldMatrix()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 60000, ExecMaxTimeoutMs = 600000, MaxIterations = 50 });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 60000,
+                ExecMaxTimeoutMs = 600000,
+                MaxIterations = 50
+            }
+        );
 
         var r1 = _agentService.ResetAgentConfig("defaultTimeout");
         Assert.Equal(30000, r1.ExecDefaultTimeoutMs);
@@ -163,7 +242,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: 全部恢复与未知项拒绝")]
     public void Reset_AllAndUnknown()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 60000, ExecMaxTimeoutMs = 600000, MaxIterations = 50 });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 60000,
+                ExecMaxTimeoutMs = 600000,
+                MaxIterations = 50
+            }
+        );
         var all = _agentService.ResetAgentConfig(null);
         Assert.Equal(30000, all.ExecDefaultTimeoutMs);
         Assert.Equal(300000, all.ExecMaxTimeoutMs);
@@ -172,7 +258,9 @@ public sealed class Stage08AgentConfigTests : IDisposable
         var all2 = _agentService.ResetAgentConfig("all");
         Assert.Equal(30000, all2.ExecDefaultTimeoutMs);
 
-        var ex = Assert.Throws<AgentConfigValidationException>(() => _agentService.ResetAgentConfig("bogus"));
+        var ex = Assert.Throws<AgentConfigValidationException>(
+            () => _agentService.ResetAgentConfig("bogus")
+        );
         Assert.Equal("field", ex.Field);
         Assert.Contains("未知恢复项", ex.Message);
     }
@@ -185,7 +273,13 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [InlineData(300000, 30000, 0, 300000, false)] // T>0, M=0 上限关闭不钳制
     [InlineData(0, 60000, 300000, 0, true)] // T=0 显式无限优先于 M
     [InlineData(null, 0, 300000, 0, true)] // D=0 且 T 缺省 → 无限
-    public void Resolve_TimeoutMatrix(int? requested, int cfgD, int cfgM, int expectedMs, bool expectedInfinite)
+    public void Resolve_TimeoutMatrix(
+        int? requested,
+        int cfgD,
+        int cfgM,
+        int expectedMs,
+        bool expectedInfinite
+    )
     {
         var (ms, infinite) = AgentTimeoutResolver.Resolve(requested, cfgD, cfgM);
         Assert.Equal(expectedMs, ms);
@@ -213,8 +307,22 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: 两次保存后 .bak 等于第一次值")]
     public void Save_AtomicBak()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 60000, ExecMaxTimeoutMs = 600000, MaxIterations = 50 });
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 120000, ExecMaxTimeoutMs = 600000, MaxIterations = 50 });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 60000,
+                ExecMaxTimeoutMs = 600000,
+                MaxIterations = 50
+            }
+        );
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 120000,
+                ExecMaxTimeoutMs = 600000,
+                MaxIterations = 50
+            }
+        );
         string bak = _agentService.AgentConfigFilePath + ".bak";
         Assert.True(File.Exists(bak));
         string raw = File.ReadAllText(bak);
@@ -239,9 +347,13 @@ public sealed class Stage08AgentConfigTests : IDisposable
             ExecMaxTimeoutMsOverride = 300000,
         };
         var result = await registry.DispatchAsync(
-            new ToolCallDto("call_s08_inf", "exec_command",
-                "{\"command\": \"ping 127.0.0.1 -n 6\", \"timeout_ms\": 0}"),
-            ctx);
+            new ToolCallDto(
+                "call_s08_inf",
+                "exec_command",
+                "{\"command\": \"ping 127.0.0.1 -n 6\", \"timeout_ms\": 0}"
+            ),
+            ctx
+        );
         Assert.False(result.Success);
         Assert.Equal("INVALID_TIMEOUT", result.ErrorCode);
         Assert.StartsWith("INVALID_TIMEOUT", result.Error);
@@ -268,10 +380,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
         cts.CancelAfter(1000);
         var sw = Stopwatch.StartNew();
         var result = await registry.DispatchAsync(
-            new ToolCallDto("call_s08_infcancel", "exec_command",
-                "{\"command\": \"ping 127.0.0.1 -n 60\", \"timeout_ms\": 60000}"),
+            new ToolCallDto(
+                "call_s08_infcancel",
+                "exec_command",
+                "{\"command\": \"ping 127.0.0.1 -n 60\", \"timeout_ms\": 60000}"
+            ),
             ctx,
-            cts.Token);
+            cts.Token
+        );
         sw.Stop();
         Assert.True(sw.ElapsedMilliseconds < 30000, $"取消回收过慢：{sw.ElapsedMilliseconds}ms");
         Assert.False(result.Success);
@@ -281,20 +397,45 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: N=0 无限轮次不截断，取消即停")]
     public async Task Iter_Infinite_NoTruncate()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 0 });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 30000,
+                ExecMaxTimeoutMs = 300000,
+                MaxIterations = 0
+            }
+        );
         try
         {
-            var gateway = new ScriptedFakeGatewayFor08(null, fallback: _ => new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.ToolDone($"call_{Guid.NewGuid():N}", "list_dir", "{\"path\":\".\"}"),
-                UnifiedStreamEvent.Completed(),
-            });
+            var gateway = new ScriptedFakeGatewayFor08(
+                null,
+                fallback: _ => new List<UnifiedStreamEvent>
+                {
+                    UnifiedStreamEvent.ToolDone(
+                        $"call_{Guid.NewGuid():N}",
+                        "list_dir",
+                        "{\"path\":\".\"}"
+                    ),
+                    UnifiedStreamEvent.Completed(),
+                }
+            );
             var orchestrator = new AgentOrchestrator(
-                _service, _budgetService, gateway, new ToolRegistry(), _storageManager, agentConfigService: _agentService);
+                _service,
+                _budgetService,
+                gateway,
+                new ToolRegistry(),
+                _storageManager,
+                agentConfigService: _agentService
+            );
             using var cts = new CancellationTokenSource();
             // 第 5 次工具执行后取消（经 ToolExecutionCompleted 计数需要事件订阅；此处用延时取消兜底）
             cts.CancelAfter(15000);
-            AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "无限轮次任务", cancellationToken: cts.Token);
+            AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+                _workspace.Id,
+                _session.Id,
+                "无限轮次任务",
+                cancellationToken: cts.Token
+            );
             Assert.True(result.WasCancelled);
             Assert.False(result.WasTruncated);
             Assert.True(result.Iterations >= 3, $"无限模式应跑多轮，实际 {result.Iterations}");
@@ -309,17 +450,41 @@ public sealed class Stage08AgentConfigTests : IDisposable
     [Fact(DisplayName = "S08: N=3 有限轮次第 3 轮截断")]
     public async Task Iter_Finite_Truncates()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument { ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 3 });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 30000,
+                ExecMaxTimeoutMs = 300000,
+                MaxIterations = 3
+            }
+        );
         try
         {
-            var gateway = new ScriptedFakeGatewayFor08(null, fallback: _ => new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.ToolDone($"call_{Guid.NewGuid():N}", "list_dir", "{\"path\":\".\"}"),
-                UnifiedStreamEvent.Completed(),
-            });
+            var gateway = new ScriptedFakeGatewayFor08(
+                null,
+                fallback: _ => new List<UnifiedStreamEvent>
+                {
+                    UnifiedStreamEvent.ToolDone(
+                        $"call_{Guid.NewGuid():N}",
+                        "list_dir",
+                        "{\"path\":\".\"}"
+                    ),
+                    UnifiedStreamEvent.Completed(),
+                }
+            );
             var orchestrator = new AgentOrchestrator(
-                _service, _budgetService, gateway, new ToolRegistry(), _storageManager, agentConfigService: _agentService);
-            AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "有限三轮任务");
+                _service,
+                _budgetService,
+                gateway,
+                new ToolRegistry(),
+                _storageManager,
+                agentConfigService: _agentService
+            );
+            AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+                _workspace.Id,
+                _session.Id,
+                "有限三轮任务"
+            );
             Assert.True(result.Success);
             Assert.True(result.WasTruncated);
             Assert.Equal(3, result.Iterations);
@@ -342,7 +507,8 @@ public sealed class Stage08AgentConfigTests : IDisposable
 
         public ScriptedFakeGatewayFor08(
             Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>? script,
-            Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>? fallback = null)
+            Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>? fallback = null
+        )
         {
             _script = script;
             _fallback = fallback;
@@ -350,7 +516,8 @@ public sealed class Stage08AgentConfigTests : IDisposable
 
         public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
             UnifiedLlmRequest request,
-            [EnumeratorCancellation] CancellationToken ct = default)
+            [EnumeratorCancellation] CancellationToken ct = default
+        )
         {
             List<UnifiedStreamEvent> events;
             if (_script != null && _script.Count > 0)

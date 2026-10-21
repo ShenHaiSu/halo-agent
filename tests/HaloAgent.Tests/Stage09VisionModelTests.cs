@@ -19,7 +19,10 @@ public sealed class Stage09VisionModelTests : IDisposable
     public Stage09VisionModelTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage09Vision_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage09VisionBs_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage09VisionBs_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
     }
@@ -28,8 +31,10 @@ public sealed class Stage09VisionModelTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -39,15 +44,20 @@ public sealed class Stage09VisionModelTests : IDisposable
         var storage = StoragePathManager.Initialize(
             customBootstrapFilePath: Path.Combine(_bootstrapRoot, "bootstrap.json"),
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         return new ProviderConfigService(storage, new HaloHttpClientFactory());
     }
 
     [Fact(DisplayName = "S09-V1: 老 providers.json 缺字段回退 false/4/high")]
     public void LegacyModelJson_FallsBackToVisionDefaults()
     {
-        string legacy = "{\"id\":\"gpt-4o\",\"displayName\":\"GPT\",\"protocol\":\"chat\",\"maxContextTokens\":128000,\"maxOutputTokens\":4096,\"enabled\":true}";
-        var model = JsonSerializer.Deserialize<ModelConfig>(legacy, HaloJsonOptions.IndentedCamelCase);
+        string legacy =
+            "{\"id\":\"gpt-4o\",\"displayName\":\"GPT\",\"protocol\":\"chat\",\"maxContextTokens\":128000,\"maxOutputTokens\":4096,\"enabled\":true}";
+        var model = JsonSerializer.Deserialize<ModelConfig>(
+            legacy,
+            HaloJsonOptions.IndentedCamelCase
+        );
         Assert.NotNull(model);
         Assert.False(model!.SupportsVision);
         Assert.Equal(4, model.MaxImagesPerTurn);
@@ -62,7 +72,9 @@ public sealed class Stage09VisionModelTests : IDisposable
         var doc = svc.GetProvidersConfigInternal();
         var provider = doc.Providers[0];
         provider.Models.Add(new ModelConfig { Id = "bad-model", MaxImagesPerTurn = 17 });
-        var ex = Assert.Throws<ProviderConfigValidationException>(() => svc.SaveProvidersConfig(doc));
+        var ex = Assert.Throws<ProviderConfigValidationException>(
+            () => svc.SaveProvidersConfig(doc)
+        );
         Assert.Equal("PROVIDER_VALIDATION", ex.Code);
         Assert.Equal("maxImagesPerTurn", ex.Field);
 
@@ -78,13 +90,15 @@ public sealed class Stage09VisionModelTests : IDisposable
         var svc = NewService();
         var doc = svc.GetProvidersConfigInternal();
         var provider = doc.Providers[0];
-        provider.Models.Add(new ModelConfig
-        {
-            Id = "vision-model",
-            SupportsVision = true,
-            MaxImagesPerTurn = 0,
-            VisionDetail = "ULTRA",
-        });
+        provider.Models.Add(
+            new ModelConfig
+            {
+                Id = "vision-model",
+                SupportsVision = true,
+                MaxImagesPerTurn = 0,
+                VisionDetail = "ULTRA",
+            }
+        );
         var saved = svc.SaveProvidersConfig(doc);
         var round = saved.Providers[0].Models.Find(m => m.Id == "vision-model");
         Assert.NotNull(round);
@@ -99,13 +113,21 @@ public sealed class Stage09VisionModelTests : IDisposable
     {
         var src = new ModelConfig
         {
-            Id = "m", SupportsVision = true, MaxImagesPerTurn = 9, VisionDetail = "high",
+            Id = "m",
+            SupportsVision = true,
+            MaxImagesPerTurn = 9,
+            VisionDetail = "high",
         };
         var clone = src.Clone();
         Assert.True(clone.SupportsVision);
         Assert.Equal(9, clone.MaxImagesPerTurn);
         Assert.Equal("high", clone.VisionDetail);
-        var provider = new ProviderConfig { Id = "p", Name = "P", Models = new() { src } };
+        var provider = new ProviderConfig
+        {
+            Id = "p",
+            Name = "P",
+            Models = new() { src }
+        };
         var pclone = provider.Clone();
         Assert.True(pclone.Models[0].SupportsVision);
         Assert.Equal(9, pclone.Models[0].MaxImagesPerTurn);

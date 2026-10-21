@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using Host.Desktop.Core.Models;
@@ -72,142 +72,174 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 writer.WriteEndObject();
             }
 
-             // 5.2 历史与当前消息（need09-05：含图 user 走 content 数组；无图保持 content:string 零抖动）
-             // FIX(tool-400)：先内存愈合配对（缺回包补 synthetic、无主 tool 丢弃），再序列化，保证线包永不非法；
-             // tool 附图不再就地插 user（会劈开 tool 块导致 400），改为收齐后在整段 tool 块尾发一个 user。
-             var sendMessages = ChatPairingGuard.HealForSend(request.Messages);
-             if (sendMessages.Count != (request.Messages?.Count ?? 0))
-             {
-                 try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Warn($"[REQ] reqId={request.RequestId} pairing-healed messages={request.Messages?.Count ?? 0}->{sendMessages.Count}"); } catch { }
-             }
-             var planRequest = new UnifiedLlmRequest
-             {
-                 RequestId = request.RequestId,
-                 Provider = request.Provider,
-                 Model = request.Model,
-                 HeaderContext = request.HeaderContext,
-                 SystemInstructions = request.SystemInstructions,
-                 Messages = sendMessages,
-                 Tools = request.Tools,
-                 ImageResolver = request.ImageResolver,
-             };
-             var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
-             string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
-             if (mmPlan.Dropped > 0)
-             {
-                 try { Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info("[REQ] reqId=" + request.RequestId + " model=" + request.Model.Id + " imgTotal=" + mmPlan.Total + " imgTruncated=" + mmPlan.Dropped); } catch { }
-             }
-             var pendingToolImages = new List<ResolvedImage>();
-             var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
-             void FlushPendingToolImages()
-             {
-                 if (pendingToolImages.Count == 0) return;
-                 writer.WriteStartObject();
-                 writer.WriteString("role", "user");
-                 writer.WriteStartArray("content");
-                 writer.WriteStartObject();
-                 writer.WriteString("type", "text");
-                 writer.WriteString("text", BuildTrailingToolImageText(pendingToolRefs, pendingToolImages.Count));
-                 writer.WriteEndObject();
-                 foreach (var r in pendingToolImages)
-                 {
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "image_url");
-                     writer.WriteStartObject("image_url");
-                     writer.WriteString("url", r.DataUrl!);
-                     writer.WriteString("detail", visionDetail);
-                     writer.WriteEndObject();
-                     writer.WriteEndObject();
-                 }
-                 writer.WriteEndArray();
-                 writer.WriteEndObject();
-                 pendingToolImages.Clear();
-                 pendingToolRefs.Clear();
-             }
-             int mmIndex = -1;
-             foreach (var msg in sendMessages)
-             {
-                 mmIndex++;
-                 var kept = mmPlan.Kept[mmIndex].Where(r => !string.IsNullOrWhiteSpace(r.DataUrl)).ToList();
-                 bool isTool = msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
-                 bool isAssistant = msg.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase);
-                 bool isUser = msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase);
-                 if (!isTool && pendingToolImages.Count > 0)
-                 {
-                     // tool 块结束：先把收齐的图以单个 user 发出，再写当前消息
-                     FlushPendingToolImages();
-                 }
-                 writer.WriteStartObject();
-                 writer.WriteString("role", msg.Role);
-                 if (isAssistant)
-                 {
-                     // 历史思考链默认随上下文发出（DeepSeek reasoning_content；空/开关关则省略零抖动）
-                     bool includeReasoning = request.Model.IncludeReasoningInHistory && !string.IsNullOrWhiteSpace(msg.ReasoningContent);
-                     // 若有 ToolCalls，content 统一输出有效文本或 ""（兼容严格校验第三方网关）
-                     if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
-                     {
-                         writer.WriteString("content", msg.Content ?? string.Empty);
-                         if (includeReasoning) writer.WriteString("reasoning_content", msg.ReasoningContent);
-                         writer.WriteStartArray("tool_calls");
-                         foreach (var tc in msg.ToolCalls)
-                         {
-                             writer.WriteStartObject();
-                             writer.WriteString("id", tc.CallId);
-                             writer.WriteString("type", "function");
-                             writer.WriteStartObject("function");
-                             writer.WriteString("name", tc.FunctionName);
-                             writer.WriteString("arguments", tc.ArgumentsJson ?? "{}");
-                             writer.WriteEndObject();
-                             writer.WriteEndObject();
-                         }
-                         writer.WriteEndArray();
-                     }
-                     else
-                     {
-                         writer.WriteString("content", msg.Content ?? string.Empty);
-                         if (includeReasoning) writer.WriteString("reasoning_content", msg.ReasoningContent);
-                     }
-                 }
-                 else if (isTool)
-                 {
-                     writer.WriteString("tool_call_id", msg.ToolCallId ?? string.Empty);
-                     writer.WriteString("content", msg.Content ?? string.Empty);
-                     writer.WriteEndObject();
-                     if (kept.Count > 0)
-                     {
-                         // 只收齐、不就地写 user，保证 tool 块连续
-                         pendingToolImages.AddRange(kept);
-                         pendingToolRefs.Add((msg.ToolCallId ?? string.Empty, msg.Name, msg.Content));
-                     }
-                     continue;
-                 }
-                 else if (isUser && kept.Count > 0)
-                 {
-                     writer.WriteStartArray("content");
-                     writer.WriteStartObject();
-                     writer.WriteString("type", "text");
-                     writer.WriteString("text", msg.Content ?? string.Empty);
-                     writer.WriteEndObject();
-                     foreach (var r in kept)
-                     {
-                         writer.WriteStartObject();
-                         writer.WriteString("type", "image_url");
-                         writer.WriteStartObject("image_url");
-                         writer.WriteString("url", r.DataUrl!);
-                         writer.WriteString("detail", visionDetail);
-                         writer.WriteEndObject();
-                         writer.WriteEndObject();
-                     }
-                     writer.WriteEndArray();
-                 }
-                 else
-                 {
-                     writer.WriteString("content", msg.Content ?? string.Empty);
-                 }
-                 writer.WriteEndObject();
-             }
-             // 尾部 tool 块后补收齐的图
-             FlushPendingToolImages();
+            // 5.2 历史与当前消息（need09-05：含图 user 走 content 数组；无图保持 content:string 零抖动）
+            // FIX(tool-400)：先内存愈合配对（缺回包补 synthetic、无主 tool 丢弃），再序列化，保证线包永不非法；
+            // tool 附图不再就地插 user（会劈开 tool 块导致 400），改为收齐后在整段 tool 块尾发一个 user。
+            var sendMessages = ChatPairingGuard.HealForSend(request.Messages);
+            if (sendMessages.Count != (request.Messages?.Count ?? 0))
+            {
+                try
+                {
+                    Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Warn(
+                        $"[REQ] reqId={request.RequestId} pairing-healed messages={request.Messages?.Count ?? 0}->{sendMessages.Count}"
+                    );
+                }
+                catch { }
+            }
+            var planRequest = new UnifiedLlmRequest
+            {
+                RequestId = request.RequestId,
+                Provider = request.Provider,
+                Model = request.Model,
+                HeaderContext = request.HeaderContext,
+                SystemInstructions = request.SystemInstructions,
+                Messages = sendMessages,
+                Tools = request.Tools,
+                ImageResolver = request.ImageResolver,
+            };
+            var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
+            string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            if (mmPlan.Dropped > 0)
+            {
+                try
+                {
+                    Host.Desktop.Infrastructure.Logging.HaloLogger.Llm.Info(
+                        "[REQ] reqId="
+                            + request.RequestId
+                            + " model="
+                            + request.Model.Id
+                            + " imgTotal="
+                            + mmPlan.Total
+                            + " imgTruncated="
+                            + mmPlan.Dropped
+                    );
+                }
+                catch { }
+            }
+            var pendingToolImages = new List<ResolvedImage>();
+            var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
+            void FlushPendingToolImages()
+            {
+                if (pendingToolImages.Count == 0)
+                    return;
+                writer.WriteStartObject();
+                writer.WriteString("role", "user");
+                writer.WriteStartArray("content");
+                writer.WriteStartObject();
+                writer.WriteString("type", "text");
+                writer.WriteString(
+                    "text",
+                    BuildTrailingToolImageText(pendingToolRefs, pendingToolImages.Count)
+                );
+                writer.WriteEndObject();
+                foreach (var r in pendingToolImages)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "image_url");
+                    writer.WriteStartObject("image_url");
+                    writer.WriteString("url", r.DataUrl!);
+                    writer.WriteString("detail", visionDetail);
+                    writer.WriteEndObject();
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                pendingToolImages.Clear();
+                pendingToolRefs.Clear();
+            }
+            int mmIndex = -1;
+            foreach (var msg in sendMessages)
+            {
+                mmIndex++;
+                var kept = mmPlan
+                    .Kept[mmIndex]
+                    .Where(r => !string.IsNullOrWhiteSpace(r.DataUrl))
+                    .ToList();
+                bool isTool = msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
+                bool isAssistant = msg.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase);
+                bool isUser = msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase);
+                if (!isTool && pendingToolImages.Count > 0)
+                {
+                    // tool 块结束：先把收齐的图以单个 user 发出，再写当前消息
+                    FlushPendingToolImages();
+                }
+                writer.WriteStartObject();
+                writer.WriteString("role", msg.Role);
+                if (isAssistant)
+                {
+                    // 历史思考链默认随上下文发出（DeepSeek reasoning_content；空/开关关则省略零抖动）
+                    bool includeReasoning =
+                        request.Model.IncludeReasoningInHistory
+                        && !string.IsNullOrWhiteSpace(msg.ReasoningContent);
+                    // 若有 ToolCalls，content 统一输出有效文本或 ""（兼容严格校验第三方网关）
+                    if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
+                    {
+                        writer.WriteString("content", msg.Content ?? string.Empty);
+                        if (includeReasoning)
+                            writer.WriteString("reasoning_content", msg.ReasoningContent);
+                        writer.WriteStartArray("tool_calls");
+                        foreach (var tc in msg.ToolCalls)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteString("id", tc.CallId);
+                            writer.WriteString("type", "function");
+                            writer.WriteStartObject("function");
+                            writer.WriteString("name", tc.FunctionName);
+                            writer.WriteString("arguments", tc.ArgumentsJson ?? "{}");
+                            writer.WriteEndObject();
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                    }
+                    else
+                    {
+                        writer.WriteString("content", msg.Content ?? string.Empty);
+                        if (includeReasoning)
+                            writer.WriteString("reasoning_content", msg.ReasoningContent);
+                    }
+                }
+                else if (isTool)
+                {
+                    writer.WriteString("tool_call_id", msg.ToolCallId ?? string.Empty);
+                    writer.WriteString("content", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    if (kept.Count > 0)
+                    {
+                        // 只收齐、不就地写 user，保证 tool 块连续
+                        pendingToolImages.AddRange(kept);
+                        pendingToolRefs.Add(
+                            (msg.ToolCallId ?? string.Empty, msg.Name, msg.Content)
+                        );
+                    }
+                    continue;
+                }
+                else if (isUser && kept.Count > 0)
+                {
+                    writer.WriteStartArray("content");
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "text");
+                    writer.WriteString("text", msg.Content ?? string.Empty);
+                    writer.WriteEndObject();
+                    foreach (var r in kept)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "image_url");
+                        writer.WriteStartObject("image_url");
+                        writer.WriteString("url", r.DataUrl!);
+                        writer.WriteString("detail", visionDetail);
+                        writer.WriteEndObject();
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
+                }
+                else
+                {
+                    writer.WriteString("content", msg.Content ?? string.Empty);
+                }
+                writer.WriteEndObject();
+            }
+            // 尾部 tool 块后补收齐的图
+            FlushPendingToolImages();
 
             writer.WriteEndArray(); // messages
 
@@ -239,14 +271,17 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
 
     public async IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(
         Stream responseStream,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default
+    )
     {
         yield return UnifiedStreamEvent.Started();
 
         var toolCallStates = new SortedDictionary<int, PartialToolCallState>();
         bool streamCompletedEmitted = false;
 
-        await foreach (var frame in SseStreamReader.ReadFramesAsync(responseStream, ct).ConfigureAwait(false))
+        await foreach (
+            var frame in SseStreamReader.ReadFramesAsync(responseStream, ct).ConfigureAwait(false)
+        )
         {
             if (string.IsNullOrWhiteSpace(frame.Data))
             {
@@ -261,7 +296,11 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 {
                     if (state.StartedEventEmitted && !state.CompletedEventEmitted)
                     {
-                        yield return UnifiedStreamEvent.ToolDone(state.CallId, state.FunctionName, state.ArgumentsBuilder.ToString());
+                        yield return UnifiedStreamEvent.ToolDone(
+                            state.CallId,
+                            state.FunctionName,
+                            state.ArgumentsBuilder.ToString()
+                        );
                         state.CompletedEventEmitted = true;
                     }
                 }
@@ -286,8 +325,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 var root = doc.RootElement;
 
                 // 1. 检查是否存在上游错误载荷（兼容 "error":null，避免对 Null 调用 TryGetProperty 抛 InvalidOperationException）
-                if (root.TryGetProperty("error", out var errorElem) &&
-                    errorElem.ValueKind == JsonValueKind.Object)
+                if (
+                    root.TryGetProperty("error", out var errorElem)
+                    && errorElem.ValueKind == JsonValueKind.Object
+                )
                 {
                     string errMessage = errorElem.TryGetProperty("message", out var msgElem)
                         ? msgElem.GetString() ?? "未知上游错误"
@@ -301,17 +342,21 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                 }
 
                 // 2. 检查顶层 usage（兼容上游返回 "usage":null 的中间 chunk，避免 InvalidOperationException 导致整轮会话失败）
-                if (root.TryGetProperty("usage", out var usageElem) &&
-                    usageElem.ValueKind == JsonValueKind.Object)
+                if (
+                    root.TryGetProperty("usage", out var usageElem)
+                    && usageElem.ValueKind == JsonValueKind.Object
+                )
                 {
                     int inTokens = TryGetInt32(usageElem, "prompt_tokens");
                     int outTokens = TryGetInt32(usageElem, "completion_tokens");
                     int totalTokens = TryGetInt32(usageElem, "total_tokens", inTokens + outTokens);
 
                     int cachedTokens = 0;
-                    if (usageElem.TryGetProperty("prompt_tokens_details", out var ptd) &&
-                        ptd.ValueKind == JsonValueKind.Object &&
-                        ptd.TryGetProperty("cached_tokens", out var ctVal))
+                    if (
+                        usageElem.TryGetProperty("prompt_tokens_details", out var ptd)
+                        && ptd.ValueKind == JsonValueKind.Object
+                        && ptd.TryGetProperty("cached_tokens", out var ctVal)
+                    )
                     {
                         cachedTokens = GetInt32Value(ctVal);
                     }
@@ -320,12 +365,19 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                         cachedTokens = GetInt32Value(pcht);
                     }
 
-                    yield return UnifiedStreamEvent.Tokens(inTokens, outTokens, cachedTokens, totalTokens);
+                    yield return UnifiedStreamEvent.Tokens(
+                        inTokens,
+                        outTokens,
+                        cachedTokens,
+                        totalTokens
+                    );
                 }
                 // 3. 检查 choices 增量（兼容 "choices":null / 非数组，避免 GetArrayLength 抛异常）
-                if (root.TryGetProperty("choices", out var choicesElem) &&
-                    choicesElem.ValueKind == JsonValueKind.Array &&
-                    choicesElem.GetArrayLength() > 0)
+                if (
+                    root.TryGetProperty("choices", out var choicesElem)
+                    && choicesElem.ValueKind == JsonValueKind.Array
+                    && choicesElem.GetArrayLength() > 0
+                )
                 {
                     var choice = choicesElem[0];
                     if (choice.ValueKind != JsonValueKind.Object)
@@ -333,8 +385,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                         continue;
                     }
 
-                    if (choice.TryGetProperty("delta", out var deltaElem) &&
-                        deltaElem.ValueKind == JsonValueKind.Object)
+                    if (
+                        choice.TryGetProperty("delta", out var deltaElem)
+                        && deltaElem.ValueKind == JsonValueKind.Object
+                    )
                     {
                         // 3.1 思考链增量（兼容 DeepSeek reasoning_content 与各家 reasoning 字段）
                         string? reasoning = null;
@@ -363,8 +417,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                         }
 
                         // 3.3 分片工具调用
-                        if (deltaElem.TryGetProperty("tool_calls", out var toolCallsElem) &&
-                            toolCallsElem.ValueKind == JsonValueKind.Array)
+                        if (
+                            deltaElem.TryGetProperty("tool_calls", out var toolCallsElem)
+                            && toolCallsElem.ValueKind == JsonValueKind.Array
+                        )
                         {
                             foreach (var tcElem in toolCallsElem.EnumerateArray())
                             {
@@ -389,8 +445,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                                     }
                                 }
 
-                                if (tcElem.TryGetProperty("function", out var funcElem) &&
-                                    funcElem.ValueKind == JsonValueKind.Object)
+                                if (
+                                    tcElem.TryGetProperty("function", out var funcElem)
+                                    && funcElem.ValueKind == JsonValueKind.Object
+                                )
                                 {
                                     if (funcElem.TryGetProperty("name", out var nameElem))
                                     {
@@ -401,11 +459,16 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                                         }
                                     }
 
-                                    if (!state.StartedEventEmitted &&
-                                        !string.IsNullOrEmpty(state.CallId) &&
-                                        !string.IsNullOrEmpty(state.FunctionName))
+                                    if (
+                                        !state.StartedEventEmitted
+                                        && !string.IsNullOrEmpty(state.CallId)
+                                        && !string.IsNullOrEmpty(state.FunctionName)
+                                    )
                                     {
-                                        yield return UnifiedStreamEvent.ToolStarted(state.CallId, state.FunctionName);
+                                        yield return UnifiedStreamEvent.ToolStarted(
+                                            state.CallId,
+                                            state.FunctionName
+                                        );
                                         state.StartedEventEmitted = true;
                                     }
 
@@ -415,7 +478,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                                         if (!string.IsNullOrEmpty(argsChunk))
                                         {
                                             state.ArgumentsBuilder.Append(argsChunk);
-                                            yield return UnifiedStreamEvent.ToolArgs(state.CallId, argsChunk);
+                                            yield return UnifiedStreamEvent.ToolArgs(
+                                                state.CallId,
+                                                argsChunk
+                                            );
                                         }
                                     }
                                 }
@@ -427,25 +493,45 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
                     if (choice.TryGetProperty("finish_reason", out var finishElem))
                     {
                         string? finishReason = finishElem.GetString();
-                        if (string.Equals(finishReason, "tool_calls", StringComparison.OrdinalIgnoreCase))
+                        if (
+                            string.Equals(
+                                finishReason,
+                                "tool_calls",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
                         {
                             foreach (var state in toolCallStates.Values)
                             {
                                 if (state.StartedEventEmitted && !state.CompletedEventEmitted)
                                 {
-                                    yield return UnifiedStreamEvent.ToolDone(state.CallId, state.FunctionName, state.ArgumentsBuilder.ToString());
+                                    yield return UnifiedStreamEvent.ToolDone(
+                                        state.CallId,
+                                        state.FunctionName,
+                                        state.ArgumentsBuilder.ToString()
+                                    );
                                     state.CompletedEventEmitted = true;
                                 }
                             }
                         }
                         // NEED17-06 §6.4：length → 先按现状闭合 ToolDone，再追加 StreamTruncated（含已收 toolCall 数）
-                        else if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
+                        else if (
+                            string.Equals(
+                                finishReason,
+                                "length",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
                         {
                             foreach (var state in toolCallStates.Values)
                             {
                                 if (state.StartedEventEmitted && !state.CompletedEventEmitted)
                                 {
-                                    yield return UnifiedStreamEvent.ToolDone(state.CallId, state.FunctionName, state.ArgumentsBuilder.ToString());
+                                    yield return UnifiedStreamEvent.ToolDone(
+                                        state.CallId,
+                                        state.FunctionName,
+                                        state.ArgumentsBuilder.ToString()
+                                    );
                                     state.CompletedEventEmitted = true;
                                 }
                             }
@@ -461,7 +547,11 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
         {
             if (state.StartedEventEmitted && !state.CompletedEventEmitted)
             {
-                yield return UnifiedStreamEvent.ToolDone(state.CallId, state.FunctionName, state.ArgumentsBuilder.ToString());
+                yield return UnifiedStreamEvent.ToolDone(
+                    state.CallId,
+                    state.FunctionName,
+                    state.ArgumentsBuilder.ToString()
+                );
                 state.CompletedEventEmitted = true;
             }
         }
@@ -481,13 +571,21 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
         try
         {
             using var doc = JsonDocument.Parse(raw);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("error", out var errorElem) &&
-                errorElem.ValueKind == JsonValueKind.Object)
+            if (
+                doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var errorElem)
+                && errorElem.ValueKind == JsonValueKind.Object
+            )
             {
-                string msg = errorElem.TryGetProperty("message", out var m) ? m.GetString() ?? raw : raw;
-                string type = errorElem.TryGetProperty("type", out var t) ? t.GetString() ?? string.Empty : string.Empty;
-                string code = errorElem.TryGetProperty("code", out var c) ? c.GetString() ?? string.Empty : string.Empty;
+                string msg = errorElem.TryGetProperty("message", out var m)
+                    ? m.GetString() ?? raw
+                    : raw;
+                string type = errorElem.TryGetProperty("type", out var t)
+                    ? t.GetString() ?? string.Empty
+                    : string.Empty;
+                string code = errorElem.TryGetProperty("code", out var c)
+                    ? c.GetString() ?? string.Empty
+                    : string.Empty;
 
                 return $"[OpenAI Chat] 上游接口返回 HTTP {statusCode} ({type} {code}): {msg}".Trim();
             }
@@ -502,8 +600,10 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
 
     private static int TryGetInt32(JsonElement parent, string propertyName, int defaultValue = 0)
     {
-        if (parent.ValueKind != JsonValueKind.Object ||
-            !parent.TryGetProperty(propertyName, out var elem))
+        if (
+            parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(propertyName, out var elem)
+        )
         {
             return defaultValue;
         }
@@ -521,21 +621,31 @@ public sealed class ChatCompletionsAdapter : ILlmProtocolAdapter
             _ => defaultValue,
         };
     }
-     /// <summary>tool 块尾随 user 文案：带 callId 归属，单条截断 200 字防 token 翻倍。</summary>
-     internal static string BuildTrailingToolImageText(List<(string CallId, string? Name, string? Text)> refs, int imageCount)
-     {
-         if (refs == null || refs.Count == 0) return $"[附图] 以上工具回包附图共 {imageCount} 张。";
-         var parts = new List<string>();
-         foreach (var (cid, name, text) in refs)
-         {
-             string label = string.IsNullOrWhiteSpace(cid) ? (name ?? "tool") : ((name ?? "tool") + " " + cid.Trim());
-             string snippet = (text ?? string.Empty).Trim().Replace("\r", " ").Replace("\n", " ");
-             if (snippet.Length > 200) snippet = snippet.Substring(0, 200) + "…";
-             parts.Add(string.IsNullOrEmpty(snippet) ? label : label + "：" + snippet);
-             if (string.Join("；", parts).Length > 800) break;
-         }
-         return $"[附图] 以下为上述工具回包附图（共 {imageCount} 张）：{string.Join("；", parts)}";
-     }
+
+    /// <summary>tool 块尾随 user 文案：带 callId 归属，单条截断 200 字防 token 翻倍。</summary>
+    internal static string BuildTrailingToolImageText(
+        List<(string CallId, string? Name, string? Text)> refs,
+        int imageCount
+    )
+    {
+        if (refs == null || refs.Count == 0)
+            return $"[附图] 以上工具回包附图共 {imageCount} 张。";
+        var parts = new List<string>();
+        foreach (var (cid, name, text) in refs)
+        {
+            string label = string.IsNullOrWhiteSpace(cid)
+                ? (name ?? "tool")
+                : ((name ?? "tool") + " " + cid.Trim());
+            string snippet = (text ?? string.Empty).Trim().Replace("\r", " ").Replace("\n", " ");
+            if (snippet.Length > 200)
+                snippet = snippet.Substring(0, 200) + "…";
+            parts.Add(string.IsNullOrEmpty(snippet) ? label : label + "：" + snippet);
+            if (string.Join("；", parts).Length > 800)
+                break;
+        }
+        return $"[附图] 以下为上述工具回包附图（共 {imageCount} 张）：{string.Join("；", parts)}";
+    }
+
     private sealed class PartialToolCallState
     {
         public int Index { get; init; }

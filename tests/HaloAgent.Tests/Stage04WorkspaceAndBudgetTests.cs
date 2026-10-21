@@ -29,7 +29,10 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
     public Stage04WorkspaceAndBudgetTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage04Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage04Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage04Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -37,7 +40,8 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
@@ -72,7 +76,10 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         string pathWithTrailingSlash = projA + "\\";
 
         // 2. 添加 Workspace A
-        WorkspaceInfo wsA = await _service.AddOrUpdateWorkspaceAsync(pathWithTrailingSlash, "项目 Alpha");
+        WorkspaceInfo wsA = await _service.AddOrUpdateWorkspaceAsync(
+            pathWithTrailingSlash,
+            "项目 Alpha"
+        );
         Assert.NotNull(wsA);
         Assert.Equal(Path.GetFullPath(projA).TrimEnd('\\', '/'), wsA.RootPath);
         Assert.False(wsA.RootPath.EndsWith("\\"));
@@ -80,7 +87,10 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         Assert.True(wsA.DirectoryExists);
 
         // 3. 再次添加相同路径（不同大小写/格式），应更新/返回同一个
-        WorkspaceInfo wsA2 = await _service.AddOrUpdateWorkspaceAsync(projA.ToLowerInvariant(), "项目 Alpha 别名");
+        WorkspaceInfo wsA2 = await _service.AddOrUpdateWorkspaceAsync(
+            projA.ToLowerInvariant(),
+            "项目 Alpha 别名"
+        );
         Assert.Equal(wsA.Id, wsA2.Id);
         Assert.Equal(wsA.WorkspaceHash, wsA2.WorkspaceHash);
 
@@ -135,17 +145,19 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         Assert.Equal(16, session.SessionHash.Length);
 
         // 验证 SessionHash 的确定性生成 (workspaceId + ":" + sessionId 的 16 位小写十六进制)
-        string expectedHash = HeaderVariableResolver.ComputeDeterministicHash16(ws.Id + ":" + session.Id);
+        string expectedHash = HeaderVariableResolver.ComputeDeterministicHash16(
+            ws.Id + ":" + session.Id
+        );
         Assert.Equal(expectedHash, session.SessionHash);
 
-         // 2. 追加第一条 User 消息，应自动将默认标题更新为 T1 五字标题（need03-03：第一句话去空格后前 5 字）
-         var userMsg1 = UnifiedChatMessage.User("请帮我实现一个高效的二分查找算法代码");
-         await _service.AppendSessionMessageAsync(ws.Id, session.Id, userMsg1);
- 
-         var updatedSession = await _service.GetSessionAsync(ws.Id, session.Id);
-         Assert.NotNull(updatedSession);
-         Assert.Equal(1, updatedSession!.MessageCount);
-         Assert.Equal("请帮我实现", updatedSession.Title);
+        // 2. 追加第一条 User 消息，应自动将默认标题更新为 T1 五字标题（need03-03：第一句话去空格后前 5 字）
+        var userMsg1 = UnifiedChatMessage.User("请帮我实现一个高效的二分查找算法代码");
+        await _service.AppendSessionMessageAsync(ws.Id, session.Id, userMsg1);
+
+        var updatedSession = await _service.GetSessionAsync(ws.Id, session.Id);
+        Assert.NotNull(updatedSession);
+        Assert.Equal(1, updatedSession!.MessageCount);
+        Assert.Equal("请帮我实现", updatedSession.Title);
 
         // 3. 追加 Assistant 消息
         var assistantMsg = UnifiedChatMessage.Assistant("以下是 C# 实现的二分查找代码：...");
@@ -158,11 +170,13 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         for (int i = 0; i < concurrentCount; i++)
         {
             int index = i;
-            tasks.Add(Task.Run(async () =>
-            {
-                var msg = UnifiedChatMessage.User($"并发测试消息 #{index}");
-                await _service.AppendSessionMessageAsync(ws.Id, session.Id, msg);
-            }));
+            tasks.Add(
+                Task.Run(async () =>
+                {
+                    var msg = UnifiedChatMessage.User($"并发测试消息 #{index}");
+                    await _service.AppendSessionMessageAsync(ws.Id, session.Id, msg);
+                })
+            );
         }
         await Task.WhenAll(tasks);
 
@@ -180,7 +194,10 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         // 验证 meta.json 也正确保持同步
         string metaFile = Path.Combine(sessionDir, "meta.json");
         Assert.True(File.Exists(metaFile));
-        var metaFromDisk = JsonSerializer.Deserialize<SessionMetadata>(await File.ReadAllTextAsync(metaFile), HaloJsonOptions.CompactCamelCase);
+        var metaFromDisk = JsonSerializer.Deserialize<SessionMetadata>(
+            await File.ReadAllTextAsync(metaFile),
+            HaloJsonOptions.CompactCamelCase
+        );
         Assert.NotNull(metaFromDisk);
         Assert.Equal(2 + concurrentCount, metaFromDisk!.MessageCount);
 
@@ -232,7 +249,11 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         var toolResult1 = UnifiedChatMessage.Tool("call_abc1", "['Program.cs', 'App.cs']", "glob");
         toolResult1.InputTokens = 150;
 
-        var toolResult2 = UnifiedChatMessage.Tool("call_abc2", "namespace MyApp { class Program {} }", "read");
+        var toolResult2 = UnifiedChatMessage.Tool(
+            "call_abc2",
+            "namespace MyApp { class Program {} }",
+            "read"
+        );
         toolResult2.InputTokens = 350;
 
         messages.Add(toolAssistant);
@@ -244,18 +265,20 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         latestUser.InputTokens = 150;
         messages.Add(latestUser);
 
-         // 3. 执行原子成对截断构建：设置总预算无法容纳全部历史，仅允许容纳 首锚点 + 最新轮次 + 提示
-         // need04-05 起为纯启发式估算（不消费 InputTokens 快照），本组消息启发式总量约 200 tokens，
-         // 故预算设为 150 tokens 以触发截断（旧 450 按快照口径已不够触发）
-         int limitedBudget = 150;
-         var truncated = _budgetService.BuildWithinBudget(messages, limitedBudget);
+        // 3. 执行原子成对截断构建：设置总预算无法容纳全部历史，仅允许容纳 首锚点 + 最新轮次 + 提示
+        // need04-05 起为纯启发式估算（不消费 InputTokens 快照），本组消息启发式总量约 200 tokens，
+        // 故预算设为 150 tokens 以触发截断（旧 450 按快照口径已不够触发）
+        int limitedBudget = 150;
+        var truncated = _budgetService.BuildWithinBudget(messages, limitedBudget);
 
         // 4. 断言验证
         // (a) 必须保留首个用户锚点
         Assert.Equal("用户原始任务：分析项目代码并修复所有编译错误", truncated[0].Content);
 
         // (b) 必须包含折叠系统提示
-        var noticeMsg = truncated.FirstOrDefault(m => m.Content != null && m.Content.Contains("较早的历史对话已自动折叠省略"));
+        var noticeMsg = truncated.FirstOrDefault(m =>
+            m.Content != null && m.Content.Contains("较早的历史对话已自动折叠省略")
+        );
         Assert.NotNull(noticeMsg);
         Assert.Equal("system", noticeMsg!.Role);
 
@@ -263,7 +286,9 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         Assert.Equal("最后结论：请给出修改补丁", truncated.Last().Content);
 
         // (d) 验证原子性：工具调用组绝不能出现"只保留 tool_calls 没有 tool 结果"或"只有 tool 结果没有 tool_calls"的残缺现象
-        var remainingToolCalls = truncated.Where(m => m.ToolCalls != null && m.ToolCalls.Count > 0).ToList();
+        var remainingToolCalls = truncated
+            .Where(m => m.ToolCalls != null && m.ToolCalls.Count > 0)
+            .ToList();
         var remainingToolResults = truncated.Where(m => m.Role == "tool").ToList();
         if (remainingToolCalls.Count == 0)
         {
@@ -272,23 +297,32 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         else
         {
             // 每一个 tool_call 都应在 tool 角色中找到对应 tool_call_id
-            var callIds = remainingToolCalls.SelectMany(m => m.ToolCalls!).Select(c => c.CallId).ToHashSet();
+            var callIds = remainingToolCalls
+                .SelectMany(m => m.ToolCalls!)
+                .Select(c => c.CallId)
+                .ToHashSet();
             var resCallIds = remainingToolResults.Select(r => r.ToolCallId!).ToHashSet();
             Assert.Subset(callIds, resCallIds);
         }
 
         // 5. 预算状态 DTO 计算校验
-        var model = new ModelConfig { Id = "test-model", MaxContextTokens = 8192, MaxOutputTokens = 2048 };
+        var model = new ModelConfig
+        {
+            Id = "test-model",
+            MaxContextTokens = 8192,
+            MaxOutputTokens = 2048
+        };
         var status = _budgetService.CalculateBudgetStatus(
             model: model,
             messages: messages,
-            sessionHash: "sess_hash_123456");
+            sessionHash: "sess_hash_123456"
+        );
 
         Assert.Equal(8192, status.TotalContextTokens);
         Assert.Equal(2048, status.MaxOutputTokens);
         Assert.Equal(1024, status.SafetyBuffer);
-         Assert.Equal(8192 - 2048 - 1024 - 150, status.AvailableInputTokens); // need05-01：可用 = 总量 - 输出 - 安全 - 占用快照（末条 InputTokens=150）
-         Assert.Equal(150, status.UsedInputTokens); // 占用快照 = 末条 InputTokens（need05-01 覆盖语义）
+        Assert.Equal(8192 - 2048 - 1024 - 150, status.AvailableInputTokens); // need05-01：可用 = 总量 - 输出 - 安全 - 占用快照（末条 InputTokens=150）
+        Assert.Equal(150, status.UsedInputTokens); // 占用快照 = 末条 InputTokens（need05-01 覆盖语义）
         Assert.False(status.IsNearLimit);
     }
 
@@ -305,7 +339,10 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         await _service.AppendSessionMessageAsync(ws.Id, session.Id, msg);
 
         // 2. 准备迁移目标目录
-        string targetDataRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentMigratedTarget_{Guid.NewGuid():N}");
+        string targetDataRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentMigratedTarget_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(targetDataRoot);
 
         try
@@ -315,7 +352,8 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
                 newTargetPath: targetDataRoot,
                 migrateExistingData: true,
                 onProgress: null,
-                ct: CancellationToken.None);
+                ct: CancellationToken.None
+            );
             Assert.True(migrationResult.Success);
             Assert.Equal(targetDataRoot, _storageManager.CurrentDataRoot);
 
@@ -341,9 +379,12 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         {
             if (Directory.Exists(targetDataRoot))
             {
-                try { Directory.Delete(targetDataRoot, recursive: true); } catch { }
+                try
+                {
+                    Directory.Delete(targetDataRoot, recursive: true);
+                }
+                catch { }
             }
         }
     }
 }
-

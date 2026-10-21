@@ -10,7 +10,8 @@
           :type="store.preset === p.key ? 'primary' : 'default'"
           :data-testid="p.testid"
           @click="store.setPreset(p.key)"
-        >{{ p.label }}</n-button>
+          >{{ p.label }}</n-button
+        >
       </n-button-group>
       <n-date-picker
         v-model:value="rangeTs"
@@ -18,7 +19,7 @@
         size="small"
         clearable
         data-testid="usage-custom-range"
-        style="width: 260px;"
+        style="width: 260px"
         @update:value="onCustomRange"
       />
       <n-select
@@ -31,7 +32,7 @@
         placeholder="Provider"
         :options="providerOptions"
         data-testid="usage-provider-select"
-        style="width: 160px;"
+        style="width: 160px"
         @update:value="onScopeChange"
       />
       <n-select
@@ -44,7 +45,7 @@
         placeholder="Model"
         :options="modelOptions"
         data-testid="usage-model-select"
-        style="width: 180px;"
+        style="width: 180px"
         @update:value="onScopeChange"
       />
       <n-select
@@ -55,7 +56,7 @@
         placeholder="来源"
         :options="sourceOptions"
         data-testid="usage-source-select"
-        style="width: 140px;"
+        style="width: 140px"
         @update:value="onScopeChange"
       />
       <n-select
@@ -64,10 +65,12 @@
         placeholder="实测/估算"
         :options="estimatedOptions"
         data-testid="usage-estimated-select"
-        style="width: 110px;"
+        style="width: 110px"
         @update:value="onEstimatedChange"
       />
-      <n-button size="small" type="primary" ghost data-testid="usage-query-btn" :loading="store.loading" @click="store.refresh()">查询</n-button>
+      <n-button size="small" type="primary" ghost data-testid="usage-query-btn" :loading="store.loading" @click="store.refresh()"
+        >查询</n-button
+      >
       <div class="flex items-center gap-1.5 shrink-0 pl-1" data-testid="usage-mask-provider-block">
         <n-switch
           :value="privacy.settings.maskProviderName"
@@ -79,38 +82,44 @@
       </div>
     </div>
 
-    <n-alert v-if="store.error" type="warning" :show-icon="false" style="font-size: 12px;">{{ store.error }}</n-alert>
+    <n-alert v-if="store.error" type="warning" :show-icon="false" style="font-size: 12px">{{ store.error }}</n-alert>
 
     <!-- 瓦片行 -->
     <div class="grid grid-cols-3 gap-2">
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-requests">
         <div class="text-[11px] text-secondary">总请求数</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">{{ fmtInt(store.overview.totalRequests) }}</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums">{{ fmtInt(store.overview.totalRequests) }}</div>
         <div class="text-[11px] text-secondary">所选范围内记录数</div>
       </div>
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-input">
         <div class="text-[11px] text-secondary">总输入</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;" :title="fmtInt(store.overview.sumInput) + ' tokens'">{{ fmtToken(store.overview.sumInput) }}</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums" :title="fmtInt(store.overview.sumInput) + ' tokens'">
+          {{ fmtToken(store.overview.sumInput) }}
+        </div>
         <div class="text-[11px] text-secondary">tokens</div>
       </div>
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-output">
         <div class="text-[11px] text-secondary">总生成</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;" :title="fmtInt(store.overview.sumOutput) + ' tokens'">{{ fmtToken(store.overview.sumOutput) }}</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums" :title="fmtInt(store.overview.sumOutput) + ' tokens'">
+          {{ fmtToken(store.overview.sumOutput) }}
+        </div>
         <div class="text-[11px] text-secondary">tokens</div>
       </div>
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-cached">
         <div class="text-[11px] text-secondary">命中缓存</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;" :title="fmtInt(store.overview.sumCached) + ' tokens'">{{ fmtToken(store.overview.sumCached) }}</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums" :title="fmtInt(store.overview.sumCached) + ' tokens'">
+          {{ fmtToken(store.overview.sumCached) }}
+        </div>
         <div class="text-[11px] text-secondary">tokens</div>
       </div>
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-hitrate">
         <div class="text-[11px] text-secondary">综合命中率</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">{{ (store.overview.hitRate * 100).toFixed(1) }}%</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums">{{ (store.overview.hitRate * 100).toFixed(1) }}%</div>
         <div class="text-[11px] text-secondary">Σcached/Σinput</div>
       </div>
       <div class="rounded border border-subtle p-2" data-testid="usage-tile-models">
         <div class="text-[11px] text-secondary">活跃模型</div>
-        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">{{ store.overview.activeModels }}</div>
+        <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums">{{ store.overview.activeModels }}</div>
         <div class="text-[11px] text-secondary">provider/model 去重数</div>
       </div>
     </div>
@@ -125,7 +134,7 @@
           <n-radio-button value="total">总量</n-radio-button>
         </n-radio-group>
       </div>
-      <div ref="stackedEl" data-testid="usage-chart-stacked" style="width: 100%; height: 260px;"></div>
+      <div ref="stackedEl" data-testid="usage-chart-stacked" style="width: 100%; height: 260px"></div>
       <n-empty v-if="!hasTrendData" size="small" description="暂无数据" />
     </div>
 
@@ -133,11 +142,11 @@
     <div class="grid grid-cols-2 gap-2">
       <div class="rounded border border-subtle p-2">
         <div class="text-[13px] font-medium mb-1">命中率趋势</div>
-        <div ref="hitEl" data-testid="usage-chart-hit" style="width: 100%; height: 200px;"></div>
+        <div ref="hitEl" data-testid="usage-chart-hit" style="width: 100%; height: 200px"></div>
       </div>
       <div class="rounded border border-subtle p-2">
         <div class="text-[13px] font-medium mb-1">Provider 占比</div>
-        <div ref="pieEl" data-testid="usage-chart-provider" style="width: 100%; height: 200px;"></div>
+        <div ref="pieEl" data-testid="usage-chart-provider" style="width: 100%; height: 200px"></div>
       </div>
     </div>
 
@@ -173,7 +182,10 @@
                   <span class="font-mono">{{ (r.hitRate * 100).toFixed(1) }}%</span>
                 </span>
               </td>
-              <td class="py-1 pr-2 font-mono text-secondary">{{ sourceLabel(r.source) }}<span v-if="r.estimated === 1" class="ml-1 rounded border border-subtle px-1" title="无网关实测，本地估算">估算</span></td>
+              <td class="py-1 pr-2 font-mono text-secondary">
+                {{ sourceLabel(r.source)
+                }}<span v-if="r.estimated === 1" class="ml-1 rounded border border-subtle px-1" title="无网关实测，本地估算">估算</span>
+              </td>
               <td class="py-1 font-mono text-secondary">{{ r.status }}</td>
             </tr>
             <tr v-if="!store.pageData.rows.length">
@@ -195,7 +207,9 @@
           @update:page-size="onPageSize"
         />
       </div>
-      <div v-if="dbStatus" class="mt-1 text-[11px] text-secondary font-mono">库：{{ dbStatus.dbPath }} · {{ dbStatus.recordCount }} 条 · {{ dbSize }}</div>
+      <div v-if="dbStatus" class="mt-1 text-[11px] text-secondary font-mono">
+        库：{{ dbStatus.dbPath }} · {{ dbStatus.recordCount }} 条 · {{ dbSize }}
+      </div>
     </div>
   </div>
 </template>
@@ -209,6 +223,7 @@ import { GridComponent, TooltipComponent, LegendComponent, DatasetComponent } fr
 import { CanvasRenderer } from 'echarts/renderers';
 import { useUsageAnalyticsStore, USAGE_PRESETS } from '@/stores/usageAnalyticsStore';
 import { usePrivacyStore } from '@/stores/privacyStore';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 import { getHostBridge, type UsageDbStatus } from '@/bridge/hostBridge';
 import { formatTokenShort, formatSmartBytesShort } from '@/utils/formatSmartBytes';
 import { displayProviderName, displayProviderModel, displayProviderNameByName } from '@/utils/maskProvider';
@@ -217,6 +232,8 @@ echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, Leg
 
 const store = useUsageAnalyticsStore();
 const privacy = usePrivacyStore();
+const appearance = useAppearanceStore();
+const isDark = computed(() => appearance.themeMode === 'dark');
 const masked = computed(() => privacy.settings.maskProviderName);
 const stackedEl = ref<HTMLElement | null>(null);
 const hitEl = ref<HTMLElement | null>(null);
@@ -227,10 +244,22 @@ let pieChart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 const dbStatus = ref<UsageDbStatus | null>(null);
 
-const providerOptions = computed(() => store.options.providers.map((p) => ({ label: displayProviderName(p.id, p.name, masked.value), value: p.id, realName: p.name })));
-const modelOptions = computed(() => store.modelOptions.map((m) => ({ label: displayProviderModel(m.providerId, m.providerName, m.modelId, masked.value), value: m.key, realName: m.label })));
+const providerOptions = computed(() =>
+  store.options.providers.map((p) => ({ label: displayProviderName(p.id, p.name, masked.value), value: p.id, realName: p.name }))
+);
+const modelOptions = computed(() =>
+  store.modelOptions.map((m) => ({
+    label: displayProviderModel(m.providerId, m.providerName, m.modelId, masked.value),
+    value: m.key,
+    realName: m.label,
+  }))
+);
 const sourceOptions = computed(() => (store.options.sources ?? []).map((s) => ({ label: sourceLabel(s.id), value: s.id })));
-const estimatedOptions = [{ label: '全部', value: 'all' }, { label: '仅实测', value: 'measured' }, { label: '仅估算', value: 'estimated' }];
+const estimatedOptions = [
+  { label: '全部', value: 'all' },
+  { label: '仅实测', value: 'measured' },
+  { label: '仅估算', value: 'estimated' },
+];
 const estimatedFilter = ref<'all' | 'measured' | 'estimated'>('all');
 const hasTrendData = computed(() => store.trend.dates.length > 0 && store.trend.perModel.length > 0);
 function sourceLabel(s: string): string {
@@ -274,7 +303,7 @@ function displayTitle(realName: string): string {
 }
 function onMaskProviderChange(val: boolean): void {
   privacy.setMaskProviderName(val);
-  renderAll();
+  queueRenderAll();
 }
 function fmtInt(n: number): string {
   const v = Number.isFinite(n) ? Math.floor(n) : 0;
@@ -299,7 +328,9 @@ let scopeTimer: number | null = null;
 function onScopeChange(): void {
   store.page = 1;
   if (scopeTimer) window.clearTimeout(scopeTimer);
-  scopeTimer = window.setTimeout(() => { void store.refresh().then(() => renderAll()); }, 300);
+  scopeTimer = window.setTimeout(() => {
+    void store.refresh().then(() => queueRenderAll());
+  }, 300);
 }
 function onPageSize(): void {
   store.page = 1;
@@ -316,12 +347,33 @@ function onCustomRange(v: [number, number] | null): void {
   store.customRange = [fmt(v[0]), fmt(v[1])];
   store.preset = 'custom';
   store.page = 1;
-  void store.refresh().then(() => renderAll());
+  void store.refresh().then(() => queueRenderAll());
 }
 
 const FONT = '"Microsoft YaHei", sans-serif';
+// 与 styles/main.css :root / html.light 同源（暗黑默认）：
+// 暗：主字 #e6edf3 / 次字 #8b949e / 分隔 #283241；亮：主字 #0f172a / 次字 #64748b / 分隔 #e2e8f0
+function chartFg(): string {
+  return isDark.value ? '#e6edf3' : '#0f172a';
+}
+function chartMuted(): string {
+  return isDark.value ? '#8b949e' : '#64748b';
+}
+function chartSplit(): string {
+  return isDark.value ? '#283241' : '#e2e8f0';
+}
+// 暗亮都可辨的堆叠色板（与 naiveTheme 主色系对齐，暗底不发灰）
+const STACK_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#38bdf8', '#f43f5e', '#a3e635', '#fb923c'];
 function baseText(): Record<string, unknown> {
-  return { fontFamily: FONT };
+  return { fontFamily: FONT, color: chartFg() };
+}
+function baseAxisLabel(fontSize: number): Record<string, unknown> {
+  return { fontFamily: FONT, fontSize, color: chartMuted() };
+}
+function tooltipBox(): Record<string, unknown> {
+  return isDark.value
+    ? { backgroundColor: '#212a36', borderColor: '#283241', textStyle: { color: '#e6edf3' } }
+    : { backgroundColor: '#ffffff', borderColor: '#e2e8f0', textStyle: { color: '#0f172a' } };
 }
 
 function renderStacked(): void {
@@ -339,9 +391,12 @@ function renderStacked(): void {
   const pointCount = dates.length * Math.max(1, series.length);
   stackedChart.setOption({
     backgroundColor: 'transparent',
+    color: STACK_COLORS,
     textStyle: baseText(),
     tooltip: {
       trigger: 'axis',
+      ...tooltipBox(),
+      axisPointer: { lineStyle: { color: chartSplit() } },
       formatter: (params: unknown): string => {
         const arr = params as Array<{ seriesName: string; value: number; color: string }>;
         if (!arr || !arr.length) return '';
@@ -360,15 +415,28 @@ function renderStacked(): void {
         return html;
       },
     },
-    legend: { type: 'scroll', textStyle: baseText() },
+    legend: {
+      type: 'scroll',
+      textStyle: baseText(),
+      pageTextStyle: { color: chartMuted() },
+      pageIconColor: chartMuted(),
+      pageIconInactiveColor: chartSplit(),
+    },
     grid: { left: 48, right: 12, top: 36, bottom: 24 },
-    xAxis: { type: 'category', data: dates, axisLabel: { fontFamily: FONT, fontSize: 11 } },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: baseAxisLabel(11),
+      axisLine: { lineStyle: { color: chartSplit() } },
+      axisTick: { lineStyle: { color: chartSplit() } },
+    },
     yAxis: {
       type: 'value',
       axisLabel: {
-        fontFamily: FONT, fontSize: 11,
+        ...baseAxisLabel(11),
         formatter: (v: number): string => formatTokenShort(v),
       },
+      splitLine: { lineStyle: { color: chartSplit() } },
     },
     series,
     animation: pointCount < 500,
@@ -383,6 +451,8 @@ function renderHit(): void {
     textStyle: baseText(),
     tooltip: {
       trigger: 'axis',
+      ...tooltipBox(),
+      axisPointer: { lineStyle: { color: chartSplit() } },
       formatter: (params: unknown): string => {
         const arr = params as Array<{ value: number; dataIndex: number }>;
         if (!arr || !arr.length) return '';
@@ -393,16 +463,37 @@ function renderHit(): void {
       },
     },
     grid: { left: 40, right: 12, top: 12, bottom: 24 },
-    xAxis: { type: 'category', data: store.trend.dates, axisLabel: { fontFamily: FONT, fontSize: 10 } },
-    yAxis: {
-      type: 'value', min: 0, max: 1,
-      axisLabel: { fontFamily: FONT, fontSize: 10, formatter: (v: number): string => Math.round(v * 100) + '%' },
+    xAxis: {
+      type: 'category',
+      data: store.trend.dates,
+      axisLabel: baseAxisLabel(10),
+      axisLine: { lineStyle: { color: chartSplit() } },
+      axisTick: { lineStyle: { color: chartSplit() } },
     },
-    series: [{
-      name: '命中率', type: 'line', data: store.trend.hitRates,
-      markLine: { data: [{ type: 'average', name: '平均' }] },
-      lineStyle: { color: '#10b981' }, itemStyle: { color: '#10b981' },
-    }],
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 1,
+      axisLabel: {
+        ...baseAxisLabel(10),
+        formatter: (v: number): string => Math.round(v * 100) + '%',
+      },
+      splitLine: { lineStyle: { color: chartSplit() } },
+    },
+    series: [
+      {
+        name: '命中率',
+        type: 'line',
+        data: store.trend.hitRates,
+        markLine: {
+          data: [{ type: 'average', name: '平均' }],
+          label: { ...baseAxisLabel(10) },
+          lineStyle: { color: chartMuted() },
+        },
+        lineStyle: { color: '#10b981' },
+        itemStyle: { color: '#10b981' },
+      },
+    ],
     animation: store.trend.dates.length < 500,
   });
 }
@@ -413,21 +504,28 @@ function renderPie(): void {
   const maskOn = masked.value;
   pieChart.setOption({
     backgroundColor: 'transparent',
+    color: STACK_COLORS,
     textStyle: baseText(),
     tooltip: {
       trigger: 'item',
+      ...tooltipBox(),
       formatter: (p: unknown): string => {
         const o = p as { name: string; value: number; percent: number };
         return o.name + '<br/>' + Number(o.value).toLocaleString('en-US') + ' tokens (' + Number(o.percent).toFixed(1) + '%)';
       },
     },
-    legend: { bottom: 0, textStyle: baseText() },
-    series: [{
-      type: 'pie', radius: ['50%', '70%'],
-      data: store.share.map((s) => ({ name: displayProviderNameByName(s.name, maskOn), value: s.value })),
-      emphasis: { focus: 'series' },
-      label: { fontFamily: FONT, fontSize: 11, formatter: '{b}\n{d}%' },
-    }],
+    // Provider占比：无图例，仅靠饼图label+labelLine斜线标识
+    series: [
+      {
+        type: 'pie',
+        center: ['50%', '46%'],
+        radius: ['52%', '72%'],
+        data: store.share.map((s) => ({ name: displayProviderNameByName(s.name, maskOn), value: s.value })),
+        emphasis: { focus: 'series' },
+        label: { ...baseAxisLabel(11), formatter: '{b}\n{d}%' },
+        labelLine: { length: 12, length2: 8, lineStyle: { color: chartMuted() } },
+      },
+    ],
     animation: store.share.length < 500,
   });
 }
@@ -437,11 +535,41 @@ function renderAll(): void {
     renderStacked();
     renderHit();
     renderPie();
-  } catch { /* 图表渲染永不阻断面板 */ }
+  } catch {
+    /* 图表渲染永不阻断面板 */
+  }
 }
 
-watch(() => [store.trend, store.share, store.metric], () => { renderAll(); }, { deep: true });
-watch(masked, () => { renderAll(); });
+// 抽屉动画/连续触发时节流，避免 resize 风暴抖动
+let renderQueued = false;
+function queueRenderAll(): void {
+  if (renderQueued) return;
+  renderQueued = true;
+  const run = (): void => {
+    renderQueued = false;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    renderAll();
+  };
+  if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(() => run());
+  else window.setTimeout(() => run(), 0);
+}
+
+watch(
+  () => [store.trend, store.share, store.metric],
+  () => {
+    renderAll();
+  },
+  { deep: true }
+);
+watch(masked, () => {
+  renderAll();
+});
+watch(
+  () => appearance.themeMode,
+  () => {
+    renderAll();
+  }
+);
 
 onMounted(async () => {
   privacy.ensureLoaded();
@@ -450,28 +578,59 @@ onMounted(async () => {
   try {
     const res = await getHostBridge().getUsageDbStatus();
     if (res.ok && res.data) dbStatus.value = res.data;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   await nextTick();
   renderAll();
   try {
+    let resizeQueued = false;
     ro = new ResizeObserver(() => {
-      try {
-        stackedChart?.resize();
-        hitChart?.resize();
-        pieChart?.resize();
-      } catch { /* ignore */ }
+      if (resizeQueued) return;
+      resizeQueued = true;
+      const run = (): void => {
+        resizeQueued = false;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        try {
+          stackedChart?.resize();
+          hitChart?.resize();
+          pieChart?.resize();
+        } catch {
+          /* ignore */
+        }
+      };
+      if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(() => run());
+      else window.setTimeout(() => run(), 0);
     });
     if (stackedEl.value) ro.observe(stackedEl.value);
     if (hitEl.value) ro.observe(hitEl.value);
     if (pieEl.value) ro.observe(pieEl.value);
-  } catch { /* observer 不可用则跳过 */ }
+  } catch {
+    /* observer 不可用则跳过 */
+  }
 });
 
 onBeforeUnmount(() => {
-  try { ro?.disconnect(); } catch { /* ignore */ }
-  try { stackedChart?.dispose(); } catch { /* ignore */ }
-  try { hitChart?.dispose(); } catch { /* ignore */ }
-  try { pieChart?.dispose(); } catch { /* ignore */ }
+  try {
+    ro?.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    stackedChart?.dispose();
+  } catch {
+    /* ignore */
+  }
+  try {
+    hitChart?.dispose();
+  } catch {
+    /* ignore */
+  }
+  try {
+    pieChart?.dispose();
+  } catch {
+    /* ignore */
+  }
   stackedChart = null;
   hitChart = null;
   pieChart = null;

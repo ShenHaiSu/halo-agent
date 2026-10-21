@@ -21,7 +21,8 @@ public sealed class CustomMenuHandler : IContextMenuHandler
         IBrowser browser,
         IFrame frame,
         IContextMenuParams parameters,
-        IMenuModel model)
+        IMenuModel model
+    )
     {
         model.Clear();
 
@@ -57,7 +58,8 @@ public sealed class CustomMenuHandler : IContextMenuHandler
         IFrame frame,
         IContextMenuParams parameters,
         CefMenuCommand commandId,
-        CefEventFlags eventFlags)
+        CefEventFlags eventFlags
+    )
     {
         if (commandId == ShowDevToolsCommandId)
         {
@@ -68,9 +70,11 @@ public sealed class CustomMenuHandler : IContextMenuHandler
         return false;
     }
 
-    public void OnContextMenuDismissed(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame)
-    {
-    }
+    public void OnContextMenuDismissed(
+        IWebBrowser chromiumWebBrowser,
+        IBrowser browser,
+        IFrame frame
+    ) { }
 
     public bool RunContextMenu(
         IWebBrowser chromiumWebBrowser,
@@ -78,7 +82,8 @@ public sealed class CustomMenuHandler : IContextMenuHandler
         IFrame frame,
         IContextMenuParams parameters,
         IMenuModel model,
-        IRunContextMenuCallback callback)
+        IRunContextMenuCallback callback
+    )
     {
         return false;
     }

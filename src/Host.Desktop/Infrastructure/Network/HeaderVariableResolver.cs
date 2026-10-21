@@ -26,7 +26,8 @@ public sealed record HeaderResolutionContext(
 /// </summary>
 public static class HeaderVariableResolver
 {
-    private static readonly Regex VariablePattern = new(@"\$\{([a-zA-Z0-9_-]+)\}", RegexOptions.Compiled);
+    private static readonly Regex VariablePattern =
+        new(@"\$\{([a-zA-Z0-9_-]+)\}", RegexOptions.Compiled);
 
     /// <summary>
     /// 计算确定性 16 位小写 Hex SHA-256 哈希值（保证同一输入始终生成完全相同的 16 位小写十六进制哈希）
@@ -42,8 +43,12 @@ public static class HeaderVariableResolver
     /// </summary>
     public static string ComputeSessionHash(string workspaceId, string sessionId)
     {
-        string normalizedWorkspaceId = string.IsNullOrWhiteSpace(workspaceId) ? "default-workspace" : workspaceId.Trim();
-        string normalizedSessionId = string.IsNullOrWhiteSpace(sessionId) ? "default-session" : sessionId.Trim();
+        string normalizedWorkspaceId = string.IsNullOrWhiteSpace(workspaceId)
+            ? "default-workspace"
+            : workspaceId.Trim();
+        string normalizedSessionId = string.IsNullOrWhiteSpace(sessionId)
+            ? "default-session"
+            : sessionId.Trim();
         return ComputeDeterministicHash16($"{normalizedWorkspaceId}:{normalizedSessionId}");
     }
 
@@ -57,13 +62,17 @@ public static class HeaderVariableResolver
         string? providerName = null,
         string? modelId = null,
         string? requestId = null,
-        string? workspaceId = null)
+        string? workspaceId = null
+    )
     {
         string resolvedWorkspacePath = string.IsNullOrWhiteSpace(workspacePath)
             ? Environment.CurrentDirectory
             : workspacePath.Trim();
 
-        string normalizedPathForHash = resolvedWorkspacePath.Replace('/', '\\').TrimEnd('\\').ToLowerInvariant();
+        string normalizedPathForHash = resolvedWorkspacePath
+            .Replace('/', '\\')
+            .TrimEnd('\\')
+            .ToLowerInvariant();
         string resolvedWorkspaceId = !string.IsNullOrWhiteSpace(workspaceId)
             ? workspaceId.Trim()
             : ComputeDeterministicHash16(normalizedPathForHash);
@@ -86,10 +95,16 @@ public static class HeaderVariableResolver
             WorkspacePath: resolvedWorkspacePath,
             SessionId: resolvedSessionId,
             SessionHash: sessionHash,
-            ProviderId: string.IsNullOrWhiteSpace(providerId) ? "provider_default" : providerId.Trim(),
-            ProviderName: string.IsNullOrWhiteSpace(providerName) ? "DefaultProvider" : providerName.Trim(),
+            ProviderId: string.IsNullOrWhiteSpace(providerId)
+                ? "provider_default"
+                : providerId.Trim(),
+            ProviderName: string.IsNullOrWhiteSpace(providerName)
+                ? "DefaultProvider"
+                : providerName.Trim(),
             ModelId: string.IsNullOrWhiteSpace(modelId) ? "gpt-4o" : modelId.Trim(),
-            RequestId: string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId.Trim()
+            RequestId: string.IsNullOrWhiteSpace(requestId)
+                ? Guid.NewGuid().ToString("N")
+                : requestId.Trim()
         );
     }
 
@@ -103,29 +118,38 @@ public static class HeaderVariableResolver
             return template ?? string.Empty;
         }
 
-        return VariablePattern.Replace(template, match =>
-        {
-            string varName = match.Groups[1].Value.ToLowerInvariant();
-            string resolvedSessionHash = !string.IsNullOrWhiteSpace(ctx.SessionHash)
-                ? ctx.SessionHash
-                : ComputeSessionHash(ctx.WorkspaceId, ctx.SessionId);
-
-            return varName switch
+        return VariablePattern.Replace(
+            template,
+            match =>
             {
-                "session-hash" => resolvedSessionHash,
-                "session-id" => ctx.SessionId,
-                "workspace-hash" => ComputeDeterministicHash16((ctx.WorkspacePath ?? string.Empty).Replace('/', '\\').TrimEnd('\\').ToLowerInvariant()),
-                "workspace-name" => Uri.EscapeDataString(ctx.WorkspaceName ?? string.Empty),
-                "model-id" => ctx.ModelId ?? string.Empty,
-                "provider-id" => Uri.EscapeDataString(ctx.ProviderId ?? string.Empty),
-                "provider-name" => Uri.EscapeDataString(ctx.ProviderName ?? string.Empty),
-                "request-id" or "req-id" => ctx.RequestId,
-                "timestamp" => DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
-                "timestamp-ms" => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
-                "os-version" => Uri.EscapeDataString(Environment.OSVersion.VersionString),
-                _ => match.Value // 未知变量保持原样，不破坏用户输入
-            };
-        });
+                string varName = match.Groups[1].Value.ToLowerInvariant();
+                string resolvedSessionHash = !string.IsNullOrWhiteSpace(ctx.SessionHash)
+                    ? ctx.SessionHash
+                    : ComputeSessionHash(ctx.WorkspaceId, ctx.SessionId);
+
+                return varName switch
+                {
+                    "session-hash" => resolvedSessionHash,
+                    "session-id" => ctx.SessionId,
+                    "workspace-hash"
+                        => ComputeDeterministicHash16(
+                            (ctx.WorkspacePath ?? string.Empty)
+                                .Replace('/', '\\')
+                                .TrimEnd('\\')
+                                .ToLowerInvariant()
+                        ),
+                    "workspace-name" => Uri.EscapeDataString(ctx.WorkspaceName ?? string.Empty),
+                    "model-id" => ctx.ModelId ?? string.Empty,
+                    "provider-id" => Uri.EscapeDataString(ctx.ProviderId ?? string.Empty),
+                    "provider-name" => Uri.EscapeDataString(ctx.ProviderName ?? string.Empty),
+                    "request-id" or "req-id" => ctx.RequestId,
+                    "timestamp" => DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                    "timestamp-ms" => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
+                    "os-version" => Uri.EscapeDataString(Environment.OSVersion.VersionString),
+                    _ => match.Value // 未知变量保持原样，不破坏用户输入
+                };
+            }
+        );
     }
 
     /// <summary>
@@ -134,11 +158,17 @@ public static class HeaderVariableResolver
     public static Dictionary<string, string> ApplyCustomHeaders(
         HttpRequestMessage request,
         ProviderConfig provider,
-        HeaderResolutionContext ctx)
+        HeaderResolutionContext ctx
+    )
     {
         var applied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        if (provider == null || !provider.EnableCustomHeaders || provider.CustomHeaders == null || provider.CustomHeaders.Count == 0)
+        if (
+            provider == null
+            || !provider.EnableCustomHeaders
+            || provider.CustomHeaders == null
+            || provider.CustomHeaders.Count == 0
+        )
         {
             return applied;
         }
@@ -152,9 +182,11 @@ public static class HeaderVariableResolver
 
             string headerName = entry.Key.Trim();
             // 保护核心 HTTP 协议头不被误覆盖导致底层异常
-            if (headerName.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
-                headerName.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
-                headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase))
+            if (
+                headerName.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
+                || headerName.Equals("Host", StringComparison.OrdinalIgnoreCase)
+                || headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 continue;
             }

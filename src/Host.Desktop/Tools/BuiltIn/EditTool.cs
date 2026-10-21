@@ -1,6 +1,6 @@
- using Host.Desktop.Tools.Validation;
- using System.Diagnostics;
- using System.Text.Json;
+using System.Diagnostics;
+using System.Text.Json;
+using Host.Desktop.Tools.Validation;
 
 namespace Host.Desktop.Tools.BuiltIn;
 
@@ -17,33 +17,49 @@ public sealed class EditTool : IToolHandler
     public string Name => "edit";
 
     public string Description =>
-        "DEPRECATED: prefer edit_file/edit_lines. " +
-        "Unified entry; prefer this over edit_file/edit_lines for new code. " +
-        "mode=text edits by string anchor; mode=lines edits by 1-based line range. " +
-        "Example text: {\"file_path\":\"src/a.ts\",\"mode\":\"text\",\"old_string\":\"...\",\"new_string\":\"...\"} " +
-        "Example lines: {\"file_path\":\"src/a.ts\",\"mode\":\"lines\",\"offset\":10,\"limit\":3,\"new_text\":\"...\"}";
+        "DEPRECATED: prefer edit_file/edit_lines. "
+        + "Unified entry; prefer this over edit_file/edit_lines for new code. "
+        + "mode=text edits by string anchor; mode=lines edits by 1-based line range. "
+        + "Example text: {\"file_path\":\"src/a.ts\",\"mode\":\"text\",\"old_string\":\"...\",\"new_string\":\"...\"} "
+        + "Example lines: {\"file_path\":\"src/a.ts\",\"mode\":\"lines\",\"offset\":10,\"limit\":3,\"new_text\":\"...\"}";
 
     public ToolDefinition GetDefinition()
     {
-         var def = new ToolDefinition(Name, Description,
-             new ToolSchemaBuilder()
-                 .AddString("file_path", "Target file path.", required: true)
-                 .AddString("mode", "text=string anchor (edit_file engine); lines=line range (edit_lines engine).", required: true, enumValues: new[] { "text", "lines" })
-                 .AddString("old_string", "Required for mode=text.")
-                 .AddString("new_string", "Required for mode=text.")
-                 .AddBoolean("replace_all", "Only for mode=text.")
-                 .AddString("match_mode", "Only for mode=text.", enumValues: new[] { "exact", "normalized", "regex" })
-                 .AddInteger("offset", "Required for mode=lines (1-based).")
-                 .AddInteger("limit", "Required for mode=lines (0=insert).")
-                 .AddString("new_text", "Required for mode=lines.")
-                 .AddBoolean("dry_run", "Preview only.")
-                 .AddString("expected_hash", "Optional concurrency guard.")
-                 .Build());
+        var def = new ToolDefinition(
+            Name,
+            Description,
+            new ToolSchemaBuilder()
+                .AddString("file_path", "Target file path.", required: true)
+                .AddString(
+                    "mode",
+                    "text=string anchor (edit_file engine); lines=line range (edit_lines engine).",
+                    required: true,
+                    enumValues: new[] { "text", "lines" }
+                )
+                .AddString("old_string", "Required for mode=text.")
+                .AddString("new_string", "Required for mode=text.")
+                .AddBoolean("replace_all", "Only for mode=text.")
+                .AddString(
+                    "match_mode",
+                    "Only for mode=text.",
+                    enumValues: new[] { "exact", "normalized", "regex" }
+                )
+                .AddInteger("offset", "Required for mode=lines (1-based).")
+                .AddInteger("limit", "Required for mode=lines (0=insert).")
+                .AddString("new_text", "Required for mode=lines.")
+                .AddBoolean("dry_run", "Preview only.")
+                .AddString("expected_hash", "Optional concurrency guard.")
+                .Build()
+        );
         def.Exposure = ToolExposure.Hidden;
         return def;
     }
 
-    public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         string mode = "text";
@@ -59,9 +75,9 @@ public sealed class EditTool : IToolHandler
         }
         catch (JsonException ex)
         {
-            return Task.FromResult(ToolResult.Fail(
-                $"参数 JSON 解析失败：{ex.Message}。",
-                durationMs: sw.ElapsedMilliseconds));
+            return Task.FromResult(
+                ToolResult.Fail($"参数 JSON 解析失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+            );
         }
         finally
         {
@@ -72,17 +88,24 @@ public sealed class EditTool : IToolHandler
         {
             // 将 mode 剥离后转调 edit_lines（其余参数名与 edit_lines 一致）
             string forwarded = ForwardWithoutMode(call.ArgumentsJson);
-            return _lines.ExecuteAsync(new ToolCallDto(call.Id, "edit_lines", forwarded), context, ct);
+            return _lines.ExecuteAsync(
+                new ToolCallDto(call.Id, "edit_lines", forwarded),
+                context,
+                ct
+            );
         }
         else if (mode == "text")
         {
             string forwarded = ForwardWithoutMode(call.ArgumentsJson);
-            return _text.ExecuteAsync(new ToolCallDto(call.Id, "edit_file", forwarded), context, ct);
+            return _text.ExecuteAsync(
+                new ToolCallDto(call.Id, "edit_file", forwarded),
+                context,
+                ct
+            );
         }
         else
         {
-            return Task.FromResult(ToolResult.Fail(
-                $"mode 取值非法：'{mode}'。可选值：text | lines。"));
+            return Task.FromResult(ToolResult.Fail($"mode 取值非法：'{mode}'。可选值：text | lines。"));
         }
     }
 

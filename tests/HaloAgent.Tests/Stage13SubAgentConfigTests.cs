@@ -23,14 +23,18 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     public Stage13SubAgentConfigTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage13Cfg_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage13CfgBoot_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage13CfgBoot_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
         string bootstrapFile = Path.Combine(_bootstrapRoot, "bootstrap.json");
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _agentService = new AgentConfigService(_storageManager);
     }
 
@@ -38,8 +42,10 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -47,8 +53,10 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     [Fact(DisplayName = "S13: 老 agent.json 无 7 字段回默认无横幅")]
     public void SubDefaults_OldFileCompatible()
     {
-        File.WriteAllText(_agentService.AgentConfigFilePath,
-            "{\"version\":1,\"execDefaultTimeoutMs\":30000,\"execMaxTimeoutMs\":300000,\"maxIterations\":25,\"scope\":\"global\"}");
+        File.WriteAllText(
+            _agentService.AgentConfigFilePath,
+            "{\"version\":1,\"execDefaultTimeoutMs\":30000,\"execMaxTimeoutMs\":300000,\"maxIterations\":25,\"scope\":\"global\"}"
+        );
         var (doc, isDefault, fallback) = _agentService.LoadWithMeta();
         Assert.True(doc.SubAgentEnabled);
         Assert.Equal(3, doc.SubMaxParallel);
@@ -67,13 +75,22 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     {
         foreach (int bad in new[] { 0, 9 })
         {
-            var ex = Assert.Throws<AgentConfigValidationException>(() =>
-                _agentService.SaveAgentConfig(new AgentConfigDocument
-                {
-                    ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25,
-                    SubAgentEnabled = true, SubMaxParallel = bad, SubMaxIterations = 15,
-                    SubAllowExecCommand = true, SubAllowFileWrite = true,
-                }));
+            var ex = Assert.Throws<AgentConfigValidationException>(
+                () =>
+                    _agentService.SaveAgentConfig(
+                        new AgentConfigDocument
+                        {
+                            ExecDefaultTimeoutMs = 30000,
+                            ExecMaxTimeoutMs = 300000,
+                            MaxIterations = 25,
+                            SubAgentEnabled = true,
+                            SubMaxParallel = bad,
+                            SubMaxIterations = 15,
+                            SubAllowExecCommand = true,
+                            SubAllowFileWrite = true,
+                        }
+                    )
+            );
             Assert.Equal("subMaxParallel", ex.Field);
         }
     }
@@ -83,13 +100,22 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     {
         foreach (int bad in new[] { 0, 101 })
         {
-            var ex = Assert.Throws<AgentConfigValidationException>(() =>
-                _agentService.SaveAgentConfig(new AgentConfigDocument
-                {
-                    ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25,
-                    SubAgentEnabled = true, SubMaxParallel = 3, SubMaxIterations = bad,
-                    SubAllowExecCommand = true, SubAllowFileWrite = true,
-                }));
+            var ex = Assert.Throws<AgentConfigValidationException>(
+                () =>
+                    _agentService.SaveAgentConfig(
+                        new AgentConfigDocument
+                        {
+                            ExecDefaultTimeoutMs = 30000,
+                            ExecMaxTimeoutMs = 300000,
+                            MaxIterations = 25,
+                            SubAgentEnabled = true,
+                            SubMaxParallel = 3,
+                            SubMaxIterations = bad,
+                            SubAllowExecCommand = true,
+                            SubAllowFileWrite = true,
+                        }
+                    )
+            );
             Assert.Equal("subMaxIterations", ex.Field);
         }
     }
@@ -97,11 +123,15 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     [Fact(DisplayName = "S13: subAllowAskUser=true 保存后读回 false")]
     public void SubAsk_LockedFalse()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument
-        {
-            ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25,
-            SubAllowAskUser = true,
-        });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 30000,
+                ExecMaxTimeoutMs = 300000,
+                MaxIterations = 25,
+                SubAllowAskUser = true,
+            }
+        );
         var (doc, _, _) = _agentService.LoadWithMeta();
         Assert.False(doc.SubAllowAskUser);
     }
@@ -109,13 +139,21 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     [Fact(DisplayName = "S13: 按项恢复只回该组")]
     public void SubReset_Matrix()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument
-        {
-            ExecDefaultTimeoutMs = 30000, ExecMaxTimeoutMs = 300000, MaxIterations = 25,
-            SubAgentEnabled = false, SubMaxParallel = 8, SubMaxIterations = 50,
-            SubAllowExecCommand = false, SubAllowFileWrite = false,
-            SubAllowSkillWrite = true, SubAllowMemoryWrite = true,
-        });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 30000,
+                ExecMaxTimeoutMs = 300000,
+                MaxIterations = 25,
+                SubAgentEnabled = false,
+                SubMaxParallel = 8,
+                SubMaxIterations = 50,
+                SubAllowExecCommand = false,
+                SubAllowFileWrite = false,
+                SubAllowSkillWrite = true,
+                SubAllowMemoryWrite = true,
+            }
+        );
         var r1 = _agentService.ResetAgentConfig("subEnabled");
         Assert.True(r1.SubAgentEnabled);
         Assert.Equal(8, r1.SubMaxParallel); // 另组保持
@@ -135,17 +173,25 @@ public sealed class Stage13SubAgentConfigTests : IDisposable
     [Fact(DisplayName = "S13: 全量恢复 + 未知项抛 field")]
     public void SubReset_AllAndUnknown()
     {
-        _agentService.SaveAgentConfig(new AgentConfigDocument
-        {
-            ExecDefaultTimeoutMs = 60000, ExecMaxTimeoutMs = 600000, MaxIterations = 50,
-            SubAgentEnabled = false, SubMaxParallel = 8, SubMaxIterations = 50,
-        });
+        _agentService.SaveAgentConfig(
+            new AgentConfigDocument
+            {
+                ExecDefaultTimeoutMs = 60000,
+                ExecMaxTimeoutMs = 600000,
+                MaxIterations = 50,
+                SubAgentEnabled = false,
+                SubMaxParallel = 8,
+                SubMaxIterations = 50,
+            }
+        );
         var all = _agentService.ResetAgentConfig("all");
         Assert.Equal(30000, all.ExecDefaultTimeoutMs);
         Assert.True(all.SubAgentEnabled);
         Assert.Equal(3, all.SubMaxParallel);
         Assert.Equal(15, all.SubMaxIterations);
-        var ex = Assert.Throws<AgentConfigValidationException>(() => _agentService.ResetAgentConfig("bogus"));
+        var ex = Assert.Throws<AgentConfigValidationException>(
+            () => _agentService.ResetAgentConfig("bogus")
+        );
         Assert.Equal("field", ex.Field);
     }
 

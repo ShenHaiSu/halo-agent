@@ -28,14 +28,18 @@ public sealed class Stage05TokenUsageTests : IDisposable
     public Stage05TokenUsageTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05Usage_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05UsageBoot_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage05UsageBoot_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
         string bootstrapFile = Path.Combine(_bootstrapRoot, "bootstrap.json");
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
         _budgetService = new TokenBudgetService();
@@ -45,13 +49,19 @@ public sealed class Stage05TokenUsageTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
 
-    private static UnifiedChatMessage AssistantWithSnapshot(int input, int output = 100, int cached = 0)
+    private static UnifiedChatMessage AssistantWithSnapshot(
+        int input,
+        int output = 100,
+        int cached = 0
+    )
     {
         var m = UnifiedChatMessage.Assistant("reply");
         m.InputTokens = input;
@@ -73,7 +83,12 @@ public sealed class Stage05TokenUsageTests : IDisposable
         Assert.Equal(48083, prompt);
         Assert.False(isEst);
 
-        var model = new ModelConfig { Id = "m", MaxContextTokens = 128000, MaxOutputTokens = 4096 };
+        var model = new ModelConfig
+        {
+            Id = "m",
+            MaxContextTokens = 128000,
+            MaxOutputTokens = 4096
+        };
         var status = _budgetService.CalculateBudgetStatus(model, messages);
         Assert.Equal(48083, status.UsedInputTokens);
         Assert.Equal("known", status.OccupancyState);
@@ -94,7 +109,12 @@ public sealed class Stage05TokenUsageTests : IDisposable
         Assert.Null(cached);
         Assert.True(isEst);
 
-        var model = new ModelConfig { Id = "m", MaxContextTokens = 128000, MaxOutputTokens = 4096 };
+        var model = new ModelConfig
+        {
+            Id = "m",
+            MaxContextTokens = 128000,
+            MaxOutputTokens = 4096
+        };
         var status = _budgetService.CalculateBudgetStatus(model, messages);
         Assert.Null(status.LastPromptTokens);
         Assert.Null(status.LastCachedTokens);
@@ -108,12 +128,22 @@ public sealed class Stage05TokenUsageTests : IDisposable
     public void Cached_Clamped_To_Input()
     {
         var m = AssistantWithSnapshot(48083, 100, 90000);
-        var (prompt, cached, _) = TokenBudgetService.ResolveOccupancy(new List<UnifiedChatMessage> { m });
+        var (prompt, cached, _) = TokenBudgetService.ResolveOccupancy(
+            new List<UnifiedChatMessage> { m }
+        );
         Assert.Equal(48083, prompt);
         Assert.Equal(48083, cached);
 
-        var model = new ModelConfig { Id = "m", MaxContextTokens = 128000, MaxOutputTokens = 4096 };
-        var status = _budgetService.CalculateBudgetStatus(model, new List<UnifiedChatMessage> { m });
+        var model = new ModelConfig
+        {
+            Id = "m",
+            MaxContextTokens = 128000,
+            MaxOutputTokens = 4096
+        };
+        var status = _budgetService.CalculateBudgetStatus(
+            model,
+            new List<UnifiedChatMessage> { m }
+        );
         Assert.Equal(48083, status.LastCachedTokens);
         Assert.Equal(1.0, status.CacheHitRate);
     }
@@ -127,7 +157,11 @@ public sealed class Stage05TokenUsageTests : IDisposable
         var sess = await _service.CreateSessionAsync(ws.Id, "计费会话");
 
         foreach (int input in new[] { 48000, 49000, 50000 })
-            await _service.AppendSessionMessageAsync(ws.Id, sess.Id, AssistantWithSnapshot(input, 100, 1000));
+            await _service.AppendSessionMessageAsync(
+                ws.Id,
+                sess.Id,
+                AssistantWithSnapshot(input, 100, 1000)
+            );
 
         var meta = await _service.GetSessionAsync(ws.Id, sess.Id);
         Assert.NotNull(meta);
@@ -140,7 +174,12 @@ public sealed class Stage05TokenUsageTests : IDisposable
     [Fact(DisplayName = "S05-01: 空会话为 known + 0%")]
     public void Empty_Session_Is_Known_Zero()
     {
-        var model = new ModelConfig { Id = "m", MaxContextTokens = 128000, MaxOutputTokens = 4096 };
+        var model = new ModelConfig
+        {
+            Id = "m",
+            MaxContextTokens = 128000,
+            MaxOutputTokens = 4096
+        };
         var status = _budgetService.CalculateBudgetStatus(model, new List<UnifiedChatMessage>());
         Assert.Equal("known", status.OccupancyState);
         Assert.Equal(0, status.UsedInputTokens);
@@ -155,25 +194,34 @@ public sealed class Stage05TokenUsageTests : IDisposable
         var ws = await _service.AddOrUpdateWorkspaceAsync(proj, "多 call 项目");
         var sess = await _service.CreateSessionAsync(ws.Id, "多 call 会话");
 
-        var gateway = new ScriptedUsageGateway(new Queue<List<UnifiedStreamEvent>>(new[]
-        {
-            // 第 1 call：工具调用轮
-            new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.ToolDone("call_1", "list_dir", "{\"path\":\".\"}"),
-                UnifiedStreamEvent.Tokens(48000, 100, 1000, 48100),
-                UnifiedStreamEvent.Completed(),
-            },
-            // 第 2 call：收尾轮
-            new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.Text("done"),
-                UnifiedStreamEvent.Tokens(49000, 200, 2000, 49200),
-                UnifiedStreamEvent.Completed(),
-            },
-        }));
+        var gateway = new ScriptedUsageGateway(
+            new Queue<List<UnifiedStreamEvent>>(
+                new[]
+                {
+                    // 第 1 call：工具调用轮
+                    new List<UnifiedStreamEvent>
+                    {
+                        UnifiedStreamEvent.ToolDone("call_1", "list_dir", "{\"path\":\".\"}"),
+                        UnifiedStreamEvent.Tokens(48000, 100, 1000, 48100),
+                        UnifiedStreamEvent.Completed(),
+                    },
+                    // 第 2 call：收尾轮
+                    new List<UnifiedStreamEvent>
+                    {
+                        UnifiedStreamEvent.Text("done"),
+                        UnifiedStreamEvent.Tokens(49000, 200, 2000, 49200),
+                        UnifiedStreamEvent.Completed(),
+                    },
+                }
+            )
+        );
         var orchestrator = new AgentOrchestrator(
-            _service, _budgetService, gateway, new ToolRegistry(registerBuiltIns: false), _storageManager);
+            _service,
+            _budgetService,
+            gateway,
+            new ToolRegistry(registerBuiltIns: false),
+            _storageManager
+        );
 
         var result = await orchestrator.RunAgentTurnAsync(ws.Id, sess.Id, "列目录后总结");
         Assert.True(result.Success);
@@ -188,15 +236,22 @@ public sealed class Stage05TokenUsageTests : IDisposable
     private sealed class ScriptedUsageGateway : ILlmGatewayClient
     {
         private readonly Queue<List<UnifiedStreamEvent>> _script;
+
         public ScriptedUsageGateway(Queue<List<UnifiedStreamEvent>> script) => _script = script;
 
         public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
             UnifiedLlmRequest request,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default
+        )
         {
-            var events = _script.Count > 0
-                ? _script.Dequeue()
-                : new List<UnifiedStreamEvent> { UnifiedStreamEvent.Text("x"), UnifiedStreamEvent.Completed() };
+            var events =
+                _script.Count > 0
+                    ? _script.Dequeue()
+                    : new List<UnifiedStreamEvent>
+                    {
+                        UnifiedStreamEvent.Text("x"),
+                        UnifiedStreamEvent.Completed()
+                    };
             foreach (var evt in events)
             {
                 ct.ThrowIfCancellationRequested();

@@ -29,7 +29,8 @@ public static class ToolOutputGuard
     /// <summary>need22-P0 S5 新增错误码（只增不改前端协议）。</summary>
     public const string InvalidCallIdCode = "INVALID_CALL_ID";
 
-    private static readonly Regex CallIdAllowlist = new(@"^[A-Za-z0-9_-]{1,64}$", RegexOptions.Compiled);
+    private static readonly Regex CallIdAllowlist =
+        new(@"^[A-Za-z0-9_-]{1,64}$", RegexOptions.Compiled);
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -43,7 +44,8 @@ public static class ToolOutputGuard
         string dataRoot,
         string workspaceId,
         string sessionId,
-        string callId)
+        string callId
+    )
     {
         string text = output ?? string.Empty;
         if (text.Length <= MaxInlineChars)
@@ -63,9 +65,7 @@ public static class ToolOutputGuard
         string spillDir;
         try
         {
-            string root = string.IsNullOrWhiteSpace(dataRoot)
-                ? Path.GetTempPath()
-                : dataRoot;
+            string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot;
             spillDir = Path.Combine(root, "sessions", workspaceId, sessionId, "tool-outputs");
             Directory.CreateDirectory(spillDir);
         }
@@ -81,9 +81,10 @@ public static class ToolOutputGuard
         string shownText = hits > 0 ? scrubbed : text;
         try
         {
-            string payload = hits > 0
-                ? scrubbed + $"\n\n[注：原文 {hits} 处疑似密钥已脱敏为 [REDACTED_SECRET]，未明文落盘。]"
-                : scrubbed;
+            string payload =
+                hits > 0
+                    ? scrubbed + $"\n\n[注：原文 {hits} 处疑似密钥已脱敏为 [REDACTED_SECRET]，未明文落盘。]"
+                    : scrubbed;
             File.WriteAllText(spillPath, payload, Utf8NoBom);
         }
         catch (Exception)

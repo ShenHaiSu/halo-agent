@@ -1,11 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import {
-  getHostBridge,
-  haloEventBus,
-  type SessionStreamEventDto,
-  type UnifiedChatMessage,
-} from '@/bridge/hostBridge';
+import { getHostBridge, haloEventBus, type SessionStreamEventDto, type UnifiedChatMessage } from '@/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useConfigStore } from '@/stores/configStore';
@@ -13,70 +8,96 @@ import { useConfigStore } from '@/stores/configStore';
 import { useAskUserStore } from '@/stores/askUserStore';
 import { buildTurnGroups, buildTimelineEntries, type TurnGroup, type TimelineEntry } from '@/utils/turnGroup';
 
+export type StreamSegKind = 'text' | 'reasoning' | 'tool';
+export interface StreamSeg {
+  key: string;
+  kind: StreamSegKind;
+  iteration: number;
+  text?: string;
+  callId?: string;
+  persisted?: boolean;
+}
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
-  export interface AgentToolCard {
-    callId: string;
-    functionName: string;
-    argsJson: string;
-    status: AgentToolCardStatus;
-    resultText: string;
-    exitCode: number | null;
-    durationMs: number | null;
-    iteration: number;
-    /** need12 R1：流式参数已接收字节（UTF-8，后端节流发布；旧后端回退估算）。 */
-    receivedBytes: number;
-    /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
-    fileBytes?: number | null;
-    images?: Array<{ imageId: string; fileName: string; mime: string; relPath: string; width: number; height: number; sizeBytes: number; sha16: string; lost?: boolean }>;
-  }
- 
- /** need09-04：sendPrompt 可选第二参附件项 */
- export interface AgentSendAttachment { attId: string; fileName: string; mime: string; base64: string }
+export interface AgentToolCard {
+  callId: string;
+  functionName: string;
+  argsJson: string;
+  status: AgentToolCardStatus;
+  resultText: string;
+  exitCode: number | null;
+  durationMs: number | null;
+  iteration: number;
+  /** need12 R1：流式参数已接收字节（UTF-8，后端节流发布；旧后端回退估算）。 */
+  receivedBytes: number;
+  /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
+  fileBytes?: number | null;
+  images?: Array<{
+    imageId: string;
+    fileName: string;
+    mime: string;
+    relPath: string;
+    width: number;
+    height: number;
+    sizeBytes: number;
+    sha16: string;
+    lost?: boolean;
+  }>;
+}
 
- export interface AgentTelemetry {
-   protocol: string;
-   ttftMs: number | null;
-   totalMs: number | null;
-   inputTokens: number;
-   outputTokens: number;
-   cachedTokens: number;
-   // need05-01：Σ账单 + 占用态 + 流式估算（与 znaide round_est + ≈ 同语义）
-   billedPrompt: number;
-   billedCompletion: number;
-   occupancyState: string;
-   liveEst: number;
- }
- 
- /** need05-01：前端估算函数（与 znaide app.rs:2119 同口径）：ASCII/4 向上取整，非 ASCII 按 1 */
- export function estTokens(text: string): number {
-   if (!text) return 0;
-   let ascii = 0;
-   let other = 0;
-   for (const ch of text) {
-     const cp = ch.codePointAt(0) || 0;
-     if (cp <= 127) ascii++;
-     else other++;
-   }
-   return other + Math.ceil(ascii / 4);
- }
- 
- /** need12 R1：旧后端兼容——前端按 UTF-8 估算 delta 字节数（与后端 GetByteCount 同单位）。 */
- export function estimateUtf8Bytes(text: string): number {
-   if (!text) return 0;
-   try {
-     if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).length;
-   } catch { /* fall through */ }
-   let n = 0;
-   for (const ch of text) {
-     const cp = ch.codePointAt(0) || 0;
-     if (cp <= 0x7f) n += 1;
-     else if (cp <= 0x7ff) n += 2;
-     else if (cp <= 0xffff) n += 3;
-     else n += 4;
-   }
-   return n;
- }
+/** need09-04：sendPrompt 可选第二参附件项 */
+export interface AgentSendAttachment {
+  attId: string;
+  fileName: string;
+  mime: string;
+  base64: string;
+}
+
+export interface AgentTelemetry {
+  protocol: string;
+  ttftMs: number | null;
+  totalMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  // need05-01：Σ账单 + 占用态 + 流式估算（与 znaide round_est + ≈ 同语义）
+  billedPrompt: number;
+  billedCompletion: number;
+  occupancyState: string;
+  liveEst: number;
+}
+
+/** need05-01：前端估算函数（与 znaide app.rs:2119 同口径）：ASCII/4 向上取整，非 ASCII 按 1 */
+export function estTokens(text: string): number {
+  if (!text) return 0;
+  let ascii = 0;
+  let other = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp <= 127) ascii++;
+    else other++;
+  }
+  return other + Math.ceil(ascii / 4);
+}
+
+/** need12 R1：旧后端兼容——前端按 UTF-8 估算 delta 字节数（与后端 GetByteCount 同单位）。 */
+export function estimateUtf8Bytes(text: string): number {
+  if (!text) return 0;
+  try {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).length;
+  } catch {
+    /* fall through */
+  }
+  let n = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp <= 0x7f) n += 1;
+    else if (cp <= 0x7ff) n += 2;
+    else if (cp <= 0xffff) n += 3;
+    else n += 4;
+  }
+  return n;
+}
 
 interface TurnEventPayload {
   sessionId: string;
@@ -105,9 +126,12 @@ export interface AgentTurnState {
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
+  curIteration: number;
+  segs: StreamSeg[];
+  toolCardIndex: Record<string, number>;
 }
 
-let turnStartMarks: Record<string, number> = {};
+const turnStartMarks: Record<string, number> = {};
 
 function emptyTelemetry(fallbackProtocol = 'chat'): AgentTelemetry {
   return {
@@ -140,12 +164,34 @@ function emptyTurnState(sessionId: string, fallbackProtocol = 'chat'): AgentTurn
     lastPrompt: '',
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
+    curIteration: 0,
+    segs: [],
+    toolCardIndex: {},
   };
 }
 
 function truncateText(s: string, max = 6000): string {
   if (!s) return '';
   return s.length > max ? s.slice(0, max) + '\n...（输出过长已截断）' : s;
+}
+const SEG_FLUSH_MS = 100;
+const SEG_DISPLAY_CAP = 20000;
+interface SegBuf {
+  text: string;
+  reasoning: string;
+  timer: number | null;
+}
+const segBufs: Record<string, SegBuf> = {};
+function segBufOf(sid: string): SegBuf {
+  let b = segBufs[sid];
+  if (!b) {
+    b = { text: '', reasoning: '', timer: null };
+    segBufs[sid] = b;
+  }
+  return b;
+}
+function segKeyOf(sid: string, kind: string, iteration: number, n: number): string {
+  return sid.slice(-6) + '-' + String(iteration) + '-' + kind + '-' + String(n);
 }
 
 /**
@@ -207,35 +253,51 @@ export const useAgentStore = defineStore('agent', () => {
   // ----  legacy 别名（模板/旧代码继续用，实际读写当前会话那桶） ----
   const streamingText = computed<string>({
     get: () => activeTurn.value.streamingText,
-    set: (v) => { activeTurn.value.streamingText = v; },
+    set: (v) => {
+      activeTurn.value.streamingText = v;
+    },
   });
   const streamingReasoning = computed<string>({
     get: () => activeTurn.value.streamingReasoning,
-    set: (v) => { activeTurn.value.streamingReasoning = v; },
+    set: (v) => {
+      activeTurn.value.streamingReasoning = v;
+    },
   });
   const streamingActive = computed<boolean>({
     get: () => activeTurn.value.streamingActive,
-    set: (v) => { activeTurn.value.streamingActive = v; },
+    set: (v) => {
+      activeTurn.value.streamingActive = v;
+    },
   });
   const isGenerating = computed<boolean>({
     get: () => activeTurn.value.isGenerating,
-    set: (v) => { activeTurn.value.isGenerating = v; },
+    set: (v) => {
+      activeTurn.value.isGenerating = v;
+    },
   });
   const toolCards = computed<AgentToolCard[]>({
     get: () => activeTurn.value.toolCards,
-    set: (v) => { activeTurn.value.toolCards = v; },
+    set: (v) => {
+      activeTurn.value.toolCards = v;
+    },
   });
   const telemetry = computed<AgentTelemetry>({
     get: () => activeTurn.value.telemetry,
-    set: (v) => { activeTurn.value.telemetry = v; },
+    set: (v) => {
+      activeTurn.value.telemetry = v;
+    },
   });
   const turnNotice = computed<string>({
     get: () => activeTurn.value.turnNotice,
-    set: (v) => { activeTurn.value.turnNotice = v; },
+    set: (v) => {
+      activeTurn.value.turnNotice = v;
+    },
   });
   const lastError = computed<string>({
     get: () => activeTurn.value.lastError,
-    set: (v) => { activeTurn.value.lastError = v; },
+    set: (v) => {
+      activeTurn.value.lastError = v;
+    },
   });
 
   const hasStreamingContent = computed(() => {
@@ -286,7 +348,9 @@ export const useAgentStore = defineStore('agent', () => {
       const ws = useWorkspaceStore();
       const fn = (ws as unknown as { touchSessionTime?: (sid: string, iso?: string) => void }).touchSessionTime;
       if (typeof fn === 'function') fn.call(ws, sessionId, iso);
-    } catch { /* 时间刷新永不阻断主链路 */ }
+    } catch {
+      /* 时间刷新永不阻断主链路 */
+    }
   }
 
   /** need22-P2 F2：uuid（crypto 优先，降级 Math.random）。 */
@@ -294,14 +358,18 @@ export const useAgentStore = defineStore('agent', () => {
     try {
       const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
       if (c && typeof c.randomUUID === 'function') return c.randomUUID().replace(/-/g, '');
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
     return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
   }
 
   function toast(kind: 'info' | 'success' | 'warning' | 'error', text: string): void {
     try {
       (window as unknown as { $message?: Record<string, (s: string) => void> }).$message?.[kind]?.(text);
-    } catch { /* 无消息通道时静默 */ }
+    } catch {
+      /* 无消息通道时静默 */
+    }
   }
 
   function markSeenRequest(reqId: string): void {
@@ -318,16 +386,132 @@ export const useAgentStore = defineStore('agent', () => {
     t.updatedAt = Date.now();
   }
 
+  const segKillSwitch = ref(false);
+  function rebuildIndex(t: AgentTurnState): void {
+    const m: Record<string, number> = {};
+    for (let i = 0; i < t.toolCards.length; i++) {
+      const c = t.toolCards[i];
+      if (c && c.callId) m[c.callId] = i;
+    }
+    t.toolCardIndex = m;
+  }
+  function cardById(t: AgentTurnState, callId: string): AgentToolCard | null {
+    const i = t.toolCardIndex[callId];
+    if (i === undefined) return t.toolCards.find((c) => c.callId === callId) || null;
+    return t.toolCards[i] || null;
+  }
+  function tailSeg(t: AgentTurnState): StreamSeg | null {
+    return t.segs.length ? t.segs[t.segs.length - 1] : null;
+  }
+  function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string): void {
+    const tail = tailSeg(t);
+    if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted) {
+      tail.text = (tail.text || '') + chunk;
+      return;
+    }
+    const n = t.segs.length;
+    t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, text: chunk });
+  }
+  function pushToolSeg(t: AgentTurnState, callId: string): void {
+    if (!callId) return;
+    const tail = tailSeg(t);
+    if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration) return;
+    t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, callId });
+  }
+  function markIterationPersisted(t: AgentTurnState, iteration: number): void {
+    if (!iteration) return;
+    for (const s of t.segs) {
+      if (s.iteration === iteration) s.persisted = true;
+    }
+  }
+  function flushSegBuf(sid: string): void {
+    const t = turns.value[sid];
+    const buf = segBufs[sid];
+    if (!t || !buf) return;
+    buf.timer = null;
+    const hasText = !!buf.text;
+    const hasReason = !!buf.reasoning;
+    if (!hasText && !hasReason) return;
+    if (hasText) {
+      t.streamingText += buf.text;
+      pushTextSeg(t, 'text', buf.text);
+      t.telemetry.liveEst += estTokens(buf.text);
+      buf.text = '';
+    }
+    if (hasReason) {
+      t.streamingReasoning += buf.reasoning;
+      pushTextSeg(t, 'reasoning', buf.reasoning);
+      t.telemetry.liveEst += estTokens(buf.reasoning);
+      buf.reasoning = '';
+    }
+    t.streamingActive = true;
+    t.isGenerating = true;
+    touch(t);
+  }
+  function queueSegDelta(sid: string, kind: 'text' | 'reasoning', chunk: string): void {
+    if (!chunk) return;
+    const t = ensureTurn(sid);
+    void t;
+    const buf = segBufOf(sid);
+    if (kind === 'text') buf.text += chunk;
+    else buf.reasoning += chunk;
+    if (buf.timer !== null) return;
+    buf.timer = window.setTimeout(() => {
+      try {
+        flushSegBuf(sid);
+      } catch (e) {
+        console.warn('[agentStore] flushSegBuf failed:', e);
+      }
+    }, SEG_FLUSH_MS);
+  }
+  function flushSegBufSync(sid: string): void {
+    const buf = segBufs[sid];
+    if (buf && buf.timer !== null) {
+      try {
+        window.clearTimeout(buf.timer);
+      } catch (e) {
+        console.warn('[agentStore] clear flush timer failed:', e);
+      }
+      buf.timer = null;
+    }
+    flushSegBuf(sid);
+  }
+  const visibleSegs = computed<StreamSeg[]>(() => {
+    const t = activeTurn.value;
+    if (!t || !t.segs) return [];
+    return t.segs.filter((s) => !s.persisted);
+  });
+  function segDisplayText(seg: StreamSeg | null | undefined): string {
+    const s = String(seg?.text || '');
+    return s.length > SEG_DISPLAY_CAP ? '…(前文已折叠)…' + s.slice(s.length - SEG_DISPLAY_CAP) : s;
+  }
   function resetTurnState(sessionId?: string): void {
     const sid = (sessionId ?? activeSessionId.value).trim();
     if (!sid) return;
+    try {
+      const b = segBufs[sid];
+      if (b && b.timer !== null) {
+        window.clearTimeout(b.timer);
+      }
+      delete segBufs[sid];
+    } catch (e) {
+      console.warn('[agentStore] reset clear buf failed:', e);
+    }
     turns.value[sid] = emptyTurnState(sid, fallbackProtocol());
     turnStartMarks[sid] = Date.now();
   }
-
   function clearTurn(sessionId: string): void {
     const sid = (sessionId || '').trim();
     if (!sid) return;
+    try {
+      const b = segBufs[sid];
+      if (b && b.timer !== null) {
+        window.clearTimeout(b.timer);
+      }
+      delete segBufs[sid];
+    } catch (e) {
+      console.warn('[agentStore] clear buf failed:', e);
+    }
     delete turns.value[sid];
     delete turnStartMarks[sid];
   }
@@ -347,19 +531,10 @@ export const useAgentStore = defineStore('agent', () => {
       const sid = resolveTargetSession(evt.sessionId);
       if (!sid) return;
       const t = ensureTurn(sid);
-
       if (evt.kind === 'TextDelta' && evt.textDelta) {
-        t.streamingActive = true;
-        t.isGenerating = true;
-        t.streamingText += evt.textDelta;
-        t.telemetry.liveEst += estTokens(evt.textDelta); // need05-01：流式中 ≈ 估算
-        touch(t);
+        queueSegDelta(sid, 'text', evt.textDelta);
       } else if (evt.kind === 'ReasoningDelta' && evt.textDelta) {
-        t.streamingActive = true;
-        t.isGenerating = true;
-        t.streamingReasoning += evt.textDelta;
-        t.telemetry.liveEst += estTokens(evt.textDelta);
-        touch(t);
+        queueSegDelta(sid, 'reasoning', evt.textDelta);
       } else if (evt.kind === 'UsageUpdated' && evt.usage) {
         t.telemetry.inputTokens = evt.usage.inputTokens || 0;
         t.telemetry.outputTokens = evt.usage.outputTokens || 0;
@@ -367,7 +542,7 @@ export const useAgentStore = defineStore('agent', () => {
         t.telemetry.liveEst = 0; // need05-01：Usage 到账切真实，≈ 消失
         touch(t);
       } else if (evt.kind === 'StreamError') {
-        // need22-P3 G6：StreamError 落 turnNotice + lastError{code,message,retry} + 重试（不断流式卡）
+        flushSegBufSync(sid);
         t.isGenerating = false;
         t.streamingActive = false;
         t.lastError = evt.errorMessage || evt.errorCode || '流式中断';
@@ -402,134 +577,154 @@ export const useAgentStore = defineStore('agent', () => {
     const str = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
 
     switch (kind) {
-      case 'IterationStarted':
+      case 'IterationStarted': {
+        const it = num(payload['iteration']);
+        flushSegBufSync(sid);
+        if (it > 0) t.curIteration = it;
+        else if (t.curIteration <= 0) t.curIteration = 1;
         t.streamingActive = true;
         t.isGenerating = true;
         touch(t);
         break;
+      }
       case 'FirstToken':
         t.telemetry.ttftMs = num(payload['ttftMs']);
         touch(t);
         break;
-       case 'ToolCallStarted': {
-         const callId = str(payload['callId']);
-         const functionName = str(payload['functionName']) || 'tool';
-         const args = pickArgs(payload);
-         const rb = typeof payload['receivedBytes'] === 'number' ? (payload['receivedBytes'] as number) : 0;
-         if (callId && !t.toolCards.some((c) => c.callId === callId)) {
-           t.toolCards.push({
-             callId,
-             functionName,
-             argsJson: args,
-             status: 'running',
-             resultText: '',
-             exitCode: null,
-             durationMs: null,
-             iteration: num(payload['iteration']),
-             receivedBytes: rb,
-           });
-         } else if (callId && args) {
-           const ex = t.toolCards.find((c) => c.callId === callId);
-           if (ex && !ex.argsJson) ex.functionName = functionName || ex.functionName;
-           if (ex && !ex.argsJson) ex.argsJson = args;
-           if (ex) ex.receivedBytes = rb;
-         }
-         touch(t);
-         break;
-       }
-       case 'ToolCallUpdated':
-       case 'ToolCallArgs':
-       case 'ToolCallCompleted': {
-         const callId = str(payload['callId']);
-         const args = pickArgs(payload);
-         const argsDelta = typeof payload['argsDelta'] === 'string' ? (payload['argsDelta'] as string) : '';
-         const hasBytes = typeof payload['receivedBytes'] === 'number';
-         const fallbackBytes = argsDelta ? estimateUtf8Bytes(argsDelta) : 0;
-         const card = t.toolCards.find((c) => c.callId === callId);
-         if (card) {
-           if (args) {
-             card.argsJson = args;
-             if (kind === 'ToolCallCompleted') {
-               // 终值对账：全量 args 的 UTF-8 长度即终值（覆盖节流欠量）
-               card.receivedBytes = estimateUtf8Bytes(args);
-             } else if (hasBytes) {
-               card.receivedBytes = num(payload['receivedBytes']);
-             } else if (fallbackBytes > 0) {
-               card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
-             }
-           } else if (hasBytes) {
-             card.receivedBytes = num(payload['receivedBytes']);
-           } else if (fallbackBytes > 0) {
-             card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
-           }
-           if (payload['functionName']) card.functionName = str(payload['functionName']);
-         } else if (callId && (args || argsDelta || hasBytes)) {
-           t.toolCards.push({
-             callId,
-             functionName: str(payload['functionName']) || 'tool',
-             argsJson: args,
-             status: 'running',
-             resultText: '',
-             exitCode: null,
-             durationMs: null,
-             iteration: num(payload['iteration']),
-             receivedBytes: hasBytes ? num(payload['receivedBytes']) : fallbackBytes,
-           });
-         }
-         touch(t);
-         break;
-       }
-       case 'ToolExecutionStarted': {
-         const callId = str(payload['callId']);
-         const args = pickArgs(payload);
-         const card = t.toolCards.find((c) => c.callId === callId);
-         if (card) {
-           card.status = 'running';
-           if (payload['functionName']) card.functionName = str(payload['functionName']);
-           if (args) card.argsJson = args;
-         } else if (callId) {
-           t.toolCards.push({
-             callId,
-             functionName: str(payload['functionName']) || 'tool',
-             argsJson: args,
-             status: 'running',
-             resultText: '',
-             exitCode: null,
-             durationMs: null,
-             iteration: num(payload['iteration']),
-             receivedBytes: 0,
-           });
-         }
-         touch(t);
-         break;
-       }
-       case 'ToolExecutionCompleted': {
-         const callId = str(payload['callId']);
-         const card = t.toolCards.find((c) => c.callId === callId);
-         if (card) {
-           const success = payload['success'] !== false;
-           card.status = success ? 'done' : 'error';
-           card.exitCode = payload['exitCode'] === null || payload['exitCode'] === undefined ? null : num(payload['exitCode']);
-           card.durationMs = payload['durationMs'] === null || payload['durationMs'] === undefined ? null : num(payload['durationMs']);
-           const args = pickArgs(payload);
-           if (args) card.argsJson = args;
-           const rt = payload['resultText'];
-           if (typeof rt === 'string' && rt) card.resultText = truncateText(rt);
-           const fb = payload['fileBytes'];
-           card.fileBytes = typeof fb === 'number' && Number.isFinite(fb) ? fb : null;
-         }
-         // need04-03：工具完成只内存更新+标脏，不全量拉取（跳动主因）；等 AssistantMessagePersisted 再对账
-         dirtyPersisted.value[sid] = true;
-         touch(t);
-         touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-         void workspaceStore.refreshBudget().catch(() => undefined);
-         break;
-       }
+      case 'ToolCallStarted': {
+        const callId = str(payload['callId']);
+        const functionName = str(payload['functionName']) || 'tool';
+        const args = pickArgs(payload);
+        const rb = typeof payload['receivedBytes'] === 'number' ? (payload['receivedBytes'] as number) : 0;
+        const pit = num(payload['iteration']);
+        if (pit > t.curIteration) t.curIteration = pit;
+        flushSegBufSync(sid);
+        if (callId && cardById(t, callId) === null) {
+          t.toolCards.push({
+            callId,
+            functionName,
+            argsJson: args,
+            status: 'running',
+            resultText: '',
+            exitCode: null,
+            durationMs: null,
+            iteration: num(payload['iteration']),
+            receivedBytes: rb,
+          });
+          rebuildIndex(t);
+          pushToolSeg(t, callId);
+        } else if (callId && args) {
+          const ex = cardById(t, callId);
+          if (ex && !ex.argsJson) ex.functionName = functionName || ex.functionName;
+          if (ex && !ex.argsJson) ex.argsJson = args;
+          if (ex) ex.receivedBytes = rb;
+          pushToolSeg(t, callId);
+        } else if (callId) {
+          pushToolSeg(t, callId);
+        }
+        touch(t);
+        break;
+      }
+      case 'ToolCallUpdated':
+      case 'ToolCallArgs':
+      case 'ToolCallCompleted': {
+        const callId = str(payload['callId']);
+        const args = pickArgs(payload);
+        const argsDelta = typeof payload['argsDelta'] === 'string' ? (payload['argsDelta'] as string) : '';
+        const hasBytes = typeof payload['receivedBytes'] === 'number';
+        const fallbackBytes = argsDelta ? estimateUtf8Bytes(argsDelta) : 0;
+        const card = cardById(t, callId);
+        if (card) {
+          if (args) {
+            card.argsJson = args;
+            if (kind === 'ToolCallCompleted') {
+              card.receivedBytes = estimateUtf8Bytes(args);
+            } else if (hasBytes) {
+              card.receivedBytes = num(payload['receivedBytes']);
+            } else if (fallbackBytes > 0) {
+              card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+            }
+          } else if (hasBytes) {
+            card.receivedBytes = num(payload['receivedBytes']);
+          } else if (fallbackBytes > 0) {
+            card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+          }
+          if (payload['functionName']) card.functionName = str(payload['functionName']);
+        } else if (callId && (args || argsDelta || hasBytes)) {
+          t.toolCards.push({
+            callId,
+            functionName: str(payload['functionName']) || 'tool',
+            argsJson: args,
+            status: 'running',
+            resultText: '',
+            exitCode: null,
+            durationMs: null,
+            iteration: num(payload['iteration']),
+            receivedBytes: hasBytes ? num(payload['receivedBytes']) : fallbackBytes,
+          });
+          rebuildIndex(t);
+          pushToolSeg(t, callId);
+        }
+        touch(t);
+        break;
+      }
+      case 'ToolExecutionStarted': {
+        const callId = str(payload['callId']);
+        const args = pickArgs(payload);
+        const card = cardById(t, callId);
+        if (card) {
+          card.status = 'running';
+          if (payload['functionName']) card.functionName = str(payload['functionName']);
+          if (args) card.argsJson = args;
+        } else if (callId) {
+          t.toolCards.push({
+            callId,
+            functionName: str(payload['functionName']) || 'tool',
+            argsJson: args,
+            status: 'running',
+            resultText: '',
+            exitCode: null,
+            durationMs: null,
+            iteration: num(payload['iteration']),
+            receivedBytes: 0,
+          });
+          rebuildIndex(t);
+          pushToolSeg(t, callId);
+        }
+        touch(t);
+        break;
+      }
+      case 'ToolExecutionCompleted': {
+        const callId = str(payload['callId']);
+        const card = cardById(t, callId);
+        if (card) {
+          const success = payload['success'] !== false;
+          card.status = success ? 'done' : 'error';
+          card.exitCode = payload['exitCode'] === null || payload['exitCode'] === undefined ? null : num(payload['exitCode']);
+          card.durationMs = payload['durationMs'] === null || payload['durationMs'] === undefined ? null : num(payload['durationMs']);
+          const args = pickArgs(payload);
+          if (args) card.argsJson = args;
+          const rt = payload['resultText'];
+          if (typeof rt === 'string' && rt) card.resultText = truncateText(rt);
+          const fb = payload['fileBytes'];
+          card.fileBytes = typeof fb === 'number' && Number.isFinite(fb) ? fb : null;
+        }
+        // need04-03：工具完成只内存更新+标脏，不全量拉取（跳动主因）；等 AssistantMessagePersisted 再对账
+        dirtyPersisted.value[sid] = true;
+        touch(t);
+        touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+        void workspaceStore.refreshBudget().catch(() => undefined);
+        break;
+      }
       case 'AssistantMessagePersisted': {
+        flushSegBufSync(sid);
+        const pit = num(payload['iteration']);
+        if (pit > 0) markIterationPersisted(t, pit);
+        else if (t.curIteration > 0) markIterationPersisted(t, t.curIteration);
         t.telemetry.inputTokens = num(payload['inputTokens']);
         t.telemetry.outputTokens = num(payload['outputTokens']);
         t.telemetry.cachedTokens = num(payload['cachedTokens']);
-        t.telemetry.billedPrompt = num(payload['billedPrompt']); // need05-01：Σ
+        t.telemetry.billedPrompt = num(payload['billedPrompt']);
         t.telemetry.billedCompletion = num(payload['billedCompletion']);
         t.telemetry.liveEst = 0;
         touch(t);
@@ -538,6 +733,7 @@ export const useAgentStore = defineStore('agent', () => {
         break;
       }
       case 'TurnCompleted': {
+        flushSegBufSync(sid);
         t.telemetry.protocol = str(payload['protocol']) || t.telemetry.protocol;
         t.telemetry.inputTokens = num(payload['inputTokens']);
         t.telemetry.outputTokens = num(payload['outputTokens']);
@@ -584,6 +780,7 @@ export const useAgentStore = defineStore('agent', () => {
         break;
       }
       case 'TurnTruncated': {
+        flushSegBufSync(sid);
         t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
         t.isGenerating = false;
         t.streamingActive = false;
@@ -594,6 +791,7 @@ export const useAgentStore = defineStore('agent', () => {
         break;
       }
       case 'TurnCancelled': {
+        flushSegBufSync(sid);
         t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
         t.isGenerating = false;
         t.streamingActive = false;
@@ -605,6 +803,7 @@ export const useAgentStore = defineStore('agent', () => {
         break;
       }
       case 'TurnError': {
+        flushSegBufSync(sid);
         t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
         t.isGenerating = false;
         t.streamingActive = false;
@@ -625,7 +824,13 @@ export const useAgentStore = defineStore('agent', () => {
         break;
     }
     // need13：子代理聚合事件（agent:sub-event 由桥接层转发为 turn-event，kind 保持 SubAgentProgress）
-    if (kind === 'SubAgentsStarted' || kind === 'SubAgentProgress' || kind === 'SubAgentsBarrier' || kind === 'SubAgentsBarrierReleased' || kind === 'agent:sub-event') {
+    if (
+      kind === 'SubAgentsStarted' ||
+      kind === 'SubAgentProgress' ||
+      kind === 'SubAgentsBarrier' ||
+      kind === 'SubAgentsBarrierReleased' ||
+      kind === 'agent:sub-event'
+    ) {
       handleSubEvent(sid, kind, payload);
     }
   }
@@ -655,7 +860,9 @@ export const useAgentStore = defineStore('agent', () => {
         if (ex) ex.status = status;
         else t.subAgents.items.push({ subId, label: String(p['label'] ?? ''), status });
       }
-      t.subAgents.done = t.subAgents.items.filter((i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled').length;
+      t.subAgents.done = t.subAgents.items.filter(
+        (i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled'
+      ).length;
       touch(t);
       return;
     }
@@ -701,31 +908,45 @@ export const useAgentStore = defineStore('agent', () => {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
     if (!sid) return;
     const t = ensureTurn(sid);
-    // need04-04：轮末快照（03 管清，04 管快照）：供时间轴无缝占位，随后被持久 turnGroups 替换
+    try {
+      flushSegBufSync(sid);
+    } catch (e) {
+      console.warn('[agentStore] finish flush failed:', e);
+    }
     try {
       lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
       haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
-    } catch { /* 快照失败不阻断收尾 */ }
+    } catch (e) {
+      console.warn('[agentStore] snapshot failed:', e);
+    }
     if (dirtyPersisted.value[sid]) {
       await refreshAfterTool(sid, 'finish');
       dirtyPersisted.value[sid] = false;
     } else {
       await refreshAfterTool(sid, 'finish');
     }
-    // need04-01：轮末轻量对账一次（每轮至多1次 getSessions，KB 级）
-    try { await (workspaceStore as unknown as { reconcileSessionTimes?: () => Promise<void> }).reconcileSessionTimes?.(); } catch { /* 忽略 */ }
-    // need22-P2 F2：轮终 requestId 清零（旧轮结束，新发不再被判重入）
+    try {
+      await (workspaceStore as unknown as { reconcileSessionTimes?: () => Promise<void> }).reconcileSessionTimes?.();
+    } catch (e) {
+      console.warn('[agentStore] reconcile failed:', e);
+    }
     t.requestId = '';
-    // need22-P2 F5：失败保留流式卡（不清容器，留错误 toast+重试按钮）；成功/取消才清
     if (opts?.keepOnFailure && t.lastErrorInfo?.retry) {
       touch(t);
       return;
     }
-    // 清流式容器（工具卡移交快照后清空，消除轮末双影）
     t.toolCards = [];
+    t.toolCardIndex = {};
+    t.segs = [];
+    t.curIteration = 0;
     t.streamingText = '';
     t.streamingReasoning = '';
     t.streamingActive = false;
+    try {
+      delete segBufs[sid];
+    } catch (e) {
+      console.warn('[agentStore] clear buf failed:', e);
+    }
     touch(t);
   }
 
@@ -734,19 +955,22 @@ export const useAgentStore = defineStore('agent', () => {
     return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
   }
 
-    /** need22-P2 F2：幂等发送。生成 requestId=uuid 透传后端；连点第二发返回既有 requestId+toast，不起新轮。 */
-    async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
-     const content = (text || '').trim();
-     const sessionId = activeSessionId.value;
-     const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && a.base64) : [];
-     if ((!content && readyFiles.length === 0) || !sessionId) return false;
-     if (isCompacting(sessionId)) { toast('warning', '压缩中，新一轮请稍候'); return false; } // need05-03：压缩中拒绝发送
-     const cur = ensureTurn(sessionId);
-     if (cur.isGenerating) {
-       // 连点/重入：直接返回既有 requestId + toast，不起新轮（后端同时回 TURN_IN_PROGRESS 双保险）
-       toast('warning', `上一轮仍在进行中（requestId=${cur.requestId || 'unknown'}），本发已忽略`);
-       return false;
-     }
+  /** need22-P2 F2：幂等发送。生成 requestId=uuid 透传后端；连点第二发返回既有 requestId+toast，不起新轮。 */
+  async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
+    const content = (text || '').trim();
+    const sessionId = activeSessionId.value;
+    const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && a.base64) : [];
+    if ((!content && readyFiles.length === 0) || !sessionId) return false;
+    if (isCompacting(sessionId)) {
+      toast('warning', '压缩中，新一轮请稍候');
+      return false;
+    } // need05-03：压缩中拒绝发送
+    const cur = ensureTurn(sessionId);
+    if (cur.isGenerating) {
+      // 连点/重入：直接返回既有 requestId + toast，不起新轮（后端同时回 TURN_IN_PROGRESS 双保险）
+      toast('warning', `上一轮仍在进行中（requestId=${cur.requestId || 'unknown'}），本发已忽略`);
+      return false;
+    }
     const prevRequestId = cur.requestId || '';
     const prevPrompt = cur.lastPrompt || '';
 
@@ -757,28 +981,28 @@ export const useAgentStore = defineStore('agent', () => {
     let maxImages = Number(configStore.activeModel?.maxImagesPerTurn);
     if (!Number.isFinite(maxImages) || maxImages === 0) maxImages = 4;
     maxImages = Math.max(1, Math.min(16, Math.trunc(maxImages)));
-     const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
-     const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
+    const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
+    const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
 
-     ensureListeners();
-     resetTurnState(sessionId);
-     touchSessionClock(sessionId);
-     const t = ensureTurn(sessionId);
-     const requestId = newRequestId();
-     t.requestId = requestId;
-     markSeenRequest(requestId);
-     t.isGenerating = true;
-     t.streamingActive = true;
-     t.lastErrorInfo = null;
-     t.lastPrompt = content;
-     touch(t);
+    ensureListeners();
+    resetTurnState(sessionId);
+    touchSessionClock(sessionId);
+    const t = ensureTurn(sessionId);
+    const requestId = newRequestId();
+    t.requestId = requestId;
+    markSeenRequest(requestId);
+    t.isGenerating = true;
+    t.streamingActive = true;
+    t.lastErrorInfo = null;
+    t.lastPrompt = content;
+    touch(t);
 
-     try {
-       const bridge = getHostBridge();
-       const providerId = configStore.activeProvider?.id || '';
-       const modelId = configStore.activeModel?.id || '';
-       const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId, attachmentsJson, requestId);
-       if (!res.ok) {
+    try {
+      const bridge = getHostBridge();
+      const providerId = configStore.activeProvider?.id || '';
+      const modelId = configStore.activeModel?.id || '';
+      const res = await bridge.startAgentTurn(workspaceId, sessionId, content, providerId, modelId, attachmentsJson, requestId);
+      if (!res.ok) {
         if (res.code === 'TURN_IN_PROGRESS') {
           // 后端重入拒绝：旧轮不受影响，恢复旧 requestId/原文继续跟旧轮
           t.requestId = prevRequestId;
@@ -789,37 +1013,37 @@ export const useAgentStore = defineStore('agent', () => {
           touch(t);
           return false;
         }
-         if (res.code === 'COMPACTING') {
-           t.lastError = res.message || '该会话正在压缩上下文';
-           t.lastErrorInfo = { code: 'COMPACTING', message: t.lastError, retry: false };
-           t.isGenerating = false;
-           t.streamingActive = false;
-           t.requestId = '';
-           toast('warning', t.lastError);
-           touch(t);
-           return false;
-         }
-         t.lastError = res.message || '启动 Agent 推理失败';
-         t.lastErrorInfo = { code: res.code || 'AGENT_START_ERROR', message: t.lastError, retry: true };
-         t.isGenerating = false;
-         t.streamingActive = false;
-         t.requestId = '';
-         toast('error', t.lastError);
-         touch(t);
-         return false;
-       }
-       // 乐观回显用户消息，等待 TurnCompleted 后与 jsonl 对账
-       await workspaceStore.loadSessionMessages(sessionId);
-       return true;
-     } catch (err) {
-       console.error('[agentStore] sendPrompt failed:', err);
-       t.lastError = err instanceof Error ? err.message : String(err);
-       t.lastErrorInfo = { code: 'SEND_FAILED', message: t.lastError, retry: true };
-       t.isGenerating = false;
-       t.streamingActive = false;
-       t.requestId = '';
-       toast('error', t.lastError);
-       touch(t);
+        if (res.code === 'COMPACTING') {
+          t.lastError = res.message || '该会话正在压缩上下文';
+          t.lastErrorInfo = { code: 'COMPACTING', message: t.lastError, retry: false };
+          t.isGenerating = false;
+          t.streamingActive = false;
+          t.requestId = '';
+          toast('warning', t.lastError);
+          touch(t);
+          return false;
+        }
+        t.lastError = res.message || '启动 Agent 推理失败';
+        t.lastErrorInfo = { code: res.code || 'AGENT_START_ERROR', message: t.lastError, retry: true };
+        t.isGenerating = false;
+        t.streamingActive = false;
+        t.requestId = '';
+        toast('error', t.lastError);
+        touch(t);
+        return false;
+      }
+      // 乐观回显用户消息，等待 TurnCompleted 后与 jsonl 对账
+      await workspaceStore.loadSessionMessages(sessionId);
+      return true;
+    } catch (err) {
+      console.error('[agentStore] sendPrompt failed:', err);
+      t.lastError = err instanceof Error ? err.message : String(err);
+      t.lastErrorInfo = { code: 'SEND_FAILED', message: t.lastError, retry: true };
+      t.isGenerating = false;
+      t.streamingActive = false;
+      t.requestId = '';
+      toast('error', t.lastError);
+      touch(t);
       return false;
     }
   }
@@ -845,7 +1069,9 @@ export const useAgentStore = defineStore('agent', () => {
     try {
       const ask = useAskUserStore();
       if (ask.hasPending(sessionId)) ask.clearPending(sessionId);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     const t = ensureTurn(sessionId);
     t.isGenerating = false;
     t.streamingActive = false;
@@ -862,7 +1088,11 @@ export const useAgentStore = defineStore('agent', () => {
       const finish = (v: boolean): void => {
         if (done) return;
         done = true;
-        try { unsub(); } catch { /* ignore */ }
+        try {
+          unsub();
+        } catch {
+          /* ignore */
+        }
         resolve(v);
       };
       const timer = window.setTimeout(() => finish(false), Math.max(500, timeoutMs));
@@ -872,7 +1102,9 @@ export const useAgentStore = defineStore('agent', () => {
           if (!evt || evt.kind !== 'TurnCancelled') return;
           if (String(evt.sessionId || '').trim() !== sessionId) return;
           finish(true);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       });
     });
   }
@@ -920,8 +1152,7 @@ export const useAgentStore = defineStore('agent', () => {
     const text = String(target?.content || '').trim();
     if (!text) return false;
     try {
-      const res = await getHostBridge().truncateSessionHistory(
-        ws.activeWorkspaceId || ws.activeWorkspace?.id || '', sid, msgId, true);
+      const res = await getHostBridge().truncateSessionHistory(ws.activeWorkspaceId || ws.activeWorkspace?.id || '', sid, msgId, true);
       if (!res.ok || !res.data) return false;
       const replayText = String((res.data.replayText as unknown as string) || text);
       await ws.loadSessionMessages(sid);
@@ -940,7 +1171,11 @@ export const useAgentStore = defineStore('agent', () => {
     if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
     try {
       const res = await getHostBridge().truncateSessionHistory(
-        ws.activeWorkspaceId || ws.activeWorkspace?.id || '', sid, assistantId, true);
+        ws.activeWorkspaceId || ws.activeWorkspace?.id || '',
+        sid,
+        assistantId,
+        true
+      );
       if (!res.ok || !res.data) return false;
       const replayText = String((res.data.replayText as unknown as string) || '').trim();
       if (!replayText) return false;
@@ -991,10 +1226,13 @@ export const useAgentStore = defineStore('agent', () => {
     subscribe,
     pauseTurn,
     resumeTurn,
-    // need22-P2 F1：单真相源归并（只算一次，Timeline 与目录共享）
     activeTurnGroups,
     visibleTurnGroups,
     activeTimelineEntries,
+    visibleSegs,
+    segDisplayText,
+    cardById,
+    segKillSwitch,
     // need22-P2 F2/F5
     seenRequestIds,
     retryLastTurn,

@@ -14,29 +14,28 @@ public sealed class StoragePathManager
     public const string DefaultCDriveDataRoot = @"C:\HaloAgentData";
     public const long MinRequiredFreeSpaceBytes = 200L * 1024L * 1024L; // 200 MB
 
-     private static readonly string[] ManagedSubDirectories =
-     {
-         "config",
-         "workspaces",
-         "sessions",
-         "logs",
-         "cef-cache",
-         "skills",
-         "memory",
-         "metrics"
-     };
+    private static readonly string[] ManagedSubDirectories =
+    {
+        "config",
+        "workspaces",
+        "sessions",
+        "logs",
+        "cef-cache",
+        "skills",
+        "memory",
+        "metrics"
+    };
 
-     private static readonly string[] MigratableSubDirectories =
-     {
-         "config",
-         "workspaces",
-         "sessions",
-         "logs",
-         "skills",
-         "memory",
-         "metrics"
-     };
-
+    private static readonly string[] MigratableSubDirectories =
+    {
+        "config",
+        "workspaces",
+        "sessions",
+        "logs",
+        "skills",
+        "memory",
+        "metrics"
+    };
 
     private readonly object _stateLock = new();
     private string _currentDataRoot;
@@ -50,40 +49,64 @@ public sealed class StoragePathManager
 
     public string CurrentDataRoot
     {
-        get { lock (_stateLock) return _currentDataRoot; }
+        get
+        {
+            lock (_stateLock)
+                return _currentDataRoot;
+        }
     }
 
     public string? PreviousDataRoot
     {
-        get { lock (_stateLock) return _previousDataRoot; }
+        get
+        {
+            lock (_stateLock)
+                return _previousDataRoot;
+        }
     }
 
     public string LastModifiedUtc
     {
-        get { lock (_stateLock) return _lastModifiedUtc; }
+        get
+        {
+            lock (_stateLock)
+                return _lastModifiedUtc;
+        }
     }
 
-     public bool IsUsingFallback
-     {
-         get { lock (_stateLock) return _isUsingFallback; }
-     }
+    public bool IsUsingFallback
+    {
+        get
+        {
+            lock (_stateLock)
+                return _isUsingFallback;
+        }
+    }
 
-     public string ConfigDirectory => Path.Combine(CurrentDataRoot, "config");
-     public string WorkspacesDirectory => Path.Combine(CurrentDataRoot, "workspaces");
-     public string SessionsDirectory => Path.Combine(CurrentDataRoot, "sessions");
-     public string LogsDirectory => Path.Combine(CurrentDataRoot, "logs");
-     public string CefCacheDirectory => Path.Combine(CurrentDataRoot, "cef-cache");
-     /// <summary>need09-01：Global Skill 域根目录（随数据根迁移）。</summary>
-     public string GlobalSkillsDirectory => Path.Combine(CurrentDataRoot, "skills");
-     /// <summary>need09-01：Global Memory 域根目录（随数据根迁移）。</summary>
-     public string GlobalMemoryDirectory => Path.Combine(CurrentDataRoot, "memory");
-     /// <summary>need12：用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
-     public string MetricsDirectory => Path.Combine(CurrentDataRoot, "metrics");
-     /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
-     public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;
-     /// <summary>need09-01：标准子目录清单（含 skills/memory）。</summary>
-     public static IReadOnlyList<string> ManagedSubDirectoryNames => ManagedSubDirectories;
-     public string AppSettingsFilePath => Path.Combine(ConfigDirectory, "app-settings.json");
+    public string ConfigDirectory => Path.Combine(CurrentDataRoot, "config");
+    public string WorkspacesDirectory => Path.Combine(CurrentDataRoot, "workspaces");
+    public string SessionsDirectory => Path.Combine(CurrentDataRoot, "sessions");
+    public string LogsDirectory => Path.Combine(CurrentDataRoot, "logs");
+    public string CefCacheDirectory => Path.Combine(CurrentDataRoot, "cef-cache");
+
+    /// <summary>need09-01：Global Skill 域根目录（随数据根迁移）。</summary>
+    public string GlobalSkillsDirectory => Path.Combine(CurrentDataRoot, "skills");
+
+    /// <summary>need09-01：Global Memory 域根目录（随数据根迁移）。</summary>
+    public string GlobalMemoryDirectory => Path.Combine(CurrentDataRoot, "memory");
+
+    /// <summary>need12：用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
+    public string MetricsDirectory => Path.Combine(CurrentDataRoot, "metrics");
+
+    /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
+    public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;
+
+    /// <summary>need09-01：标准子目录清单（含 skills/memory）。</summary>
+    public static IReadOnlyList<string> ManagedSubDirectoryNames => ManagedSubDirectories;
+    public string AppSettingsFilePath => Path.Combine(ConfigDirectory, "app-settings.json");
+
+    /// <summary>UI 活跃状态文件（独立于 app-settings，避免多写者读-改-写覆盖；随数据根迁移）。</summary>
+    public string UiStateFilePath => Path.Combine(ConfigDirectory, "ui-state.json");
 
     private StoragePathManager(
         string bootstrapFilePath,
@@ -92,7 +115,8 @@ public sealed class StoragePathManager
         string activeDataRoot,
         string? previousDataRoot,
         string lastModifiedUtc,
-        bool isUsingFallback)
+        bool isUsingFallback
+    )
     {
         BootstrapFilePath = bootstrapFilePath;
         DefaultDataRootPath = defaultDataRootPath;
@@ -103,20 +127,23 @@ public sealed class StoragePathManager
         _isUsingFallback = isUsingFallback;
     }
 
-     /// <summary>
-     /// 最近一次 Initialize 调用的候选目录决策链（成功/失败均记录，供启动追踪与冒烟诊断使用）。
-     /// </summary>
-     public static string LastInitReport { get; private set; } = string.Empty;
- 
+    /// <summary>
+    /// 最近一次 Initialize 调用的候选目录决策链（成功/失败均记录，供启动追踪与冒烟诊断使用）。
+    /// </summary>
+    public static string LastInitReport { get; private set; } = string.Empty;
+
     /// <summary>
     /// 启动时初始化两级引导存储结构，确保 bootstrap.json 与标准子目录树落盘。
     /// </summary>
     public static StoragePathManager Initialize(
         string? customBootstrapFilePath = null,
         string? customDefaultDataRoot = null,
-        string? customFallbackDataRoot = null)
+        string? customFallbackDataRoot = null
+    )
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localAppData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData
+        );
         var haloLocalAppDataDir = Path.Combine(localAppData, "HaloAgent");
 
         var envBootstrap = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
@@ -125,96 +152,107 @@ public sealed class StoragePathManager
                 ? customBootstrapFilePath
                 : !string.IsNullOrWhiteSpace(envBootstrap)
                     ? envBootstrap
-                    : Path.Combine(haloLocalAppDataDir, "bootstrap.json"));
+                    : Path.Combine(haloLocalAppDataDir, "bootstrap.json")
+        );
 
         var defaultRoot = Path.GetFullPath(
             !string.IsNullOrWhiteSpace(customDefaultDataRoot)
                 ? customDefaultDataRoot
-                : DefaultCDriveDataRoot);
+                : DefaultCDriveDataRoot
+        );
 
         var fallbackRoot = Path.GetFullPath(
             !string.IsNullOrWhiteSpace(customFallbackDataRoot)
                 ? customFallbackDataRoot
-                : Path.Combine(haloLocalAppDataDir, "Data"));
+                : Path.Combine(haloLocalAppDataDir, "Data")
+        );
 
         Directory.CreateDirectory(Path.GetDirectoryName(bootstrapPath)!);
 
-        var existingBootstrap = AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(bootstrapPath);
+        var existingBootstrap = AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(
+            bootstrapPath
+        );
         var preferredPath = !string.IsNullOrWhiteSpace(existingBootstrap?.DataRootPath)
             ? existingBootstrap!.DataRootPath
             : defaultRoot;
 
-         string activePath;
-         var usingFallback = false;
-         var attempts = new List<string>
-         {
-             $"bootstrap={bootstrapPath}",
-             $"preferred={preferredPath}",
-             $"default={defaultRoot}",
-             $"fallback={fallbackRoot}",
-         };
- 
-         if (TryEnsureDirectoryWritable(preferredPath, ".write_test", out var preferredError))
-         {
-             activePath = Path.GetFullPath(preferredPath);
-             attempts.Add("preferred: OK");
-         }
-         else
-         {
-             attempts.Add($"preferred: FAIL {preferredError}");
-             string? defaultError = null;
-             if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase) &&
-                 TryEnsureDirectoryWritable(defaultRoot, ".write_test", out defaultError))
-             {
-                 activePath = defaultRoot;
-                 attempts.Add("default: OK");
-             }
-             else
-             {
-                 if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase))
-                 {
-                     attempts.Add($"default: FAIL {defaultError}");
-                 }
-                 // 多级兜底：首选 fallbackRoot；若其亦不可写（如 LocalAppData 被 ACL/杀软锁定），
-                 // 最后退守 %TEMP%\HaloAgent\Data。所有候选均失败时才抛出带明细的异常，
-                 // 绝不允许裸 Directory.CreateDirectory 直接崩掉启动流程。
-                 var candidates = new[]
-                 {
-                     fallbackRoot,
-                     Path.Combine(Path.GetTempPath(), "HaloAgent", "Data")
-                 };
-                 string? resolvedPath = null;
-                 foreach (var candidate in candidates)
-                 {
-                     try
-                     {
-                         Directory.CreateDirectory(candidate);
-                         if (TryEnsureDirectoryWritable(candidate, ".write_test", out var probeError))
-                         {
-                             resolvedPath = candidate;
-                             attempts.Add($"fallback {candidate}: OK");
-                             break;
-                         }
-                         attempts.Add($"fallback {candidate}: FAIL {probeError}");
-                     }
-                     catch (Exception ex)
-                     {
-                         attempts.Add($"fallback {candidate}: EX {ex.Message}");
-                     }
-                 }
-                 if (resolvedPath == null)
-                 {
-                     LastInitReport = string.Join(" | ", attempts);
-                     throw new IOException(
-                         "无法初始化任何可写数据目录（已尝试 fallback 与 TEMP 兜底）。"
-                         + "请检查杀毒软件/权限后重试，或设置环境变量 HALO_BOOTSTRAP_PATH 指向可写位置。"
-                         + "明细: " + LastInitReport);
-                 }
-                 activePath = resolvedPath;
-                 usingFallback = true;
-             }
-         }
-         LastInitReport = string.Join(" | ", attempts) + $" => active={activePath}";
+        string activePath;
+        var usingFallback = false;
+        var attempts = new List<string>
+        {
+            $"bootstrap={bootstrapPath}",
+            $"preferred={preferredPath}",
+            $"default={defaultRoot}",
+            $"fallback={fallbackRoot}",
+        };
+
+        if (TryEnsureDirectoryWritable(preferredPath, ".write_test", out var preferredError))
+        {
+            activePath = Path.GetFullPath(preferredPath);
+            attempts.Add("preferred: OK");
+        }
+        else
+        {
+            attempts.Add($"preferred: FAIL {preferredError}");
+            string? defaultError = null;
+            if (
+                !string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase)
+                && TryEnsureDirectoryWritable(defaultRoot, ".write_test", out defaultError)
+            )
+            {
+                activePath = defaultRoot;
+                attempts.Add("default: OK");
+            }
+            else
+            {
+                if (!string.Equals(preferredPath, defaultRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    attempts.Add($"default: FAIL {defaultError}");
+                }
+                // 多级兜底：首选 fallbackRoot；若其亦不可写（如 LocalAppData 被 ACL/杀软锁定），
+                // 最后退守 %TEMP%\HaloAgent\Data。所有候选均失败时才抛出带明细的异常，
+                // 绝不允许裸 Directory.CreateDirectory 直接崩掉启动流程。
+                var candidates = new[]
+                {
+                    fallbackRoot,
+                    Path.Combine(Path.GetTempPath(), "HaloAgent", "Data")
+                };
+                string? resolvedPath = null;
+                foreach (var candidate in candidates)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(candidate);
+                        if (
+                            TryEnsureDirectoryWritable(candidate, ".write_test", out var probeError)
+                        )
+                        {
+                            resolvedPath = candidate;
+                            attempts.Add($"fallback {candidate}: OK");
+                            break;
+                        }
+                        attempts.Add($"fallback {candidate}: FAIL {probeError}");
+                    }
+                    catch (Exception ex)
+                    {
+                        attempts.Add($"fallback {candidate}: EX {ex.Message}");
+                    }
+                }
+                if (resolvedPath == null)
+                {
+                    LastInitReport = string.Join(" | ", attempts);
+                    throw new IOException(
+                        "无法初始化任何可写数据目录（已尝试 fallback 与 TEMP 兜底）。"
+                            + "请检查杀毒软件/权限后重试，或设置环境变量 HALO_BOOTSTRAP_PATH 指向可写位置。"
+                            + "明细: "
+                            + LastInitReport
+                    );
+                }
+                activePath = resolvedPath;
+                usingFallback = true;
+            }
+        }
+        LastInitReport = string.Join(" | ", attempts) + $" => active={activePath}";
 
         EnsureStandardSubdirectories(activePath);
 
@@ -239,7 +277,8 @@ public sealed class StoragePathManager
             activePath,
             previousRoot,
             lastModifiedUtc,
-            usingFallback);
+            usingFallback
+        );
 
         manager.EnsureDefaultAppSettings();
         return manager;
@@ -258,10 +297,15 @@ public sealed class StoragePathManager
         return defaults;
     }
 
-    public async Task SaveAppSettingsAsync(AppSettingsConfig settings, CancellationToken ct = default)
+    public async Task SaveAppSettingsAsync(
+        AppSettingsConfig settings,
+        CancellationToken ct = default
+    )
     {
         settings.LastUpdatedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
-        await AtomicFileWriter.WriteJsonAtomicAsync(AppSettingsFilePath, settings, ct).ConfigureAwait(false);
+        await AtomicFileWriter
+            .WriteJsonAtomicAsync(AppSettingsFilePath, settings, ct)
+            .ConfigureAwait(false);
     }
 
     private void EnsureDefaultAppSettings()
@@ -273,10 +317,29 @@ public sealed class StoragePathManager
         }
     }
 
+    /// <summary>读取 UI 活跃状态（无文件/空/坏 JSON 一律回默认空状态，永不抛）。</summary>
+    public UiActiveState LoadUiState()
+    {
+        var state = AtomicFileWriter.ReadJsonOrDefault<UiActiveState>(UiStateFilePath);
+        return state ?? new UiActiveState();
+    }
+
+    /// <summary>保存 UI 活跃状态（切换即写，原子落盘；单实例互斥，无锁需求）。</summary>
+    public async Task SaveUiStateAsync(UiActiveState state, CancellationToken ct = default)
+    {
+        state.LastActiveAtUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        await AtomicFileWriter
+            .WriteJsonAtomicAsync(UiStateFilePath, state, ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// 校验目标路径格式、系统目录保护、磁盘剩余空间（>= 200MB）及实际读写删除权限。
     /// </summary>
-    public Task<StorageValidationResult> ValidateTargetRootPathAsync(string targetPath, CancellationToken ct = default)
+    public Task<StorageValidationResult> ValidateTargetRootPathAsync(
+        string targetPath,
+        CancellationToken ct = default
+    )
     {
         return Task.Run(() => ValidateTargetRootPath(targetPath), ct);
     }
@@ -310,10 +373,17 @@ public sealed class StoragePathManager
             }
 
             var pathRoot = Path.GetPathRoot(rawFullPath);
-            if (!string.IsNullOrWhiteSpace(pathRoot) &&
-                string.Equals(rawFullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            if (
+                !string.IsNullOrWhiteSpace(pathRoot)
+                && string.Equals(
+                    rawFullPath.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar
+                    ),
                     pathRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 return new StorageValidationResult
                 {
@@ -324,7 +394,10 @@ public sealed class StoragePathManager
                 };
             }
 
-            fullPath = rawFullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            fullPath = rawFullPath.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar
+            );
         }
         catch (Exception ex)
         {
@@ -427,7 +500,8 @@ public sealed class StoragePathManager
         string newTargetPath,
         bool migrateExistingData,
         Action<int, string>? onProgress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default
+    )
     {
         var validation = await ValidateTargetRootPathAsync(newTargetPath, ct).ConfigureAwait(false);
         if (!validation.IsValid)
@@ -491,7 +565,10 @@ public sealed class StoragePathManager
                 migratedBytes += fileInfo.Exists ? fileInfo.Length : 0;
 
                 var percent = 15 + (int)((i + 1) * 70.0 / Math.Max(1, totalFiles));
-                onProgress?.Invoke(percent, $"正在迁移文件 ({i + 1}/{totalFiles}): {Path.GetFileName(sourceFile)}");
+                onProgress?.Invoke(
+                    percent,
+                    $"正在迁移文件 ({i + 1}/{totalFiles}): {Path.GetFileName(sourceFile)}"
+                );
             }
         }
 
@@ -505,20 +582,27 @@ public sealed class StoragePathManager
             LastModifiedUtc = nowUtc
         };
 
-        await AtomicFileWriter.WriteJsonAtomicAsync(BootstrapFilePath, bootstrap, ct).ConfigureAwait(false);
+        await AtomicFileWriter
+            .WriteJsonAtomicAsync(BootstrapFilePath, bootstrap, ct)
+            .ConfigureAwait(false);
 
         lock (_stateLock)
         {
             _previousDataRoot = sourceRoot;
             _currentDataRoot = targetRoot;
             _lastModifiedUtc = nowUtc;
-            _isUsingFallback = string.Equals(targetRoot, FallbackDataRootPath, StringComparison.OrdinalIgnoreCase);
+            _isUsingFallback = string.Equals(
+                targetRoot,
+                FallbackDataRootPath,
+                StringComparison.OrdinalIgnoreCase
+            );
         }
 
         EnsureDefaultAppSettings();
         HaloLogger.SwitchLogsDirectory(LogsDirectory);
         HaloLogger.App.Info(
-            $"Storage dataRootPath switched from '{sourceRoot}' to '{targetRoot}' (migrateExistingData={migrateExistingData}, files={migratedCount}, bytes={migratedBytes}).");
+            $"Storage dataRootPath switched from '{sourceRoot}' to '{targetRoot}' (migrateExistingData={migrateExistingData}, files={migratedCount}, bytes={migratedBytes})."
+        );
         await HaloLogger.FlushAsync().ConfigureAwait(false);
 
         onProgress?.Invoke(100, "存储路径切换完成。");
@@ -578,16 +662,20 @@ public sealed class StoragePathManager
         {
             var fullPath = Path.Combine(logsDir, def.FileName);
             var info = new FileInfo(fullPath);
-            result.Add(new LogChannelStatus
-            {
-                Channel = def.Channel,
-                Label = def.Label,
-                FileName = def.FileName,
-                FilePath = fullPath,
-                Exists = info.Exists,
-                SizeBytes = info.Exists ? info.Length : 0L,
-                LastWriteTimeUtc = info.Exists ? info.LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ") : null
-            });
+            result.Add(
+                new LogChannelStatus
+                {
+                    Channel = def.Channel,
+                    Label = def.Label,
+                    FileName = def.FileName,
+                    FilePath = fullPath,
+                    Exists = info.Exists,
+                    SizeBytes = info.Exists ? info.Length : 0L,
+                    LastWriteTimeUtc = info.Exists
+                        ? info.LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        : null
+                }
+            );
         }
 
         return result;
@@ -602,10 +690,14 @@ public sealed class StoragePathManager
         }
     }
 
-    private static List<(string SourceFile, string DestFile)> CollectMigratableFiles(string sourceRoot, string targetRoot)
+    private static List<(string SourceFile, string DestFile)> CollectMigratableFiles(
+        string sourceRoot,
+        string targetRoot
+    )
     {
         var result = new List<(string, string)>();
-        var normalizedTargetWithSep = targetRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var normalizedTargetWithSep =
+            targetRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
         foreach (var subDirName in MigratableSubDirectories)
         {
@@ -615,11 +707,15 @@ public sealed class StoragePathManager
                 continue;
             }
 
-            foreach (var file in Directory.EnumerateFiles(sourceSubDir, "*", SearchOption.AllDirectories))
+            foreach (
+                var file in Directory.EnumerateFiles(sourceSubDir, "*", SearchOption.AllDirectories)
+            )
             {
                 var fullFile = Path.GetFullPath(file);
                 // 防止当新目录位于旧目录内部时发生递归拷贝
-                if (fullFile.StartsWith(normalizedTargetWithSep, StringComparison.OrdinalIgnoreCase))
+                if (
+                    fullFile.StartsWith(normalizedTargetWithSep, StringComparison.OrdinalIgnoreCase)
+                )
                 {
                     continue;
                 }
@@ -633,7 +729,11 @@ public sealed class StoragePathManager
         return result;
     }
 
-    private static async Task CopyFileSharedAsync(string sourceFile, string destFile, CancellationToken ct)
+    private static async Task CopyFileSharedAsync(
+        string sourceFile,
+        string destFile,
+        CancellationToken ct
+    )
     {
         await using var sourceStream = new FileStream(
             sourceFile,
@@ -641,7 +741,8 @@ public sealed class StoragePathManager
             FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 81920,
-            useAsync: true);
+            useAsync: true
+        );
 
         await using var destStream = new FileStream(
             destFile,
@@ -649,7 +750,8 @@ public sealed class StoragePathManager
             FileAccess.Write,
             FileShare.None,
             bufferSize: 81920,
-            useAsync: true);
+            useAsync: true
+        );
 
         await sourceStream.CopyToAsync(destStream, 81920, ct).ConfigureAwait(false);
         await destStream.FlushAsync(ct).ConfigureAwait(false);
@@ -679,8 +781,13 @@ public sealed class StoragePathManager
             }
 
             var normRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
-            if (string.Equals(fullPath, normRoot, StringComparison.OrdinalIgnoreCase) ||
-                fullPath.StartsWith(normRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(fullPath, normRoot, StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(
+                    normRoot + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 return true;
             }
@@ -713,29 +820,34 @@ public sealed class StoragePathManager
         }
     }
 
+    public static bool TryEnsureDirectoryWritable(
+        string directoryPath,
+        string probeFileName = ".halo_write_probe"
+    ) => TryEnsureDirectoryWritable(directoryPath, probeFileName, out _);
 
-    public static bool TryEnsureDirectoryWritable(string directoryPath, string probeFileName = ".halo_write_probe") =>
-        TryEnsureDirectoryWritable(directoryPath, probeFileName, out _);
-
-     public static bool TryEnsureDirectoryWritable(string directoryPath, string probeFileName, out string? errorMessage)
-     {
-         errorMessage = null;
-         try
-         {
-             Directory.CreateDirectory(directoryPath);
-             var probePath = Path.Combine(directoryPath, $"{probeFileName}_{Guid.NewGuid():N}");
-             // 注意：此处故意使用最普通的创建+写入+删除组合进行探测。
-             // 严禁使用 FileShare.None / FileOptions.WriteThrough 等排他式直写标志——
-             // 该组合极易被杀软行为监控误判为勒索软件特征，导致新构建的未签名程序被拦截写入、
-             // 明明有权限却报 Access Denied（冒烟测试 2026-10-14 实证）。
-             File.WriteAllText(probePath, "HALO_PROBE");
-             File.Delete(probePath);
-             return true;
-         }
-         catch (Exception ex)
-         {
-             errorMessage = ex.Message;
-             return false;
-         }
-     }
+    public static bool TryEnsureDirectoryWritable(
+        string directoryPath,
+        string probeFileName,
+        out string? errorMessage
+    )
+    {
+        errorMessage = null;
+        try
+        {
+            Directory.CreateDirectory(directoryPath);
+            var probePath = Path.Combine(directoryPath, $"{probeFileName}_{Guid.NewGuid():N}");
+            // 注意：此处故意使用最普通的创建+写入+删除组合进行探测。
+            // 严禁使用 FileShare.None / FileOptions.WriteThrough 等排他式直写标志——
+            // 该组合极易被杀软行为监控误判为勒索软件特征，导致新构建的未签名程序被拦截写入、
+            // 明明有权限却报 Access Denied（冒烟测试 2026-10-14 实证）。
+            File.WriteAllText(probePath, "HALO_PROBE");
+            File.Delete(probePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            return false;
+        }
+    }
 }

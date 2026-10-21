@@ -10,7 +10,9 @@ namespace Host.Desktop.Infrastructure.Storage;
 public static class SecretProtector
 {
     // 绑定应用级附加熵
-    private static readonly byte[] AppEntropy = Encoding.UTF8.GetBytes("HaloAgent.Win7Desktop.SecretSalt.v1");
+    private static readonly byte[] AppEntropy = Encoding.UTF8.GetBytes(
+        "HaloAgent.Win7Desktop.SecretSalt.v1"
+    );
 
     /// <summary>
     /// 将明文加密为 DPAPI Base64 密文
@@ -23,7 +25,11 @@ public static class SecretProtector
         }
 
         byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
-        byte[] cipherBytes = ProtectedData.Protect(plainBytes, AppEntropy, DataProtectionScope.CurrentUser);
+        byte[] cipherBytes = ProtectedData.Protect(
+            plainBytes,
+            AppEntropy,
+            DataProtectionScope.CurrentUser
+        );
         return Convert.ToBase64String(cipherBytes);
     }
 
@@ -40,7 +46,11 @@ public static class SecretProtector
         try
         {
             byte[] cipherBytes = Convert.FromBase64String(cipherBase64);
-            byte[] plainBytes = ProtectedData.Unprotect(cipherBytes, AppEntropy, DataProtectionScope.CurrentUser);
+            byte[] plainBytes = ProtectedData.Unprotect(
+                cipherBytes,
+                AppEntropy,
+                DataProtectionScope.CurrentUser
+            );
             return Encoding.UTF8.GetString(plainBytes);
         }
         catch
@@ -63,7 +73,11 @@ public static class SecretProtector
         try
         {
             byte[] cipherBytes = Convert.FromBase64String(candidate);
-            byte[] plainBytes = ProtectedData.Unprotect(cipherBytes, AppEntropy, DataProtectionScope.CurrentUser);
+            byte[] plainBytes = ProtectedData.Unprotect(
+                cipherBytes,
+                AppEntropy,
+                DataProtectionScope.CurrentUser
+            );
             return plainBytes.Length > 0;
         }
         catch

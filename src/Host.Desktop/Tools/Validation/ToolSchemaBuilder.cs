@@ -35,19 +35,23 @@ public sealed class ToolSchemaBuilder
         string[]? enumValues = null,
         int? minLength = null,
         int? maxLength = null,
-        string? defaultValue = null)
+        string? defaultValue = null
+    )
     {
-        _fields.Add(new FieldSpec
-        {
-            Name = name,
-            Type = "string",
-            Description = description ?? string.Empty,
-            Required = required,
-            EnumValues = enumValues,
-            MinLength = minLength,
-            MaxLength = maxLength,
-            DefaultRawJson = defaultValue == null ? null : JsonSerializer.Serialize(defaultValue),
-        });
+        _fields.Add(
+            new FieldSpec
+            {
+                Name = name,
+                Type = "string",
+                Description = description ?? string.Empty,
+                Required = required,
+                EnumValues = enumValues,
+                MinLength = minLength,
+                MaxLength = maxLength,
+                DefaultRawJson =
+                    defaultValue == null ? null : JsonSerializer.Serialize(defaultValue),
+            }
+        );
         return this;
     }
 
@@ -57,58 +61,80 @@ public sealed class ToolSchemaBuilder
         bool required = false,
         long? minimum = null,
         long? maximum = null,
-        long? defaultValue = null)
+        long? defaultValue = null
+    )
     {
-        _fields.Add(new FieldSpec
-        {
-            Name = name,
-            Type = "integer",
-            Description = description ?? string.Empty,
-            Required = required,
-            Minimum = minimum,
-            Maximum = maximum,
-            DefaultRawJson = defaultValue?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        });
+        _fields.Add(
+            new FieldSpec
+            {
+                Name = name,
+                Type = "integer",
+                Description = description ?? string.Empty,
+                Required = required,
+                Minimum = minimum,
+                Maximum = maximum,
+                DefaultRawJson = defaultValue?.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
+            }
+        );
         return this;
     }
 
-    public ToolSchemaBuilder AddBoolean(string name, string description, bool required = false, bool? defaultValue = null)
+    public ToolSchemaBuilder AddBoolean(
+        string name,
+        string description,
+        bool required = false,
+        bool? defaultValue = null
+    )
     {
-        _fields.Add(new FieldSpec
-        {
-            Name = name,
-            Type = "boolean",
-            Description = description ?? string.Empty,
-            Required = required,
-            DefaultRawJson = defaultValue == null ? null : (defaultValue.Value ? "true" : "false"),
-        });
+        _fields.Add(
+            new FieldSpec
+            {
+                Name = name,
+                Type = "boolean",
+                Description = description ?? string.Empty,
+                Required = required,
+                DefaultRawJson =
+                    defaultValue == null ? null : (defaultValue.Value ? "true" : "false"),
+            }
+        );
         return this;
     }
 
     /// <summary>数组字段（itemsType 如 "object"/"string"；暂只做一层声明，深层元素校验由业务层负责）。</summary>
-    public ToolSchemaBuilder AddArray(string name, string description, bool required = false, string itemsType = "object")
+    public ToolSchemaBuilder AddArray(
+        string name,
+        string description,
+        bool required = false,
+        string itemsType = "object"
+    )
     {
-        _fields.Add(new FieldSpec
-        {
-            Name = name,
-            Type = "array",
-            Description = description ?? string.Empty,
-            Required = required,
-            ItemsType = itemsType,
-        });
+        _fields.Add(
+            new FieldSpec
+            {
+                Name = name,
+                Type = "array",
+                Description = description ?? string.Empty,
+                Required = required,
+                ItemsType = itemsType,
+            }
+        );
         return this;
     }
 
     /// <summary>对象字段（结构由业务层校验，声明层只约束类型）。</summary>
     public ToolSchemaBuilder AddObject(string name, string description, bool required = false)
     {
-        _fields.Add(new FieldSpec
-        {
-            Name = name,
-            Type = "object",
-            Description = description ?? string.Empty,
-            Required = required,
-        });
+        _fields.Add(
+            new FieldSpec
+            {
+                Name = name,
+                Type = "object",
+                Description = description ?? string.Empty,
+                Required = required,
+            }
+        );
         return this;
     }
 

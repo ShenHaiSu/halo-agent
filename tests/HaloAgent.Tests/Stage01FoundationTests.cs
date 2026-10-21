@@ -21,7 +21,8 @@ public sealed class Stage01FoundationTests : IDisposable
     {
         _tempRoot = Path.Combine(
             Path.GetTempPath(),
-            "HaloAgentStage01Tests_" + Guid.NewGuid().ToString("N"));
+            "HaloAgentStage01Tests_" + Guid.NewGuid().ToString("N")
+        );
         Directory.CreateDirectory(_tempRoot);
 
         _bootstrapFilePath = Path.Combine(_tempRoot, "LocalAppData", "HaloAgent", "bootstrap.json");
@@ -36,7 +37,11 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public void S01_AC02_Initialize_CreatesBootstrapJson_And_DefaultSubDirectories()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
 
         Assert.True(File.Exists(_bootstrapFilePath), "bootstrap.json 应当被自动创建");
         Assert.Equal(Path.GetFullPath(_defaultDataRoot), manager.CurrentDataRoot);
@@ -57,7 +62,11 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public async Task S01_AC03_ChangeDataRoot_SupportsMigrateAndSwitchOnly_AndPersistsBootstrap()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
         HaloLogger.Initialize(manager);
 
         // 在原目录写入模拟配置文件和会话文件
@@ -78,13 +87,20 @@ public sealed class Stage01FoundationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(newRootA, "sessions", "sess-001.json")));
 
         // 验证重启后读取 bootstrap.json 依然指向 NewRootA
-        var reloadedManager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var reloadedManager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
         Assert.Equal(Path.GetFullPath(newRootA), reloadedManager.CurrentDataRoot);
         Assert.Equal(Path.GetFullPath(_defaultDataRoot), reloadedManager.PreviousDataRoot);
 
         // 2. 测试仅切换至新目录 NewRootB（不迁移旧文件）
         var newRootB = Path.Combine(_tempRoot, "CustomRootB_Empty");
-        var resultB = await reloadedManager.ChangeDataRootAsync(newRootB, migrateExistingData: false);
+        var resultB = await reloadedManager.ChangeDataRootAsync(
+            newRootB,
+            migrateExistingData: false
+        );
 
         Assert.True(resultB.Success);
         Assert.False(resultB.MigratedData);
@@ -108,7 +124,11 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public void S01_AC03_ValidateTargetRootPath_RejectsDriveRootAndSystemDirectories()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
 
         var driveRootCheck = manager.ValidateTargetRootPath(@"C:\");
         Assert.False(driveRootCheck.IsValid);
@@ -125,18 +145,27 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public async Task S01_AC04_HaloLogger_WritesThreeChannels_SanitizesSecrets_AndCleansExpiredLogs()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
         HaloLogger.Initialize(manager);
 
         HaloLogger.App.Info("Stage 01 Host started.");
-        HaloLogger.Llm.Info("Request header Authorization: Bearer sk-abcdef1234567890xyz9876 sent.");
+        HaloLogger.Llm.Info(
+            "Request header Authorization: Bearer sk-abcdef1234567890xyz9876 sent."
+        );
         HaloLogger.Tool.Info("Executed cmd.exe /c echo hello");
 
         await HaloLogger.FlushAsync(TimeSpan.FromSeconds(5));
 
         var statuses = manager.GetLogChannelStatuses();
         Assert.Equal(3, statuses.Count);
-        Assert.All(statuses, s => Assert.True(s.Exists && s.SizeBytes > 0, $"通道 {s.Channel} 日志文件应存在且非空"));
+        Assert.All(
+            statuses,
+            s => Assert.True(s.Exists && s.SizeBytes > 0, $"通道 {s.Channel} 日志文件应存在且非空")
+        );
 
         var llmChannel = Assert.Single(statuses, s => s.Channel == "llm");
         var llmContent = await File.ReadAllTextAsync(llmChannel.FilePath);
@@ -159,7 +188,11 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public async Task S01_AC03_AC04_LoggerFollowsDynamicStorageRootSwitch()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
         HaloLogger.Initialize(manager);
 
         HaloLogger.App.Info("BeforeSwitch: Log in default root.");
@@ -185,7 +218,11 @@ public sealed class Stage01FoundationTests : IDisposable
     [Fact]
     public async Task S01_AC06_HostBridgeFacade_ReturnsExpectedSystemAndStorageInfo()
     {
-        var manager = StoragePathManager.Initialize(_bootstrapFilePath, _defaultDataRoot, _fallbackDataRoot);
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            _defaultDataRoot,
+            _fallbackDataRoot
+        );
         HaloLogger.Initialize(manager);
         var facade = new HostBridgeFacade(null, manager, gpuDisabled: true);
 
@@ -201,25 +238,29 @@ public sealed class Stage01FoundationTests : IDisposable
         Assert.Equal(3, storageRes.Data!.LogChannels.Count);
     }
 
-     /// <summary>
-     /// 冒烟回归：当首选与默认数据目录均不可写时，初始化必须降级到 fallback
-     /// （或最后的 TEMP 兜底），绝不允许抛出未处理异常导致启动闪退。
-     /// 用“已存在文件之下的子路径”确定性模拟不可写目录。
-     /// </summary>
-     [Fact]
-     public void S01_Smoke_Initialize_FallsBack_WhenPreferredAndDefaultUnwritable()
-     {
-         var blockerFile = Path.Combine(_tempRoot, "blocker");
-         File.WriteAllText(blockerFile, "block");
-         var unwritablePreferred = Path.Combine(blockerFile, "Preferred");
- 
-         var manager = StoragePathManager.Initialize(_bootstrapFilePath, unwritablePreferred, _fallbackDataRoot);
- 
-         Assert.Equal(Path.GetFullPath(_fallbackDataRoot), manager.CurrentDataRoot);
-         Assert.True(manager.IsUsingFallback);
-         Assert.True(Directory.Exists(manager.LogsDirectory));
-     }
- 
+    /// <summary>
+    /// 冒烟回归：当首选与默认数据目录均不可写时，初始化必须降级到 fallback
+    /// （或最后的 TEMP 兜底），绝不允许抛出未处理异常导致启动闪退。
+    /// 用“已存在文件之下的子路径”确定性模拟不可写目录。
+    /// </summary>
+    [Fact]
+    public void S01_Smoke_Initialize_FallsBack_WhenPreferredAndDefaultUnwritable()
+    {
+        var blockerFile = Path.Combine(_tempRoot, "blocker");
+        File.WriteAllText(blockerFile, "block");
+        var unwritablePreferred = Path.Combine(blockerFile, "Preferred");
+
+        var manager = StoragePathManager.Initialize(
+            _bootstrapFilePath,
+            unwritablePreferred,
+            _fallbackDataRoot
+        );
+
+        Assert.Equal(Path.GetFullPath(_fallbackDataRoot), manager.CurrentDataRoot);
+        Assert.True(manager.IsUsingFallback);
+        Assert.True(Directory.Exists(manager.LogsDirectory));
+    }
+
     public void Dispose()
     {
         try

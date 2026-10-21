@@ -37,7 +37,10 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
     public Stage06AgentOrchestratorTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage06Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage06Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage06Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -45,7 +48,8 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
@@ -54,8 +58,14 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         _projectDir = Path.Combine(_tempRoot, "Projects", "AgentTest");
         Directory.CreateDirectory(_projectDir);
 
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "Agent测试项目").GetAwaiter().GetResult();
-        _session = _service.CreateSessionAsync(_workspace.Id, "Stage06 验收会话").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "Agent测试项目")
+            .GetAwaiter()
+            .GetResult();
+        _session = _service
+            .CreateSessionAsync(_workspace.Id, "Stage06 验收会话")
+            .GetAwaiter()
+            .GetResult();
     }
 
     public void Dispose()
@@ -73,40 +83,59 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         }
     }
 
-     [Fact]
-     public async Task SystemPrompt_Contains_CmdFirst_And_PowerShellBan()
-     {
-         string prompt = await SystemPromptBuilder.BuildAsync(_workspace, "Python 3.11.9 (C:\\Python311\\python.exe)");
+    [Fact]
+    public async Task SystemPrompt_Contains_CmdFirst_And_PowerShellBan()
+    {
+        string prompt = await SystemPromptBuilder.BuildAsync(
+            _workspace,
+            "Python 3.11.9 (C:\\Python311\\python.exe)"
+        );
 
-         Assert.Contains("cmd.exe", prompt);
-         Assert.Contains("FIRST CHOICE", prompt);
-         Assert.Contains("powershell", prompt, StringComparison.OrdinalIgnoreCase);
-         Assert.Contains("AVOID PowerShell", prompt);
-         Assert.Contains("read_file", prompt);
-         Assert.Contains("edit_file", prompt);
-         // need15: ToolGuide 已收敛为硬规则（不再逐字列 list_dir/grep_search，通用卡片仍可用）
-         Assert.Contains("NEVER invent", prompt);
-         Assert.Contains("verbatim copy-paste", prompt);
-         Assert.Contains(_workspace.RootPath, prompt);
-         Assert.Contains(_workspace.Name, prompt);
-     }
+        Assert.Contains("cmd.exe", prompt);
+        Assert.Contains("FIRST CHOICE", prompt);
+        Assert.Contains("powershell", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AVOID PowerShell", prompt);
+        Assert.Contains("read_file", prompt);
+        Assert.Contains("edit_file", prompt);
+        // need15: ToolGuide 已收敛为硬规则（不再逐字列 list_dir/grep_search，通用卡片仍可用）
+        Assert.Contains("NEVER invent", prompt);
+        Assert.Contains("verbatim copy-paste", prompt);
+        Assert.Contains(_workspace.RootPath, prompt);
+        Assert.Contains(_workspace.Name, prompt);
+    }
 
     [Fact]
     public async Task React_NoTools_DirectAnswer_Completes()
     {
-        var gateway = new ScriptedFakeGateway(new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>(new[]
-        {
-            new Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>(_ => new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.Text("任务已完成，无需调用工具。"),
-                UnifiedStreamEvent.Tokens(100, 20, 80, 120),
-                UnifiedStreamEvent.Completed(),
-            }),
-        }));
+        var gateway = new ScriptedFakeGateway(
+            new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>(
+                new[]
+                {
+                    new Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>(
+                        _ => new List<UnifiedStreamEvent>
+                        {
+                            UnifiedStreamEvent.Text("任务已完成，无需调用工具。"),
+                            UnifiedStreamEvent.Tokens(100, 20, 80, 120),
+                            UnifiedStreamEvent.Completed(),
+                        }
+                    ),
+                }
+            )
+        );
 
-        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(registerBuiltIns: false), _storageManager);
+        var orchestrator = new AgentOrchestrator(
+            _service,
+            _budgetService,
+            gateway,
+            new ToolRegistry(registerBuiltIns: false),
+            _storageManager
+        );
 
-        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "你好");
+        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+            _workspace.Id,
+            _session.Id,
+            "你好"
+        );
 
         Assert.True(result.Success);
         Assert.False(result.WasCancelled);
@@ -133,25 +162,42 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         var script = new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>();
         script.Enqueue(_ => new List<UnifiedStreamEvent>
         {
-            UnifiedStreamEvent.ToolDone("call_edit_1", "edit_file", "{\"file_path\":\"notes.txt\",\"old_string\":\"not-exist-line\",\"new_string\":\"x\"}"),
+            UnifiedStreamEvent.ToolDone(
+                "call_edit_1",
+                "edit_file",
+                "{\"file_path\":\"notes.txt\",\"old_string\":\"not-exist-line\",\"new_string\":\"x\"}"
+            ),
             UnifiedStreamEvent.Completed(),
         });
         script.Enqueue(req =>
         {
             // 自愈断言：上一轮 tool 消息必须包含自愈提示（含 read_file 引导）
-            var history = _service.GetSessionMessagesAsync(_workspace.Id, _session.Id).GetAwaiter().GetResult();
-            var lastTool = history.FindLast(m => string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase));
+            var history = _service
+                .GetSessionMessagesAsync(_workspace.Id, _session.Id)
+                .GetAwaiter()
+                .GetResult();
+            var lastTool = history.FindLast(m =>
+                string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase)
+            );
             Assert.NotNull(lastTool);
             Assert.Contains("read_file", lastTool!.Content ?? string.Empty);
             return new List<UnifiedStreamEvent>
             {
-                UnifiedStreamEvent.ToolDone("call_read_1", "read_file", "{\"file_path\":\"notes.txt\"}"),
+                UnifiedStreamEvent.ToolDone(
+                    "call_read_1",
+                    "read_file",
+                    "{\"file_path\":\"notes.txt\"}"
+                ),
                 UnifiedStreamEvent.Completed(),
             };
         });
         script.Enqueue(_ => new List<UnifiedStreamEvent>
         {
-            UnifiedStreamEvent.ToolDone("call_edit_2", "edit_file", "{\"file_path\":\"notes.txt\",\"old_string\":\"line1\",\"new_string\":\"line1-edited\"}"),
+            UnifiedStreamEvent.ToolDone(
+                "call_edit_2",
+                "edit_file",
+                "{\"file_path\":\"notes.txt\",\"old_string\":\"line1\",\"new_string\":\"line1-edited\"}"
+            ),
             UnifiedStreamEvent.Completed(),
         });
         script.Enqueue(_ => new List<UnifiedStreamEvent>
@@ -161,9 +207,19 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         });
 
         var gateway = new ScriptedFakeGateway(script);
-        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(), _storageManager);
+        var orchestrator = new AgentOrchestrator(
+            _service,
+            _budgetService,
+            gateway,
+            new ToolRegistry(),
+            _storageManager
+        );
 
-        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "修复 notes.txt");
+        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+            _workspace.Id,
+            _session.Id,
+            "修复 notes.txt"
+        );
 
         Assert.True(result.Success);
         Assert.False(result.WasTruncated);
@@ -172,24 +228,45 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         Assert.Equal("line1-edited\nline2\n", await File.ReadAllTextAsync(targetFile));
 
         var messages = await _service.GetSessionMessagesAsync(_workspace.Id, _session.Id);
-        Assert.Contains(messages, m => string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase)
-            && (m.Content ?? string.Empty).Contains("[Tool Error - edit_file]"));
+        Assert.Contains(
+            messages,
+            m =>
+                string.Equals(m.Role, "tool", StringComparison.OrdinalIgnoreCase)
+                && (m.Content ?? string.Empty).Contains("[Tool Error - edit_file]")
+        );
     }
 
     [Fact]
     public async Task React_MaxIterations_Truncates()
     {
-        var gateway = new ScriptedFakeGateway(null, fallback: req => new List<UnifiedStreamEvent>
-        {
-            UnifiedStreamEvent.ToolDone($"call_{Guid.NewGuid():N}", "list_dir", "{\"path\":\".\"}"),
-            UnifiedStreamEvent.Completed(),
-        });
+        var gateway = new ScriptedFakeGateway(
+            null,
+            fallback: req => new List<UnifiedStreamEvent>
+            {
+                UnifiedStreamEvent.ToolDone(
+                    $"call_{Guid.NewGuid():N}",
+                    "list_dir",
+                    "{\"path\":\".\"}"
+                ),
+                UnifiedStreamEvent.Completed(),
+            }
+        );
 
         var orchestrator = new AgentOrchestrator(
-            _service, _budgetService, gateway, new ToolRegistry(), _storageManager, maxIterations: 3);
+            _service,
+            _budgetService,
+            gateway,
+            new ToolRegistry(),
+            _storageManager,
+            maxIterations: 3
+        );
 
         Assert.Equal(3, orchestrator.MaxIterations);
-        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "列出目录三轮");
+        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+            _workspace.Id,
+            _session.Id,
+            "列出目录三轮"
+        );
 
         Assert.True(result.Success);
         Assert.True(result.WasTruncated);
@@ -200,22 +277,39 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
     [Fact]
     public async Task React_Cancel_BeforeStart_Under100ms()
     {
-        var gateway = new ScriptedFakeGateway(new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>(new[]
-        {
-            new Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>(_ => new List<UnifiedStreamEvent>
-            {
-                UnifiedStreamEvent.Text("不应执行到这里。"),
-                UnifiedStreamEvent.Completed(),
-            }),
-        }));
+        var gateway = new ScriptedFakeGateway(
+            new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>(
+                new[]
+                {
+                    new Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>(
+                        _ => new List<UnifiedStreamEvent>
+                        {
+                            UnifiedStreamEvent.Text("不应执行到这里。"),
+                            UnifiedStreamEvent.Completed(),
+                        }
+                    ),
+                }
+            )
+        );
 
-        var orchestrator = new AgentOrchestrator(_service, _budgetService, gateway, new ToolRegistry(registerBuiltIns: false), _storageManager);
+        var orchestrator = new AgentOrchestrator(
+            _service,
+            _budgetService,
+            gateway,
+            new ToolRegistry(registerBuiltIns: false),
+            _storageManager
+        );
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var sw = Stopwatch.StartNew();
-        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(_workspace.Id, _session.Id, "取消我", cancellationToken: cts.Token);
+        AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
+            _workspace.Id,
+            _session.Id,
+            "取消我",
+            cancellationToken: cts.Token
+        );
         sw.Stop();
 
         Assert.True(result.WasCancelled);
@@ -231,7 +325,8 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
 
         public ScriptedFakeGateway(
             Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>? script,
-            Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>? fallback = null)
+            Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>? fallback = null
+        )
         {
             _script = script;
             _fallback = fallback;
@@ -239,7 +334,8 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
 
         public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
             UnifiedLlmRequest request,
-            [EnumeratorCancellation] CancellationToken ct = default)
+            [EnumeratorCancellation] CancellationToken ct = default
+        )
         {
             List<UnifiedStreamEvent> events;
             if (_script != null && _script.Count > 0)

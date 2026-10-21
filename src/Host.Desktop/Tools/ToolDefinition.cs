@@ -72,10 +72,15 @@ public sealed class ToolDefinition
     /// <summary>need17-01：按指定全局模式导出（Off=回滚开关，还原 need17 前行为）。</summary>
     public string ToChatToolJson(StrictToolsMode mode)
     {
-        string json = "{\"type\":\"function\",\"function\":"
-            + "{\"name\":" + JsonQuote(Name)
-            + ",\"description\":" + JsonQuote(Description)
-            + ",\"parameters\":" + ParametersJson + "}}";
+        string json =
+            "{\"type\":\"function\",\"function\":"
+            + "{\"name\":"
+            + JsonQuote(Name)
+            + ",\"description\":"
+            + JsonQuote(Description)
+            + ",\"parameters\":"
+            + ParametersJson
+            + "}}";
         if (ResolveStrict(mode))
         {
             // 在 function 对象内注入 "strict": true（Chat 协议位置）。
@@ -96,10 +101,15 @@ public sealed class ToolDefinition
     /// <summary>need17-01：按指定全局模式导出（Off=回滚开关，还原 need17 前行为）。</summary>
     public string ToResponsesToolJson(StrictToolsMode mode)
     {
-        string json = "{\"type\":\"function\""
-            + ",\"name\":" + JsonQuote(Name)
-            + ",\"description\":" + JsonQuote(Description)
-            + ",\"parameters\":" + ParametersJson + "}";
+        string json =
+            "{\"type\":\"function\""
+            + ",\"name\":"
+            + JsonQuote(Name)
+            + ",\"description\":"
+            + JsonQuote(Description)
+            + ",\"parameters\":"
+            + ParametersJson
+            + "}";
         if (ResolveStrict(mode))
         {
             // 顶层注入 "strict": true（Responses 协议位置）。
@@ -115,12 +125,14 @@ public sealed class ToolDefinition
             return "null";
         }
 
-        return "\"" + value
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\r", "\\r")
-            .Replace("\n", "\\n")
-            .Replace("\t", "\\t") + "\"";
+        return "\""
+            + value
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t")
+            + "\"";
     }
 }
 

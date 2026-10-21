@@ -1,6 +1,6 @@
- using System;
- using System.Linq;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Host.Desktop.Core.Models;
@@ -16,14 +16,29 @@ public sealed class UnifiedLlmRequest
     public string RequestId { get; init; } = string.Empty;
     public ProviderConfig Provider { get; init; } = new();
     public ModelConfig Model { get; init; } = new();
-    public HeaderResolutionContext HeaderContext { get; init; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+    public HeaderResolutionContext HeaderContext { get; init; } =
+        new(
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty
+        );
     public string SystemInstructions { get; init; } = string.Empty;
-    public IReadOnlyList<UnifiedChatMessage> Messages { get; init; } = Array.Empty<UnifiedChatMessage>();
-    public IReadOnlyList<UnifiedToolDefinition> Tools { get; init; } = Array.Empty<UnifiedToolDefinition>();
+    public IReadOnlyList<UnifiedChatMessage> Messages { get; init; } =
+        Array.Empty<UnifiedChatMessage>();
+    public IReadOnlyList<UnifiedToolDefinition> Tools { get; init; } =
+        Array.Empty<UnifiedToolDefinition>();
+
     /// <summary>need09-05：图片引用 → dataURL 解析器（默认 ImageDataRegistry；单测可注入假数据）。返回 null 表示该图无字节（发送时省略，文本保留）。</summary>
     [JsonIgnore]
     public Func<ChatImageRef, string?>? ImageResolver { get; init; }
 }
+
 /// <summary>need09-03/05：非视觉模型收到含图轮次时由 Adapter 抛出；Orchestrator 捕获后纯文本降级重发一次。</summary>
 public sealed class NonVisionModelException : Exception
 {
@@ -33,31 +48,45 @@ public sealed class NonVisionModelException : Exception
         ModelId = modelId ?? string.Empty;
         ImageCount = imageCount;
     }
+
     public string ModelId { get; }
     public int ImageCount { get; }
 }
+
 /// <summary>need09-05：图片字节内存注册表（生产由 SessionRepository 读盘回填；单测注入假 dataURL）。</summary>
 public static class ImageDataRegistry
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _map = new(StringComparer.Ordinal);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+        string,
+        string
+    > _map = new(StringComparer.Ordinal);
+
     public static void Register(string imageId, string dataUrl)
     {
-        if (!string.IsNullOrWhiteSpace(imageId) && !string.IsNullOrWhiteSpace(dataUrl)) _map[imageId.Trim()] = dataUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(imageId) && !string.IsNullOrWhiteSpace(dataUrl))
+            _map[imageId.Trim()] = dataUrl.Trim();
     }
+
     public static string? Resolve(ChatImageRef? img)
     {
-        if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) return null;
+        if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
+            return null;
         return _map.TryGetValue(img.ImageId, out var url) ? url : null;
     }
+
     public static void Clear() => _map.Clear();
 }
+
 /// <summary>need09-05：adapter 共享的多模态轮次规划结果项。</summary>
 public sealed record ResolvedImage(ChatImageRef Ref, string? DataUrl);
+
 /// <summary>need09-05：adapter 共享的多模态轮次规划（门控加取最新 N 保 latest 丢最旧加dataURL 解析）。</summary>
 public static class MultimodalPlanner
 {
     /// <summary>规划本轮图片：非视觉模型含图抛 NonVisionModelException；超 Max 取最新 N 张。返回与 Messages 等长对齐的 kept 列表。</summary>
-    public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(UnifiedLlmRequest request)
+    public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(
+        UnifiedLlmRequest request
+    )
     {
         var kept = new List<List<ResolvedImage>>();
         int total = 0;
@@ -66,32 +95,43 @@ public static class MultimodalPlanner
             var list = new List<ResolvedImage>();
             if (msg != null && msg.Images != null)
             {
-                bool carries = msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase)
+                bool carries =
+                    msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase)
                     || msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
                 if (carries)
                 {
                     foreach (var img in msg.Images)
                     {
-                        if (img == null || string.IsNullOrWhiteSpace(img.ImageId)) continue;
+                        if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
+                            continue;
                         total++;
-                        string? url = request.ImageResolver != null ? request.ImageResolver(img) : ImageDataRegistry.Resolve(img);
+                        string? url =
+                            request.ImageResolver != null
+                                ? request.ImageResolver(img)
+                                : ImageDataRegistry.Resolve(img);
                         if (!string.IsNullOrWhiteSpace(url))
                         {
                             url = url.Trim();
                             if (!url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                             {
-                                string mime = string.IsNullOrWhiteSpace(img.Mime) ? "image/jpeg" : img.Mime.Trim();
+                                string mime = string.IsNullOrWhiteSpace(img.Mime)
+                                    ? "image/jpeg"
+                                    : img.Mime.Trim();
                                 url = "data:" + mime + ";base64," + url;
                             }
                         }
-                        else { url = null; }
+                        else
+                        {
+                            url = null;
+                        }
                         list.Add(new ResolvedImage(img, url));
                     }
                 }
             }
             kept.Add(list);
         }
-        if (total > 0 && !request.Model.SupportsVision) throw new NonVisionModelException(request.Model.Id, total);
+        if (total > 0 && !request.Model.SupportsVision)
+            throw new NonVisionModelException(request.Model.Id, total);
         int max = VisionDefaults.ResolveMaxImages(request.Model.MaxImagesPerTurn);
         int dropped = 0;
         if (total > max)
@@ -100,104 +140,186 @@ public static class MultimodalPlanner
             int skip = dropped;
             for (int i = 0; i < kept.Count && skip > 0; i++)
             {
-                while (kept[i].Count > 0 && skip > 0) { kept[i].RemoveAt(0); skip--; }
+                while (kept[i].Count > 0 && skip > 0)
+                {
+                    kept[i].RemoveAt(0);
+                    skip--;
+                }
             }
         }
         return (kept, dropped, total);
     }
 }
- /// <summary>
- /// 发包前配对守卫（纯函数，无 Services 依赖，双协议适配器共用）：
- /// assistant(tool_calls) 后必须紧跟覆盖全部 call_id 的 tool 块；缺回包在块尾补 synthetic，
- /// 无主 tool 直接丢弃，保证任何历史脏数据都发不出坏包。
- /// 合成文本与 WorkspaceSessionService.SyntheticCancelledToolText 同格式（前端可识别）。
- /// </summary>
- public static class ChatPairingGuard
- {
-     public const string SyntheticPrefix = "[Tool Cancelled";
-     public static string SyntheticText(string? functionName)
-     {
-         string name = string.IsNullOrWhiteSpace(functionName) ? "tool" : functionName!.Trim();
-         return $"[Tool Cancelled - {name}]: 该工具调用在实际执行前被中断（用户手动停止或进程异常退出），未产生任何副作用。请基于已有上下文继续任务；如仍需要该操作，请重新发起工具调用。";
-     }
-     /// <summary>返回修好配对的内存副本（不改输入）；已配对时返回原引用拷贝。</summary>
-     public static List<Host.Desktop.Core.Models.UnifiedChatMessage> HealForSend(System.Collections.Generic.IReadOnlyList<Host.Desktop.Core.Models.UnifiedChatMessage>? messages)
-     {
-         var src = messages ?? System.Array.Empty<Host.Desktop.Core.Models.UnifiedChatMessage>();
-         int n = src.Count;
-         if (n == 0) return new List<Host.Desktop.Core.Models.UnifiedChatMessage>();
-         var uncoveredByAssistant = new System.Collections.Generic.Dictionary<int, System.Collections.Generic.List<(string CallId, string? Name)>>();
-         var orphanToolIndexes = new System.Collections.Generic.HashSet<int>();
-         for (int i = 0; i < n; i++)
-         {
-             var m = src[i];
-             if (m == null) continue;
-             string role = (m.Role ?? string.Empty).ToLowerInvariant();
-             if (string.Equals(role, "assistant", System.StringComparison.Ordinal))
-             {
-                 var calls = m.ToolCalls?
-                     .Where(c => c != null && !string.IsNullOrWhiteSpace(c.CallId))
-                     .ToList();
-                 if (calls == null || calls.Count == 0) continue;
-                 var covered = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
-                 for (int j = i + 1; j < n; j++)
-                 {
-                     var t = src[j];
-                     if (t == null || !string.Equals((t.Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal)) break;
-                     if (!string.IsNullOrWhiteSpace(t.ToolCallId)) covered.Add(t.ToolCallId!);
-                 }
-                 var uncovered = calls.Where(c => !covered.Contains(c.CallId)).Select(c => (c.CallId, (string?)c.FunctionName)).ToList();
-                 if (uncovered.Count > 0) uncoveredByAssistant[i] = uncovered;
-             }
-             else if (string.Equals(role, "tool", System.StringComparison.Ordinal))
-             {
-                 bool owned = false;
-                 if (!string.IsNullOrWhiteSpace(m.ToolCallId))
-                 {
-                     int k = i - 1;
-                     while (k >= 0 && src[k] != null && string.Equals((src[k].Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal)) k--;
-                     if (k >= 0 && src[k] != null && string.Equals((src[k].Role ?? string.Empty).ToLowerInvariant(), "assistant", System.StringComparison.Ordinal))
-                     {
-                         owned = src[k].ToolCalls?.Any(c => c != null && string.Equals(c.CallId, m.ToolCallId, System.StringComparison.Ordinal)) == true;
-                     }
-                 }
-                 if (!owned) orphanToolIndexes.Add(i);
-             }
-         }
-         if (uncoveredByAssistant.Count == 0 && orphanToolIndexes.Count == 0)
-         {
-             return new List<Host.Desktop.Core.Models.UnifiedChatMessage>(src);
-         }
-         // 合成一律追加在存量 tool 块尾（[assistant, toolA, syntheticB]），不插在块中。
-         var fixed_ = new List<Host.Desktop.Core.Models.UnifiedChatMessage>(n + uncoveredByAssistant.Values.Sum(v => v.Count));
-         int idx = 0;
-         while (idx < n)
-         {
-             if (orphanToolIndexes.Contains(idx)) { idx++; continue; }
-             var m = src[idx];
-             fixed_.Add(m!);
-             if (uncoveredByAssistant.TryGetValue(idx, out var uncovered))
-             {
-                 int j = idx + 1;
-                 while (j < n && src[j] != null && string.Equals((src[j].Role ?? string.Empty).ToLowerInvariant(), "tool", System.StringComparison.Ordinal))
-                 {
-                     if (orphanToolIndexes.Contains(j)) { j++; continue; }
-                     fixed_.Add(src[j]!);
-                     j++;
-                 }
-                 foreach (var (callId, name) in uncovered)
-                 {
-                     fixed_.Add(Host.Desktop.Core.Models.UnifiedChatMessage.Tool(callId, SyntheticText(name), name));
-                 }
-                 idx = j;
-             }
-             else { idx++; }
-         }
-         return fixed_;
-     }
- }
 
+/// <summary>
+/// 发包前配对守卫（纯函数，无 Services 依赖，双协议适配器共用）：
+/// assistant(tool_calls) 后必须紧跟覆盖全部 call_id 的 tool 块；缺回包在块尾补 synthetic，
+/// 无主 tool 直接丢弃，保证任何历史脏数据都发不出坏包。
+/// 合成文本与 WorkspaceSessionService.SyntheticCancelledToolText 同格式（前端可识别）。
+/// </summary>
+public static class ChatPairingGuard
+{
+    public const string SyntheticPrefix = "[Tool Cancelled";
 
+    public static string SyntheticText(string? functionName)
+    {
+        string name = string.IsNullOrWhiteSpace(functionName) ? "tool" : functionName!.Trim();
+        return $"[Tool Cancelled - {name}]: 该工具调用在实际执行前被中断（用户手动停止或进程异常退出），未产生任何副作用。请基于已有上下文继续任务；如仍需要该操作，请重新发起工具调用。";
+    }
+
+    /// <summary>返回修好配对的内存副本（不改输入）；已配对时返回原引用拷贝。</summary>
+    public static List<Host.Desktop.Core.Models.UnifiedChatMessage> HealForSend(
+        System.Collections.Generic.IReadOnlyList<Host.Desktop.Core.Models.UnifiedChatMessage>? messages
+    )
+    {
+        var src = messages ?? System.Array.Empty<Host.Desktop.Core.Models.UnifiedChatMessage>();
+        int n = src.Count;
+        if (n == 0)
+            return new List<Host.Desktop.Core.Models.UnifiedChatMessage>();
+        var uncoveredByAssistant = new System.Collections.Generic.Dictionary<
+            int,
+            System.Collections.Generic.List<(string CallId, string? Name)>
+        >();
+        var orphanToolIndexes = new System.Collections.Generic.HashSet<int>();
+        for (int i = 0; i < n; i++)
+        {
+            var m = src[i];
+            if (m == null)
+                continue;
+            string role = (m.Role ?? string.Empty).ToLowerInvariant();
+            if (string.Equals(role, "assistant", System.StringComparison.Ordinal))
+            {
+                var calls = m
+                    .ToolCalls?.Where(c => c != null && !string.IsNullOrWhiteSpace(c.CallId))
+                    .ToList();
+                if (calls == null || calls.Count == 0)
+                    continue;
+                var covered = new System.Collections.Generic.HashSet<string>(
+                    System.StringComparer.Ordinal
+                );
+                for (int j = i + 1; j < n; j++)
+                {
+                    var t = src[j];
+                    if (
+                        t == null
+                        || !string.Equals(
+                            (t.Role ?? string.Empty).ToLowerInvariant(),
+                            "tool",
+                            System.StringComparison.Ordinal
+                        )
+                    )
+                        break;
+                    if (!string.IsNullOrWhiteSpace(t.ToolCallId))
+                        covered.Add(t.ToolCallId!);
+                }
+                var uncovered = calls
+                    .Where(c => !covered.Contains(c.CallId))
+                    .Select(c => (c.CallId, (string?)c.FunctionName))
+                    .ToList();
+                if (uncovered.Count > 0)
+                    uncoveredByAssistant[i] = uncovered;
+            }
+            else if (string.Equals(role, "tool", System.StringComparison.Ordinal))
+            {
+                bool owned = false;
+                if (!string.IsNullOrWhiteSpace(m.ToolCallId))
+                {
+                    int k = i - 1;
+                    while (
+                        k >= 0
+                        && src[k] != null
+                        && string.Equals(
+                            (src[k].Role ?? string.Empty).ToLowerInvariant(),
+                            "tool",
+                            System.StringComparison.Ordinal
+                        )
+                    )
+                        k--;
+                    if (
+                        k >= 0
+                        && src[k] != null
+                        && string.Equals(
+                            (src[k].Role ?? string.Empty).ToLowerInvariant(),
+                            "assistant",
+                            System.StringComparison.Ordinal
+                        )
+                    )
+                    {
+                        owned =
+                            src[k]
+                                .ToolCalls?.Any(c =>
+                                    c != null
+                                    && string.Equals(
+                                        c.CallId,
+                                        m.ToolCallId,
+                                        System.StringComparison.Ordinal
+                                    )
+                                ) == true;
+                    }
+                }
+                if (!owned)
+                    orphanToolIndexes.Add(i);
+            }
+        }
+        if (uncoveredByAssistant.Count == 0 && orphanToolIndexes.Count == 0)
+        {
+            return new List<Host.Desktop.Core.Models.UnifiedChatMessage>(src);
+        }
+        // 合成一律追加在存量 tool 块尾（[assistant, toolA, syntheticB]），不插在块中。
+        var fixed_ = new List<Host.Desktop.Core.Models.UnifiedChatMessage>(
+            n + uncoveredByAssistant.Values.Sum(v => v.Count)
+        );
+        int idx = 0;
+        while (idx < n)
+        {
+            if (orphanToolIndexes.Contains(idx))
+            {
+                idx++;
+                continue;
+            }
+            var m = src[idx];
+            fixed_.Add(m!);
+            if (uncoveredByAssistant.TryGetValue(idx, out var uncovered))
+            {
+                int j = idx + 1;
+                while (
+                    j < n
+                    && src[j] != null
+                    && string.Equals(
+                        (src[j].Role ?? string.Empty).ToLowerInvariant(),
+                        "tool",
+                        System.StringComparison.Ordinal
+                    )
+                )
+                {
+                    if (orphanToolIndexes.Contains(j))
+                    {
+                        j++;
+                        continue;
+                    }
+                    fixed_.Add(src[j]!);
+                    j++;
+                }
+                foreach (var (callId, name) in uncovered)
+                {
+                    fixed_.Add(
+                        Host.Desktop.Core.Models.UnifiedChatMessage.Tool(
+                            callId,
+                            SyntheticText(name),
+                            name
+                        )
+                    );
+                }
+                idx = j;
+            }
+            else
+            {
+                idx++;
+            }
+        }
+        return fixed_;
+    }
+}
 
 /// <summary>
 /// 统一工具描述符
@@ -206,6 +328,7 @@ public sealed class UnifiedToolDefinition
 {
     public string Name { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
+
     /// <summary>
     /// 标准 JSON Schema 对象（type: "object", properties: {...}, required: [...]）
     /// </summary>
@@ -213,7 +336,9 @@ public sealed class UnifiedToolDefinition
 
     public static UnifiedToolDefinition Create(string name, string description, string jsonSchema)
     {
-        using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(jsonSchema) ? "{}" : jsonSchema);
+        using var doc = JsonDocument.Parse(
+            string.IsNullOrWhiteSpace(jsonSchema) ? "{}" : jsonSchema
+        );
         return new UnifiedToolDefinition
         {
             Name = name,
@@ -228,18 +353,19 @@ public sealed class UnifiedToolDefinition
 /// </summary>
 public enum UnifiedStreamEventKind
 {
-    StreamStarted,       // 流已建立
-    ReasoningDelta,      // 思考过程增量（兼容 DeepSeek reasoning_content / OpenAI reasoning summary）
-    TextDelta,           // 正文文本增量
-    ToolCallStarted,     // 模型决定发起某个工具调用（已拿到 callId 与 functionName）
-    ToolCallArgsDelta,   // 工具参数 JSON 增量片段
-    ToolCallCompleted,   // 单个工具调用参数接收完毕
-    UsageUpdated,        // Token 消耗统计（含 Prompt Cache 命中统计）
-    StreamCompleted,     // 整轮响应完成
-    StreamTruncated,     // NEED17-06：finish_reason=length（回复因输出长度被截断，tool args 可能不完整）
-    StreamCancelled,     // 用户主动取消中途生成
-    StreamError          // 协议层或网络层错误
+    StreamStarted, // 流已建立
+    ReasoningDelta, // 思考过程增量（兼容 DeepSeek reasoning_content / OpenAI reasoning summary）
+    TextDelta, // 正文文本增量
+    ToolCallStarted, // 模型决定发起某个工具调用（已拿到 callId 与 functionName）
+    ToolCallArgsDelta, // 工具参数 JSON 增量片段
+    ToolCallCompleted, // 单个工具调用参数接收完毕
+    UsageUpdated, // Token 消耗统计（含 Prompt Cache 命中统计）
+    StreamCompleted, // 整轮响应完成
+    StreamTruncated, // NEED17-06：finish_reason=length（回复因输出长度被截断，tool args 可能不完整）
+    StreamCancelled, // 用户主动取消中途生成
+    StreamError // 协议层或网络层错误
 }
+
 /// <summary>
 /// 统一流式事件载荷
 /// </summary>
@@ -252,8 +378,7 @@ public sealed record UnifiedStreamEvent(
     string? ErrorMessage = null
 )
 {
-    public static UnifiedStreamEvent Started() =>
-        new(UnifiedStreamEventKind.StreamStarted);
+    public static UnifiedStreamEvent Started() => new(UnifiedStreamEventKind.StreamStarted);
 
     public static UnifiedStreamEvent Text(string delta) =>
         new(UnifiedStreamEventKind.TextDelta, TextDelta: delta);
@@ -261,43 +386,65 @@ public sealed record UnifiedStreamEvent(
     public static UnifiedStreamEvent Reasoning(string delta) =>
         new(UnifiedStreamEventKind.ReasoningDelta, TextDelta: delta);
 
-    public static UnifiedStreamEvent ToolStarted(string callId, string functionName, string? itemId = null) =>
-        new(UnifiedStreamEventKind.ToolCallStarted,
-            ToolCall: new UnifiedToolCall(callId, itemId, functionName, string.Empty));
+    public static UnifiedStreamEvent ToolStarted(
+        string callId,
+        string functionName,
+        string? itemId = null
+    ) =>
+        new(
+            UnifiedStreamEventKind.ToolCallStarted,
+            ToolCall: new UnifiedToolCall(callId, itemId, functionName, string.Empty)
+        );
 
-    public static UnifiedStreamEvent ToolArgs(string callId, string argsDelta, string? itemId = null) =>
-        new(UnifiedStreamEventKind.ToolCallArgsDelta,
+    public static UnifiedStreamEvent ToolArgs(
+        string callId,
+        string argsDelta,
+        string? itemId = null
+    ) =>
+        new(
+            UnifiedStreamEventKind.ToolCallArgsDelta,
             TextDelta: argsDelta,
-            ToolCall: new UnifiedToolCall(callId, itemId, string.Empty, argsDelta));
+            ToolCall: new UnifiedToolCall(callId, itemId, string.Empty, argsDelta)
+        );
 
-    public static UnifiedStreamEvent ToolDone(string callId, string functionName, string argumentsJson, string? itemId = null) =>
-        new(UnifiedStreamEventKind.ToolCallCompleted,
-            ToolCall: new UnifiedToolCall(callId, itemId, functionName, argumentsJson));
+    public static UnifiedStreamEvent ToolDone(
+        string callId,
+        string functionName,
+        string argumentsJson,
+        string? itemId = null
+    ) =>
+        new(
+            UnifiedStreamEventKind.ToolCallCompleted,
+            ToolCall: new UnifiedToolCall(callId, itemId, functionName, argumentsJson)
+        );
 
     public static UnifiedStreamEvent Tokens(int input, int output, int cached, int total) =>
-        new(UnifiedStreamEventKind.UsageUpdated,
-            Usage: new UnifiedTokenUsage(input, output, cached, total));
+        new(
+            UnifiedStreamEventKind.UsageUpdated,
+            Usage: new UnifiedTokenUsage(input, output, cached, total)
+        );
 
-    public static UnifiedStreamEvent Completed() =>
-        new(UnifiedStreamEventKind.StreamCompleted);
+    public static UnifiedStreamEvent Completed() => new(UnifiedStreamEventKind.StreamCompleted);
+
     public static UnifiedStreamEvent Truncated(int toolCalls) =>
-        new(UnifiedStreamEventKind.StreamTruncated, ErrorCode: "STREAM_TRUNCATED",
-            ErrorMessage: toolCalls.ToString(System.Globalization.CultureInfo.InvariantCulture));
-    public static UnifiedStreamEvent Cancelled() =>
-        new(UnifiedStreamEventKind.StreamCancelled);
+        new(
+            UnifiedStreamEventKind.StreamTruncated,
+            ErrorCode: "STREAM_TRUNCATED",
+            ErrorMessage: toolCalls.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        );
+
+    public static UnifiedStreamEvent Cancelled() => new(UnifiedStreamEventKind.StreamCancelled);
 
     public static UnifiedStreamEvent Error(string code, string message) =>
-        new(UnifiedStreamEventKind.StreamError,
-            ErrorCode: code,
-            ErrorMessage: message);
+        new(UnifiedStreamEventKind.StreamError, ErrorCode: code, ErrorMessage: message);
 }
 
 /// <summary>
 /// 统一工具调用数据
 /// </summary>
 public sealed record UnifiedToolCall(
-    string CallId,          // 对应 Chat 的 tool_call.id 或 Responses 的 call_id
-    string? ItemId,         // 对应 Responses API 的 fc_xxx item id（可选）
+    string CallId, // 对应 Chat 的 tool_call.id 或 Responses 的 call_id
+    string? ItemId, // 对应 Responses API 的 fc_xxx item id（可选）
     string FunctionName,
     string ArgumentsJson
 );
@@ -308,13 +455,12 @@ public sealed record UnifiedToolCall(
 public sealed record UnifiedTokenUsage(
     int InputTokens,
     int OutputTokens,
-    int CachedInputTokens,  // 重点：记录 Prompt Cache 命中的 Token 数，验证 ${session-hash} 收益
+    int CachedInputTokens, // 重点：记录 Prompt Cache 命中的 Token 数，验证 ${session-hash} 收益
     int TotalTokens
 )
 {
-    public double CacheHitRate => InputTokens > 0
-        ? Math.Clamp((double)CachedInputTokens / InputTokens, 0.0, 1.0)
-        : 0.0;
+    public double CacheHitRate =>
+        InputTokens > 0 ? Math.Clamp((double)CachedInputTokens / InputTokens, 0.0, 1.0) : 0.0;
 }
 
 /// <summary>
@@ -330,7 +476,10 @@ public sealed class SessionStreamEventDto
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
 
-    public static SessionStreamEventDto FromUnifiedEvent(string sessionId, UnifiedStreamEvent evt) =>
+    public static SessionStreamEventDto FromUnifiedEvent(
+        string sessionId,
+        UnifiedStreamEvent evt
+    ) =>
         new()
         {
             SessionId = sessionId,

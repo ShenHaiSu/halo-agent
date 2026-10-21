@@ -28,14 +28,18 @@ public sealed class Stage05CompactTests : IDisposable
     public Stage05CompactTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05Compact_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05CompactBoot_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage05CompactBoot_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
         string bootstrapFile = Path.Combine(_bootstrapRoot, "bootstrap.json");
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
         _budgetService = new TokenBudgetService();
@@ -45,8 +49,10 @@ public sealed class Stage05CompactTests : IDisposable
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -66,18 +72,29 @@ public sealed class Stage05CompactTests : IDisposable
         await _service.AppendSessionMessageAsync(wsId, sessId, UnifiedChatMessage.System("你是助手"));
         for (int i = 0; i < 5; i++)
         {
-            await _service.AppendSessionMessageAsync(wsId, sessId, UnifiedChatMessage.User($"问题{i}"));
+            await _service.AppendSessionMessageAsync(
+                wsId,
+                sessId,
+                UnifiedChatMessage.User($"问题{i}")
+            );
             var a = UnifiedChatMessage.Assistant($"回答{i}");
             a.InputTokens = 1000 + i;
             a.OutputTokens = 50;
             await _service.AppendSessionMessageAsync(wsId, sessId, a);
         }
-        var calls = new List<UnifiedToolCall> { new("call_c1", null, "read_file", "{\"p\":\"a\"}") };
+        var calls = new List<UnifiedToolCall>
+        {
+            new("call_c1", null, "read_file", "{\"p\":\"a\"}")
+        };
         var ta = UnifiedChatMessage.Assistant("scanning", calls);
         ta.InputTokens = 2000;
         ta.OutputTokens = 60;
         await _service.AppendSessionMessageAsync(wsId, sessId, ta);
-        await _service.AppendSessionMessageAsync(wsId, sessId, UnifiedChatMessage.Tool("call_c1", "file-content", "read_file"));
+        await _service.AppendSessionMessageAsync(
+            wsId,
+            sessId,
+            UnifiedChatMessage.Tool("call_c1", "file-content", "read_file")
+        );
         await _service.AppendSessionMessageAsync(wsId, sessId, UnifiedChatMessage.User("尾部追问"));
         var la = UnifiedChatMessage.Assistant("尾部回答");
         la.InputTokens = 2100;
@@ -96,9 +113,17 @@ public sealed class Stage05CompactTests : IDisposable
     {
         var (wsId, sessId) = await NewSessionAsync();
         for (int i = 0; i < 5; i++)
-            await _service.AppendSessionMessageAsync(wsId, sessId, UnifiedChatMessage.User($"q{i}"));
+            await _service.AppendSessionMessageAsync(
+                wsId,
+                sessId,
+                UnifiedChatMessage.User($"q{i}")
+            );
 
-        var compaction = new CompactionService(_service, _budgetService, new FakeGateway("要点1\n要点2"));
+        var compaction = new CompactionService(
+            _service,
+            _budgetService,
+            new FakeGateway("要点1\n要点2")
+        );
         var result = await compaction.CompactAsync(wsId, sessId);
         Assert.True(result.Success);
         Assert.Equal(0, result.RemovedMessages);
@@ -117,20 +142,28 @@ public sealed class Stage05CompactTests : IDisposable
         int before = JsonlLineCount(wsDir, sessId);
         Assert.True(before >= 15);
 
-        var compaction = new CompactionService(_service, _budgetService, new FakeGateway("要点1\n要点2"));
+        var compaction = new CompactionService(
+            _service,
+            _budgetService,
+            new FakeGateway("要点1\n要点2")
+        );
         var result = await compaction.CompactAsync(wsId, sessId);
         Assert.True(result.Success);
         Assert.True(result.RemovedMessages > 0);
 
         var after = await _service.GetSessionMessagesAsync(wsId, sessId);
         Assert.Equal("system", after[0].Role);
-        Assert.Contains(after, m => m.Role == "user" && (m.Content ?? string.Empty).Contains("【上下文摘要"));
+        Assert.Contains(
+            after,
+            m => m.Role == "user" && (m.Content ?? string.Empty).Contains("【上下文摘要")
+        );
         // 摘要块含中文要点（桩回放）
         Assert.Contains(after, m => (m.Content ?? string.Empty).Contains("要点1"));
         // 尾部 tool 组无孤儿
         var calls = after.Where(m => m.ToolCalls != null && m.ToolCalls.Count > 0).ToList();
         var results = after.Where(m => m.Role == "tool").ToList();
-        if (calls.Count == 0) Assert.Empty(results);
+        if (calls.Count == 0)
+            Assert.Empty(results);
         else
         {
             var ids = calls.SelectMany(m => m.ToolCalls!).Select(c => c.CallId).ToHashSet();
@@ -207,11 +240,13 @@ public sealed class Stage05CompactTests : IDisposable
     private sealed class FakeGateway : ILlmGatewayClient
     {
         private readonly string _content;
+
         public FakeGateway(string content) => _content = content;
 
         public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
             UnifiedLlmRequest request,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default
+        )
         {
             await Task.Yield();
             yield return UnifiedStreamEvent.Text(_content);
@@ -224,7 +259,8 @@ public sealed class Stage05CompactTests : IDisposable
     {
         public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
             UnifiedLlmRequest request,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default
+        )
         {
             await Task.Yield();
             throw new HttpRequestException("network down");

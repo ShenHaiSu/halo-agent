@@ -1,16 +1,17 @@
-  import { defineStore } from 'pinia';
-  import { ref, computed, watch } from 'vue';
-  import {
-    getHostBridge,
-    haloEventBus,
-    type WorkspaceInfo,
-    type SessionMetadata,
-    type UnifiedChatMessage,
-    type ContextBudgetStatusDto,
-  } from '@/bridge/hostBridge';
-  import { useConfigStore } from '@/stores/configStore';
-  import { useSessionStore } from '@/stores/sessionStore';
-  import { isBadTime } from '@/utils/timeFormat';
+import { defineStore } from 'pinia';
+import { ref, computed, watch } from 'vue';
+import {
+  getHostBridge,
+  haloEventBus,
+  type WorkspaceInfo,
+  type SessionMetadata,
+  type UnifiedChatMessage,
+  type ContextBudgetStatusDto,
+  type UiActiveState,
+} from '@/bridge/hostBridge';
+import { useConfigStore } from '@/stores/configStore';
+import { useSessionStore } from '@/stores/sessionStore';
+import { isBadTime } from '@/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -23,7 +24,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeSessionId = ref<string>('');
   // need22-P2 F1：activeSessionId 唯一真相=sessionStore；本 ref 为兼容镜像，任何写入同步过去。
   const sessionStore = useSessionStore();
-  watch(activeSessionId, (sid) => { sessionStore.syncActive(sid || ''); }, { flush: 'sync' });
+  watch(
+    activeSessionId,
+    (sid) => {
+      sessionStore.syncActive(sid || '');
+    },
+    { flush: 'sync' }
+  );
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
   const budgetStatus = ref<ContextBudgetStatusDto | null>(null);
   // need22-P3 G6：budget 失败显式角标（顶栏⚠），统一 {code,message}
@@ -32,35 +39,71 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const searchQuery = ref<string>('');
   const loading = ref<boolean>(false);
   const loadingMessages = ref<boolean>(false);
+  // UI活跃状态：后端config/ui-state.json持久（上次离开时的工作区+会话，只恢复到main）
+  const lastActive = ref<UiActiveState>({ workspaceId: null, sessionId: null });
+  let lastActiveLoaded = false;
+  let persistTimer: number | null = null;
+  async function ensureLastActive(): Promise<UiActiveState> {
+    if (lastActiveLoaded) return lastActive.value;
+    lastActiveLoaded = true;
+    try {
+      const res = await getHostBridge().getLastActive();
+      if (res.ok && res.data) lastActive.value = { workspaceId: res.data.workspaceId ?? null, sessionId: res.data.sessionId ?? null };
+    } catch {
+      /* 无/坏一律回空，不阻断启动 */
+    }
+    return lastActive.value;
+  }
+  function persistLastActive(): void {
+    try {
+      if (persistTimer) window.clearTimeout(persistTimer);
+      persistTimer = window.setTimeout(() => {
+        const wid = activeWorkspaceId.value || '';
+        const sid = activeSessionId.value || '';
+        if (!wid) return;
+        void getHostBridge()
+          .setLastActive(wid, sid)
+          .catch(() => {
+            /* 静默：持久失败不阻断 */
+          });
+      }, 300);
+    } catch {
+      /* ignore */
+    }
+  }
+  /** 只恢复到main：sub一律解析到其父main，父缺失则回首个 */
+  function resolveMainSessionId(list: SessionMetadata[], candidateId: string | null): string {
+    if (!list.length) return '';
+    if (candidateId) {
+      const hit = list.find((s) => s.id === candidateId);
+      if (hit) {
+        const role = String((hit as unknown as { agentRole?: string }).agentRole || 'main').toLowerCase();
+        const parent = String((hit as unknown as { parentSessionId?: string }).parentSessionId || '');
+        if (role !== 'sub' || !parent) return hit.id;
+        const p = list.find((s) => s.id === parent);
+        if (p) return p.id;
+      }
+    }
+    return list[0].id;
+  }
   // need03-03：自动标题冻结位（手动改名最高优，此后永不覆盖）+ 首轮已生成位 + 生成中位
   const titleLocked = ref<Record<string, boolean>>({});
   const autoTitleDone = ref<Record<string, boolean>>({});
   const titleGenerating = ref<Record<string, boolean>>({});
 
   const activeWorkspace = computed<WorkspaceInfo | null>(() => {
-    return (
-      workspaces.value.find((w) => w.id === activeWorkspaceId.value) ||
-      workspaces.value[0] ||
-      null
-    );
+    return workspaces.value.find((w) => w.id === activeWorkspaceId.value) || workspaces.value[0] || null;
   });
 
   const activeSession = computed<SessionMetadata | null>(() => {
-    return (
-      sessions.value.find((s) => s.id === activeSessionId.value) ||
-      sessions.value[0] ||
-      null
-    );
+    return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
 
   const filteredSessions = computed<SessionMetadata[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();
     if (!q) return sessions.value;
     return sessions.value.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.sessionHash.toLowerCase().includes(q) ||
-        s.id.toLowerCase().includes(q)
+      (s) => s.title.toLowerCase().includes(q) || s.sessionHash.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
     );
   });
 
@@ -79,11 +122,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.getWorkspaces();
       if (res.ok && res.data) {
         workspaces.value = res.data;
-        if (
-          !activeWorkspaceId.value ||
-          !workspaces.value.some((w) => w.id === activeWorkspaceId.value)
-        ) {
-          if (workspaces.value.length > 0) {
+        const saved = await ensureLastActive();
+        if (!activeWorkspaceId.value || !workspaces.value.some((w) => w.id === activeWorkspaceId.value)) {
+          const savedWid = (saved.workspaceId || '').trim();
+          if (savedWid && workspaces.value.some((w) => w.id === savedWid)) {
+            activeWorkspaceId.value = savedWid;
+          } else if (workspaces.value.length > 0) {
             activeWorkspaceId.value = workspaces.value[0].id;
           }
         }
@@ -101,6 +145,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     activeWorkspaceId.value = workspaceId;
     await loadSessions(workspaceId);
+    persistLastActive();
   }
 
   async function addWorkspace(rootPath: string, name?: string): Promise<WorkspaceInfo | null> {
@@ -139,15 +184,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         workspaces.value = workspaces.value.filter((w) => w.id !== workspaceId);
         if (activeWorkspaceId.value === workspaceId) {
           activeWorkspaceId.value = workspaces.value[0]?.id || '';
+          activeSessionId.value = '';
           if (activeWorkspaceId.value) {
             await loadSessions(activeWorkspaceId.value);
           } else {
             sessions.value = [];
-            activeSessionId.value = '';
             sessionMessages.value = [];
             budgetStatus.value = null;
           }
         }
+        persistLastActive();
         return true;
       }
     } catch (err) {
@@ -193,7 +239,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         if (!!a.isPinned !== !!b.isPinned) return (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0);
         return new Date(b.updatedAtUtc).getTime() - new Date(a.updatedAtUtc).getTime();
       });
-    } catch { /* 对账失败只打日志，不阻断 */ }
+    } catch {
+      /* 对账失败只打日志，不阻断 */
+    }
   }
 
   async function loadSessions(workspaceId: string): Promise<void> {
@@ -212,30 +260,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const nowIso = new Date().toISOString();
         // need04-01：坏时间统一回填（空串/null/0001/Invalid/年<2000），内存态不回写磁盘
         for (const s of res.data) {
-          if (isBadTime((s as unknown as { createdAtUtc: string }).createdAtUtc)) (s as unknown as { createdAtUtc: string }).createdAtUtc = nowIso;
-          if (isBadTime((s as unknown as { updatedAtUtc: string }).updatedAtUtc)) (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s.createdAtUtc as string) || nowIso;
+          if (isBadTime((s as unknown as { createdAtUtc: string }).createdAtUtc))
+            (s as unknown as { createdAtUtc: string }).createdAtUtc = nowIso;
+          if (isBadTime((s as unknown as { updatedAtUtc: string }).updatedAtUtc))
+            (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s.createdAtUtc as string) || nowIso;
           const c = new Date((s as unknown as { createdAtUtc: string }).createdAtUtc).getTime();
           const u = new Date((s as unknown as { updatedAtUtc: string }).updatedAtUtc).getTime();
-          if (!isNaN(c) && !isNaN(u) && u < c) (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s as unknown as { createdAtUtc: string }).createdAtUtc;
+          if (!isNaN(c) && !isNaN(u) && u < c)
+            (s as unknown as { updatedAtUtc: string }).updatedAtUtc = (s as unknown as { createdAtUtc: string }).createdAtUtc;
         }
         sessions.value = res.data;
-        if (
-          !activeSessionId.value ||
-          !sessions.value.some((s) => s.id === activeSessionId.value)
-        ) {
-          if (sessions.value.length > 0) {
-            activeSessionId.value = sessions.value[0].id;
-          } else {
-            activeSessionId.value = '';
-          }
+        if (!activeSessionId.value || !sessions.value.some((s) => s.id === activeSessionId.value)) {
+          // 启动恢复：同工作区才用存档session，且只到main（sub解析到父main）
+          const saved = await ensureLastActive();
+          const candidate = saved.workspaceId === workspaceId ? saved.sessionId : null;
+          activeSessionId.value = resolveMainSessionId(sessions.value, candidate);
         }
 
-         if (activeSessionId.value) {
-           await loadSessionMessages(activeSessionId.value);
-           // 启动/工作区进入：同样做一次孤儿愈合，脏了才重拉
-           if (await healSessionHistory()) await loadSessionMessages(activeSessionId.value);
-           await refreshBudget();
-         } else {
+        if (activeSessionId.value) {
+          await loadSessionMessages(activeSessionId.value);
+          // 启动/工作区进入：同样做一次孤儿愈合，脏了才重拉
+          if (await healSessionHistory()) await loadSessionMessages(activeSessionId.value);
+          await refreshBudget();
+        } else {
           sessionMessages.value = [];
           budgetStatus.value = null;
         }
@@ -245,25 +292,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-   async function selectSession(sessionId: string): Promise<void> {
-     const sid = (sessionId || '').trim();
-     if (!sid) return;
-     if (activeSessionId.value === sid && useSessionStore().activeSessionId === sid) return;
-     // need22-P2 F3：递增 epoch + 换发 AbortController；旧 epoch 响应全部丢弃
-     const sessionStore = useSessionStore();
-     const { epoch, signal } = sessionStore.beginSelect(sid);
-     activeSessionId.value = sid;
-     await loadSessionMessages(sid, { signal, epoch });
-     // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
-     if (await healSessionHistory({ signal, epoch })) await loadSessionMessages(sid, { signal, epoch });
-     await refreshBudget({ signal, epoch });
-   }
+  async function selectSession(sessionId: string): Promise<void> {
+    const sid = (sessionId || '').trim();
+    if (!sid) return;
+    if (activeSessionId.value === sid && useSessionStore().activeSessionId === sid) return;
+    // need22-P2 F3：递增 epoch + 换发 AbortController；旧 epoch 响应全部丢弃
+    const sessionStore = useSessionStore();
+    const { epoch, signal } = sessionStore.beginSelect(sid);
+    activeSessionId.value = sid;
+    await loadSessionMessages(sid, { signal, epoch });
+    // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
+    if (await healSessionHistory({ signal, epoch })) await loadSessionMessages(sid, { signal, epoch });
+    await refreshBudget({ signal, epoch });
+    persistLastActive();
+  }
 
-  async function createSession(
-    title?: string,
-    providerId?: string,
-    modelId?: string
-  ): Promise<SessionMetadata | null> {
+  async function createSession(title?: string, providerId?: string, modelId?: string): Promise<SessionMetadata | null> {
     if (!activeWorkspaceId.value) return null;
 
     try {
@@ -273,13 +317,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.createSession(activeWorkspaceId.value, title, pId, mId);
       if (res.ok && res.data) {
         const newSess = res.data;
-        if (isBadTime((newSess as unknown as { createdAtUtc: string }).createdAtUtc)) (newSess as unknown as { createdAtUtc: string }).createdAtUtc = new Date().toISOString();
-        if (isBadTime((newSess as unknown as { updatedAtUtc: string }).updatedAtUtc)) (newSess as unknown as { updatedAtUtc: string }).updatedAtUtc = (newSess as unknown as { createdAtUtc: string }).createdAtUtc;
+        if (isBadTime((newSess as unknown as { createdAtUtc: string }).createdAtUtc))
+          (newSess as unknown as { createdAtUtc: string }).createdAtUtc = new Date().toISOString();
+        if (isBadTime((newSess as unknown as { updatedAtUtc: string }).updatedAtUtc))
+          (newSess as unknown as { updatedAtUtc: string }).updatedAtUtc = (newSess as unknown as { createdAtUtc: string }).createdAtUtc;
         sessions.value = [newSess, ...sessions.value];
         touchSessionTime(newSess.id, (newSess as unknown as { createdAtUtc: string }).createdAtUtc);
         activeSessionId.value = newSess.id;
         sessionMessages.value = [];
         await refreshBudget();
+        persistLastActive();
         return newSess;
       }
     } catch (err) {
@@ -295,7 +342,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.updateSessionTitle(activeWorkspaceId.value, sessionId, newTitle.trim());
       if (res.ok && res.data) {
         const item = sessions.value.find((s) => s.id === sessionId);
-        if (item) { item.title = newTitle.trim(); touchSessionTime(item.id); }
+        if (item) {
+          item.title = newTitle.trim();
+          touchSessionTime(item.id);
+        }
         // need03-03：显式改名（默认视为手动）即永久冻结自动逻辑；LLM 回写走 manual:false
         if (opts?.manual !== false) {
           titleLocked.value[sessionId] = true;
@@ -316,7 +366,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const res = await bridge.setSessionPinned(activeWorkspaceId.value, sessionId, isPinned);
       if (res.ok && res.data) {
         const item = sessions.value.find((s) => s.id === sessionId);
-        if (item) { item.isPinned = isPinned; touchSessionTime(item.id); }
+        if (item) {
+          item.isPinned = isPinned;
+          touchSessionTime(item.id);
+        }
         return true;
       }
     } catch (err) {
@@ -339,6 +392,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             activeSessionId.value = '';
             sessionMessages.value = [];
             budgetStatus.value = null;
+            persistLastActive();
           }
         }
         return true;
@@ -398,10 +452,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           cur.messageCount = sessionMessages.value.length;
           cur.updatedAtUtc = new Date().toISOString();
           // need03-03 T1：首条 user 发出即 5 字标题（第一句话前 5 字），并持久化
-          if (msg.role === 'user' && !titleLocked.value[sid] && !autoTitleDone.value[sid] && (cur.title === '新建会话' || !cur.title?.trim()) && msg.content) {
+          if (
+            msg.role === 'user' &&
+            !titleLocked.value[sid] &&
+            !autoTitleDone.value[sid] &&
+            (cur.title === '新建会话' || !cur.title?.trim()) &&
+            msg.content
+          ) {
             const t1 = instantTitleFromUserText(String(msg.content));
             cur.title = t1;
-            try { await bridge.updateSessionTitle(wid, sid, t1); } catch { /* 静默：T1 内存已更新 */ }
+            try {
+              await bridge.updateSessionTitle(wid, sid, t1);
+            } catch {
+              /* 静默：T1 内存已更新 */
+            }
           }
         }
         await refreshBudget();
@@ -449,8 +513,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         }
         return;
       }
-      let parsed = refineTitleLocal(assistantText, firstUser);
-      if (!parsed) { return; }
+      const parsed = refineTitleLocal(assistantText, firstUser);
+      if (!parsed) {
+        return;
+      }
       if (titleLocked.value[sid]) return;
       const still = sessions.value.find((s) => s.id === sid);
       if (!still) return;
@@ -470,7 +536,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const pId = configStore.activeProvider?.id || '';
     const mId = configStore.activeModel?.id || '';
     const call = bridge.generateSessionTitle(wid, sessionId, pId, mId);
-    const timeout = new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('title-timeout')), Math.max(1000, timeoutMs)));
+    const timeout = new Promise<never>((_, reject) =>
+      window.setTimeout(() => reject(new Error('title-timeout')), Math.max(1000, timeoutMs))
+    );
     const res = await Promise.race([call, timeout]);
     if (!res || !res.ok || !res.data || !String(res.data).trim()) throw new Error(String((res && res.message) || 'title-empty'));
     void truncateRoundText;
@@ -546,7 +614,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   // need07：重放截断（removeAnchor=true 为重放模式，切面以后端为准）
-  async function truncateHistory(anchorMessageId: string, removeAnchor = true): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
+  async function truncateHistory(
+    anchorMessageId: string,
+    removeAnchor = true
+  ): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
     try {
       const bridge = getHostBridge();
@@ -583,57 +654,59 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return false;
     }
   }
-   // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
-   async function healSessionHistory(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<boolean> {
-     if (!activeWorkspaceId.value || !activeSessionId.value) return false;
-     const sessionStore = useSessionStore();
-     const epoch = opts?.epoch ?? sessionStore.epoch;
-     const signal = opts?.signal ?? null;
-     const sid = activeSessionId.value;
-     try {
-       const bridge = getHostBridge();
-       const res = await bridge.healSessionHistory(activeWorkspaceId.value, sid);
-       if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
-         sessionStore.discardStale(`healSessionHistory(${sid.slice(-6)})`);
-         return false;
-       }
-       if (!res.ok || !res.data) return false;
-       const d = res.data;
-       if ((d.syntheticAppended || 0) > 0 || (d.orphanToolsRemoved || 0) > 0) {
-         console.info(`[workspaceStore] history healed: synthetic=${d.syntheticAppended} removedOrphans=${d.orphanToolsRemoved}`);
-         return true;
-       }
-       return false;
-     } catch (err) {
-       console.error('[workspaceStore] healSessionHistory failed:', err);
-       return false;
-     }
-   }
+  // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
+  async function healSessionHistory(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<boolean> {
+    if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+    const sessionStore = useSessionStore();
+    const epoch = opts?.epoch ?? sessionStore.epoch;
+    const signal = opts?.signal ?? null;
+    const sid = activeSessionId.value;
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.healSessionHistory(activeWorkspaceId.value, sid);
+      if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
+        sessionStore.discardStale(`healSessionHistory(${sid.slice(-6)})`);
+        return false;
+      }
+      if (!res.ok || !res.data) return false;
+      const d = res.data;
+      if ((d.syntheticAppended || 0) > 0 || (d.orphanToolsRemoved || 0) > 0) {
+        console.info(`[workspaceStore] history healed: synthetic=${d.syntheticAppended} removedOrphans=${d.orphanToolsRemoved}`);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('[workspaceStore] healSessionHistory failed:', err);
+      return false;
+    }
+  }
 
-   // 删除单条消息（后端先备份再删行，删后自动愈合；生成中拒绝）。
-   async function deleteMessage(messageId: string): Promise<{ ok: boolean; message?: string; code?: string }> {
-     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
-     if (!messageId) return { ok: false, message: '消息不存在' };
-     try {
-       const bridge = getHostBridge();
-       const res = await bridge.deleteSessionMessage(activeWorkspaceId.value, activeSessionId.value, messageId);
-       if (res.ok && res.data) {
-         await loadSessionMessages(activeSessionId.value);
-         await refreshBudget();
-         return { ok: true };
-       }
-       return { ok: false, message: res.message || '删除失败', code: res.code };
-     } catch (err) {
-       console.error('[workspaceStore] deleteMessage failed:', err);
-       return { ok: false, message: String(err) };
-     }
-   }
+  // 删除单条消息（后端先备份再删行，删后自动愈合；生成中拒绝）。
+  async function deleteMessage(messageId: string): Promise<{ ok: boolean; message?: string; code?: string }> {
+    if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+    if (!messageId) return { ok: false, message: '消息不存在' };
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.deleteSessionMessage(activeWorkspaceId.value, activeSessionId.value, messageId);
+      if (res.ok && res.data) {
+        await loadSessionMessages(activeSessionId.value);
+        await refreshBudget();
+        return { ok: true };
+      }
+      return { ok: false, message: res.message || '删除失败', code: res.code };
+    } catch (err) {
+      console.error('[workspaceStore] deleteMessage failed:', err);
+      return { ok: false, message: String(err) };
+    }
+  }
 
   async function initialize(): Promise<void> {
     await loadWorkspaces();
     if (activeWorkspaceId.value) {
       await loadSessions(activeWorkspaceId.value);
     }
+    // 启动恢复完成后立即回写一次（存档指向已删ID时纠正为实际恢复位置）
+    persistLastActive();
   }
 
   async function init(): Promise<void> {
@@ -672,8 +745,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     togglePinSession,
     deleteSession,
     loadSessionMessages,
-     healSessionHistory,
-     deleteMessage,
+    healSessionHistory,
+    deleteMessage,
     truncateHistory,
     branchFromMessage,
     appendMessage,

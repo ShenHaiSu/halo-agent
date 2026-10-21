@@ -10,12 +10,22 @@ public interface IToolHook
     /// Validator 通过后、执行前调用。返回 Blocked 则跳过执行，
     /// 直接返回 <c>ToolResult.FailCode("TOOL_BLOCKED", reason)</c>。
     /// </summary>
-    Task<ToolHookDecision> BeforeAsync(ToolCallDto call, string normalizedArgsJson, ToolContext ctx, CancellationToken ct);
+    Task<ToolHookDecision> BeforeAsync(
+        ToolCallDto call,
+        string normalizedArgsJson,
+        ToolContext ctx,
+        CancellationToken ct
+    );
 
     /// <summary>
     /// 执行后调用。整字段覆盖语义：返回值的 <c>Output/Error/Success</c> 三字段直接覆盖原结果。
     /// </summary>
-    Task<ToolResult> AfterAsync(ToolCallDto call, ToolResult result, ToolContext ctx, CancellationToken ct);
+    Task<ToolResult> AfterAsync(
+        ToolCallDto call,
+        ToolResult result,
+        ToolContext ctx,
+        CancellationToken ct
+    );
 }
 
 /// <summary>

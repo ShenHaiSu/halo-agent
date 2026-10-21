@@ -25,9 +25,11 @@ public static class CommandRunnerProbe
         public static ProbeResult Missing() => new() { Found = false };
 
         public string DisplayName =>
-            !Found ? "(未检测到 Python)" :
-            Kind == "launcher" ? $"py launcher ({ExePath} -3)" :
-            ExePath ?? "(未知)";
+            !Found
+                ? "(未检测到 Python)"
+                : Kind == "launcher"
+                    ? $"py launcher ({ExePath} -3)"
+                    : ExePath ?? "(未知)";
     }
 
     /// <summary>
@@ -81,7 +83,11 @@ public static class CommandRunnerProbe
     /// <summary>
     /// 构造 python 执行的 ProcessStartInfo。arguments 由调用方按探测结果组装完整参数。
     /// </summary>
-    public static ProcessStartInfo BuildPythonStartInfo(string pythonExe, string arguments, string workingDirectory)
+    public static ProcessStartInfo BuildPythonStartInfo(
+        string pythonExe,
+        string arguments,
+        string workingDirectory
+    )
     {
         var psi = new ProcessStartInfo
         {
@@ -126,7 +132,8 @@ public static class CommandRunnerProbe
     public static ProbeResult ProbePython(
         string? configuredPath = null,
         string? pathEnvOverride = null,
-        bool checkLauncher = true)
+        bool checkLauncher = true
+    )
     {
         // 显式传入任一覆盖参数时不走缓存（供测试精确控制）。
         bool useCache = configuredPath == null && pathEnvOverride == null && checkLauncher;
@@ -168,7 +175,8 @@ public static class CommandRunnerProbe
     private static ProbeResult ProbePythonNoCache(
         string? configuredPath,
         string? pathEnvOverride,
-        bool checkLauncher)
+        bool checkLauncher
+    )
     {
         // 1. 用户在设置中心显式指定的 Python 路径
         if (!string.IsNullOrWhiteSpace(configuredPath))
@@ -176,14 +184,28 @@ public static class CommandRunnerProbe
             string trimmed = configuredPath.Trim().Trim('"');
             if (File.Exists(trimmed) && VerifyPythonExe(trimmed, string.Empty))
             {
-                return new ProbeResult { Found = true, ExePath = trimmed, Kind = "configured" };
+                return new ProbeResult
+                {
+                    Found = true,
+                    ExePath = trimmed,
+                    Kind = "configured"
+                };
             }
 
             // 配置路径可能是目录（含 python.exe）
             string inDir = Path.Combine(trimmed, "python.exe");
-            if (Directory.Exists(trimmed) && File.Exists(inDir) && VerifyPythonExe(inDir, string.Empty))
+            if (
+                Directory.Exists(trimmed)
+                && File.Exists(inDir)
+                && VerifyPythonExe(inDir, string.Empty)
+            )
             {
-                return new ProbeResult { Found = true, ExePath = inDir, Kind = "configured" };
+                return new ProbeResult
+                {
+                    Found = true,
+                    ExePath = inDir,
+                    Kind = "configured"
+                };
             }
         }
 
@@ -191,7 +213,12 @@ public static class CommandRunnerProbe
         string? pathPython = FindOnPath("python.exe", pathEnvOverride);
         if (!string.IsNullOrWhiteSpace(pathPython) && VerifyPythonExe(pathPython, string.Empty))
         {
-            return new ProbeResult { Found = true, ExePath = pathPython, Kind = "path" };
+            return new ProbeResult
+            {
+                Found = true,
+                ExePath = pathPython,
+                Kind = "path"
+            };
         }
 
         // 3. Windows Python Launcher: py.exe -3
@@ -200,7 +227,13 @@ public static class CommandRunnerProbe
             string? pyLauncher = FindOnPath("py.exe", pathEnvOverride);
             if (!string.IsNullOrWhiteSpace(pyLauncher) && VerifyPythonExe(pyLauncher, "-3"))
             {
-                return new ProbeResult { Found = true, ExePath = pyLauncher, LauncherArgsPrefix = "-3", Kind = "launcher" };
+                return new ProbeResult
+                {
+                    Found = true,
+                    ExePath = pyLauncher,
+                    LauncherArgsPrefix = "-3",
+                    Kind = "launcher"
+                };
             }
         }
 
@@ -214,7 +247,8 @@ public static class CommandRunnerProbe
     {
         try
         {
-            string rawPath = pathEnvOverride ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            string rawPath =
+                pathEnvOverride ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
             char[] separators = new[] { ';' };
             foreach (string dir in rawPath.Split(separators, StringSplitOptions.RemoveEmptyEntries))
             {
@@ -289,7 +323,13 @@ public static class CommandRunnerProbe
             bool exited = process.WaitForExit(8000);
             if (!exited)
             {
-                try { process.Kill(); } catch { /* 忽略 */ }
+                try
+                {
+                    process.Kill();
+                }
+                catch
+                { /* 忽略 */
+                }
                 return false;
             }
 

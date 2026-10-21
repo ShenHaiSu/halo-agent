@@ -21,7 +21,8 @@ public sealed record SystemProxySnapshot(
 /// </summary>
 public static class SystemProxyInspector
 {
-    private const string InternetSettingsKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+    private const string InternetSettingsKeyPath =
+        @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
     private static Func<string, SystemProxySnapshot>? _testOverrideInspector;
 
@@ -36,7 +37,9 @@ public static class SystemProxyInspector
     /// <summary>
     /// 实时检测当前操作系统代理设置
     /// </summary>
-    public static SystemProxySnapshot InspectCurrentSystemProxy(string probeTargetUrl = "https://api.openai.com")
+    public static SystemProxySnapshot InspectCurrentSystemProxy(
+        string probeTargetUrl = "https://api.openai.com"
+    )
     {
         var overrideFn = _testOverrideInspector;
         if (overrideFn != null)
@@ -51,7 +54,10 @@ public static class SystemProxyInspector
 
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(InternetSettingsKeyPath, writable: false);
+            using var key = Registry.CurrentUser.OpenSubKey(
+                InternetSettingsKeyPath,
+                writable: false
+            );
             if (key != null)
             {
                 proxyEnable = Convert.ToInt32(key.GetValue("ProxyEnable", 0)) == 1;
@@ -92,7 +98,8 @@ public static class SystemProxyInspector
             proxyServer,
             autoConfigUrl,
             proxyOverride,
-            dynamicResolvedUri);
+            dynamicResolvedUri
+        );
     }
 
     /// <summary>
@@ -103,13 +110,19 @@ public static class SystemProxyInspector
         string? proxyServer,
         string? autoConfigUrl,
         string? proxyOverride,
-        string? dynamicResolvedUri = null)
+        string? dynamicResolvedUri = null
+    )
     {
         string? normalizedFromRegistry = proxyEnable ? NormalizeProxyUri(proxyServer) : null;
-        string? effectiveUri = normalizedFromRegistry ?? (proxyEnable || !string.IsNullOrWhiteSpace(autoConfigUrl) ? dynamicResolvedUri : null);
-        bool isEnabled = (proxyEnable && !string.IsNullOrWhiteSpace(effectiveUri))
-                         || !string.IsNullOrWhiteSpace(autoConfigUrl)
-                         || (!proxyEnable && !string.IsNullOrWhiteSpace(dynamicResolvedUri));
+        string? effectiveUri =
+            normalizedFromRegistry
+            ?? (
+                proxyEnable || !string.IsNullOrWhiteSpace(autoConfigUrl) ? dynamicResolvedUri : null
+            );
+        bool isEnabled =
+            (proxyEnable && !string.IsNullOrWhiteSpace(effectiveUri))
+            || !string.IsNullOrWhiteSpace(autoConfigUrl)
+            || (!proxyEnable && !string.IsNullOrWhiteSpace(dynamicResolvedUri));
 
         return new SystemProxySnapshot(
             IsEnabled: isEnabled,
@@ -134,7 +147,10 @@ public static class SystemProxyInspector
         string trimmed = raw.Trim();
         if (trimmed.Contains('='))
         {
-            var segments = trimmed.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var segments = trimmed.Split(
+                ';',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            );
             string? httpsCandidate = null;
             string? httpCandidate = null;
             string? socksCandidate = null;

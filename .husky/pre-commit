@@ -1,0 +1,17 @@
+#!/bin/sh
+# need22-P4 H4：仓库根统一 pre-commit（前端+后端分流，增量自动修）。
+# 前端：仅暂存区有 src/Web.Client/ 文件才跑 npx lint-staged。
+# 后端：仅暂存区有 *.cs 才跑 dotnet-csharpier（默认写入） + git add。
+# CI 保留 --check 做最终门禁；热修可用 git commit --no-verify 绕过。
+
+WEB_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep "^src/Web.Client/" || true)
+if [ -n "$WEB_STAGED" ]; then
+  (cd src/Web.Client && npx lint-staged)
+fi
+
+CS_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep "\.cs$" || true)
+if [ -n "$CS_STAGED" ]; then
+  dotnet tool restore >/dev/null 2>&1
+  echo "$CS_STAGED" | xargs dotnet dotnet-csharpier
+  echo "$CS_STAGED" | xargs git add
+fi

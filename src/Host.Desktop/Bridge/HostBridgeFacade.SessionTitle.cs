@@ -17,7 +17,12 @@ namespace Host.Desktop.Bridge;
 /// </summary>
 public sealed partial class HostBridgeFacade
 {
-    public async Task<BridgeResponse<string>> GenerateSessionTitle(string workspaceId, string sessionId, string? providerId = null, string? modelId = null)
+    public async Task<BridgeResponse<string>> GenerateSessionTitle(
+        string workspaceId,
+        string sessionId,
+        string? providerId = null,
+        string? modelId = null
+    )
     {
         try
         {
@@ -28,7 +33,9 @@ public sealed partial class HostBridgeFacade
             string wsId = workspaceId.Trim();
             string sessId = sessionId.Trim();
 
-            var session = await _workspaceSessionService.GetSessionAsync(wsId, sessId).ConfigureAwait(false);
+            var session = await _workspaceSessionService
+                .GetSessionAsync(wsId, sessId)
+                .ConfigureAwait(false);
             if (session == null)
             {
                 return BridgeResponse<string>.Fail("SESSION_NOT_FOUND", "会话不存在");
@@ -38,50 +45,78 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<string>.Success(session.Title ?? string.Empty, "标题已冻结");
             }
 
-            var messages = await _workspaceSessionService.GetSessionMessagesAsync(wsId, sessId).ConfigureAwait(false);
-            var firstUser = messages.FirstOrDefault(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase));
+            var messages = await _workspaceSessionService
+                .GetSessionMessagesAsync(wsId, sessId)
+                .ConfigureAwait(false);
+            var firstUser = messages.FirstOrDefault(m =>
+                string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
+            );
             if (firstUser == null || string.IsNullOrWhiteSpace(firstUser.Content))
             {
                 return BridgeResponse<string>.Fail("NO_USER_MESSAGE", "首轮用户消息不存在");
             }
-            var firstAssistant = messages.LastOrDefault(m => string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+            var firstAssistant = messages.LastOrDefault(m =>
+                string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+            );
             string userText = firstUser.Content!.Trim();
             string assistantText = (firstAssistant?.Content ?? string.Empty).Trim();
             string roundText = "<user>: " + userText + "\n<assistant>: " + assistantText;
-            if (roundText.Length > 2000) roundText = roundText.Substring(0, 2000);
+            if (roundText.Length > 2000)
+                roundText = roundText.Substring(0, 2000);
 
             // 同模型解析：session.ProviderId/ModelId 优先，显式传入覆盖
             ProviderConfig? provider = null;
             try
             {
-                string pid = !string.IsNullOrWhiteSpace(providerId) ? providerId!.Trim() : (session.ProviderId ?? string.Empty);
-                if (!string.IsNullOrWhiteSpace(pid)) provider = _providerConfigService.GetProviderById(pid);
+                string pid = !string.IsNullOrWhiteSpace(providerId)
+                    ? providerId!.Trim()
+                    : (session.ProviderId ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(pid))
+                    provider = _providerConfigService.GetProviderById(pid);
                 if (provider == null)
                 {
                     var doc = _providerConfigService.GetProvidersConfigInternal();
-                    provider = doc.Providers.FirstOrDefault(p => p.Enabled) ?? doc.Providers.FirstOrDefault();
+                    provider =
+                        doc.Providers.FirstOrDefault(p => p.Enabled)
+                        ?? doc.Providers.FirstOrDefault();
                 }
             }
-            catch { provider = null; }
+            catch
+            {
+                provider = null;
+            }
             if (provider == null)
             {
                 return BridgeResponse<string>.Fail("NO_PROVIDER", "无可用模型服务商");
             }
-            string mid = !string.IsNullOrWhiteSpace(modelId) ? modelId!.Trim() : (session.ModelId ?? string.Empty);
+            string mid = !string.IsNullOrWhiteSpace(modelId)
+                ? modelId!.Trim()
+                : (session.ModelId ?? string.Empty);
             ModelConfig? model = null;
             if (!string.IsNullOrWhiteSpace(mid))
             {
-                model = provider.Models.FirstOrDefault(m => string.Equals(m.Id, mid, StringComparison.OrdinalIgnoreCase));
+                model = provider.Models.FirstOrDefault(m =>
+                    string.Equals(m.Id, mid, StringComparison.OrdinalIgnoreCase)
+                );
             }
-            model ??= provider.Models.FirstOrDefault(m => m.Enabled)
+            model ??=
+                provider.Models.FirstOrDefault(m => m.Enabled)
                 ?? provider.Models.FirstOrDefault()
-                ?? new ModelConfig { Id = "gpt-4o", Protocol = LlmProtocolType.Chat, MaxContextTokens = 128000, MaxOutputTokens = 4096 };
+                ?? new ModelConfig
+                {
+                    Id = "gpt-4o",
+                    Protocol = LlmProtocolType.Chat,
+                    MaxContextTokens = 128000,
+                    MaxOutputTokens = 4096
+                };
             if (string.IsNullOrWhiteSpace(provider.GetEffectiveApiKey()))
             {
                 return BridgeResponse<string>.Fail("NO_API_KEY", "服务商未配置 API Key");
             }
 
-            var workspace = await _workspaceSessionService.GetWorkspaceAsync(wsId).ConfigureAwait(false);
+            var workspace = await _workspaceSessionService
+                .GetWorkspaceAsync(wsId)
+                .ConfigureAwait(false);
             string sessionHash = !string.IsNullOrWhiteSpace(session.SessionHash)
                 ? session.SessionHash
                 : HeaderVariableResolver.ComputeSessionHash(wsId, sessId);
@@ -95,9 +130,11 @@ public sealed partial class HostBridgeFacade
                 provider.Id,
                 provider.Name,
                 model.Id,
-                requestId);
+                requestId
+            );
 
-            const string titleSystemPrompt = "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。";
+            const string titleSystemPrompt =
+                "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。";
             string titleUserPrompt = "对话全文如下：\n---\n" + roundText + "\n---";
             var titleModel = new ModelConfig
             {
@@ -132,12 +169,20 @@ public sealed partial class HostBridgeFacade
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             try
             {
-                await foreach (var evt in _llmGatewayClient.StreamAsync(llmRequest, cts.Token).ConfigureAwait(false))
+                await foreach (
+                    var evt in _llmGatewayClient
+                        .StreamAsync(llmRequest, cts.Token)
+                        .ConfigureAwait(false)
+                )
                 {
-                    if (evt.Kind == UnifiedStreamEventKind.TextDelta && !string.IsNullOrEmpty(evt.TextDelta))
+                    if (
+                        evt.Kind == UnifiedStreamEventKind.TextDelta
+                        && !string.IsNullOrEmpty(evt.TextDelta)
+                    )
                     {
                         sb.Append(evt.TextDelta);
-                        if (sb.Length > 200) break;
+                        if (sb.Length > 200)
+                            break;
                     }
                     else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
                     {
@@ -173,13 +218,24 @@ public sealed partial class HostBridgeFacade
             try
             {
                 var titleRows = new List<PendingUsageRow>();
-                UsageRecorder.CollectAuto(titleRows, provider, model, titleUsage,
+                UsageRecorder.CollectAuto(
+                    titleRows,
+                    provider,
+                    model,
+                    titleUsage,
                     UsageRecorder.EstimateInput(llmRequest.Messages, llmRequest.SystemInstructions),
                     UsageRecorder.EstimateOutput(sb.ToString()),
-                    titleStatus, requestId, sessId, wsId, UsageRecorder.SourceTitle);
+                    titleStatus,
+                    requestId,
+                    sessId,
+                    wsId,
+                    UsageRecorder.SourceTitle
+                );
                 UsageRecorder.Flush(UsageMetricsServiceInternal, titleRows, sessId, wsId);
             }
-            catch { /* 用量落袋永不影响标题主流程 */ }
+            catch
+            { /* 用量落袋永不影响标题主流程 */
+            }
             if (titleStatus != "ok")
             {
                 return BridgeResponse<string>.Fail(titleFailCode, titleFailMsg);
@@ -191,7 +247,9 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<string>.Fail("TITLE_PARSE_EMPTY", "标题解析为空");
             }
 
-            bool ok = await _workspaceSessionService.UpdateSessionTitleAsync(wsId, sessId, parsed).ConfigureAwait(false);
+            bool ok = await _workspaceSessionService
+                .UpdateSessionTitleAsync(wsId, sessId, parsed)
+                .ConfigureAwait(false);
             if (!ok)
             {
                 return BridgeResponse<string>.Fail("TITLE_SAVE_FAILED", "标题回写失败");
@@ -207,16 +265,35 @@ public sealed partial class HostBridgeFacade
 
     private static string ParseSessionTitle(string raw)
     {
-        string t = (raw ?? string.Empty).Trim().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? string.Empty;
-        if (string.IsNullOrEmpty(t)) return string.Empty;
-        t = System.Text.RegularExpressions.Regex.Replace(t, "^(标题|题目|名称|title)[:：]\\s*", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        t = t.Trim('"', '\'', '「', '『', '“', '‘', '(', '[', '【').TrimEnd('"', '\'', '」', '』', '”', '’', ')', ']', '】');
-        t = System.Text.RegularExpressions.Regex.Replace(t, "[。！？!?;；，,、.\\-—…·\\s]+$", string.Empty);
+        string t =
+            (raw ?? string.Empty)
+                .Trim()
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()
+                ?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(t))
+            return string.Empty;
+        t = System.Text.RegularExpressions.Regex.Replace(
+            t,
+            "^(标题|题目|名称|title)[:：]\\s*",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        );
+        t = t.Trim('"', '\'', '「', '『', '“', '‘', '(', '[', '【')
+            .TrimEnd('"', '\'', '」', '』', '”', '’', ')', ']', '】');
+        t = System.Text.RegularExpressions.Regex.Replace(
+            t,
+            "[。！？!?;；，,、.\\-—…·\\s]+$",
+            string.Empty
+        );
         t = System.Text.RegularExpressions.Regex.Replace(t, "^[-*•\\d.\\s]+", string.Empty).Trim();
-        if (string.IsNullOrEmpty(t)) return string.Empty;
+        if (string.IsNullOrEmpty(t))
+            return string.Empty;
         var elements = System.Globalization.StringInfo.ParseCombiningCharacters(t);
-        if (elements.Length < 2) return string.Empty;
-        if (elements.Length <= 12) return t;
+        if (elements.Length < 2)
+            return string.Empty;
+        if (elements.Length <= 12)
+            return t;
         return t.Substring(elements[0], elements[12] - elements[0]);
     }
 }

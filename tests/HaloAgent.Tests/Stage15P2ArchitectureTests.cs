@@ -36,23 +36,35 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: Path.Combine(_bootstrapRoot, "bootstrap.json"),
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
         _registry = new ToolRegistry();
         _projectDir = Path.Combine(_tempRoot, "Projects", "Need15P2");
         Directory.CreateDirectory(_projectDir);
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "need15 P2").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "need15 P2")
+            .GetAwaiter()
+            .GetResult();
         _session = _service.CreateSessionAsync(_workspace.Id, "p2").GetAwaiter().GetResult();
-        _context = new ToolContext { WorkspaceRoot = _projectDir, WorkspaceId = _workspace.Id, SessionId = _session.Id, DataRoot = _tempRoot };
+        _context = new ToolContext
+        {
+            WorkspaceRoot = _projectDir,
+            WorkspaceId = _workspace.Id,
+            SessionId = _session.Id,
+            DataRoot = _tempRoot
+        };
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -64,18 +76,46 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
         File.WriteAllText(Abs(f1), "alpha-dry-line\nbeta-dry-line\n", new UTF8Encoding(false));
         var before1 = File.ReadAllBytes(Abs(f1));
         var t1 = File.GetLastWriteTimeUtc(Abs(f1));
-        var r1 = await Call("edit_file", new { file_path = f1, old_string = "alpha-dry-line", new_string = "alpha-DRY-line", dry_run = true });
+        var r1 = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f1,
+                old_string = "alpha-dry-line",
+                new_string = "alpha-DRY-line",
+                dry_run = true
+            }
+        );
         Assert.True(r1.Success, r1.Error);
         Assert.Contains("DRY_RUN", r1.Output ?? string.Empty);
         Assert.Contains("@@", r1.Output ?? string.Empty);
         Assert.Equal(before1, File.ReadAllBytes(Abs(f1)));
 
-        var r2 = await Call("edit_lines", new { file_path = f1, offset = 1, limit = 1, new_text = "alpha-DRY2-line", dry_run = true });
+        var r2 = await Call(
+            "edit_lines",
+            new
+            {
+                file_path = f1,
+                offset = 1,
+                limit = 1,
+                new_text = "alpha-DRY2-line",
+                dry_run = true
+            }
+        );
         Assert.True(r2.Success, r2.Error);
         Assert.Contains("DRY_RUN", r2.Output ?? string.Empty);
         Assert.Equal(before1, File.ReadAllBytes(Abs(f1)));
 
-        var r3 = await Call("write_file", new { file_path = f1, content = "overwrite-dry-content\n", allow_overwrite = true, dry_run = true });
+        var r3 = await Call(
+            "write_file",
+            new
+            {
+                file_path = f1,
+                content = "overwrite-dry-content\n",
+                allow_overwrite = true,
+                dry_run = true
+            }
+        );
         Assert.True(r3.Success, r3.Error);
         Assert.Contains("DRY_RUN", r3.Output ?? string.Empty);
         Assert.Equal(before1, File.ReadAllBytes(Abs(f1)));
@@ -87,7 +127,18 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     {
         const string f = "dryhash.txt";
         File.WriteAllText(Abs(f), "content-line-one\ncontent-line-two\n", new UTF8Encoding(false));
-        var r = await Call("edit_lines", new { file_path = f, offset = 1, limit = 1, new_text = "X", expected_hash = new string('1', 64), dry_run = true });
+        var r = await Call(
+            "edit_lines",
+            new
+            {
+                file_path = f,
+                offset = 1,
+                limit = 1,
+                new_text = "X",
+                expected_hash = new string('1', 64),
+                dry_run = true
+            }
+        );
         Assert.False(r.Success);
         Assert.StartsWith("EXPECTED_HASH_MISMATCH", r.Error ?? string.Empty);
     }
@@ -97,11 +148,36 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     {
         const string f = "chain.txt";
         File.WriteAllText(Abs(f), "v0-content-line\n", new UTF8Encoding(false));
-        var w1 = await Call("write_file", new { file_path = f, content = "v1-content-line\n", allow_overwrite = true });
+        var w1 = await Call(
+            "write_file",
+            new
+            {
+                file_path = f,
+                content = "v1-content-line\n",
+                allow_overwrite = true
+            }
+        );
         Assert.True(w1.Success, w1.Error);
-        var e1 = await Call("edit_file", new { file_path = f, old_string = "v1-content-line", new_string = "v2-content-line" });
+        var e1 = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "v1-content-line",
+                new_string = "v2-content-line"
+            }
+        );
         Assert.True(e1.Success, e1.Error);
-        var e2 = await Call("edit_lines", new { file_path = f, offset = 1, limit = 1, new_text = "v3-content-line" });
+        var e2 = await Call(
+            "edit_lines",
+            new
+            {
+                file_path = f,
+                offset = 1,
+                limit = 1,
+                new_text = "v3-content-line"
+            }
+        );
         Assert.True(e2.Success, e2.Error);
         string bakDir = Path.Combine(_tempRoot, "backups", _workspace.Id, _session.Id);
         Assert.Equal(3, Directory.GetFiles(bakDir, "*.bak").Length);
@@ -121,7 +197,15 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
         File.WriteAllText(Abs(f), "prune-v0-line\n", new UTF8Encoding(false));
         for (int i = 1; i <= 55; i++)
         {
-            var r = await Call("write_file", new { file_path = f, content = $"prune-v{i}-line-content\n", allow_overwrite = true });
+            var r = await Call(
+                "write_file",
+                new
+                {
+                    file_path = f,
+                    content = $"prune-v{i}-line-content\n",
+                    allow_overwrite = true
+                }
+            );
             Assert.True(r.Success, r.Error);
         }
 
@@ -139,27 +223,66 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     [Fact(DisplayName = "P2_3: 三类码回包自动带 NextAction 草稿")]
     public void P2_3_NextAction_Emitted()
     {
-        var notFound = ToolResult.FailCode("OLD_STRING_NOT_FOUND", "OLD_STRING_NOT_FOUND：{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}", "{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}");
-        string h1 = AgentOrchestrator.BuildNextActionHint(notFound, "edit_file", "{\"file_path\":\"a.txt\"}", "OLD_STRING_NOT_FOUND");
+        var notFound = ToolResult.FailCode(
+            "OLD_STRING_NOT_FOUND",
+            "OLD_STRING_NOT_FOUND：{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}",
+            "{\"ok\":false,\"code\":\"OLD_STRING_NOT_FOUND\",\"file\":\"a.txt\",\"old_string_lines\":2,\"nearest\":[{\"line\":10,\"score\":0.9,\"preview\":\"x\"}]}"
+        );
+        string h1 = AgentOrchestrator.BuildNextActionHint(
+            notFound,
+            "edit_file",
+            "{\"file_path\":\"a.txt\"}",
+            "OLD_STRING_NOT_FOUND"
+        );
         Assert.Contains("NextAction", h1);
-        using var doc = JsonDocument.Parse(h1.Substring(h1.IndexOf("edit_lines(") + "edit_lines(".Length).TrimEnd(')'));
+        using var doc = JsonDocument.Parse(
+            h1.Substring(h1.IndexOf("edit_lines(") + "edit_lines(".Length).TrimEnd(')')
+        );
         Assert.Equal(10, doc.RootElement.GetProperty("offset").GetInt32());
 
-        var needConfirm = ToolResult.FailCode("NEED_CONFIRM_OVERWRITE", "NEED_CONFIRM_OVERWRITE：目标已存在", null);
-        string h2 = AgentOrchestrator.BuildNextActionHint(needConfirm, "write_file", "{}", "NEED_CONFIRM_OVERWRITE");
+        var needConfirm = ToolResult.FailCode(
+            "NEED_CONFIRM_OVERWRITE",
+            "NEED_CONFIRM_OVERWRITE：目标已存在",
+            null
+        );
+        string h2 = AgentOrchestrator.BuildNextActionHint(
+            needConfirm,
+            "write_file",
+            "{}",
+            "NEED_CONFIRM_OVERWRITE"
+        );
         Assert.Contains("NextAction", h2);
         Assert.Contains("allow_overwrite", h2);
 
         var missing = ToolResult.FailCode("MISSING_LIMIT", "MISSING_LIMIT：缺少 limit", null);
-        string h3 = AgentOrchestrator.BuildNextActionHint(missing, "edit_lines", "{}", "MISSING_LIMIT");
+        string h3 = AgentOrchestrator.BuildNextActionHint(
+            missing,
+            "edit_lines",
+            "{}",
+            "MISSING_LIMIT"
+        );
         Assert.Contains("NextAction", h3);
         Assert.Contains("limit", h3);
 
         // HintForTool 每个码非空
-        Assert.False(string.IsNullOrWhiteSpace(AgentOrchestrator.HintForTool("edit_file", "OLD_STRING_NOT_FOUND")));
-        Assert.False(string.IsNullOrWhiteSpace(AgentOrchestrator.HintForTool("edit_file", "ANCHOR_AMBIGUOUS")));
-        Assert.False(string.IsNullOrWhiteSpace(AgentOrchestrator.HintForTool("write_file", "NEED_CONFIRM_OVERWRITE")));
-        Assert.False(string.IsNullOrWhiteSpace(AgentOrchestrator.HintForTool("edit_lines", "MISSING_LIMIT")));
+        Assert.False(
+            string.IsNullOrWhiteSpace(
+                AgentOrchestrator.HintForTool("edit_file", "OLD_STRING_NOT_FOUND")
+            )
+        );
+        Assert.False(
+            string.IsNullOrWhiteSpace(
+                AgentOrchestrator.HintForTool("edit_file", "ANCHOR_AMBIGUOUS")
+            )
+        );
+        Assert.False(
+            string.IsNullOrWhiteSpace(
+                AgentOrchestrator.HintForTool("write_file", "NEED_CONFIRM_OVERWRITE")
+            )
+        );
+        Assert.False(
+            string.IsNullOrWhiteSpace(AgentOrchestrator.HintForTool("edit_lines", "MISSING_LIMIT"))
+        );
     }
 
     [Fact(DisplayName = "P2_4a: 统一 edit(mode=text) 分发成功")]
@@ -167,7 +290,16 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     {
         const string f = "unified.txt";
         File.WriteAllText(Abs(f), "aaa-unified-line\nbbb-unified-line\n", new UTF8Encoding(false));
-        var r = await Call("edit", new { file_path = f, mode = "text", old_string = "aaa-unified-line", new_string = "aaa-UNIFIED-line" });
+        var r = await Call(
+            "edit",
+            new
+            {
+                file_path = f,
+                mode = "text",
+                old_string = "aaa-unified-line",
+                new_string = "aaa-UNIFIED-line"
+            }
+        );
         Assert.True(r.Success, r.Error);
         Assert.Contains("aaa-UNIFIED-line", File.ReadAllText(Abs(f), Encoding.UTF8));
     }
@@ -177,14 +309,32 @@ public sealed class Stage15P2ArchitectureTests : IDisposable
     {
         const string f = "unified2.txt";
         File.WriteAllText(Abs(f), "one-unified-line\ntwo-unified-line\n", new UTF8Encoding(false));
-        var r = await Call("edit", new { file_path = f, mode = "lines", offset = 2, limit = 1, new_text = "TWO-unified-line" });
+        var r = await Call(
+            "edit",
+            new
+            {
+                file_path = f,
+                mode = "lines",
+                offset = 2,
+                limit = 1,
+                new_text = "TWO-unified-line"
+            }
+        );
         Assert.True(r.Success, r.Error);
         Assert.Contains("TWO-unified-line", File.ReadAllText(Abs(f), Encoding.UTF8));
     }
 
     private string Abs(string n) => Path.Combine(_projectDir, n);
+
     private Task<ToolResult> Call(string name, object args) =>
-        _registry.DispatchAsync(new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)), _context);
+        _registry.DispatchAsync(
+            new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)),
+            _context
+        );
+
     private static string Args(object o) =>
-        JsonSerializer.Serialize(o, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        JsonSerializer.Serialize(
+            o,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+        );
 }

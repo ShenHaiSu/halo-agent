@@ -10,7 +10,7 @@ public enum GlobalProxyMode
 {
     System = 0, // 自动检测并使用当前操作系统代理
     Custom = 1, // 使用用户手动配置的代理
-    None = 2    // 不使用任何代理（强制直连，绕过系统代理）
+    None = 2 // 不使用任何代理（强制直连，绕过系统代理）
 }
 
 /// <summary>
@@ -20,8 +20,8 @@ public enum GlobalProxyMode
 public enum ProviderProxyMode
 {
     Inherit = 0, // 默认：继承全局代理设置
-    None = 1,    // 强制直连（例如本地 Ollama 127.0.0.1 不走全局代理）
-    Custom = 2   // 使用该 Provider 专属的手动代理
+    None = 1, // 强制直连（例如本地 Ollama 127.0.0.1 不走全局代理）
+    Custom = 2 // 使用该 Provider 专属的手动代理
 }
 
 /// <summary>
@@ -95,8 +95,8 @@ public sealed class GlobalNetworkSettings
 
     public int DefaultConnectTimeoutSeconds { get; set; } = 15;
 
-     /// <summary>need22-P1 T3：单次请求超时默认 120s（HttpClient.Timeout 同步钳制到 120s 上限）。</summary>
-     public int DefaultRequestTimeoutSeconds { get; set; } = 120;
+    /// <summary>need22-P1 T3：单次请求超时默认 120s（HttpClient.Timeout 同步钳制到 120s 上限）。</summary>
+    public int DefaultRequestTimeoutSeconds { get; set; } = 120;
 
     public GlobalNetworkSettings Clone()
     {

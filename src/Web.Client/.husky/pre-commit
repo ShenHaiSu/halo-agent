@@ -1,3 +1,0 @@
-#!/bin/sh
-# need22-P5 J2：仓库根为 develop/（core.hooksPath 指向本目录）；切到包目录再跑 lint-staged。
-cd "$(dirname "$0")/.." && npx lint-staged

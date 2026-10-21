@@ -23,32 +23,40 @@ namespace Host.Desktop.Bridge;
 /// 2. 所有涉及 WinForms 控件/对话框操作强制通过 InvokeOnUiThreadAsync 切回主线程；
 /// 3. DTO 统一小驼峰序列化。
 /// </summary>
-  public sealed partial class HostBridgeFacade
-  {
+public sealed partial class HostBridgeFacade
+{
     private readonly Form? _mainForm;
     private readonly StoragePathManager _storageManager;
     private readonly HaloHttpClientFactory _httpClientFactory;
-     private readonly ProviderConfigService _providerConfigService;
-     private readonly PromptConfigService _promptConfigService;
-     private readonly AgentConfigService _agentConfigService;
+    private readonly ProviderConfigService _providerConfigService;
+    private readonly PromptConfigService _promptConfigService;
+    private readonly AgentConfigService _agentConfigService;
     private readonly ILlmGatewayClient _llmGatewayClient;
     private readonly ISessionRepository _sessionRepository;
     private readonly IWorkspaceSessionService _workspaceSessionService;
     private readonly ITokenBudgetService _tokenBudgetService;
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessionTokens =
+        new();
+
     /// <summary>need22-P1 T1：进行中 Agent 轮的 requestId（turnKey→requestId；重入拒绝时附 activeRequestId）。</summary>
     private readonly ConcurrentDictionary<string, string> _activeAgentRequestIds = new();
+
     /// <summary>need22-P1 T1：sendPrompt requestId 去重集合（requestId→turnKey，有界，防重复投递重起一轮）。</summary>
     private readonly ConcurrentDictionary<string, string> _recentAgentRequestIds = new();
+
     private void RememberAgentRequestId(string reqId, string turnKey)
     {
         try
         {
-            if (_recentAgentRequestIds.Count > 5000) _recentAgentRequestIds.Clear();
+            if (_recentAgentRequestIds.Count > 5000)
+                _recentAgentRequestIds.Clear();
             _recentAgentRequestIds[reqId] = turnKey;
         }
-        catch { /* 去重集合永不阻断发轮 */ }
+        catch
+        { /* 去重集合永不阻断发轮 */
+        }
     }
+
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
@@ -56,17 +64,47 @@ namespace Host.Desktop.Bridge;
     private readonly bool _gpuDisabled;
 
     public HaloHttpClientFactory HttpClientFactory => _httpClientFactory;
-     public ProviderConfigService ProviderConfigService => _providerConfigService;
-     public PromptConfigService PromptConfigService => _promptConfigService;
-     public AgentConfigService AgentConfigService => _agentConfigService;
-     public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
-     public ISessionRepository SessionRepository => _sessionRepository;
-     public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
-     public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
-      /// <summary>need13：子代理协调器（懒建；与 Orchestrator 双向引用由属性延迟装配）。</summary>
-    public SubAgentCoordinator SubCoordinator => _subCoordinator ??= new SubAgentCoordinator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _storageManager, _providerConfigService, _promptConfigService, _agentConfigService, UsageMetricsServiceInternal);
-    public IAgentOrchestrator AgentOrchestrator => _agentOrchestrator ??= new AgentOrchestrator(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, ToolRegistry, _storageManager, _providerConfigService, _promptConfigService, agentConfigService: _agentConfigService, usageMetrics: UsageMetricsServiceInternal, coordinator: SubCoordinator);
-    public ICompactionService CompactionService => _compactionService ??= new CompactionService(_workspaceSessionService, _tokenBudgetService, _llmGatewayClient, _providerConfigService, UsageMetricsServiceInternal);
+    public ProviderConfigService ProviderConfigService => _providerConfigService;
+    public PromptConfigService PromptConfigService => _promptConfigService;
+    public AgentConfigService AgentConfigService => _agentConfigService;
+    public ILlmGatewayClient LlmGatewayClient => _llmGatewayClient;
+    public ISessionRepository SessionRepository => _sessionRepository;
+    public IWorkspaceSessionService WorkspaceSessionService => _workspaceSessionService;
+    public ITokenBudgetService TokenBudgetService => _tokenBudgetService;
+
+    /// <summary>need13：子代理协调器（懒建；与 Orchestrator 双向引用由属性延迟装配）。</summary>
+    public SubAgentCoordinator SubCoordinator =>
+        _subCoordinator ??= new SubAgentCoordinator(
+            _workspaceSessionService,
+            _tokenBudgetService,
+            _llmGatewayClient,
+            _storageManager,
+            _providerConfigService,
+            _promptConfigService,
+            _agentConfigService,
+            UsageMetricsServiceInternal
+        );
+    public IAgentOrchestrator AgentOrchestrator =>
+        _agentOrchestrator ??= new AgentOrchestrator(
+            _workspaceSessionService,
+            _tokenBudgetService,
+            _llmGatewayClient,
+            ToolRegistry,
+            _storageManager,
+            _providerConfigService,
+            _promptConfigService,
+            agentConfigService: _agentConfigService,
+            usageMetrics: UsageMetricsServiceInternal,
+            coordinator: SubCoordinator
+        );
+    public ICompactionService CompactionService =>
+        _compactionService ??= new CompactionService(
+            _workspaceSessionService,
+            _tokenBudgetService,
+            _llmGatewayClient,
+            _providerConfigService,
+            UsageMetricsServiceInternal
+        );
 
     public HostBridgeFacade(
         Form? mainForm,
@@ -76,28 +114,34 @@ namespace Host.Desktop.Bridge;
         ProviderConfigService? providerConfigService = null,
         ILlmGatewayClient? llmGatewayClient = null,
         ISessionRepository? sessionRepository = null,
-         IWorkspaceSessionService? workspaceSessionService = null,
-         ITokenBudgetService? tokenBudgetService = null,
-         IAgentOrchestrator? agentOrchestrator = null,
-         ICompactionService? compactionService = null,
-         PromptConfigService? promptConfigService = null,
-         AgentConfigService? agentConfigService = null,
-         SkillMemoryService? skillMemoryService = null)
+        IWorkspaceSessionService? workspaceSessionService = null,
+        ITokenBudgetService? tokenBudgetService = null,
+        IAgentOrchestrator? agentOrchestrator = null,
+        ICompactionService? compactionService = null,
+        PromptConfigService? promptConfigService = null,
+        AgentConfigService? agentConfigService = null,
+        SkillMemoryService? skillMemoryService = null
+    )
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
         _gpuDisabled = gpuDisabled;
         _httpClientFactory = httpClientFactory ?? new HaloHttpClientFactory();
-         _providerConfigService = providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
-         _promptConfigService = promptConfigService ?? new PromptConfigService(_storageManager);
-         _agentConfigService = agentConfigService ?? new AgentConfigService(_storageManager);
-         _llmGatewayClient = llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
-         _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
-         _workspaceSessionService = workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
-         _tokenBudgetService = tokenBudgetService ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
-         _agentOrchestrator = agentOrchestrator;
-         _compactionService = compactionService;
-         _skillMemoryServiceOpt = skillMemoryService;
+        _providerConfigService =
+            providerConfigService ?? new ProviderConfigService(_storageManager, _httpClientFactory);
+        _promptConfigService = promptConfigService ?? new PromptConfigService(_storageManager);
+        _agentConfigService = agentConfigService ?? new AgentConfigService(_storageManager);
+        _llmGatewayClient =
+            llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
+        _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
+        _workspaceSessionService =
+            workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
+        _tokenBudgetService =
+            tokenBudgetService
+            ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);
+        _agentOrchestrator = agentOrchestrator;
+        _compactionService = compactionService;
+        _skillMemoryServiceOpt = skillMemoryService;
     }
 
     /// <summary>
@@ -116,17 +160,19 @@ namespace Host.Desktop.Bridge;
 
         if (form.InvokeRequired)
         {
-            form.BeginInvoke(new Action(() =>
-            {
-                try
+            form.BeginInvoke(
+                new Action(() =>
                 {
-                    tcs.SetResult(action());
-                }
-                catch (Exception ex)
-                {
-                    tcs.SetException(ex);
-                }
-            }));
+                    try
+                    {
+                        tcs.SetResult(action());
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.SetException(ex);
+                    }
+                })
+            );
         }
         else
         {
@@ -172,7 +218,9 @@ namespace Host.Desktop.Bridge;
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetSystemInfo failed", ex);
-            return Task.FromResult(BridgeResponse<SystemRuntimeInfo>.Fail("SYS_INFO_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<SystemRuntimeInfo>.Fail("SYS_INFO_ERROR", ex.Message)
+            );
         }
     }
 
@@ -186,21 +234,30 @@ namespace Host.Desktop.Bridge;
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetStorageConfig failed", ex);
-            return Task.FromResult(BridgeResponse<StorageConfigInfo>.Fail("STORAGE_CONFIG_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<StorageConfigInfo>.Fail("STORAGE_CONFIG_ERROR", ex.Message)
+            );
         }
     }
 
-    public async Task<BridgeResponse<StorageValidationResult>> ValidateStoragePath(string targetPath)
+    public async Task<BridgeResponse<StorageValidationResult>> ValidateStoragePath(
+        string targetPath
+    )
     {
         try
         {
-            var result = await _storageManager.ValidateTargetRootPathAsync(targetPath).ConfigureAwait(false);
+            var result = await _storageManager
+                .ValidateTargetRootPathAsync(targetPath)
+                .ConfigureAwait(false);
             return BridgeResponse<StorageValidationResult>.Success(result, result.Message);
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"ValidateStoragePath failed for '{targetPath}'", ex);
-            return BridgeResponse<StorageValidationResult>.Fail("STORAGE_VALIDATE_ERROR", ex.Message);
+            return BridgeResponse<StorageValidationResult>.Fail(
+                "STORAGE_VALIDATE_ERROR",
+                ex.Message
+            );
         }
     }
 
@@ -209,25 +266,27 @@ namespace Host.Desktop.Bridge;
         try
         {
             var selected = await InvokeOnUiThreadAsync<string?>(() =>
-            {
-                using var dialog = new FolderBrowserDialog
                 {
-                    Description = "选择 Halo-Agent 数据与日志根目录",
-                    UseDescriptionForTitle = true,
-                    ShowNewFolderButton = true,
-                    SelectedPath = !string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath)
-                        ? initialPath
-                        : _storageManager.CurrentDataRoot
-                };
+                    using var dialog = new FolderBrowserDialog
+                    {
+                        Description = "选择 Halo-Agent 数据与日志根目录",
+                        UseDescriptionForTitle = true,
+                        ShowNewFolderButton = true,
+                        SelectedPath =
+                            !string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath)
+                                ? initialPath
+                                : _storageManager.CurrentDataRoot
+                    };
 
-                var result = _mainForm != null
-                    ? dialog.ShowDialog(_mainForm)
-                    : dialog.ShowDialog();
+                    var result =
+                        _mainForm != null ? dialog.ShowDialog(_mainForm) : dialog.ShowDialog();
 
-                return result == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath)
-                    ? dialog.SelectedPath
-                    : null;
-            }).ConfigureAwait(false);
+                    return
+                        result == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath)
+                        ? dialog.SelectedPath
+                        : null;
+                })
+                .ConfigureAwait(false);
 
             return BridgeResponse<string?>.Success(selected);
         }
@@ -238,52 +297,80 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<StorageMigrationResult>> ChangeStoragePath(string newPath, bool migrateData = true)
+    public async Task<BridgeResponse<StorageMigrationResult>> ChangeStoragePath(
+        string newPath,
+        bool migrateData = true
+    )
     {
         try
         {
-            var result = await _storageManager.ChangeDataRootAsync(
-                newPath,
-                migrateData,
-                onProgress: (percent, message) =>
-                {
-                    JsEventDispatcher.Publish("storage:migration-progress", new
+            var result = await _storageManager
+                .ChangeDataRootAsync(
+                    newPath,
+                    migrateData,
+                    onProgress: (percent, message) =>
                     {
-                        percent,
-                        message,
-                        targetPath = newPath
-                    });
-                }).ConfigureAwait(false);
+                        JsEventDispatcher.Publish(
+                            "storage:migration-progress",
+                            new
+                            {
+                                percent,
+                                message,
+                                targetPath = newPath
+                            }
+                        );
+                    }
+                )
+                .ConfigureAwait(false);
 
             if (!result.Success)
             {
-                return BridgeResponse<StorageMigrationResult>.Fail("STORAGE_CHANGE_FAILED", result.Message);
+                return BridgeResponse<StorageMigrationResult>.Fail(
+                    "STORAGE_CHANGE_FAILED",
+                    result.Message
+                );
             }
 
             // 新目录切换成功后，确保新目录下的 network.json 与 providers.json 已初始化并同步至网络工厂
             // need08：新目录切换成功后，确保 agent.json 已初始化
-            try { _agentConfigService.EnsureInitialized(); } catch { }
-             _providerConfigService.EnsureInitialized();
-             try { _promptConfigService.EnsureInitialized(); } catch { }
-
-            JsEventDispatcher.Publish("storage:changed", new
+            try
             {
-                oldDataRootPath = result.OldDataRootPath,
-                newDataRootPath = result.NewDataRootPath,
-                migratedData = result.MigratedData,
-                migratedFileCount = result.MigratedFileCount
-            });
+                _agentConfigService.EnsureInitialized();
+            }
+            catch { }
+            _providerConfigService.EnsureInitialized();
+            try
+            {
+                _promptConfigService.EnsureInitialized();
+            }
+            catch { }
+
+            JsEventDispatcher.Publish(
+                "storage:changed",
+                new
+                {
+                    oldDataRootPath = result.OldDataRootPath,
+                    newDataRootPath = result.NewDataRootPath,
+                    migratedData = result.MigratedData,
+                    migratedFileCount = result.MigratedFileCount
+                }
+            );
 
             return BridgeResponse<StorageMigrationResult>.Success(result, result.Message);
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"ChangeStoragePath failed for '{newPath}'", ex);
-            return BridgeResponse<StorageMigrationResult>.Fail("STORAGE_CHANGE_EXCEPTION", ex.Message);
+            return BridgeResponse<StorageMigrationResult>.Fail(
+                "STORAGE_CHANGE_EXCEPTION",
+                ex.Message
+            );
         }
     }
 
-    public Task<BridgeResponse<StorageMigrationResult>> ResetStoragePathToDefault(bool migrateData = true)
+    public Task<BridgeResponse<StorageMigrationResult>> ResetStoragePathToDefault(
+        bool migrateData = true
+    )
     {
         return ChangeStoragePath(_storageManager.DefaultDataRootPath, migrateData);
     }
@@ -298,12 +385,14 @@ namespace Host.Desktop.Bridge;
 
             if (File.Exists(pathToOpen))
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"/select,\"{pathToOpen}\"",
-                    UseShellExecute = true
-                });
+                Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"/select,\"{pathToOpen}\"",
+                        UseShellExecute = true
+                    }
+                );
                 return Task.FromResult(BridgeResponse<bool>.Success(true));
             }
 
@@ -312,12 +401,14 @@ namespace Host.Desktop.Bridge;
                 Directory.CreateDirectory(pathToOpen);
             }
 
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = $"\"{pathToOpen}\"",
-                UseShellExecute = true
-            });
+            Process.Start(
+                new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{pathToOpen}\"",
+                    UseShellExecute = true
+                }
+            );
 
             return Task.FromResult(BridgeResponse<bool>.Success(true));
         }
@@ -327,77 +418,98 @@ namespace Host.Desktop.Bridge;
             return Task.FromResult(BridgeResponse<bool>.Fail("OPEN_EXPLORER_ERROR", ex.Message));
         }
     }
-     /// <summary>
-     /// 聊天 markdown 链接统一出口：http(s) 交系统默认浏览器，本地路径交 explorer 定位，永不在 CEF 主帧内导航。
-     /// 安全铁律：文件一律 explorer /select 定位，绝不 UseShellExecute 直接打开（防模型输出的 exe/bat 被执行）。
-     /// </summary>
-     public Task<BridgeResponse<bool>> OpenExternalLink(string href, string? workspaceRoot = null)
-     {
-         try
-         {
-             string link = (href ?? string.Empty).Trim();
-             if (string.IsNullOrWhiteSpace(link))
-             {
-                 return Task.FromResult(BridgeResponse<bool>.Fail("EMPTY_LINK", "链接为空"));
-             }
-             // 防护：拒绝 javascript:/data:/vbscript: 等可执行伪协议
-             if (link.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
-                 || link.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
-                 || link.StartsWith("vbscript:", StringComparison.OrdinalIgnoreCase))
-             {
-                 return Task.FromResult(BridgeResponse<bool>.Fail("BLOCKED_SCHEME", "该链接协议不允许打开"));
-             }
-             if (link.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                 || link.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-             {
-                 Process.Start(new ProcessStartInfo { FileName = link, UseShellExecute = true });
-                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已交系统浏览器打开"));
-             }
-             // 本地路径：支持 file:/// 与绝对/工作区相对路径，统一落到 explorer 定位
-             string candidate = link;
-             if (candidate.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-             {
-                 try { candidate = new Uri(candidate).LocalPath; }
-                 catch { return Task.FromResult(BridgeResponse<bool>.Fail("BAD_FILE_URL", "文件链接格式非法")); }
-             }
-             string fullPath;
-             try
-             {
-                 fullPath = Host.Desktop.Tools.Safety.PathSafetyValidator.ResolveWorkspacePath(workspaceRoot ?? string.Empty, candidate);
-             }
-             catch (Exception ex)
-             {
-                 return Task.FromResult(BridgeResponse<bool>.Fail("BAD_PATH", "路径无法解析：" + ex.Message));
-             }
-             if (File.Exists(fullPath))
-             {
-                 Process.Start(new ProcessStartInfo
-                 {
-                     FileName = "explorer.exe",
-                     Arguments = $"/select,\"{fullPath}\"",
-                     UseShellExecute = true
-                 });
-                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中定位文件"));
-             }
-             if (Directory.Exists(fullPath))
-             {
-                 Process.Start(new ProcessStartInfo
-                 {
-                     FileName = "explorer.exe",
-                     Arguments = $"\"{fullPath}\"",
-                     UseShellExecute = true
-                 });
-                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中打开目录"));
-             }
-             return Task.FromResult(BridgeResponse<bool>.Fail("PATH_NOT_FOUND", $"本地路径不存在：'{fullPath}'"));
-         }
-         catch (Exception ex)
-         {
-             HaloLogger.App.Error($"OpenExternalLink failed for '{href}'", ex);
-             return Task.FromResult(BridgeResponse<bool>.Fail("OPEN_LINK_ERROR", ex.Message));
-         }
-     }
 
+    /// <summary>
+    /// 聊天 markdown 链接统一出口：http(s) 交系统默认浏览器，本地路径交 explorer 定位，永不在 CEF 主帧内导航。
+    /// 安全铁律：文件一律 explorer /select 定位，绝不 UseShellExecute 直接打开（防模型输出的 exe/bat 被执行）。
+    /// </summary>
+    public Task<BridgeResponse<bool>> OpenExternalLink(string href, string? workspaceRoot = null)
+    {
+        try
+        {
+            string link = (href ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(link))
+            {
+                return Task.FromResult(BridgeResponse<bool>.Fail("EMPTY_LINK", "链接为空"));
+            }
+            // 防护：拒绝 javascript:/data:/vbscript: 等可执行伪协议
+            if (
+                link.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+                || link.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                || link.StartsWith("vbscript:", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                return Task.FromResult(BridgeResponse<bool>.Fail("BLOCKED_SCHEME", "该链接协议不允许打开"));
+            }
+            if (
+                link.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || link.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                Process.Start(new ProcessStartInfo { FileName = link, UseShellExecute = true });
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已交系统浏览器打开"));
+            }
+            // 本地路径：支持 file:/// 与绝对/工作区相对路径，统一落到 explorer 定位
+            string candidate = link;
+            if (candidate.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    candidate = new Uri(candidate).LocalPath;
+                }
+                catch
+                {
+                    return Task.FromResult(BridgeResponse<bool>.Fail("BAD_FILE_URL", "文件链接格式非法"));
+                }
+            }
+            string fullPath;
+            try
+            {
+                fullPath = Host.Desktop.Tools.Safety.PathSafetyValidator.ResolveWorkspacePath(
+                    workspaceRoot ?? string.Empty,
+                    candidate
+                );
+            }
+            catch (Exception ex)
+            {
+                return Task.FromResult(
+                    BridgeResponse<bool>.Fail("BAD_PATH", "路径无法解析：" + ex.Message)
+                );
+            }
+            if (File.Exists(fullPath))
+            {
+                Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"/select,\"{fullPath}\"",
+                        UseShellExecute = true
+                    }
+                );
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中定位文件"));
+            }
+            if (Directory.Exists(fullPath))
+            {
+                Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"\"{fullPath}\"",
+                        UseShellExecute = true
+                    }
+                );
+                return Task.FromResult(BridgeResponse<bool>.Success(true, "已在资源管理器中打开目录"));
+            }
+            return Task.FromResult(
+                BridgeResponse<bool>.Fail("PATH_NOT_FOUND", $"本地路径不存在：'{fullPath}'")
+            );
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"OpenExternalLink failed for '{href}'", ex);
+            return Task.FromResult(BridgeResponse<bool>.Fail("OPEN_LINK_ERROR", ex.Message));
+        }
+    }
 
     public async Task<BridgeResponse<int>> CleanupExpiredLogs(int retentionDays = 14)
     {
@@ -409,7 +521,9 @@ namespace Host.Desktop.Bridge;
             await _storageManager.SaveAppSettingsAsync(settings).ConfigureAwait(false);
 
             var deleted = HaloLogger.CleanupExpiredLogs(effectiveDays);
-            HaloLogger.App.Info($"Manual log cleanup executed (retentionDays={effectiveDays}, deleted={deleted}).");
+            HaloLogger.App.Info(
+                $"Manual log cleanup executed (retentionDays={effectiveDays}, deleted={deleted})."
+            );
             await HaloLogger.FlushAsync().ConfigureAwait(false);
             return BridgeResponse<int>.Success(deleted, $"清理完成，共移除 {deleted} 个过期日志文件。");
         }
@@ -452,13 +566,16 @@ namespace Host.Desktop.Bridge;
         try
         {
             await InvokeOnUiThreadAsync(() =>
-            {
-                if (_mainForm != null && !_mainForm.IsDisposed)
                 {
-                    _mainForm.Text = string.IsNullOrWhiteSpace(title) ? "Halo-Agent Desktop" : title;
-                }
-                return true;
-            }).ConfigureAwait(false);
+                    if (_mainForm != null && !_mainForm.IsDisposed)
+                    {
+                        _mainForm.Text = string.IsNullOrWhiteSpace(title)
+                            ? "Halo-Agent Desktop"
+                            : title;
+                    }
+                    return true;
+                })
+                .ConfigureAwait(false);
 
             return BridgeResponse<bool>.Success(true);
         }
@@ -482,7 +599,9 @@ namespace Host.Desktop.Bridge;
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetNetworkSettings failed", ex);
-            return Task.FromResult(BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_GET_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_GET_ERROR", ex.Message)
+            );
         }
     }
 
@@ -492,59 +611,90 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(settingsJson))
             {
-                return Task.FromResult(BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_SAVE_INVALID", "网络配置参数不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_SAVE_INVALID", "网络配置参数不能为空")
+                );
             }
 
-            var incoming = JsonSerializer.Deserialize<GlobalNetworkSettings>(settingsJson, HaloJsonOptions.IndentedCamelCase);
+            var incoming = JsonSerializer.Deserialize<GlobalNetworkSettings>(
+                settingsJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (incoming == null)
             {
-                return Task.FromResult(BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_SAVE_INVALID", "网络配置 JSON 解析失败"));
+                return Task.FromResult(
+                    BridgeResponse<GlobalNetworkSettings>.Fail(
+                        "NETWORK_SAVE_INVALID",
+                        "网络配置 JSON 解析失败"
+                    )
+                );
             }
 
             var saved = _providerConfigService.SaveNetworkSettings(incoming);
             JsEventDispatcher.Publish("config:network-changed", saved);
-            return Task.FromResult(BridgeResponse<GlobalNetworkSettings>.Success(saved, "网络与代理设置已保存并立即生效"));
+            return Task.FromResult(
+                BridgeResponse<GlobalNetworkSettings>.Success(saved, "网络与代理设置已保存并立即生效")
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("SaveNetworkSettings failed", ex);
-            return Task.FromResult(BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_SAVE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<GlobalNetworkSettings>.Fail("NETWORK_SAVE_ERROR", ex.Message)
+            );
         }
     }
 
-    public Task<BridgeResponse<SystemProxySnapshot>> InspectSystemProxy(string? probeTargetUrl = null)
+    public Task<BridgeResponse<SystemProxySnapshot>> InspectSystemProxy(
+        string? probeTargetUrl = null
+    )
     {
         try
         {
-            string target = string.IsNullOrWhiteSpace(probeTargetUrl) ? "https://api.openai.com" : probeTargetUrl.Trim();
+            string target = string.IsNullOrWhiteSpace(probeTargetUrl)
+                ? "https://api.openai.com"
+                : probeTargetUrl.Trim();
             var snapshot = SystemProxyInspector.InspectCurrentSystemProxy(target);
             return Task.FromResult(BridgeResponse<SystemProxySnapshot>.Success(snapshot));
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("InspectSystemProxy failed", ex);
-            return Task.FromResult(BridgeResponse<SystemProxySnapshot>.Fail("PROXY_INSPECT_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<SystemProxySnapshot>.Fail("PROXY_INSPECT_ERROR", ex.Message)
+            );
         }
     }
 
     public async Task<BridgeResponse<ProxyConnectivityTestResult>> TestProxyConnectivity(
         string? targetUrl = null,
         string? overrideSettingsJson = null,
-        string? providerJson = null)
+        string? providerJson = null
+    )
     {
         try
         {
             GlobalNetworkSettings? overrideSettings = null;
             if (!string.IsNullOrWhiteSpace(overrideSettingsJson))
             {
-                overrideSettings = JsonSerializer.Deserialize<GlobalNetworkSettings>(overrideSettingsJson, HaloJsonOptions.IndentedCamelCase);
+                overrideSettings = JsonSerializer.Deserialize<GlobalNetworkSettings>(
+                    overrideSettingsJson,
+                    HaloJsonOptions.IndentedCamelCase
+                );
             }
 
             ProviderConfig? provider = null;
             if (!string.IsNullOrWhiteSpace(providerJson))
             {
-                provider = JsonSerializer.Deserialize<ProviderConfig>(providerJson, HaloJsonOptions.IndentedCamelCase);
-                if (provider != null && string.IsNullOrWhiteSpace(provider.ApiKeyEncrypted) && !string.IsNullOrWhiteSpace(provider.Id))
+                provider = JsonSerializer.Deserialize<ProviderConfig>(
+                    providerJson,
+                    HaloJsonOptions.IndentedCamelCase
+                );
+                if (
+                    provider != null
+                    && string.IsNullOrWhiteSpace(provider.ApiKeyEncrypted)
+                    && !string.IsNullOrWhiteSpace(provider.Id)
+                )
                 {
                     var persisted = _providerConfigService.GetProviderById(provider.Id);
                     if (persisted != null)
@@ -554,16 +704,20 @@ namespace Host.Desktop.Bridge;
                 }
             }
 
-            var result = await _httpClientFactory.TestProxyConnectivityAsync(
-                targetUrl: targetUrl,
-                overrideGlobalSettings: overrideSettings,
-                provider: provider).ConfigureAwait(false);
+            var result = await _httpClientFactory
+                .TestProxyConnectivityAsync(
+                    targetUrl: targetUrl,
+                    overrideGlobalSettings: overrideSettings,
+                    provider: provider
+                )
+                .ConfigureAwait(false);
 
             return BridgeResponse<ProxyConnectivityTestResult>.Success(
                 result,
                 result.Success
                     ? $"连通测试成功 ({result.ElapsedMs} ms · {result.EffectiveProxyUsed})"
-                    : result.ErrorMessage ?? "连通测试失败");
+                    : result.ErrorMessage ?? "连通测试失败"
+            );
         }
         catch (Exception ex)
         {
@@ -582,7 +736,9 @@ namespace Host.Desktop.Bridge;
         catch (Exception ex)
         {
             HaloLogger.App.Error("GetProvidersConfig failed", ex);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_GET_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_GET_ERROR", ex.Message)
+            );
         }
     }
 
@@ -592,27 +748,49 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(configJson))
             {
-                return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_SAVE_INVALID", "Provider 配置参数不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<ProvidersConfigDocument>.Fail(
+                        "PROVIDERS_SAVE_INVALID",
+                        "Provider 配置参数不能为空"
+                    )
+                );
             }
 
-            var incoming = JsonSerializer.Deserialize<ProvidersConfigDocument>(configJson, HaloJsonOptions.IndentedCamelCase);
+            var incoming = JsonSerializer.Deserialize<ProvidersConfigDocument>(
+                configJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (incoming == null)
             {
-                return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_SAVE_INVALID", "Provider 配置 JSON 解析失败"));
+                return Task.FromResult(
+                    BridgeResponse<ProvidersConfigDocument>.Fail(
+                        "PROVIDERS_SAVE_INVALID",
+                        "Provider 配置 JSON 解析失败"
+                    )
+                );
             }
 
             var saved = _providerConfigService.SaveProvidersConfig(incoming);
             JsEventDispatcher.Publish("config:providers-changed", saved);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, "大模型服务商与模型配置已安全加密落盘"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Success(saved, "大模型服务商与模型配置已安全加密落盘")
+            );
         }
         catch (ProviderConfigValidationException vex)
         {
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_VALIDATION", $"字段 [{vex.Field}]：{vex.Message}"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail(
+                    "PROVIDER_VALIDATION",
+                    $"字段 [{vex.Field}]：{vex.Message}"
+                )
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("SaveProvidersConfig failed", ex);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_SAVE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDERS_SAVE_ERROR", ex.Message)
+            );
         }
     }
 
@@ -622,27 +800,49 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(providerJson))
             {
-                return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_UPSERT_INVALID", "Provider 参数不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<ProvidersConfigDocument>.Fail(
+                        "PROVIDER_UPSERT_INVALID",
+                        "Provider 参数不能为空"
+                    )
+                );
             }
 
-            var provider = JsonSerializer.Deserialize<ProviderConfig>(providerJson, HaloJsonOptions.IndentedCamelCase);
+            var provider = JsonSerializer.Deserialize<ProviderConfig>(
+                providerJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (provider == null)
             {
-                return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_UPSERT_INVALID", "Provider JSON 解析失败"));
+                return Task.FromResult(
+                    BridgeResponse<ProvidersConfigDocument>.Fail(
+                        "PROVIDER_UPSERT_INVALID",
+                        "Provider JSON 解析失败"
+                    )
+                );
             }
 
             var saved = _providerConfigService.UpsertProvider(provider);
             JsEventDispatcher.Publish("config:providers-changed", saved);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, $"服务商 [{provider.Name}] 已保存"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Success(saved, $"服务商 [{provider.Name}] 已保存")
+            );
         }
         catch (ProviderConfigValidationException vex)
         {
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_VALIDATION", $"字段 [{vex.Field}]：{vex.Message}"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail(
+                    "PROVIDER_VALIDATION",
+                    $"字段 [{vex.Field}]：{vex.Message}"
+                )
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("UpsertProvider failed", ex);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_UPSERT_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_UPSERT_ERROR", ex.Message)
+            );
         }
     }
 
@@ -652,27 +852,38 @@ namespace Host.Desktop.Bridge;
         {
             var saved = _providerConfigService.DeleteProvider(providerId);
             JsEventDispatcher.Publish("config:providers-changed", saved);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, "服务商已删除"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Success(saved, "服务商已删除")
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"DeleteProvider failed for '{providerId}'", ex);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_DELETE_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail("PROVIDER_DELETE_ERROR", ex.Message)
+            );
         }
     }
 
-    public Task<BridgeResponse<ProvidersConfigDocument>> SetActiveModel(string providerId, string modelId)
+    public Task<BridgeResponse<ProvidersConfigDocument>> SetActiveModel(
+        string providerId,
+        string modelId
+    )
     {
         try
         {
             var saved = _providerConfigService.SetActiveModel(providerId, modelId);
             JsEventDispatcher.Publish("config:providers-changed", saved);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Success(saved, $"已切换至模型 {modelId}"));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Success(saved, $"已切换至模型 {modelId}")
+            );
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("SetActiveModel failed", ex);
-            return Task.FromResult(BridgeResponse<ProvidersConfigDocument>.Fail("ACTIVE_MODEL_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProvidersConfigDocument>.Fail("ACTIVE_MODEL_ERROR", ex.Message)
+            );
         }
     }
 
@@ -680,23 +891,39 @@ namespace Host.Desktop.Bridge;
         string providerJson,
         string? modelId = null,
         string? sessionId = null,
-        string? workspacePath = null)
+        string? workspacePath = null
+    )
     {
         try
         {
-            var provider = JsonSerializer.Deserialize<ProviderConfig>(providerJson, HaloJsonOptions.IndentedCamelCase);
+            var provider = JsonSerializer.Deserialize<ProviderConfig>(
+                providerJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (provider == null)
             {
-                return Task.FromResult(BridgeResponse<ProviderEndpointPreviewDto>.Fail("PREVIEW_INVALID", "Provider JSON 解析失败"));
+                return Task.FromResult(
+                    BridgeResponse<ProviderEndpointPreviewDto>.Fail(
+                        "PREVIEW_INVALID",
+                        "Provider JSON 解析失败"
+                    )
+                );
             }
 
-            var preview = _providerConfigService.PreviewProviderEndpointsAndHeaders(provider, modelId, sessionId, workspacePath);
+            var preview = _providerConfigService.PreviewProviderEndpointsAndHeaders(
+                provider,
+                modelId,
+                sessionId,
+                workspacePath
+            );
             return Task.FromResult(BridgeResponse<ProviderEndpointPreviewDto>.Success(preview));
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("PreviewProviderResolution failed", ex);
-            return Task.FromResult(BridgeResponse<ProviderEndpointPreviewDto>.Fail("PREVIEW_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<ProviderEndpointPreviewDto>.Fail("PREVIEW_ERROR", ex.Message)
+            );
         }
     }
 
@@ -708,10 +935,15 @@ namespace Host.Desktop.Bridge;
     {
         try
         {
-            var req = JsonSerializer.Deserialize<UnifiedLlmRequest>(requestJson, HaloJsonOptions.IndentedCamelCase);
+            var req = JsonSerializer.Deserialize<UnifiedLlmRequest>(
+                requestJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (req == null)
             {
-                return Task.FromResult(BridgeResponse<string>.Fail("INVALID_REQUEST", "请求 JSON 无法反序列化"));
+                return Task.FromResult(
+                    BridgeResponse<string>.Fail("INVALID_REQUEST", "请求 JSON 无法反序列化")
+                );
             }
 
             string sessionId = !string.IsNullOrWhiteSpace(req.HeaderContext?.SessionId)
@@ -743,73 +975,107 @@ namespace Host.Desktop.Bridge;
             string sessionRequestId = req.RequestId ?? Guid.NewGuid().ToString("N");
             var sessionTextAcc = new System.Text.StringBuilder();
             var sessionReasonAcc = new System.Text.StringBuilder();
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await foreach (var evt in _llmGatewayClient.StreamAsync(req, cts.Token).ConfigureAwait(false))
-                    {
-                        var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
-                        JsEventDispatcher.Publish("llm:stream-event", dto);
-
-                        if (evt.Kind == UnifiedStreamEventKind.TextDelta && !string.IsNullOrEmpty(evt.TextDelta))
-                            sessionTextAcc.Append(evt.TextDelta);
-                        else if (evt.Kind == UnifiedStreamEventKind.ReasoningDelta && !string.IsNullOrEmpty(evt.TextDelta))
-                            sessionReasonAcc.Append(evt.TextDelta);
-                        else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
-                            sessionUsage = evt.Usage;
-                        else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
-                            sessionStatus = "cancelled";
-                        else if (evt.Kind == UnifiedStreamEventKind.StreamError)
-                            sessionStatus = "error";
-
-                        if (evt.Kind == UnifiedStreamEventKind.StreamCompleted ||
-                            evt.Kind == UnifiedStreamEventKind.StreamCancelled ||
-                            evt.Kind == UnifiedStreamEventKind.StreamError)
-                        {
-                            break;
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    sessionStatus = "cancelled";
-                    var cancelDto = new SessionStreamEventDto
-                    {
-                        SessionId = sessionId,
-                        Kind = nameof(UnifiedStreamEventKind.StreamCancelled)
-                    };
-                    JsEventDispatcher.Publish("llm:stream-event", cancelDto);
-                }
-                catch (Exception ex)
-                {
-                    sessionStatus = "error";
-                    HaloLogger.App.Error($"[HostBridge] Session {sessionId} 流式推送异常", ex);
-                    var errDto = new SessionStreamEventDto
-                    {
-                        SessionId = sessionId,
-                        Kind = nameof(UnifiedStreamEventKind.StreamError),
-                        ErrorCode = "STREAM_EXECUTION_EXCEPTION",
-                        ErrorMessage = ex.Message
-                    };
-                    JsEventDispatcher.Publish("llm:stream-event", errDto);
-                }
-                finally
+            _ = Task.Run(
+                async () =>
                 {
                     try
                     {
-                        // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本）。
-                        UsageRecorder.CollectAuto(usageRows, req.Provider, req.Model, sessionUsage,
-                            UsageRecorder.EstimateInput(req.Messages, req.SystemInstructions),
-                            UsageRecorder.EstimateOutput(sessionTextAcc, sessionReasonAcc),
-                            sessionStatus, sessionRequestId, sessionId, string.Empty, UsageRecorder.SourceSession);
-                        UsageRecorder.Flush(UsageMetricsServiceInternal, usageRows, sessionId, string.Empty);
+                        await foreach (
+                            var evt in _llmGatewayClient
+                                .StreamAsync(req, cts.Token)
+                                .ConfigureAwait(false)
+                        )
+                        {
+                            var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
+                            JsEventDispatcher.Publish("llm:stream-event", dto);
+
+                            if (
+                                evt.Kind == UnifiedStreamEventKind.TextDelta
+                                && !string.IsNullOrEmpty(evt.TextDelta)
+                            )
+                                sessionTextAcc.Append(evt.TextDelta);
+                            else if (
+                                evt.Kind == UnifiedStreamEventKind.ReasoningDelta
+                                && !string.IsNullOrEmpty(evt.TextDelta)
+                            )
+                                sessionReasonAcc.Append(evt.TextDelta);
+                            else if (
+                                evt.Kind == UnifiedStreamEventKind.UsageUpdated
+                                && evt.Usage != null
+                            )
+                                sessionUsage = evt.Usage;
+                            else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
+                                sessionStatus = "cancelled";
+                            else if (evt.Kind == UnifiedStreamEventKind.StreamError)
+                                sessionStatus = "error";
+
+                            if (
+                                evt.Kind == UnifiedStreamEventKind.StreamCompleted
+                                || evt.Kind == UnifiedStreamEventKind.StreamCancelled
+                                || evt.Kind == UnifiedStreamEventKind.StreamError
+                            )
+                            {
+                                break;
+                            }
+                        }
                     }
-                    catch { /* 用量落袋永不影响会话清理 */ }
-                    _activeSessionTokens.TryRemove(sessionId, out _);
-                    cts.Dispose();
-                }
-            }, CancellationToken.None);
+                    catch (OperationCanceledException)
+                    {
+                        sessionStatus = "cancelled";
+                        var cancelDto = new SessionStreamEventDto
+                        {
+                            SessionId = sessionId,
+                            Kind = nameof(UnifiedStreamEventKind.StreamCancelled)
+                        };
+                        JsEventDispatcher.Publish("llm:stream-event", cancelDto);
+                    }
+                    catch (Exception ex)
+                    {
+                        sessionStatus = "error";
+                        HaloLogger.App.Error($"[HostBridge] Session {sessionId} 流式推送异常", ex);
+                        var errDto = new SessionStreamEventDto
+                        {
+                            SessionId = sessionId,
+                            Kind = nameof(UnifiedStreamEventKind.StreamError),
+                            ErrorCode = "STREAM_EXECUTION_EXCEPTION",
+                            ErrorMessage = ex.Message
+                        };
+                        JsEventDispatcher.Publish("llm:stream-event", errDto);
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本）。
+                            UsageRecorder.CollectAuto(
+                                usageRows,
+                                req.Provider,
+                                req.Model,
+                                sessionUsage,
+                                UsageRecorder.EstimateInput(req.Messages, req.SystemInstructions),
+                                UsageRecorder.EstimateOutput(sessionTextAcc, sessionReasonAcc),
+                                sessionStatus,
+                                sessionRequestId,
+                                sessionId,
+                                string.Empty,
+                                UsageRecorder.SourceSession
+                            );
+                            UsageRecorder.Flush(
+                                UsageMetricsServiceInternal,
+                                usageRows,
+                                sessionId,
+                                string.Empty
+                            );
+                        }
+                        catch
+                        { /* 用量落袋永不影响会话清理 */
+                        }
+                        _activeSessionTokens.TryRemove(sessionId, out _);
+                        cts.Dispose();
+                    }
+                },
+                CancellationToken.None
+            );
 
             return Task.FromResult(BridgeResponse<string>.Success(sessionId, "流式请求已启动"));
         }
@@ -829,7 +1095,9 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空")
+                );
             }
 
             if (_activeSessionTokens.TryRemove(sessionId, out var cts))
@@ -848,6 +1116,7 @@ namespace Host.Desktop.Bridge;
             return Task.FromResult(BridgeResponse<bool>.Fail("CANCEL_ERROR", ex.Message));
         }
     }
+
     /// <summary>
     /// Stage 06 Agent ReAct 编排入口：后台 Task 运行 AgentOrchestrator，不阻塞 CEF 线程；
     /// 每 session 一个 CancellationTokenSource（复用 _activeSessionTokens，key 为 sessionId）。
@@ -859,13 +1128,16 @@ namespace Host.Desktop.Bridge;
         string? providerId = null,
         string? modelId = null,
         string? attachmentsJson = null,
-        string? requestId = null)
+        string? requestId = null
+    )
     {
         try
         {
             if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空")
+                );
             }
             if (string.IsNullOrWhiteSpace(userText))
             {
@@ -873,22 +1145,38 @@ namespace Host.Desktop.Bridge;
             }
             string turnKey = "agent:" + sessionId.Trim();
             // need22-P1 T1：sendPrompt requestId 回显去重（重复投递直接成功回显，不重起一轮）。
-            string turnRequestId = string.IsNullOrWhiteSpace(requestId) ? Guid.NewGuid().ToString("N") : requestId.Trim();
+            string turnRequestId = string.IsNullOrWhiteSpace(requestId)
+                ? Guid.NewGuid().ToString("N")
+                : requestId.Trim();
             if (_recentAgentRequestIds.ContainsKey(turnRequestId))
             {
-                return Task.FromResult(BridgeResponse<string>.Success(sessionId.Trim(), $"重复请求已去重（requestId={turnRequestId} 回显）"));
+                return Task.FromResult(
+                    BridgeResponse<string>.Success(
+                        sessionId.Trim(),
+                        $"重复请求已去重（requestId={turnRequestId} 回显）"
+                    )
+                );
             }
             // need22-P1 T5：压缩中查询可用，但新轮明确拒绝（COMPACTING 码；可先 CancelCompaction 再发轮）。
             if (_activeSessionTokens.ContainsKey("compact:" + sessionId.Trim()))
             {
-                return Task.FromResult(BridgeResponse<string>.Fail("COMPACTING", "该会话正在压缩上下文（查询可用），新一轮请稍候或先取消压缩"));
+                return Task.FromResult(
+                    BridgeResponse<string>.Fail("COMPACTING", "该会话正在压缩上下文（查询可用），新一轮请稍候或先取消压缩")
+                );
             }
             // need22-P1 T1：同 session 重入不再静默丢旧轮 → 返回 TURN_IN_PROGRESS（附 activeRequestId），旧轮继续跑。
             // 旧轮走正常 TurnCancelled 落盘仅发生在显式 CancelAgentTree 时。
             if (_activeSessionTokens.ContainsKey(turnKey))
             {
-                string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar) ? ar : "unknown";
-                return Task.FromResult(BridgeResponse<string>.Fail("TURN_IN_PROGRESS", $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"));
+                string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar)
+                    ? ar
+                    : "unknown";
+                return Task.FromResult(
+                    BridgeResponse<string>.Fail(
+                        "TURN_IN_PROGRESS",
+                        $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"
+                    )
+                );
             }
             var cts = new CancellationTokenSource();
             _activeSessionTokens[turnKey] = cts;
@@ -902,35 +1190,55 @@ namespace Host.Desktop.Bridge;
             try
             {
                 var imgRefs = SaveTurnAttachments(wsId, sessId, attachmentsJson, ref prompt);
-                if (imgRefs.Count > 0) PendingSessionImages.Put(sessId, imgRefs);
+                if (imgRefs.Count > 0)
+                    PendingSessionImages.Put(sessId, imgRefs);
             }
             catch (Exception ex)
             {
                 HaloLogger.App.Warn("[HostBridge] 附件落盘失败（文字仍发送）：" + ex.Message);
             }
 
-            _ = Task.Run(async () =>
-            {
-                try
+            _ = Task.Run(
+                async () =>
                 {
-                    await AgentOrchestrator.RunAgentTurnAsync(wsId, sessId, prompt, provId, modId, cts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    JsEventDispatcher.Publish("agent:turn-event", new { sessionId = sessId, kind = "TurnCancelled" });
-                }
-                catch (Exception ex)
-                {
-                    HaloLogger.App.Error($"[HostBridge] Agent turn failed for session '{sessId}'", ex);
-                    JsEventDispatcher.Publish("agent:turn-event", new { sessionId = sessId, kind = "TurnError", payload = new { errorMessage = ex.Message } });
-                }
-                finally
-                {
-                    _activeSessionTokens.TryRemove(turnKey, out _);
-                    _activeAgentRequestIds.TryRemove(turnKey, out _);
-                    cts.Dispose();
-                }
-            }, CancellationToken.None);
+                    try
+                    {
+                        await AgentOrchestrator
+                            .RunAgentTurnAsync(wsId, sessId, prompt, provId, modId, cts.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        JsEventDispatcher.Publish(
+                            "agent:turn-event",
+                            new { sessionId = sessId, kind = "TurnCancelled" }
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        HaloLogger.App.Error(
+                            $"[HostBridge] Agent turn failed for session '{sessId}'",
+                            ex
+                        );
+                        JsEventDispatcher.Publish(
+                            "agent:turn-event",
+                            new
+                            {
+                                sessionId = sessId,
+                                kind = "TurnError",
+                                payload = new { errorMessage = ex.Message }
+                            }
+                        );
+                    }
+                    finally
+                    {
+                        _activeSessionTokens.TryRemove(turnKey, out _);
+                        _activeAgentRequestIds.TryRemove(turnKey, out _);
+                        cts.Dispose();
+                    }
+                },
+                CancellationToken.None
+            );
 
             return Task.FromResult(BridgeResponse<string>.Success(sessId, "Agent 推理已启动"));
         }
@@ -957,12 +1265,18 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(mainSessionId))
             {
-                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空")
+                );
             }
 
             string mainId = mainSessionId.Trim();
             int subN = 0;
-            try { subN = SubCoordinator.CancelTree(mainId); } catch { }
+            try
+            {
+                subN = SubCoordinator.CancelTree(mainId);
+            }
+            catch { }
             string turnKey = "agent:" + mainId;
             bool hadMain = false;
             if (_activeSessionTokens.TryRemove(turnKey, out var cts))
@@ -971,10 +1285,20 @@ namespace Host.Desktop.Bridge;
                 cts.Dispose();
                 hadMain = true;
             }
-            try { Host.Desktop.Tools.BuiltIn.AskUserGate.RemoveTimeout(mainId, string.Empty, "cancelled"); } catch { }
+            try
+            {
+                Host.Desktop.Tools.BuiltIn.AskUserGate.RemoveTimeout(
+                    mainId,
+                    string.Empty,
+                    "cancelled"
+                );
+            }
+            catch { }
             HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {mainId} 的 Agent 推理（含 {subN} 个子代理）");
             if (hadMain || subN > 0)
-                return Task.FromResult(BridgeResponse<bool>.Success(true, $"已发送取消指令（含 {subN} 个子代理）"));
+                return Task.FromResult(
+                    BridgeResponse<bool>.Success(true, $"已发送取消指令（含 {subN} 个子代理）")
+                );
             return Task.FromResult(BridgeResponse<bool>.Success(false, "没有正在运行的 Agent 任务"));
         }
         catch (Exception ex)
@@ -991,13 +1315,23 @@ namespace Host.Desktop.Bridge;
         {
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<bool>.Fail("INVALID_SESSION_ID", "会话 ID 不能为空")
+                );
             }
             string compactKey = "compact:" + sessionId.Trim();
             if (_activeSessionTokens.TryRemove(compactKey, out var cts))
             {
-                try { cts.Cancel(); } catch { }
-                try { cts.Dispose(); } catch { }
+                try
+                {
+                    cts.Cancel();
+                }
+                catch { }
+                try
+                {
+                    cts.Dispose();
+                }
+                catch { }
                 HaloLogger.App.Info($"[HostBridge] 已请求取消 Session {sessionId.Trim()} 的压缩");
                 return Task.FromResult(BridgeResponse<bool>.Success(true, "已发送压缩取消指令"));
             }
@@ -1017,15 +1351,16 @@ namespace Host.Desktop.Bridge;
         {
             int n = 0;
             foreach (var kv in _activeSessionTokens)
-                if (kv.Key.StartsWith("agent:", StringComparison.Ordinal)) n++;
+                if (kv.Key.StartsWith("agent:", StringComparison.Ordinal))
+                    n++;
             return n;
         }
     }
 
     /// <summary>need22-P1：测试钩子（指定会话是否压缩中）。</summary>
     internal bool IsCompactingForTests(string sessionId) =>
-        !string.IsNullOrWhiteSpace(sessionId) && _activeSessionTokens.ContainsKey("compact:" + sessionId.Trim());
-
+        !string.IsNullOrWhiteSpace(sessionId)
+        && _activeSessionTokens.ContainsKey("compact:" + sessionId.Trim());
 
     #region Stage 04: Workspace, Session & Token Budget Methods
 
@@ -1043,7 +1378,10 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<WorkspaceInfo>> AddWorkspace(string rootPath, string? name = null)
+    public async Task<BridgeResponse<WorkspaceInfo>> AddWorkspace(
+        string rootPath,
+        string? name = null
+    )
     {
         try
         {
@@ -1051,7 +1389,9 @@ namespace Host.Desktop.Bridge;
             {
                 return BridgeResponse<WorkspaceInfo>.Fail("工作路径不能为空", "INVALID_PATH");
             }
-            var ws = await _workspaceSessionService.AddOrUpdateWorkspaceAsync(rootPath, name).ConfigureAwait(false);
+            var ws = await _workspaceSessionService
+                .AddOrUpdateWorkspaceAsync(rootPath, name)
+                .ConfigureAwait(false);
             return BridgeResponse<WorkspaceInfo>.Success(ws);
         }
         catch (Exception ex)
@@ -1065,7 +1405,9 @@ namespace Host.Desktop.Bridge;
     {
         try
         {
-            bool removed = await _workspaceSessionService.RemoveWorkspaceAsync(workspaceId).ConfigureAwait(false);
+            bool removed = await _workspaceSessionService
+                .RemoveWorkspaceAsync(workspaceId)
+                .ConfigureAwait(false);
             return BridgeResponse<bool>.Success(removed);
         }
         catch (Exception ex)
@@ -1106,7 +1448,9 @@ namespace Host.Desktop.Bridge;
     {
         try
         {
-            var list = await _workspaceSessionService.GetSessionsByWorkspaceAsync(workspaceId).ConfigureAwait(false);
+            var list = await _workspaceSessionService
+                .GetSessionsByWorkspaceAsync(workspaceId)
+                .ConfigureAwait(false);
             return BridgeResponse<List<SessionMetadata>>.Success(list);
         }
         catch (Exception ex)
@@ -1116,11 +1460,18 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<SessionMetadata>> CreateSession(string workspaceId, string? title = null, string? providerId = null, string? modelId = null)
+    public async Task<BridgeResponse<SessionMetadata>> CreateSession(
+        string workspaceId,
+        string? title = null,
+        string? providerId = null,
+        string? modelId = null
+    )
     {
         try
         {
-            var meta = await _workspaceSessionService.CreateSessionAsync(workspaceId, title, providerId, modelId).ConfigureAwait(false);
+            var meta = await _workspaceSessionService
+                .CreateSessionAsync(workspaceId, title, providerId, modelId)
+                .ConfigureAwait(false);
             return BridgeResponse<SessionMetadata>.Success(meta);
         }
         catch (Exception ex)
@@ -1130,11 +1481,16 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(string workspaceId, string sessionId)
+    public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(
+        string workspaceId,
+        string sessionId
+    )
     {
         try
         {
-            var messages = await _workspaceSessionService.GetSessionMessagesAsync(workspaceId, sessionId).ConfigureAwait(false);
+            var messages = await _workspaceSessionService
+                .GetSessionMessagesAsync(workspaceId, sessionId)
+                .ConfigureAwait(false);
             return BridgeResponse<List<UnifiedChatMessage>>.Success(messages);
         }
         catch (Exception ex)
@@ -1144,16 +1500,25 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<bool>> AppendSessionMessage(string workspaceId, string sessionId, string messageJson)
+    public async Task<BridgeResponse<bool>> AppendSessionMessage(
+        string workspaceId,
+        string sessionId,
+        string messageJson
+    )
     {
         try
         {
-            var msg = JsonSerializer.Deserialize<UnifiedChatMessage>(messageJson, HaloJsonOptions.IndentedCamelCase);
+            var msg = JsonSerializer.Deserialize<UnifiedChatMessage>(
+                messageJson,
+                HaloJsonOptions.IndentedCamelCase
+            );
             if (msg == null)
             {
                 return BridgeResponse<bool>.Fail("消息 JSON 无法反序列化", "INVALID_MESSAGE");
             }
-            bool ok = await _workspaceSessionService.AppendSessionMessageAsync(workspaceId, sessionId, msg).ConfigureAwait(false);
+            bool ok = await _workspaceSessionService
+                .AppendSessionMessageAsync(workspaceId, sessionId, msg)
+                .ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)
@@ -1163,11 +1528,17 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<bool>> UpdateSessionTitle(string workspaceId, string sessionId, string title)
+    public async Task<BridgeResponse<bool>> UpdateSessionTitle(
+        string workspaceId,
+        string sessionId,
+        string title
+    )
     {
         try
         {
-            bool ok = await _workspaceSessionService.UpdateSessionTitleAsync(workspaceId, sessionId, title).ConfigureAwait(false);
+            bool ok = await _workspaceSessionService
+                .UpdateSessionTitleAsync(workspaceId, sessionId, title)
+                .ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)
@@ -1177,11 +1548,17 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<bool>> SetSessionPinned(string workspaceId, string sessionId, bool isPinned)
+    public async Task<BridgeResponse<bool>> SetSessionPinned(
+        string workspaceId,
+        string sessionId,
+        bool isPinned
+    )
     {
         try
         {
-            bool ok = await _workspaceSessionService.SetSessionPinnedAsync(workspaceId, sessionId, isPinned).ConfigureAwait(false);
+            bool ok = await _workspaceSessionService
+                .SetSessionPinnedAsync(workspaceId, sessionId, isPinned)
+                .ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)
@@ -1196,8 +1573,14 @@ namespace Host.Desktop.Bridge;
         try
         {
             // need13：删主先 CancelTree 再级联删树（含子盘）
-            try { SubCoordinator.CancelTree(sessionId.Trim()); } catch { }
-            bool ok = await _workspaceSessionService.DeleteSessionTreeAsync(workspaceId, sessionId).ConfigureAwait(false);
+            try
+            {
+                SubCoordinator.CancelTree(sessionId.Trim());
+            }
+            catch { }
+            bool ok = await _workspaceSessionService
+                .DeleteSessionTreeAsync(workspaceId, sessionId)
+                .ConfigureAwait(false);
             return BridgeResponse<bool>.Success(ok);
         }
         catch (Exception ex)
@@ -1207,11 +1590,16 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<string>> ExportSessionMarkdown(string workspaceId, string sessionId)
+    public async Task<BridgeResponse<string>> ExportSessionMarkdown(
+        string workspaceId,
+        string sessionId
+    )
     {
         try
         {
-            string md = await _workspaceSessionService.ExportSessionMarkdownAsync(workspaceId, sessionId).ConfigureAwait(false);
+            string md = await _workspaceSessionService
+                .ExportSessionMarkdownAsync(workspaceId, sessionId)
+                .ConfigureAwait(false);
             return BridgeResponse<string>.Success(md);
         }
         catch (Exception ex)
@@ -1221,11 +1609,18 @@ namespace Host.Desktop.Bridge;
         }
     }
 
-    public async Task<BridgeResponse<ContextBudgetStatusDto>> GetContextBudget(string providerId, string modelId, string workspaceId, string sessionId)
+    public async Task<BridgeResponse<ContextBudgetStatusDto>> GetContextBudget(
+        string providerId,
+        string modelId,
+        string workspaceId,
+        string sessionId
+    )
     {
         try
         {
-            var status = await _tokenBudgetService.GetBudgetStatusAsync(providerId, modelId, workspaceId, sessionId).ConfigureAwait(false);
+            var status = await _tokenBudgetService
+                .GetBudgetStatusAsync(providerId, modelId, workspaceId, sessionId)
+                .ConfigureAwait(false);
             return BridgeResponse<ContextBudgetStatusDto>.Success(status);
         }
         catch (Exception ex)
@@ -1234,6 +1629,7 @@ namespace Host.Desktop.Bridge;
             return BridgeResponse<ContextBudgetStatusDto>.Fail(ex.Message, "BUDGET_ERROR");
         }
     }
+
     #region Stage 05: Standard Toolchain Debug Methods
 
     public ToolRegistry ToolRegistry => _toolRegistry ??= new ToolRegistry();
@@ -1246,9 +1642,10 @@ namespace Host.Desktop.Bridge;
         try
         {
             string normalized = (protocol ?? "chat").Trim().ToLowerInvariant();
-            string json = normalized == "resp"
-                ? ToolRegistry.GetResponsesToolsJson()
-                : ToolRegistry.GetChatToolsJson();
+            string json =
+                normalized == "resp"
+                    ? ToolRegistry.GetResponsesToolsJson()
+                    : ToolRegistry.GetChatToolsJson();
             return Task.FromResult(BridgeResponse<string>.Success(json));
         }
         catch (Exception ex)
@@ -1266,7 +1663,8 @@ namespace Host.Desktop.Bridge;
         string sessionId,
         string toolName,
         string argumentsJson,
-        string? toolCallId = null)
+        string? toolCallId = null
+    )
     {
         try
         {
@@ -1275,10 +1673,15 @@ namespace Host.Desktop.Bridge;
                 return BridgeResponse<ToolResult>.Fail("INVALID_TOOL", "工具名不能为空");
             }
 
-            var ws = await _workspaceSessionService.GetWorkspaceAsync(workspaceId).ConfigureAwait(false);
+            var ws = await _workspaceSessionService
+                .GetWorkspaceAsync(workspaceId)
+                .ConfigureAwait(false);
             if (ws == null)
             {
-                return BridgeResponse<ToolResult>.Fail("WORKSPACE_NOT_FOUND", $"工作区不存在：'{workspaceId}'");
+                return BridgeResponse<ToolResult>.Fail(
+                    "WORKSPACE_NOT_FOUND",
+                    $"工作区不存在：'{workspaceId}'"
+                );
             }
             var context = new ToolContext
             {
@@ -1294,12 +1697,19 @@ namespace Host.Desktop.Bridge;
                 context.ExecMaxTimeoutMsOverride = agentCfg.ExecMaxTimeoutMs;
                 context.AllowedCommandsOverride = agentCfg.AllowedCommands;
             }
-            catch { /* 调试单跑快照失败则回退常量，不阻断 */ }
+            catch
+            { /* 调试单跑快照失败则回退常量，不阻断 */
+            }
             var call = new ToolCallDto(
-                string.IsNullOrWhiteSpace(toolCallId) ? $"call_{Guid.NewGuid():N}"[..12] : toolCallId.Trim(),
+                string.IsNullOrWhiteSpace(toolCallId)
+                    ? $"call_{Guid.NewGuid():N}"[..12]
+                    : toolCallId.Trim(),
                 toolName.Trim(),
-                argumentsJson);
-            ToolResult result = await ToolRegistry.DispatchAsync(call, context).ConfigureAwait(false);
+                argumentsJson
+            );
+            ToolResult result = await ToolRegistry
+                .DispatchAsync(call, context)
+                .ConfigureAwait(false);
             return BridgeResponse<ToolResult>.Success(result);
         }
         catch (Exception ex)
@@ -1323,13 +1733,16 @@ namespace Host.Desktop.Bridge;
         string sessionId,
         string? providerId = null,
         string? modelId = null,
-        int keepLastGroups = 6)
+        int keepLastGroups = 6
+    )
     {
         try
         {
             if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(BridgeResponse<CompactionResult>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
+                return Task.FromResult(
+                    BridgeResponse<CompactionResult>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空")
+                );
             }
 
             string wsId = workspaceId.Trim();
@@ -1341,78 +1754,110 @@ namespace Host.Desktop.Bridge;
 
             if (_activeSessionTokens.ContainsKey(compactKey))
             {
-                return Task.FromResult(BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候"));
+                return Task.FromResult(
+                    BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候")
+                );
             }
 
-            JsEventDispatcher.Publish("agent:turn-event", new
-            {
-                sessionId = sessId,
-                kind = "CompactStarted",
-                payload = new { sessionId = sessId },
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            });
+            JsEventDispatcher.Publish(
+                "agent:turn-event",
+                new
+                {
+                    sessionId = sessId,
+                    kind = "CompactStarted",
+                    payload = new { sessionId = sessId },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                }
+            );
 
             // need22-P1 T5：CTS 同步前置注册（消除检查与后台注册之间的竞态；CancelCompaction 可靠中断）。
             var compactCts = new CancellationTokenSource();
             _activeSessionTokens[compactKey] = compactCts;
-            _ = Task.Run(async () =>
-            {
-                var cts = compactCts;
-                try
+            _ = Task.Run(
+                async () =>
                 {
-                    var result = await CompactionService.CompactAsync(wsId, sessId, provId, modId, keep, cts.Token).ConfigureAwait(false);
-                    if (result.Success)
+                    var cts = compactCts;
+                    try
                     {
-                        JsEventDispatcher.Publish("agent:turn-event", new
+                        var result = await CompactionService
+                            .CompactAsync(wsId, sessId, provId, modId, keep, cts.Token)
+                            .ConfigureAwait(false);
+                        if (result.Success)
                         {
-                            sessionId = sessId,
-                            kind = "CompactCompleted",
-                            payload = new
+                            JsEventDispatcher.Publish(
+                                "agent:turn-event",
+                                new
+                                {
+                                    sessionId = sessId,
+                                    kind = "CompactCompleted",
+                                    payload = new
+                                    {
+                                        removedMessages = result.RemovedMessages,
+                                        keptMessages = result.KeptMessages,
+                                        summaryPreview = result.SummaryPreview,
+                                        backupFileName = result.BackupFileName,
+                                        updatedAtUtc = DateTime.UtcNow.ToString("o")
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                }
+                            );
+                        }
+                        else
+                        {
+                            JsEventDispatcher.Publish(
+                                "agent:turn-event",
+                                new
+                                {
+                                    sessionId = sessId,
+                                    kind = "CompactFailed",
+                                    payload = new
+                                    {
+                                        errorCode = result.ErrorCode,
+                                        errorMessage = result.ErrorMessage
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                }
+                            );
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        HaloLogger.App.Error(
+                            $"[HostBridge] Compact failed for session '{sessId}'",
+                            ex
+                        );
+                        JsEventDispatcher.Publish(
+                            "agent:turn-event",
+                            new
                             {
-                                removedMessages = result.RemovedMessages,
-                                keptMessages = result.KeptMessages,
-                                summaryPreview = result.SummaryPreview,
-                                backupFileName = result.BackupFileName,
-                                updatedAtUtc = DateTime.UtcNow.ToString("o")
-                            },
-                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                        });
+                                sessionId = sessId,
+                                kind = "CompactFailed",
+                                payload = new
+                                {
+                                    errorCode = "COMPACT_EXCEPTION",
+                                    errorMessage = ex.Message
+                                },
+                                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            }
+                        );
                     }
-                    else
+                    finally
                     {
-                        JsEventDispatcher.Publish("agent:turn-event", new
-                        {
-                            sessionId = sessId,
-                            kind = "CompactFailed",
-                            payload = new { errorCode = result.ErrorCode, errorMessage = result.ErrorMessage },
-                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                        });
+                        _activeSessionTokens.TryRemove(compactKey, out _);
+                        cts.Dispose();
                     }
-                }
-                catch (Exception ex)
-                {
-                    HaloLogger.App.Error($"[HostBridge] Compact failed for session '{sessId}'", ex);
-                    JsEventDispatcher.Publish("agent:turn-event", new
-                    {
-                        sessionId = sessId,
-                        kind = "CompactFailed",
-                        payload = new { errorCode = "COMPACT_EXCEPTION", errorMessage = ex.Message },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    });
-                }
-                finally
-                {
-                    _activeSessionTokens.TryRemove(compactKey, out _);
-                    cts.Dispose();
-                }
-            }, CancellationToken.None);
+                },
+                CancellationToken.None
+            );
 
             return Task.FromResult(BridgeResponse<CompactionResult>.Success(default!, "压缩已启动"));
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("CompactSession failed", ex);
-            return Task.FromResult(BridgeResponse<CompactionResult>.Fail("COMPACT_START_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<CompactionResult>.Fail("COMPACT_START_ERROR", ex.Message)
+            );
         }
     }
 
@@ -1425,7 +1870,8 @@ namespace Host.Desktop.Bridge;
             var names = new List<string>();
             if (Directory.Exists(sessionDir))
             {
-                names = Directory.GetFiles(sessionDir, "messages.compact-bak-*.jsonl")
+                names = Directory
+                    .GetFiles(sessionDir, "messages.compact-bak-*.jsonl")
                     .Select(Path.GetFileName)
                     .Where(n => !string.IsNullOrEmpty(n))
                     .Select(n => n!)
@@ -1438,7 +1884,9 @@ namespace Host.Desktop.Bridge;
         catch (Exception ex)
         {
             HaloLogger.App.Error($"GetCompactBackupList failed for session '{sessionId}'", ex);
-            return Task.FromResult(BridgeResponse<string>.Fail("COMPACT_BACKUP_LIST_ERROR", ex.Message));
+            return Task.FromResult(
+                BridgeResponse<string>.Fail("COMPACT_BACKUP_LIST_ERROR", ex.Message)
+            );
         }
     }
 

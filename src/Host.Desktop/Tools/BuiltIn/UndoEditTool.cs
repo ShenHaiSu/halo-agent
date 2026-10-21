@@ -18,21 +18,32 @@ public sealed class UndoEditTool : IToolHandler
 
     // NEED17 PromptBrief: Restore a file from backup
     public string Description =>
-        "Restore a file from a backup created by edit_file/edit_lines/write_file. " +
-        "Restores the most recent backup of file_path made by edit_*/write_file. Use after a bad edit instead of hand-reverting. " +
-        "backup_path must be under <DataRoot>/backups/. The current file is backed up again before restore. " +
-        "Example: {\"backup_path\":\"backups/ws/sess/20260101-120000-000_abcdef12_notes.txt.bak\"}";
+        "Restore a file from a backup created by edit_file/edit_lines/write_file. "
+        + "Restores the most recent backup of file_path made by edit_*/write_file. Use after a bad edit instead of hand-reverting. "
+        + "backup_path must be under <DataRoot>/backups/. The current file is backed up again before restore. "
+        + "Example: {\"backup_path\":\"backups/ws/sess/20260101-120000-000_abcdef12_notes.txt.bak\"}";
 
     public ToolDefinition GetDefinition()
     {
         string schema = new ToolSchemaBuilder()
-            .AddString("backup_path", "Backup file path (under <DataRoot>/backups/).", required: true)
-            .AddString("restore_to", "Optional target file path. Defaults to the original src recorded in the .meta.json.")
+            .AddString(
+                "backup_path",
+                "Backup file path (under <DataRoot>/backups/).",
+                required: true
+            )
+            .AddString(
+                "restore_to",
+                "Optional target file path. Defaults to the original src recorded in the .meta.json."
+            )
             .Build();
         return new(Name, Description, schema);
     }
 
-    public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         try
@@ -51,20 +62,31 @@ public sealed class UndoEditTool : IToolHandler
             }
             catch (JsonException ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        $"参数 JSON 解析失败：{ex.Message}。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
-            string dataRoot = string.IsNullOrWhiteSpace(context.DataRoot) ? Path.GetTempPath() : context.DataRoot;
+            string dataRoot = string.IsNullOrWhiteSpace(context.DataRoot)
+                ? Path.GetTempPath()
+                : context.DataRoot;
             string backupArgResolved = backupPathArg ?? string.Empty;
             // 允许相对 DataRoot 的备份路径
-            if (!string.IsNullOrWhiteSpace(backupPathArg) && !Path.IsPathFullyQualified(backupPathArg))
+            if (
+                !string.IsNullOrWhiteSpace(backupPathArg)
+                && !Path.IsPathFullyQualified(backupPathArg)
+            )
             {
                 backupArgResolved = Path.Combine(dataRoot, backupPathArg);
             }
 
-            var (allowed, error, bakFull) = PathSafetyValidator.ValidateBackupRead(dataRoot, backupArgResolved);
+            var (allowed, error, bakFull) = PathSafetyValidator.ValidateBackupRead(
+                dataRoot,
+                backupArgResolved
+            );
             if (!allowed)
             {
                 return Task.FromResult(ToolResult.Fail(error!, durationMs: sw.ElapsedMilliseconds));
@@ -76,10 +98,15 @@ public sealed class UndoEditTool : IToolHandler
             string? targetPath;
             if (!string.IsNullOrWhiteSpace(restoreToArg))
             {
-                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(workspaceRoot, restoreToArg);
+                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(
+                    workspaceRoot,
+                    restoreToArg
+                );
                 if (!ok)
                 {
-                    return Task.FromResult(ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds)
+                    );
                 }
 
                 targetPath = full;
@@ -87,22 +114,37 @@ public sealed class UndoEditTool : IToolHandler
             else
             {
                 // need22-P0 S4：.meta.json → index.json 精确回查；无 GuessOriginal 猜测
-                targetPath = ResolveOriginalFromMeta(bakFull)
+                targetPath =
+                    ResolveOriginalFromMeta(bakFull)
                     ?? BackupStore.LookupOriginal(
-                        BackupStore.SessionBackupDir(dataRoot, context.WorkspaceId, context.SessionId),
-                        bakFull);
+                        BackupStore.SessionBackupDir(
+                            dataRoot,
+                            context.WorkspaceId,
+                            context.SessionId
+                        ),
+                        bakFull
+                    );
                 if (targetPath == null)
                 {
-                    return Task.FromResult(ToolResult.FailCode("BACKUP_INDEX_MISS",
-                        "BACKUP_INDEX_MISS：无法从备份推断原始路径（缺少 .meta.json 且索引无记录）。请显式传 restore_to。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            "BACKUP_INDEX_MISS",
+                            "BACKUP_INDEX_MISS：无法从备份推断原始路径（缺少 .meta.json 且索引无记录）。请显式传 restore_to。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
                 // 恢复目标仍需过写保护
-                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(workspaceRoot, targetPath);
+                var (ok, err, full, _) = PathSafetyValidator.ValidateWrite(
+                    workspaceRoot,
+                    targetPath
+                );
                 if (!ok)
                 {
-                    return Task.FromResult(ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds)
+                    );
                 }
 
                 targetPath = full;
@@ -115,9 +157,9 @@ public sealed class UndoEditTool : IToolHandler
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"备份读取失败：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail($"备份读取失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
             // 再备当前（撤销的撤销链）
@@ -125,14 +167,23 @@ public sealed class UndoEditTool : IToolHandler
             {
                 if (File.Exists(targetPath))
                 {
-                    BackupStore.WriteBackup(targetPath, context.DataRoot, context.WorkspaceId, context.SessionId, "undo_edit");
+                    BackupStore.WriteBackup(
+                        targetPath,
+                        context.DataRoot,
+                        context.WorkspaceId,
+                        context.SessionId,
+                        "undo_edit"
+                    );
                 }
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"备份当前文件失败，恢复已中止：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        $"备份当前文件失败，恢复已中止：{ex.Message}。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             try
@@ -147,8 +198,16 @@ public sealed class UndoEditTool : IToolHandler
                 string tmp = targetPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
-                    using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write,
-                        FileShare.None, bufferSize: 4096, FileOptions.WriteThrough))
+                    using (
+                        var fs = new FileStream(
+                            tmp,
+                            FileMode.CreateNew,
+                            FileAccess.Write,
+                            FileShare.None,
+                            bufferSize: 4096,
+                            FileOptions.WriteThrough
+                        )
+                    )
                     {
                         fs.Write(bakBytes, 0, bakBytes.Length);
                         fs.Flush(flushToDisk: true);
@@ -164,39 +223,43 @@ public sealed class UndoEditTool : IToolHandler
                             File.Delete(tmp);
                         }
                     }
-                    catch
-                    {
-                    }
+                    catch { }
                 }
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"恢复写回失败：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail($"恢复写回失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
             string hash = FileToolShared.ComputeHash(bakBytes);
-            string display = PathSafetyValidator.GetWorkspaceRelativePath(workspaceRoot, targetPath);
+            string display = PathSafetyValidator.GetWorkspaceRelativePath(
+                workspaceRoot,
+                targetPath
+            );
             var sb = new StringBuilder();
-            sb.Append("已从 backup 恢复 '").Append(display).Append("'（")
-                .Append(bakBytes.Length).Append(" 字节，hash:").Append(FileToolShared.TruncateHash(hash)).Append("）");
+            sb.Append("已从 backup 恢复 '")
+                .Append(display)
+                .Append("'（")
+                .Append(bakBytes.Length)
+                .Append(" 字节，hash:")
+                .Append(FileToolShared.TruncateHash(hash))
+                .Append("）");
             var ok2 = ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds);
             try
             {
                 ok2.FileBytes = new FileInfo(targetPath).Length;
             }
-            catch
-            {
-            }
+            catch { }
 
             return Task.FromResult(ok2);
         }
         catch (Exception ex)
         {
-            return Task.FromResult(ToolResult.Fail(
-                $"undo_edit 执行异常：{ex.Message}。",
-                durationMs: sw.ElapsedMilliseconds));
+            return Task.FromResult(
+                ToolResult.Fail($"undo_edit 执行异常：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+            );
         }
         finally
         {
@@ -215,7 +278,10 @@ public sealed class UndoEditTool : IToolHandler
             }
 
             using var doc = JsonDocument.Parse(File.ReadAllText(metaPath));
-            if (doc.RootElement.TryGetProperty("Src", out var src) && src.ValueKind == JsonValueKind.String)
+            if (
+                doc.RootElement.TryGetProperty("Src", out var src)
+                && src.ValueKind == JsonValueKind.String
+            )
             {
                 string? s = src.GetString();
                 if (!string.IsNullOrWhiteSpace(s))
@@ -224,14 +290,15 @@ public sealed class UndoEditTool : IToolHandler
                 }
             }
 
-            if (doc.RootElement.TryGetProperty("src", out var src2) && src2.ValueKind == JsonValueKind.String)
+            if (
+                doc.RootElement.TryGetProperty("src", out var src2)
+                && src2.ValueKind == JsonValueKind.String
+            )
             {
                 return src2.GetString();
             }
         }
-        catch
-        {
-        }
+        catch { }
 
         return null;
     }

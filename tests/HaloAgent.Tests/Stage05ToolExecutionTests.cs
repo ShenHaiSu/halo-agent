@@ -34,7 +34,10 @@ public sealed class Stage05ToolExecutionTests : IDisposable
     public Stage05ToolExecutionTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05Tests_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage05Bootstrap_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage05Bootstrap_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
 
@@ -42,7 +45,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
 
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
@@ -51,8 +55,14 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         _projectDir = Path.Combine(_tempRoot, "Projects", "ToolTest");
         Directory.CreateDirectory(_projectDir);
 
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "工具测试项目").GetAwaiter().GetResult();
-        _session = _service.CreateSessionAsync(_workspace.Id, "Stage05 验收会话").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "工具测试项目")
+            .GetAwaiter()
+            .GetResult();
+        _session = _service
+            .CreateSessionAsync(_workspace.Id, "Stage05 验收会话")
+            .GetAwaiter()
+            .GetResult();
 
         _context = new ToolContext
         {
@@ -84,7 +94,10 @@ public sealed class Stage05ToolExecutionTests : IDisposable
     }
 
     private static string Args(object o) =>
-        JsonSerializer.Serialize(o, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        JsonSerializer.Serialize(
+            o,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+        );
 
     // ============ S05-AC01: exec_command CMD 优先与中文无乱码 ============
 
@@ -93,7 +106,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
     {
         string original = "中文测试目录 Mixed ABC 123";
         SmartConsoleDecoder.EnsureRegistered();
-        byte[] gbkBytes = Encoding.GetEncoding(936, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
+        byte[] gbkBytes = Encoding
+            .GetEncoding(936, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
             .GetBytes(original);
         // GBK 中文字符必然含非合法 UTF-8 序列 → 回退解码必须还原
         string decoded = SmartConsoleDecoder.DecodeBytes(gbkBytes);
@@ -114,7 +128,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
         var result = await _registry.DispatchAsync(
             new ToolCallDto("call_ac01", "exec_command", Args(new { command = "echo 中文测试" })),
-            _context);
+            _context
+        );
 
         Assert.True(result.Success, $"exec 失败：{result.Error} / {result.Output}");
         Assert.Equal(0, result.ExitCode);
@@ -151,8 +166,13 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         };
 
         var result = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac02", "exec_command", Args(new { command = "print('hi')", runner = "python" })),
-            missingCtx);
+            new ToolCallDto(
+                "call_ac02",
+                "exec_command",
+                Args(new { command = "print('hi')", runner = "python" })
+            ),
+            missingCtx
+        );
 
         Assert.False(result.Success);
         // need17一次性更新：PYTHON_NOT_AVAILABLE 中文冻结文案替代老英文（docs/need17/07 §7.1）。
@@ -171,7 +191,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         var result = CommandRunnerProbe.ProbePython(
             configuredPath: Path.Combine(emptyDir, "nope.exe"),
             pathEnvOverride: emptyDir + ";C:\\WindowsApps",
-            checkLauncher: false);
+            checkLauncher: false
+        );
 
         Assert.False(result.Found);
 
@@ -179,7 +200,11 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         var real = CommandRunnerProbe.ProbePython();
         if (real.Found)
         {
-            Assert.DoesNotContain("WindowsApps", real.ExePath ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "WindowsApps",
+                real.ExePath ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase
+            );
         }
     }
 
@@ -193,9 +218,13 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         }
 
         var result = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac02b", "exec_command",
-                Args(new { command = "print('hello-stage05')\nprint(40 + 2)", runner = "python" })),
-            _context);
+            new ToolCallDto(
+                "call_ac02b",
+                "exec_command",
+                Args(new { command = "print('hello-stage05')\nprint(40 + 2)", runner = "python" })
+            ),
+            _context
+        );
 
         Assert.True(result.Success, $"python 执行失败：{result.Error} / {result.Output}");
         Assert.Contains("hello-stage05", result.Output);
@@ -240,9 +269,13 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         }
 
         var result = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac03", "exec_command",
-                Args(new { command = "ping 127.0.0.1 -n 60", timeout_ms = 2000 })),
-            _context);
+            new ToolCallDto(
+                "call_ac03",
+                "exec_command",
+                Args(new { command = "ping 127.0.0.1 -n 60", timeout_ms = 2000 })
+            ),
+            _context
+        );
 
         Assert.False(result.Success);
         Assert.Equal(-1, result.ExitCode);
@@ -266,7 +299,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         // 1. read_file 准确识别 GBK + CRLF + 行号
         var readResult = await _registry.DispatchAsync(
             new ToolCallDto("call_ac04r", "read_file", Args(new { file_path = fileName })),
-            _context);
+            _context
+        );
         Assert.True(readResult.Success, readResult.Error);
         Assert.Contains("[Encoding: GBK", readResult.Output);
         Assert.Contains("CRLF", readResult.Output);
@@ -275,13 +309,20 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
         // 2. edit_file 用 LF 传参仍可匹配 CRLF 文件
         var editResult = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04e", "edit_file", Args(new
-            {
-                file_path = fileName,
-                old_string = "// 中文注释：待修改行\nint b = 2;",
-                new_string = "// 中文注释：已修复\nint b = 42;",
-            })),
-            _context);
+            new ToolCallDto(
+                "call_ac04e",
+                "edit_file",
+                Args(
+                    new
+                    {
+                        file_path = fileName,
+                        old_string = "// 中文注释：待修改行\nint b = 2;",
+                        new_string = "// 中文注释：已修复\nint b = 42;",
+                    }
+                )
+            ),
+            _context
+        );
         Assert.True(editResult.Success, editResult.Error);
         Assert.Contains("@@", editResult.Output);
         Assert.Contains("--- a/", editResult.Output);
@@ -298,40 +339,70 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
         // 4. 唯一性校验：重复 old_string 非 replace_all 应拒绝
         var dupResult = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04d", "edit_file", Args(new
-            {
-                file_path = fileName,
-                old_string = "// 中文注释",
-                new_string = "X",
-            })),
-            _context);
+            new ToolCallDto(
+                "call_ac04d",
+                "edit_file",
+                Args(
+                    new
+                    {
+                        file_path = fileName,
+                        old_string = "// 中文注释",
+                        new_string = "X",
+                    }
+                )
+            ),
+            _context
+        );
         Assert.False(dupResult.Success);
-        Assert.Contains("matched", dupResult.Error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "matched",
+            dupResult.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase
+        );
     }
 
     [Fact(DisplayName = "S05-AC04: write_file自动建父目录+原子写+分页read")]
     public async Task AC04_WriteAndPagedRead()
     {
         var writeResult = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04w", "write_file",
-                Args(new { file_path = "sub/deep/notes.txt", content = "line1\nline2\nline3" })),
-            _context);
+            new ToolCallDto(
+                "call_ac04w",
+                "write_file",
+                Args(new { file_path = "sub/deep/notes.txt", content = "line1\nline2\nline3" })
+            ),
+            _context
+        );
         Assert.True(writeResult.Success, writeResult.Error);
         Assert.Contains("已创建新文件", writeResult.Output);
         Assert.True(File.Exists(Path.Combine(_projectDir, "sub", "deep", "notes.txt")));
 
         var page = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04p", "read_file",
-                Args(new { file_path = "sub/deep/notes.txt", offset = 2, limit = 1 })),
-            _context);
+            new ToolCallDto(
+                "call_ac04p",
+                "read_file",
+                Args(
+                    new
+                    {
+                        file_path = "sub/deep/notes.txt",
+                        offset = 2,
+                        limit = 1
+                    }
+                )
+            ),
+            _context
+        );
         Assert.True(page.Success, page.Error);
         Assert.Contains("line2", page.Output);
         Assert.DoesNotContain("line1", page.Output);
 
         var binary = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04b", "read_file",
-                Args(new { file_path = "sub/deep/notes.txt" })),
-            _context);
+            new ToolCallDto(
+                "call_ac04b",
+                "read_file",
+                Args(new { file_path = "sub/deep/notes.txt" })
+            ),
+            _context
+        );
         Assert.True(binary.Success);
 
         // 二进制拒绝
@@ -339,7 +410,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         File.WriteAllBytes(binPath, new byte[] { 0x41, 0x00, 0x42, 0xFF });
         var binResult = await _registry.DispatchAsync(
             new ToolCallDto("call_ac04bin", "read_file", Args(new { file_path = "sub/blob.bin" })),
-            _context);
+            _context
+        );
         Assert.False(binResult.Success);
         Assert.Contains("二进制", binResult.Error ?? string.Empty);
     }
@@ -349,21 +421,56 @@ public sealed class Stage05ToolExecutionTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_projectDir, "src"));
         Directory.CreateDirectory(Path.Combine(_projectDir, "node_modules", "pkg"));
-        await File.WriteAllTextAsync(Path.Combine(_projectDir, "src", "app.cs"), "class App { // TODO: fix me }\n", Encoding.UTF8);
-        await File.WriteAllTextAsync(Path.Combine(_projectDir, "src", "readme.md"), "hello world\n", Encoding.UTF8);
-        await File.WriteAllTextAsync(Path.Combine(_projectDir, "node_modules", "pkg", "x.js"), "TODO should be excluded\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(_projectDir, "src", "app.cs"),
+            "class App { // TODO: fix me }\n",
+            Encoding.UTF8
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_projectDir, "src", "readme.md"),
+            "hello world\n",
+            Encoding.UTF8
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(_projectDir, "node_modules", "pkg", "x.js"),
+            "TODO should be excluded\n",
+            Encoding.UTF8
+        );
 
         var list = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04l", "list_dir", Args(new { path = ".", recursive = true, max_depth = 3 })),
-            _context);
+            new ToolCallDto(
+                "call_ac04l",
+                "list_dir",
+                Args(
+                    new
+                    {
+                        path = ".",
+                        recursive = true,
+                        max_depth = 3
+                    }
+                )
+            ),
+            _context
+        );
         Assert.True(list.Success, list.Error);
         Assert.Contains("app.cs", list.Output);
         Assert.DoesNotContain("node_modules", list.Output);
 
         var grep = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac04g", "grep_search",
-                Args(new { pattern = "TODO", path = ".", include_glob = "*.cs" })),
-            _context);
+            new ToolCallDto(
+                "call_ac04g",
+                "grep_search",
+                Args(
+                    new
+                    {
+                        pattern = "TODO",
+                        path = ".",
+                        include_glob = "*.cs"
+                    }
+                )
+            ),
+            _context
+        );
         Assert.True(grep.Success, grep.Error);
         Assert.Contains("app.cs", grep.Output);
         Assert.Contains("1:", grep.Output);
@@ -371,7 +478,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
         var badRegex = await _registry.DispatchAsync(
             new ToolCallDto("call_ac04bad", "grep_search", Args(new { pattern = "([unclosed" })),
-            _context);
+            _context
+        );
         Assert.False(badRegex.Success);
         Assert.Contains("正则", badRegex.Error ?? string.Empty);
     }
@@ -384,18 +492,33 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         string big = new string('A', 4000) + new string('中', 46000) + new string('Z', 10000);
         Assert.True(big.Length > 50000);
 
-        var (display, spilled) = ToolOutputGuard.ApplyGuard(big, _tempRoot, _workspace.Id, _session.Id, "call_ac05");
+        var (display, spilled) = ToolOutputGuard.ApplyGuard(
+            big,
+            _tempRoot,
+            _workspace.Id,
+            _session.Id,
+            "call_ac05"
+        );
 
         Assert.NotNull(spilled);
         Assert.True(File.Exists(spilled));
         Assert.Equal(big, File.ReadAllText(spilled, Encoding.UTF8));
-        Assert.True(display.Length <= ToolOutputGuard.MaxInlineChars, $"截断后长度 {display.Length} 超出上限");
+        Assert.True(
+            display.Length <= ToolOutputGuard.MaxInlineChars,
+            $"截断后长度 {display.Length} 超出上限"
+        );
         Assert.Contains("中间省略", display);
         Assert.Contains("read_file", display);
         Assert.StartsWith(new string('A', 100), display);
         Assert.EndsWith(new string('Z', 100), display);
 
-        var (small, smallSpill) = ToolOutputGuard.ApplyGuard("short", _tempRoot, _workspace.Id, _session.Id, "x");
+        var (small, smallSpill) = ToolOutputGuard.ApplyGuard(
+            "short",
+            _tempRoot,
+            _workspace.Id,
+            _session.Id,
+            "x"
+        );
         Assert.Equal("short", small);
         Assert.Null(smallSpill);
     }
@@ -410,14 +533,27 @@ public sealed class Stage05ToolExecutionTests : IDisposable
 
         // 输出约 60,000+ 字符
         var result = await _registry.DispatchAsync(
-            new ToolCallDto("call_ac05exec", "exec_command",
-                Args(new { command = "for /L %i in (1,1,1500) do echo ABCDEFGHIJ0123456789_abcdefghijklmnopqrstuvwxyz_行%i", timeout_ms = 60000 })),
-            _context);
+            new ToolCallDto(
+                "call_ac05exec",
+                "exec_command",
+                Args(
+                    new
+                    {
+                        command = "for /L %i in (1,1,1500) do echo ABCDEFGHIJ0123456789_abcdefghijklmnopqrstuvwxyz_行%i",
+                        timeout_ms = 60000
+                    }
+                )
+            ),
+            _context
+        );
 
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.SpilledFile);
         Assert.True(File.Exists(result.SpilledFile));
-        Assert.True(result.Output.Length <= ToolOutputGuard.MaxInlineChars, $"返回长度 {result.Output.Length} 超出上限");
+        Assert.True(
+            result.Output.Length <= ToolOutputGuard.MaxInlineChars,
+            $"返回长度 {result.Output.Length} 超出上限"
+        );
         Assert.Contains("中间省略", result.Output);
         Assert.Contains("tool-outputs", result.SpilledFile);
     }
@@ -430,58 +566,99 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         Assert.True(PathSafetyValidator.IsProtectedSystemPath(@"C:\Windows\System32\evil.txt"));
         Assert.True(PathSafetyValidator.IsProtectedSystemPath(@"C:\Program Files\App\a.txt"));
         Assert.True(PathSafetyValidator.IsProtectedSystemPath(@"C:\Program Files (x86)\App\a.txt"));
-        Assert.False(PathSafetyValidator.IsProtectedSystemPath(Path.Combine(_projectDir, "ok.txt")));
+        Assert.False(
+            PathSafetyValidator.IsProtectedSystemPath(Path.Combine(_projectDir, "ok.txt"))
+        );
 
         var writeBlocked = await _registry.DispatchAsync(
-            new ToolCallDto("call_safe1", "write_file",
-                Args(new { file_path = @"C:\Windows\Temp\halo_agent_probe_test.txt", content = "evil" })),
-            _context);
+            new ToolCallDto(
+                "call_safe1",
+                "write_file",
+                Args(
+                    new
+                    {
+                        file_path = @"C:\Windows\Temp\halo_agent_probe_test.txt",
+                        content = "evil"
+                    }
+                )
+            ),
+            _context
+        );
         Assert.False(writeBlocked.Success);
         Assert.Contains("系统", writeBlocked.Error ?? string.Empty);
 
         var editBlocked = await _registry.DispatchAsync(
-            new ToolCallDto("call_safe2", "edit_file",
-                Args(new
-                {
-                    file_path = @"C:\Program Files\halo_probe.txt",
-                    old_string = "a",
-                    new_string = "b",
-                })),
-            _context);
+            new ToolCallDto(
+                "call_safe2",
+                "edit_file",
+                Args(
+                    new
+                    {
+                        file_path = @"C:\Program Files\halo_probe.txt",
+                        old_string = "a",
+                        new_string = "b",
+                    }
+                )
+            ),
+            _context
+        );
         Assert.False(editBlocked.Success);
         Assert.Contains("严禁", editBlocked.Error ?? string.Empty);
     }
 
     // ============ 双协议 Schema 与自愈 ============
 
-      [Fact(DisplayName = "S05-注册表: 15工具注册(6标准+4 need09+need13 spawn_subagent+need14 edit_lines+need15 undo_edit/edit+need16 goal_tool)+chat/resp双协议Schema+未知工具自愈")]
-      public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
-      {
-          var defs = _registry.GetDefinitions();
-          Assert.Equal(15, defs.Count);
-          foreach (string expected in new[] { "exec_command", "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "grep_search", "view_image", "ask_user", "skill_tool", "memory_tool", "spawn_subagent", "undo_edit", "edit", "goal_tool" })
-         {
-             Assert.Contains(defs, d => d.Name == expected);
-         }
+    [Fact(
+        DisplayName = "S05-注册表: 15工具注册(6标准+4 need09+need13 spawn_subagent+need14 edit_lines+need15 undo_edit/edit+need16 goal_tool)+chat/resp双协议Schema+未知工具自愈"
+    )]
+    public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
+    {
+        var defs = _registry.GetDefinitions();
+        Assert.Equal(15, defs.Count);
+        foreach (
+            string expected in new[]
+            {
+                "exec_command",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "edit_lines",
+                "list_dir",
+                "grep_search",
+                "view_image",
+                "ask_user",
+                "skill_tool",
+                "memory_tool",
+                "spawn_subagent",
+                "undo_edit",
+                "edit",
+                "goal_tool"
+            }
+        )
+        {
+            Assert.Contains(defs, d => d.Name == expected);
+        }
 
-         string chatJson = _registry.GetChatToolsJson();
-         using (JsonDocument chat = JsonDocument.Parse(chatJson))
-         {
-             Assert.Equal(15, chat.RootElement.GetArrayLength());
-             Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
-             Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
-         }
+        string chatJson = _registry.GetChatToolsJson();
+        using (JsonDocument chat = JsonDocument.Parse(chatJson))
+        {
+            Assert.Equal(15, chat.RootElement.GetArrayLength());
+            Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
+            Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
+        }
 
-         string respJson = _registry.GetResponsesToolsJson();
-         using (JsonDocument resp = JsonDocument.Parse(respJson))
-         {
-             Assert.Equal(15, resp.RootElement.GetArrayLength());
-             Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
-             Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
-         }
+        string respJson = _registry.GetResponsesToolsJson();
+        using (JsonDocument resp = JsonDocument.Parse(respJson))
+        {
+            Assert.Equal(15, resp.RootElement.GetArrayLength());
+            Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
+            Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
+        }
 
         var unknown = await _registry.DispatchAsync(
-            new ToolCallDto("call_x", "no_such_tool", "{}"), _context);
+            new ToolCallDto("call_x", "no_such_tool", "{}"),
+            _context
+        );
         Assert.False(unknown.Success);
         Assert.Contains("未知工具", unknown.Error ?? string.Empty);
         Assert.Contains("exec_command", unknown.Error ?? string.Empty);

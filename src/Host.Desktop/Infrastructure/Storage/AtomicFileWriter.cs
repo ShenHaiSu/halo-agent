@@ -9,21 +9,23 @@ namespace Host.Desktop.Infrastructure.Storage;
 /// </summary>
 public static class HaloJsonOptions
 {
-    public static readonly JsonSerializerOptions IndentedCamelCase = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    public static readonly JsonSerializerOptions IndentedCamelCase =
+        new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
 
-    public static readonly JsonSerializerOptions CompactCamelCase = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = false,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    public static readonly JsonSerializerOptions CompactCamelCase =
+        new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = false,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
 }
 
 /// <summary>
@@ -33,7 +35,11 @@ public static class AtomicFileWriter
 {
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    public static async Task WriteJsonAtomicAsync<T>(string filePath, T data, CancellationToken ct = default)
+    public static async Task WriteJsonAtomicAsync<T>(
+        string filePath,
+        T data,
+        CancellationToken ct = default
+    )
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -51,13 +57,16 @@ public static class AtomicFileWriter
         try
         {
             var json = JsonSerializer.Serialize(data, HaloJsonOptions.IndentedCamelCase);
-            await using (var fs = new FileStream(
-                tempPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 4096,
-                FileOptions.WriteThrough))
+            await using (
+                var fs = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.WriteThrough
+                )
+            )
             await using (var sw = new StreamWriter(fs, Utf8NoBom))
             {
                 await sw.WriteAsync(json.AsMemory(), ct).ConfigureAwait(false);
@@ -71,7 +80,13 @@ public static class AtomicFileWriter
         {
             if (File.Exists(tempPath))
             {
-                try { File.Delete(tempPath); } catch { /* 忽略残留临时文件清理异常 */ }
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                { /* 忽略残留临时文件清理异常 */
+                }
             }
         }
     }
@@ -94,13 +109,16 @@ public static class AtomicFileWriter
         try
         {
             var json = JsonSerializer.Serialize(data, HaloJsonOptions.IndentedCamelCase);
-            using (var fs = new FileStream(
-                tempPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 4096,
-                FileOptions.WriteThrough))
+            using (
+                var fs = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.WriteThrough
+                )
+            )
             using (var sw = new StreamWriter(fs, Utf8NoBom))
             {
                 sw.Write(json);
@@ -114,7 +132,13 @@ public static class AtomicFileWriter
         {
             if (File.Exists(tempPath))
             {
-                try { File.Delete(tempPath); } catch { /* 忽略残留临时文件清理异常 */ }
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                { /* 忽略残留临时文件清理异常 */
+                }
             }
         }
     }
@@ -134,7 +158,8 @@ public static class AtomicFileWriter
                 return defaultValue;
             }
 
-            return JsonSerializer.Deserialize<T>(json, HaloJsonOptions.IndentedCamelCase) ?? defaultValue;
+            return JsonSerializer.Deserialize<T>(json, HaloJsonOptions.IndentedCamelCase)
+                ?? defaultValue;
         }
         catch
         {
@@ -142,7 +167,11 @@ public static class AtomicFileWriter
         }
     }
 
-    public static async Task<T?> ReadJsonOrDefaultAsync<T>(string filePath, T? defaultValue = default, CancellationToken ct = default)
+    public static async Task<T?> ReadJsonOrDefaultAsync<T>(
+        string filePath,
+        T? defaultValue = default,
+        CancellationToken ct = default
+    )
     {
         try
         {
@@ -157,7 +186,8 @@ public static class AtomicFileWriter
                 return defaultValue;
             }
 
-            return JsonSerializer.Deserialize<T>(json, HaloJsonOptions.IndentedCamelCase) ?? defaultValue;
+            return JsonSerializer.Deserialize<T>(json, HaloJsonOptions.IndentedCamelCase)
+                ?? defaultValue;
         }
         catch
         {

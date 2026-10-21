@@ -26,22 +26,28 @@ public sealed class Stage12UsageSupplementTests : IDisposable
     public Stage12UsageSupplementTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage12Sup_{Guid.NewGuid():N}");
-        _bootstrapRoot = Path.Combine(Path.GetTempPath(), $"HaloAgentStage12SupBoot_{Guid.NewGuid():N}");
+        _bootstrapRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HaloAgentStage12SupBoot_{Guid.NewGuid():N}"
+        );
         Directory.CreateDirectory(_tempRoot);
         Directory.CreateDirectory(_bootstrapRoot);
         string bootstrapFile = Path.Combine(_bootstrapRoot, "bootstrap.json");
         _storage = StoragePathManager.Initialize(
             customBootstrapFilePath: bootstrapFile,
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
         }
         catch { }
     }
@@ -49,7 +55,8 @@ public sealed class Stage12UsageSupplementTests : IDisposable
     private UsageMetricsService NewService(DateTime? now = null)
     {
         var svc = new UsageMetricsService(_storage);
-        if (now.HasValue) svc.NowLocal = () => now.Value;
+        if (now.HasValue)
+            svc.NowLocal = () => now.Value;
         return svc;
     }
 
@@ -58,15 +65,29 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < timeoutMs)
         {
-            if (cond()) return;
+            if (cond())
+                return;
             Thread.Sleep(100);
         }
     }
 
-    private static (ProviderConfig, ModelConfig) FakeProviderModel(string pid = "p1", string mid = "m1")
+    private static (ProviderConfig, ModelConfig) FakeProviderModel(
+        string pid = "p1",
+        string mid = "m1"
+    )
     {
-        var provider = new ProviderConfig { Id = pid, Name = "P1", BaseUrl = "https://api.openai.com/v1" };
-        var model = new ModelConfig { Id = mid, DisplayName = mid, Protocol = LlmProtocolType.Chat };
+        var provider = new ProviderConfig
+        {
+            Id = pid,
+            Name = "P1",
+            BaseUrl = "https://api.openai.com/v1"
+        };
+        var model = new ModelConfig
+        {
+            Id = mid,
+            DisplayName = mid,
+            Protocol = LlmProtocolType.Chat
+        };
         provider.Models.Add(model);
         return (provider, model);
     }
@@ -77,8 +98,30 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         using var svc = NewService(new DateTime(2026, 10, 18, 12, 0, 0));
         var (provider, model) = FakeProviderModel();
         var rows = new List<PendingUsageRow>();
-        UsageRecorder.Collect(rows, provider, model, new UnifiedTokenUsage(100, 20, 10, 120), "ok", "req-agent-1", "s1", "w1", UsageRecorder.SourceAgent);
-        UsageRecorder.CollectAuto(rows, provider, model, null, 500, 60, "cancelled", "req-compact-1", "s1", "w1", UsageRecorder.SourceCompact);
+        UsageRecorder.Collect(
+            rows,
+            provider,
+            model,
+            new UnifiedTokenUsage(100, 20, 10, 120),
+            "ok",
+            "req-agent-1",
+            "s1",
+            "w1",
+            UsageRecorder.SourceAgent
+        );
+        UsageRecorder.CollectAuto(
+            rows,
+            provider,
+            model,
+            null,
+            500,
+            60,
+            "cancelled",
+            "req-compact-1",
+            "s1",
+            "w1",
+            UsageRecorder.SourceCompact
+        );
         svc.EnqueueFlush(rows, "s1", "w1");
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests == 2);
         var (total, all) = svc.QueryPage(new UsageFilter { Preset = "today" }, 1, 50);
@@ -91,11 +134,27 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         Assert.Equal(500, est.InputTokens);
         Assert.Equal(60, est.OutputTokens);
         // 来源筛选
-        var (ct, _) = svc.QueryPage(new UsageFilter { Preset = "today", Sources = new List<string> { "compact" } }, 1, 50);
+        var (ct, _) = svc.QueryPage(
+            new UsageFilter
+            {
+                Preset = "today",
+                Sources = new List<string> { "compact" }
+            },
+            1,
+            50
+        );
         Assert.Equal(1, ct);
-        var (et, _) = svc.QueryPage(new UsageFilter { Preset = "today", EstimatedOnly = true }, 1, 50);
+        var (et, _) = svc.QueryPage(
+            new UsageFilter { Preset = "today", EstimatedOnly = true },
+            1,
+            50
+        );
         Assert.Equal(1, et);
-        var (mt, _) = svc.QueryPage(new UsageFilter { Preset = "today", EstimatedOnly = false }, 1, 50);
+        var (mt, _) = svc.QueryPage(
+            new UsageFilter { Preset = "today", EstimatedOnly = false },
+            1,
+            50
+        );
         Assert.Equal(1, mt);
         var opts = svc.GetFilterOptions();
         Assert.NotNull(opts);
@@ -114,7 +173,14 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         using var svc = NewService(new DateTime(2026, 10, 18, 12, 0, 0));
 
         var gateway = new TwoTurnThenCancelGateway();
-        var orch = new AgentOrchestrator(service, budget, gateway, new ToolRegistry(registerBuiltIns: false), _storage, usageMetrics: svc);
+        var orch = new AgentOrchestrator(
+            service,
+            budget,
+            gateway,
+            new ToolRegistry(registerBuiltIns: false),
+            _storage,
+            usageMetrics: svc
+        );
         var result = await orch.RunAgentTurnAsync(ws.Id, sess.Id, "hi");
         Assert.True(result.WasCancelled);
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests >= 1);
@@ -124,7 +190,10 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         Assert.True(ov.SumInput >= 100);
         var (_, rows) = svc.QueryPage(new UsageFilter { Preset = "today" }, 1, 50);
         Assert.Contains(rows, r => r.Status == "ok" && r.Estimated == 0);
-        Assert.Contains(rows, r => r.Status == "cancelled" && r.Estimated == 1 && r.InputTokens > 0);
+        Assert.Contains(
+            rows,
+            r => r.Status == "cancelled" && r.Estimated == 1 && r.InputTokens > 0
+        );
     }
 
     [Fact(DisplayName = "P2: 估算永不覆盖实测；全 0 仍记 cancelled 计数")]
@@ -132,8 +201,32 @@ public sealed class Stage12UsageSupplementTests : IDisposable
     {
         var (provider, model) = FakeProviderModel();
         var rows = new List<PendingUsageRow>();
-        UsageRecorder.CollectAuto(rows, provider, model, new UnifiedTokenUsage(10, 2, 0, 12), 9999, 9999, "cancelled", "r-measured", "s", "w", UsageRecorder.SourceAgent);
-        UsageRecorder.CollectAuto(rows, provider, model, null, 0, 0, "cancelled", "r-zero", "s", "w", UsageRecorder.SourceAgent);
+        UsageRecorder.CollectAuto(
+            rows,
+            provider,
+            model,
+            new UnifiedTokenUsage(10, 2, 0, 12),
+            9999,
+            9999,
+            "cancelled",
+            "r-measured",
+            "s",
+            "w",
+            UsageRecorder.SourceAgent
+        );
+        UsageRecorder.CollectAuto(
+            rows,
+            provider,
+            model,
+            null,
+            0,
+            0,
+            "cancelled",
+            "r-zero",
+            "s",
+            "w",
+            UsageRecorder.SourceAgent
+        );
         Assert.Equal(10, rows[0].Input);
         Assert.Equal(2, rows[0].Output);
         Assert.Equal(0, rows[0].Estimated);
@@ -144,7 +237,11 @@ public sealed class Stage12UsageSupplementTests : IDisposable
     private sealed class TwoTurnThenCancelGateway : ILlmGatewayClient
     {
         private int _calls;
-        public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(UnifiedLlmRequest request, [EnumeratorCancellation] CancellationToken ct = default)
+
+        public async IAsyncEnumerable<UnifiedStreamEvent> StreamAsync(
+            UnifiedLlmRequest request,
+            [EnumeratorCancellation] CancellationToken ct = default
+        )
         {
             _calls++;
             if (_calls == 1)

@@ -9,10 +9,18 @@ using Host.Desktop.Infrastructure.Storage;
 namespace Host.Desktop.Services;
 
 /// <summary>need09-01：Skill/Memory 域（Global 随数据根走 / Project 随工作区 .haloagent/ 走）。</summary>
-public enum SkillMemoryScope { Global, Project }
+public enum SkillMemoryScope
+{
+    Global,
+    Project
+}
 
 /// <summary>need09-01：条目类别。</summary>
-public enum SkillMemoryKind { Skill, Memory }
+public enum SkillMemoryKind
+{
+    Skill,
+    Memory
+}
 
 /// <summary>need09-01：Skill/Memory 校验失败（非法名/超限/遍历逃逸等）。Message 恒含 Code 前缀。</summary>
 public sealed class SkillMemoryValidationException : Exception
@@ -41,7 +49,8 @@ public sealed record SkillMemoryEntry(
     string Hash,
     bool HasAssets,
     string DirPath,
-    DateTime UpdatedAtUtc)
+    DateTime UpdatedAtUtc
+)
 {
     public SkillMemoryKind Kind { get; init; } = SkillMemoryKind.Skill;
 }
@@ -58,13 +67,34 @@ public sealed class SkillMemoryService
     public const int MaxEntriesPerDomainKind = 200;
     public const int IndexVersion = 1;
 
-    private static readonly Regex NameRegex = new(@"^[a-z0-9][a-z0-9-_]{1,47}$", RegexOptions.Compiled);
-    private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "con", "prn", "aux", "nul",
-        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-    };
+    private static readonly Regex NameRegex =
+        new(@"^[a-z0-9][a-z0-9-_]{1,47}$", RegexOptions.Compiled);
+    private static readonly HashSet<string> ReservedNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "con",
+            "prn",
+            "aux",
+            "nul",
+            "com1",
+            "com2",
+            "com3",
+            "com4",
+            "com5",
+            "com6",
+            "com7",
+            "com8",
+            "com9",
+            "lpt1",
+            "lpt2",
+            "lpt3",
+            "lpt4",
+            "lpt5",
+            "lpt6",
+            "lpt7",
+            "lpt8",
+            "lpt9",
+        };
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -75,10 +105,12 @@ public sealed class SkillMemoryService
     private string? _mergedCacheKey;
     private string? _mergedCacheSig;
     private DateTime _mergedCacheAtUtc;
-    private (IReadOnlyList<SkillMemoryEntry> GlobalSkills,
-             IReadOnlyList<SkillMemoryEntry> ProjectSkills,
-             IReadOnlyList<SkillMemoryEntry> GlobalMemory,
-             IReadOnlyList<SkillMemoryEntry> ProjectMemory)? _mergedCacheValue;
+    private (
+        IReadOnlyList<SkillMemoryEntry> GlobalSkills,
+        IReadOnlyList<SkillMemoryEntry> ProjectSkills,
+        IReadOnlyList<SkillMemoryEntry> GlobalMemory,
+        IReadOnlyList<SkillMemoryEntry> ProjectMemory
+    )? _mergedCacheValue;
 
     public SkillMemoryService(StoragePathManager storage)
     {
@@ -95,13 +127,22 @@ public sealed class SkillMemoryService
         {
             Directory.CreateDirectory(_storage.GlobalSkillsDirectory);
             Directory.CreateDirectory(_storage.GlobalMemoryDirectory);
-            EnsureIndexFileLocked(Path.Combine(_storage.GlobalSkillsDirectory, "_index.json"), SkillMemoryScope.Global, SkillMemoryKind.Skill);
-            EnsureIndexFileLocked(Path.Combine(_storage.GlobalMemoryDirectory, "_index.json"), SkillMemoryScope.Global, SkillMemoryKind.Memory);
+            EnsureIndexFileLocked(
+                Path.Combine(_storage.GlobalSkillsDirectory, "_index.json"),
+                SkillMemoryScope.Global,
+                SkillMemoryKind.Skill
+            );
+            EnsureIndexFileLocked(
+                Path.Combine(_storage.GlobalMemoryDirectory, "_index.json"),
+                SkillMemoryScope.Global,
+                SkillMemoryKind.Memory
+            );
         }
     }
 
     /// <summary>建 Project 空域 .haloagent/skills|memory（失败由调用方 Warn吞掉）。实例入口。</summary>
-    public void EnsureProjectInitialized(string workspaceRoot) => EnsureProjectInitializedStatic(workspaceRoot);
+    public void EnsureProjectInitialized(string workspaceRoot) =>
+        EnsureProjectInitializedStatic(workspaceRoot);
 
     /// <summary>建 Project 空域（静态，供 WorkspaceSessionService 调用，避免循环依赖）。</summary>
     public static void EnsureProjectInitializedStatic(string workspaceRoot)
@@ -111,8 +152,16 @@ public sealed class SkillMemoryService
         string haloRoot = ResolveProjectRoot(workspaceRoot);
         Directory.CreateDirectory(Path.Combine(haloRoot, "skills"));
         Directory.CreateDirectory(Path.Combine(haloRoot, "memory"));
-        EnsureIndexFile(Path.Combine(haloRoot, "skills", "_index.json"), SkillMemoryScope.Project, SkillMemoryKind.Skill);
-        EnsureIndexFile(Path.Combine(haloRoot, "memory", "_index.json"), SkillMemoryScope.Project, SkillMemoryKind.Memory);
+        EnsureIndexFile(
+            Path.Combine(haloRoot, "skills", "_index.json"),
+            SkillMemoryScope.Project,
+            SkillMemoryKind.Skill
+        );
+        EnsureIndexFile(
+            Path.Combine(haloRoot, "memory", "_index.json"),
+            SkillMemoryScope.Project,
+            SkillMemoryKind.Memory
+        );
     }
 
     /// <summary>Project 域根（&lt;WorkspaceRoot&gt;/.haloagent），含工作区根前缀校验。</summary>
@@ -120,7 +169,9 @@ public sealed class SkillMemoryService
     {
         string wsFull = Path.GetFullPath(workspaceRoot.Trim());
         string halo = Path.GetFullPath(Path.Combine(wsFull, ".haloagent"));
-        string prefix = wsFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string prefix =
+            wsFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
         if (!halo.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             throw new SkillMemoryValidationException("PATH_TRAVERSAL", $"工作区根非法：{workspaceRoot}");
         return halo;
@@ -129,7 +180,11 @@ public sealed class SkillMemoryService
     // ---------- 读 ----------
 
     /// <summary>列出单域单类全部条目（排序：name 升序；单条损坏跳过 + Warn）。</summary>
-    public IReadOnlyList<SkillMemoryEntry> List(SkillMemoryScope scope, SkillMemoryKind kind, string? workspaceRoot)
+    public IReadOnlyList<SkillMemoryEntry> List(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string? workspaceRoot
+    )
     {
         lock (_syncLock)
         {
@@ -138,7 +193,12 @@ public sealed class SkillMemoryService
     }
 
     /// <summary>按名取单条（缺失返回 null；非法名抛 SKILL_VALIDATION）。大小写归一。</summary>
-    public SkillMemoryEntry? Get(SkillMemoryScope scope, SkillMemoryKind kind, string name, string? workspaceRoot)
+    public SkillMemoryEntry? Get(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string name,
+        string? workspaceRoot
+    )
     {
         string normalized = NormalizeAndValidateName(name);
         lock (_syncLock)
@@ -162,14 +222,26 @@ public sealed class SkillMemoryService
     }
 
     /// <summary>资产绝对路径解析（含 ../ 逃逸校验，违规抛 PATH_TRAVERSAL）。</summary>
-    public string ResolveAssetPath(SkillMemoryScope scope, SkillMemoryKind kind, string name, string assetRelativePath, string? workspaceRoot)
+    public string ResolveAssetPath(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string name,
+        string assetRelativePath,
+        string? workspaceRoot
+    )
     {
         string normalized = NormalizeAndValidateName(name);
         if (string.IsNullOrWhiteSpace(assetRelativePath))
             throw new SkillMemoryValidationException("PATH_TRAVERSAL", "资产相对路径不能为空。");
-        string rel = assetRelativePath.Trim().Replace('/', Path.DirectorySeparatorChar).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        string rel = assetRelativePath
+            .Trim()
+            .Replace('/', Path.DirectorySeparatorChar)
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
         if (Path.IsPathRooted(rel))
-            throw new SkillMemoryValidationException("PATH_TRAVERSAL", $"禁止绝对路径资产引用：{assetRelativePath}");
+            throw new SkillMemoryValidationException(
+                "PATH_TRAVERSAL",
+                $"禁止绝对路径资产引用：{assetRelativePath}"
+            );
 
         string? domainRoot;
         lock (_syncLock)
@@ -186,7 +258,10 @@ public sealed class SkillMemoryService
         string combined = Path.GetFullPath(Path.Combine(dirFull, rel));
         string prefix = dirFull.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!combined.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            throw new SkillMemoryValidationException("PATH_TRAVERSAL", $"资产路径逃逸已拒绝：{assetRelativePath}");
+            throw new SkillMemoryValidationException(
+                "PATH_TRAVERSAL",
+                $"资产路径逃逸已拒绝：{assetRelativePath}"
+            );
         return combined;
     }
 
@@ -195,11 +270,12 @@ public sealed class SkillMemoryService
     /// Project 同名覆盖 Global（即 global 列表剔除被 project 同名覆盖项）；排序键 scope+name 升序
     /// （各列表单 scope，体现为 name 升序）；5 秒快照缓存。
     /// </summary>
-    public (IReadOnlyList<SkillMemoryEntry> GlobalSkills,
-            IReadOnlyList<SkillMemoryEntry> ProjectSkills,
-            IReadOnlyList<SkillMemoryEntry> GlobalMemory,
-            IReadOnlyList<SkillMemoryEntry> ProjectMemory)
-        GetMergedForPrompt(string? workspaceRoot)
+    public (
+        IReadOnlyList<SkillMemoryEntry> GlobalSkills,
+        IReadOnlyList<SkillMemoryEntry> ProjectSkills,
+        IReadOnlyList<SkillMemoryEntry> GlobalMemory,
+        IReadOnlyList<SkillMemoryEntry> ProjectMemory
+    ) GetMergedForPrompt(string? workspaceRoot)
     {
         lock (_syncLock)
         {
@@ -207,29 +283,51 @@ public sealed class SkillMemoryService
                 ? string.Empty
                 : Path.GetFullPath(workspaceRoot.Trim()).ToLowerInvariant();
             string sig = BuildMergedSignature(wsKey);
-            if (_mergedCacheValue.HasValue
+            if (
+                _mergedCacheValue.HasValue
                 && string.Equals(_mergedCacheKey, wsKey, StringComparison.Ordinal)
                 && string.Equals(_mergedCacheSig, sig, StringComparison.Ordinal)
-                && (DateTime.UtcNow - _mergedCacheAtUtc).TotalSeconds < 5)
+                && (DateTime.UtcNow - _mergedCacheAtUtc).TotalSeconds < 5
+            )
             {
                 return _mergedCacheValue.Value;
             }
 
             var globalSkills = ListLocked(SkillMemoryScope.Global, SkillMemoryKind.Skill, null);
-            var projectSkills = ListLocked(SkillMemoryScope.Project, SkillMemoryKind.Skill, workspaceRoot);
+            var projectSkills = ListLocked(
+                SkillMemoryScope.Project,
+                SkillMemoryKind.Skill,
+                workspaceRoot
+            );
             var globalMemory = ListLocked(SkillMemoryScope.Global, SkillMemoryKind.Memory, null);
-            var projectMemory = ListLocked(SkillMemoryScope.Project, SkillMemoryKind.Memory, workspaceRoot);
+            var projectMemory = ListLocked(
+                SkillMemoryScope.Project,
+                SkillMemoryKind.Memory,
+                workspaceRoot
+            );
 
             // Project 同名覆盖 Global：global 侧剔除被覆盖项。
-            var projectSkillNames = new HashSet<string>(projectSkills.Select(e => e.Name), StringComparer.Ordinal);
-            var projectMemoryNames = new HashSet<string>(projectMemory.Select(e => e.Name), StringComparer.Ordinal);
-            var mergedGlobalSkills = globalSkills.Where(e => !projectSkillNames.Contains(e.Name)).ToList();
-            var mergedGlobalMemory = globalMemory.Where(e => !projectMemoryNames.Contains(e.Name)).ToList();
+            var projectSkillNames = new HashSet<string>(
+                projectSkills.Select(e => e.Name),
+                StringComparer.Ordinal
+            );
+            var projectMemoryNames = new HashSet<string>(
+                projectMemory.Select(e => e.Name),
+                StringComparer.Ordinal
+            );
+            var mergedGlobalSkills = globalSkills
+                .Where(e => !projectSkillNames.Contains(e.Name))
+                .ToList();
+            var mergedGlobalMemory = globalMemory
+                .Where(e => !projectMemoryNames.Contains(e.Name))
+                .ToList();
 
-            var result = ((IReadOnlyList<SkillMemoryEntry>)mergedGlobalSkills,
-                          (IReadOnlyList<SkillMemoryEntry>)projectSkills,
-                          (IReadOnlyList<SkillMemoryEntry>)mergedGlobalMemory,
-                          (IReadOnlyList<SkillMemoryEntry>)projectMemory);
+            var result = (
+                (IReadOnlyList<SkillMemoryEntry>)mergedGlobalSkills,
+                (IReadOnlyList<SkillMemoryEntry>)projectSkills,
+                (IReadOnlyList<SkillMemoryEntry>)mergedGlobalMemory,
+                (IReadOnlyList<SkillMemoryEntry>)projectMemory
+            );
             _mergedCacheKey = wsKey;
             _mergedCacheSig = sig;
             _mergedCacheAtUtc = DateTime.UtcNow;
@@ -252,41 +350,69 @@ public sealed class SkillMemoryService
         int version = 1,
         string pin = "auto",
         string? title = null,
-        string? summary = null)
+        string? summary = null
+    )
     {
         string normalized = NormalizeAndValidateName(name);
         string body = (bodyMarkdown ?? string.Empty).Replace("\r\n", "\n");
         if (body.Length > MaxReadmeChars)
-            throw new SkillMemoryValidationException("SKILL_VALIDATION",
-                $"正文 {body.Length} 字符超限（上限 {MaxReadmeChars}），请截断到第 {MaxReadmeChars} 字符。");
+            throw new SkillMemoryValidationException(
+                "SKILL_VALIDATION",
+                $"正文 {body.Length} 字符超限（上限 {MaxReadmeChars}），请截断到第 {MaxReadmeChars} 字符。"
+            );
         string normalizedPin = NormalizePin(kind, pin);
 
         lock (_syncLock)
         {
-            string domainRoot = ResolveDomainRootOrThrow(scope, kind, workspaceRoot, forWrite: true);
+            string domainRoot = ResolveDomainRootOrThrow(
+                scope,
+                kind,
+                workspaceRoot,
+                forWrite: true
+            );
             Directory.CreateDirectory(domainRoot);
             RemoveCaseVariantDirs(domainRoot, normalized);
 
             // 配额：数量上限 + 单域单类总字符。
             var existing = ListLocked(scope, kind, workspaceRoot);
-            var same = existing.FirstOrDefault(e => string.Equals(e.Name, normalized, StringComparison.Ordinal));
+            var same = existing.FirstOrDefault(e =>
+                string.Equals(e.Name, normalized, StringComparison.Ordinal)
+            );
             if (same == null && existing.Count >= MaxEntriesPerDomainKind)
-                throw new SkillMemoryValidationException("SKILL_VALIDATION",
-                    $"单域单类已达 {MaxEntriesPerDomainKind} 条上限，请先删除或归档。");
-            int totalChars = existing.Where(e => !string.Equals(e.Name, normalized, StringComparison.Ordinal))
-                .Sum(e => e.BodyMarkdown.Length) + body.Length;
+                throw new SkillMemoryValidationException(
+                    "SKILL_VALIDATION",
+                    $"单域单类已达 {MaxEntriesPerDomainKind} 条上限，请先删除或归档。"
+                );
+            int totalChars =
+                existing
+                    .Where(e => !string.Equals(e.Name, normalized, StringComparison.Ordinal))
+                    .Sum(e => e.BodyMarkdown.Length) + body.Length;
             if (totalChars > MaxDomainTotalChars)
-                throw new SkillMemoryValidationException("SKILL_VALIDATION",
-                    $"单域单类总字符 {totalChars} 超限（上限 {MaxDomainTotalChars}），请先删除或归档。");
+                throw new SkillMemoryValidationException(
+                    "SKILL_VALIDATION",
+                    $"单域单类总字符 {totalChars} 超限（上限 {MaxDomainTotalChars}），请先删除或归档。"
+                );
 
             string dir = Path.Combine(domainRoot, normalized);
             Directory.CreateDirectory(dir);
 
-            string resolvedTitle = string.IsNullOrWhiteSpace(title) ? DeriveTitle(body) : title.Trim();
-            string resolvedSummary = string.IsNullOrWhiteSpace(summary) ? DeriveSummary(body) : summary.Trim();
+            string resolvedTitle = string.IsNullOrWhiteSpace(title)
+                ? DeriveTitle(body)
+                : title.Trim();
+            string resolvedSummary = string.IsNullOrWhiteSpace(summary)
+                ? DeriveSummary(body)
+                : summary.Trim();
             DateTime now = DateTime.UtcNow;
 
-            string readme = BuildReadme(version, enabled, priority, normalizedPin, resolvedSummary, now, body);
+            string readme = BuildReadme(
+                version,
+                enabled,
+                priority,
+                normalizedPin,
+                resolvedSummary,
+                now,
+                body
+            );
             WriteTextAtomic(Path.Combine(dir, "readme.md"), readme);
 
             string metaFile = kind == SkillMemoryKind.Skill ? "skill.json" : "memory.json";
@@ -306,17 +432,29 @@ public sealed class SkillMemoryService
             InvalidateMergedCacheLocked();
 
             return TryLoadEntry(dir, normalized, scope, kind)
-                ?? throw new SkillMemoryValidationException("SKILL_VALIDATION", $"写入后回读失败：{normalized}。");
+                ?? throw new SkillMemoryValidationException(
+                    "SKILL_VALIDATION",
+                    $"写入后回读失败：{normalized}。"
+                );
         }
     }
 
     /// <summary>写入资产文件（单文件 512KB 上限；含逃逸校验）。返回落盘绝对路径。</summary>
-    public string WriteAsset(SkillMemoryScope scope, SkillMemoryKind kind, string name, string assetRelativePath, byte[] content, string? workspaceRoot = null)
+    public string WriteAsset(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string name,
+        string assetRelativePath,
+        byte[] content,
+        string? workspaceRoot = null
+    )
     {
         string normalized = NormalizeAndValidateName(name);
         if (content != null && content.Length > MaxAssetBytes)
-            throw new SkillMemoryValidationException("SKILL_VALIDATION",
-                $"资产 {content.Length} 字节超限（上限 {MaxAssetBytes} 字节）。");
+            throw new SkillMemoryValidationException(
+                "SKILL_VALIDATION",
+                $"资产 {content.Length} 字节超限（上限 {MaxAssetBytes} 字节）。"
+            );
         // 复用逃逸校验（要求条目已存在）。
         string abs = ResolveAssetPath(scope, kind, normalized, assetRelativePath, workspaceRoot);
         lock (_syncLock)
@@ -332,7 +470,12 @@ public sealed class SkillMemoryService
     }
 
     /// <summary>删除整条（先留 .deleted-&lt;ts&gt;.bak 一份同级备份，再删原目录 + 重建索引）。</summary>
-    public void Delete(SkillMemoryScope scope, SkillMemoryKind kind, string name, string? workspaceRoot = null)
+    public void Delete(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string name,
+        string? workspaceRoot = null
+    )
     {
         string normalized = NormalizeAndValidateName(name);
         lock (_syncLock)
@@ -345,20 +488,29 @@ public sealed class SkillMemoryService
                 throw new SkillMemoryValidationException("SKILL_NOT_FOUND", $"条目不存在：{normalized}。");
 
             // 同级仅保留 1 份 bak：先清旧 bak 再拷新 bak。
-            foreach (var old in Directory.EnumerateFileSystemEntries(domainRoot, normalized + ".deleted-*.bak"))
+            foreach (
+                var old in Directory.EnumerateFileSystemEntries(
+                    domainRoot,
+                    normalized + ".deleted-*.bak"
+                )
+            )
             {
                 try
                 {
-                    if (Directory.Exists(old)) Directory.Delete(old, recursive: true);
-                    else File.Delete(old);
+                    if (Directory.Exists(old))
+                        Directory.Delete(old, recursive: true);
+                    else
+                        File.Delete(old);
                 }
                 catch (Exception ex)
                 {
                     HaloLogger.App.Warn($"[SkillMemory] 旧 bak 清理失败（继续删除）：{old}", ex);
                 }
             }
-            string bak = Path.Combine(domainRoot,
-                $"{normalized}.deleted-{DateTime.UtcNow:yyyyMMddHHmmss}.bak");
+            string bak = Path.Combine(
+                domainRoot,
+                $"{normalized}.deleted-{DateTime.UtcNow:yyyyMMddHHmmss}.bak"
+            );
             try
             {
                 CopyDirectory(dir, bak);
@@ -376,14 +528,30 @@ public sealed class SkillMemoryService
     }
 
     /// <summary>启用/禁用开关（保留正文与元数据，仅改 enabled + 索引重建）。</summary>
-    public void SetEnabled(SkillMemoryScope scope, SkillMemoryKind kind, string name, string? workspaceRoot, bool enabled)
+    public void SetEnabled(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string name,
+        string? workspaceRoot,
+        bool enabled
+    )
     {
         SkillMemoryEntry? current = Get(scope, kind, name, workspaceRoot);
         if (current == null)
             throw new SkillMemoryValidationException("SKILL_NOT_FOUND", $"条目不存在：{name?.Trim()}。");
-        CreateOrUpdate(scope, kind, current.Name, current.BodyMarkdown, workspaceRoot,
-            enabled: enabled, priority: current.Priority, version: current.Version,
-            pin: current.Pin, title: current.Title, summary: current.Summary);
+        CreateOrUpdate(
+            scope,
+            kind,
+            current.Name,
+            current.BodyMarkdown,
+            workspaceRoot,
+            enabled: enabled,
+            priority: current.Priority,
+            version: current.Version,
+            pin: current.Pin,
+            title: current.Title,
+            summary: current.Summary
+        );
     }
 
     /// <summary>重建单域单类 _index.json（损坏/版本不符时调用；原子写）。</summary>
@@ -405,22 +573,35 @@ public sealed class SkillMemoryService
             throw new SkillMemoryValidationException("SKILL_VALIDATION", "名称不能为空。");
         string n = name.Trim().ToLowerInvariant();
         if (n.Length < 2 || n.Length > 48 || !NameRegex.IsMatch(n))
-            throw new SkillMemoryValidationException("SKILL_VALIDATION",
-                $"非法名称 '{name.Trim()}'：须 2–48 字符、小写字母数字开头、仅含小写字母/数字/-/_。");
+            throw new SkillMemoryValidationException(
+                "SKILL_VALIDATION",
+                $"非法名称 '{name.Trim()}'：须 2–48 字符、小写字母数字开头、仅含小写字母/数字/-/_。"
+            );
         if (ReservedNames.Contains(n))
             throw new SkillMemoryValidationException("SKILL_VALIDATION", $"保留名称禁止使用：'{n}'。");
-        if (n is "_index" or "_tmp" || n.StartsWith("_", StringComparison.Ordinal)
-            || n.Contains("..") || n.Contains('/') || n.Contains('\\'))
+        if (
+            n is "_index" or "_tmp"
+            || n.StartsWith("_", StringComparison.Ordinal)
+            || n.Contains("..")
+            || n.Contains('/')
+            || n.Contains('\\')
+        )
             throw new SkillMemoryValidationException("SKILL_VALIDATION", $"非法名称 '{n}'。");
         return n;
     }
 
     // ---------- 内部实现 ----------
 
-    private string? ResolveDomainRoot(SkillMemoryScope scope, SkillMemoryKind kind, string? workspaceRoot)
+    private string? ResolveDomainRoot(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string? workspaceRoot
+    )
     {
         if (scope == SkillMemoryScope.Global)
-            return kind == SkillMemoryKind.Skill ? _storage.GlobalSkillsDirectory : _storage.GlobalMemoryDirectory;
+            return kind == SkillMemoryKind.Skill
+                ? _storage.GlobalSkillsDirectory
+                : _storage.GlobalMemoryDirectory;
         if (string.IsNullOrWhiteSpace(workspaceRoot))
             return null;
         try
@@ -444,18 +625,32 @@ public sealed class SkillMemoryService
         }
     }
 
-    private string ResolveDomainRootOrThrow(SkillMemoryScope scope, SkillMemoryKind kind, string? workspaceRoot, bool forWrite)
+    private string ResolveDomainRootOrThrow(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string? workspaceRoot,
+        bool forWrite
+    )
     {
         if (scope == SkillMemoryScope.Global)
-            return kind == SkillMemoryKind.Skill ? _storage.GlobalSkillsDirectory : _storage.GlobalMemoryDirectory;
+            return kind == SkillMemoryKind.Skill
+                ? _storage.GlobalSkillsDirectory
+                : _storage.GlobalMemoryDirectory;
         if (string.IsNullOrWhiteSpace(workspaceRoot))
-            throw new SkillMemoryValidationException("SKILL_VALIDATION", "Project 域必须指定 workspaceRoot。");
+            throw new SkillMemoryValidationException(
+                "SKILL_VALIDATION",
+                "Project 域必须指定 workspaceRoot。"
+            );
         string wsFull = Path.GetFullPath(workspaceRoot.Trim());
         string halo = ResolveProjectRoot(wsFull);
         return Path.Combine(halo, kind == SkillMemoryKind.Skill ? "skills" : "memory");
     }
 
-    private IReadOnlyList<SkillMemoryEntry> ListLocked(SkillMemoryScope scope, SkillMemoryKind kind, string? workspaceRoot)
+    private IReadOnlyList<SkillMemoryEntry> ListLocked(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string? workspaceRoot
+    )
     {
         string? domainRoot = ResolveDomainRoot(scope, kind, workspaceRoot);
         if (domainRoot == null || !Directory.Exists(domainRoot))
@@ -506,8 +701,13 @@ public sealed class SkillMemoryService
             return exact;
         foreach (var dir in Directory.EnumerateDirectories(domainRoot))
         {
-            if (string.Equals(Path.GetFileName(dir), normalized, StringComparison.OrdinalIgnoreCase)
-                && !(Path.GetFileName(dir) ?? string.Empty).EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(Path.GetFileName(dir), normalized, StringComparison.OrdinalIgnoreCase)
+                && !(Path.GetFileName(dir) ?? string.Empty).EndsWith(
+                    ".bak",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
                 return dir;
         }
         return null;
@@ -518,10 +718,18 @@ public sealed class SkillMemoryService
         foreach (var dir in Directory.EnumerateDirectories(domainRoot))
         {
             string leaf = Path.GetFileName(dir) ?? string.Empty;
-            if (!string.Equals(leaf, normalized, StringComparison.Ordinal)
-                && string.Equals(leaf, normalized, StringComparison.OrdinalIgnoreCase))
+            if (
+                !string.Equals(leaf, normalized, StringComparison.Ordinal)
+                && string.Equals(leaf, normalized, StringComparison.OrdinalIgnoreCase)
+            )
             {
-                try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+                try
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+                catch
+                { /* 忽略 */
+                }
             }
         }
     }
@@ -536,7 +744,12 @@ public sealed class SkillMemoryService
         public DateTime? UpdatedAtUtc;
     }
 
-    private SkillMemoryEntry? TryLoadEntry(string dir, string normalized, SkillMemoryScope scope, SkillMemoryKind kind)
+    private SkillMemoryEntry? TryLoadEntry(
+        string dir,
+        string normalized,
+        SkillMemoryScope scope,
+        SkillMemoryKind kind
+    )
     {
         string readmePath = Path.Combine(dir, "readme.md");
         if (!File.Exists(readmePath))
@@ -555,7 +768,10 @@ public sealed class SkillMemoryService
         string? title = null;
         string? summary = front.ScopeHint;
         DateTime? updatedAt = front.UpdatedAtUtc;
-        string metaFile = Path.Combine(dir, kind == SkillMemoryKind.Skill ? "skill.json" : "memory.json");
+        string metaFile = Path.Combine(
+            dir,
+            kind == SkillMemoryKind.Skill ? "skill.json" : "memory.json"
+        );
         if (File.Exists(metaFile))
         {
             try
@@ -567,16 +783,22 @@ public sealed class SkillMemoryService
                 priority = GetJsonInt(root, "priority", priority);
                 pin = GetJsonString(root, "pin", pin) ?? pin;
                 title = GetJsonString(root, "title", title);
-                summary = GetJsonString(root, "summary", summary)
+                summary =
+                    GetJsonString(root, "summary", summary)
                     ?? GetJsonString(root, "scopeHint", summary)
                     ?? GetJsonString(root, "scope_hint", summary);
-                string? ts = GetJsonString(root, "updatedAtUtc", null) ?? GetJsonString(root, "updated_at", null);
+                string? ts =
+                    GetJsonString(root, "updatedAtUtc", null)
+                    ?? GetJsonString(root, "updated_at", null);
                 if (!string.IsNullOrWhiteSpace(ts) && DateTime.TryParse(ts, out var parsed))
                     updatedAt = parsed.ToUniversalTime();
             }
             catch (Exception ex)
             {
-                HaloLogger.App.Warn($"[SkillMemory] 条目 '{normalized}' 元数据 JSON 损坏，已用 frontmatter 兜底。", ex);
+                HaloLogger.App.Warn(
+                    $"[SkillMemory] 条目 '{normalized}' 元数据 JSON 损坏，已用 frontmatter 兜底。",
+                    ex
+                );
             }
         }
 
@@ -586,30 +808,58 @@ public sealed class SkillMemoryService
         string normalizedBody = body.TrimEnd();
         string hash = HeaderVariableResolver.ComputeDeterministicHash16(normalizedBody);
         string assetsDir = Path.Combine(dir, "assets");
-        bool hasAssets = Directory.Exists(assetsDir) && Directory.EnumerateFiles(assetsDir, "*", SearchOption.AllDirectories).Any();
+        bool hasAssets =
+            Directory.Exists(assetsDir)
+            && Directory.EnumerateFiles(assetsDir, "*", SearchOption.AllDirectories).Any();
         DateTime mtime;
-        try { mtime = File.GetLastWriteTimeUtc(readmePath); }
-        catch { mtime = DateTime.UtcNow; }
+        try
+        {
+            mtime = File.GetLastWriteTimeUtc(readmePath);
+        }
+        catch
+        {
+            mtime = DateTime.UtcNow;
+        }
 
         return new SkillMemoryEntry(
             normalized,
             scope == SkillMemoryScope.Global ? "global" : "project",
-            title, summary, body, pin, enabled, priority, version,
-            (body.Length + 3) / 4, hash, hasAssets, Path.GetFullPath(dir),
-            updatedAt ?? mtime) with { Kind = kind };
+            title,
+            summary,
+            body,
+            pin,
+            enabled,
+            priority,
+            version,
+            (body.Length + 3) / 4,
+            hash,
+            hasAssets,
+            Path.GetFullPath(dir),
+            updatedAt ?? mtime
+        ) with
+        {
+            Kind = kind
+        };
     }
 
     private static (FrontMeta Meta, string Body) ParseReadme(string raw)
     {
         var meta = new FrontMeta();
         string text = (raw ?? string.Empty).Replace("\r\n", "\n").TrimStart('\uFEFF');
-        if (!text.StartsWith("---\n", StringComparison.Ordinal) && !text.StartsWith("---\r\n", StringComparison.Ordinal))
+        if (
+            !text.StartsWith("---\n", StringComparison.Ordinal)
+            && !text.StartsWith("---\r\n", StringComparison.Ordinal)
+        )
             return (meta, text);
         string[] lines = text.Split('\n');
         int end = -1;
         for (int i = 1; i < lines.Length && i < 60; i++)
         {
-            if (lines[i].Trim() == "---") { end = i; break; }
+            if (lines[i].Trim() == "---")
+            {
+                end = i;
+                break;
+            }
         }
         if (end < 0)
             return (meta, text); // 无闭合则全文即正文
@@ -625,19 +875,37 @@ public sealed class SkillMemoryService
             string val = Unquote(line[(colon + 1)..].Trim());
             switch (key)
             {
-                case "version": if (int.TryParse(val, out var v)) meta.Version = v; break;
+                case "version":
+                    if (int.TryParse(val, out var v))
+                        meta.Version = v;
+                    break;
                 case "enabled":
-                    if (bool.TryParse(val, out var b)) meta.Enabled = b;
-                    else if (val == "1" || val.Equals("yes", StringComparison.OrdinalIgnoreCase)) meta.Enabled = true;
-                    else if (val == "0" || val.Equals("no", StringComparison.OrdinalIgnoreCase)) meta.Enabled = false;
+                    if (bool.TryParse(val, out var b))
+                        meta.Enabled = b;
+                    else if (val == "1" || val.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                        meta.Enabled = true;
+                    else if (val == "0" || val.Equals("no", StringComparison.OrdinalIgnoreCase))
+                        meta.Enabled = false;
                     break;
-                case "priority": if (int.TryParse(val, out var p)) meta.Priority = p; break;
-                case "pin": if (!string.IsNullOrWhiteSpace(val)) meta.Pin = val.ToLowerInvariant(); break;
-                case "scope_hint": case "scopehint": meta.ScopeHint = val; break;
-                case "updated_at": case "updatedatutc":
-                    if (DateTime.TryParse(val, out var dt)) meta.UpdatedAtUtc = dt.ToUniversalTime();
+                case "priority":
+                    if (int.TryParse(val, out var p))
+                        meta.Priority = p;
                     break;
-                default: break; // 未知键保留但忽略
+                case "pin":
+                    if (!string.IsNullOrWhiteSpace(val))
+                        meta.Pin = val.ToLowerInvariant();
+                    break;
+                case "scope_hint":
+                case "scopehint":
+                    meta.ScopeHint = val;
+                    break;
+                case "updated_at":
+                case "updatedatutc":
+                    if (DateTime.TryParse(val, out var dt))
+                        meta.UpdatedAtUtc = dt.ToUniversalTime();
+                    break;
+                default:
+                    break; // 未知键保留但忽略
             }
         }
         return (meta, string.Join("\n", lines.Skip(end + 1)));
@@ -645,7 +913,10 @@ public sealed class SkillMemoryService
 
     private static string Unquote(string v)
     {
-        if (v.Length >= 2 && ((v.StartsWith('"') && v.EndsWith('"')) || (v.StartsWith('\'') && v.EndsWith('\''))))
+        if (
+            v.Length >= 2
+            && ((v.StartsWith('"') && v.EndsWith('"')) || (v.StartsWith('\'') && v.EndsWith('\'')))
+        )
             return v[1..^1];
         return v;
     }
@@ -654,8 +925,10 @@ public sealed class SkillMemoryService
     {
         foreach (var prop in root.EnumerateObject())
         {
-            if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase)
-                && prop.Value.ValueKind == JsonValueKind.String)
+            if (
+                string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase)
+                && prop.Value.ValueKind == JsonValueKind.String
+            )
                 return prop.Value.GetString() ?? fallback;
         }
         return fallback;
@@ -665,9 +938,11 @@ public sealed class SkillMemoryService
     {
         foreach (var prop in root.EnumerateObject())
         {
-            if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase)
+            if (
+                string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase)
                 && prop.Value.ValueKind == JsonValueKind.Number
-                && prop.Value.TryGetInt32(out var v))
+                && prop.Value.TryGetInt32(out var v)
+            )
                 return v;
         }
         return fallback;
@@ -679,8 +954,10 @@ public sealed class SkillMemoryService
         {
             if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase))
             {
-                if (prop.Value.ValueKind == JsonValueKind.True) return true;
-                if (prop.Value.ValueKind == JsonValueKind.False) return false;
+                if (prop.Value.ValueKind == JsonValueKind.True)
+                    return true;
+                if (prop.Value.ValueKind == JsonValueKind.False)
+                    return false;
             }
         }
         return fallback;
@@ -707,16 +984,28 @@ public sealed class SkillMemoryService
 
     private static string DeriveSummary(string body)
     {
-        string flat = string.Join(" ", body.Split('\n').Select(l => l.Trim()).Where(l => !string.IsNullOrEmpty(l)));
+        string flat = string.Join(
+            " ",
+            body.Split('\n').Select(l => l.Trim()).Where(l => !string.IsNullOrEmpty(l))
+        );
         if (flat.StartsWith('#'))
             flat = flat.TrimStart('#').Trim();
         int dot = flat.IndexOfAny(new[] { '。', '！', '？', '!', '?', '.', ';', '；' });
         string first = dot >= 0 ? flat[..(dot + 1)].Trim() : flat.Trim();
-        if (first.Length > 120) first = first[..120];
+        if (first.Length > 120)
+            first = first[..120];
         return string.IsNullOrEmpty(first) ? "（空）" : first;
     }
 
-    private static string BuildReadme(int version, bool enabled, int priority, string pin, string scopeHint, DateTime updatedAt, string body)
+    private static string BuildReadme(
+        int version,
+        bool enabled,
+        int priority,
+        string pin,
+        string scopeHint,
+        DateTime updatedAt,
+        string body
+    )
     {
         var sb = new StringBuilder();
         sb.AppendLine("---");
@@ -736,7 +1025,11 @@ public sealed class SkillMemoryService
 
     // ---------- 索引 ----------
 
-    private void EnsureIndexHealthyLocked(string domainRoot, SkillMemoryScope scope, SkillMemoryKind kind)
+    private void EnsureIndexHealthyLocked(
+        string domainRoot,
+        SkillMemoryScope scope,
+        SkillMemoryKind kind
+    )
     {
         string indexPath = Path.Combine(domainRoot, "_index.json");
         try
@@ -747,18 +1040,32 @@ public sealed class SkillMemoryService
                 return;
             }
             using var doc = JsonDocument.Parse(File.ReadAllText(indexPath, Utf8NoBom));
-            if (!doc.RootElement.TryGetProperty("version", out var v) || v.GetInt32() != IndexVersion)
+            if (
+                !doc.RootElement.TryGetProperty("version", out var v)
+                || v.GetInt32() != IndexVersion
+            )
                 throw new InvalidDataException($"_index.json version != {IndexVersion}");
         }
         catch (Exception ex)
         {
             HaloLogger.App.Warn($"[SkillMemory] _index.json 损坏/过时，已重建：{indexPath}", ex);
-            try { RebuildIndexLocked(scope, kind, null, domainRoot); }
-            catch (Exception ex2) { HaloLogger.App.Warn("[SkillMemory] 索引重建失败。", ex2); }
+            try
+            {
+                RebuildIndexLocked(scope, kind, null, domainRoot);
+            }
+            catch (Exception ex2)
+            {
+                HaloLogger.App.Warn("[SkillMemory] 索引重建失败。", ex2);
+            }
         }
     }
 
-    private void RebuildIndexLocked(SkillMemoryScope scope, SkillMemoryKind kind, string? workspaceRoot, string? knownRoot = null)
+    private void RebuildIndexLocked(
+        SkillMemoryScope scope,
+        SkillMemoryKind kind,
+        string? workspaceRoot,
+        string? knownRoot = null
+    )
     {
         string? domainRoot = knownRoot ?? ResolveDomainRoot(scope, kind, workspaceRoot);
         if (domainRoot == null)
@@ -773,8 +1080,14 @@ public sealed class SkillMemoryService
             if (rawName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
                 continue;
             string normalized;
-            try { normalized = NormalizeAndValidateName(rawName); }
-            catch { continue; }
+            try
+            {
+                normalized = NormalizeAndValidateName(rawName);
+            }
+            catch
+            {
+                continue;
+            }
             if (!seen.Add(normalized))
                 continue;
             try
@@ -783,25 +1096,32 @@ public sealed class SkillMemoryService
                 if (e == null)
                     continue;
                 string summary = e.Summary.Length <= 120 ? e.Summary : e.Summary[..120];
-                entries.Add(new Dictionary<string, object?>
-                {
-                    ["name"] = e.Name,
-                    ["scope"] = e.Scope,
-                    ["enabled"] = e.Enabled,
-                    ["pin"] = e.Pin,
-                    ["priority"] = e.Priority,
-                    ["version"] = e.Version,
-                    ["title"] = e.Title,
-                    ["summary"] = summary,
-                    ["chars"] = e.BodyMarkdown.Length,
-                    ["estTokens"] = e.EstTokens,
-                    ["hash"] = e.Hash,
-                    ["hasAssets"] = e.HasAssets,
-                });
+                entries.Add(
+                    new Dictionary<string, object?>
+                    {
+                        ["name"] = e.Name,
+                        ["scope"] = e.Scope,
+                        ["enabled"] = e.Enabled,
+                        ["pin"] = e.Pin,
+                        ["priority"] = e.Priority,
+                        ["version"] = e.Version,
+                        ["title"] = e.Title,
+                        ["summary"] = summary,
+                        ["chars"] = e.BodyMarkdown.Length,
+                        ["estTokens"] = e.EstTokens,
+                        ["hash"] = e.Hash,
+                        ["hasAssets"] = e.HasAssets,
+                    }
+                );
             }
-            catch { /* 单条损坏跳过 */ }
+            catch
+            { /* 单条损坏跳过 */
+            }
         }
-        entries.Sort((a, b) => string.Compare((string)a["name"]!, (string)b["name"]!, StringComparison.Ordinal));
+        entries.Sort(
+            (a, b) =>
+                string.Compare((string)a["name"]!, (string)b["name"]!, StringComparison.Ordinal)
+        );
 
         var index = new Dictionary<string, object?>
         {
@@ -810,13 +1130,19 @@ public sealed class SkillMemoryService
             ["scope"] = scope == SkillMemoryScope.Global ? "global" : "project",
             ["kind"] = kind == SkillMemoryKind.Skill ? "skill" : "memory",
         };
-        if (kind == SkillMemoryKind.Skill) index["skills"] = entries;
-        else index["memories"] = entries;
+        if (kind == SkillMemoryKind.Skill)
+            index["skills"] = entries;
+        else
+            index["memories"] = entries;
 
         WriteJsonAtomic(Path.Combine(domainRoot, "_index.json"), index);
     }
 
-    private static void EnsureIndexFileLocked(string indexPath, SkillMemoryScope scope, SkillMemoryKind kind)
+    private static void EnsureIndexFileLocked(
+        string indexPath,
+        SkillMemoryScope scope,
+        SkillMemoryKind kind
+    )
     {
         try
         {
@@ -831,7 +1157,11 @@ public sealed class SkillMemoryService
         }
     }
 
-    private static void EnsureIndexFile(string indexPath, SkillMemoryScope scope, SkillMemoryKind kind)
+    private static void EnsureIndexFile(
+        string indexPath,
+        SkillMemoryScope scope,
+        SkillMemoryKind kind
+    )
     {
         if (File.Exists(indexPath))
             return;
@@ -842,8 +1172,10 @@ public sealed class SkillMemoryService
             ["scope"] = scope == SkillMemoryScope.Global ? "global" : "project",
             ["kind"] = kind == SkillMemoryKind.Skill ? "skill" : "memory",
         };
-        if (kind == SkillMemoryKind.Skill) index["skills"] = new List<object>();
-        else index["memories"] = new List<object>();
+        if (kind == SkillMemoryKind.Skill)
+            index["skills"] = new List<object>();
+        else
+            index["memories"] = new List<object>();
         WriteJsonAtomic(indexPath, index);
     }
 
@@ -851,11 +1183,13 @@ public sealed class SkillMemoryService
     {
         var sb = new StringBuilder(wsKey);
         sb.Append('|');
-        foreach (var p in new[]
-        {
-            Path.Combine(_storage.GlobalSkillsDirectory, "_index.json"),
-            Path.Combine(_storage.GlobalMemoryDirectory, "_index.json"),
-        })
+        foreach (
+            var p in new[]
+            {
+                Path.Combine(_storage.GlobalSkillsDirectory, "_index.json"),
+                Path.Combine(_storage.GlobalMemoryDirectory, "_index.json"),
+            }
+        )
         {
             sb.Append(SigOf(p)).Append(';');
         }
@@ -867,7 +1201,10 @@ public sealed class SkillMemoryService
                 sb.Append(SigOf(Path.Combine(halo, "skills", "_index.json"))).Append(';');
                 sb.Append(SigOf(Path.Combine(halo, "memory", "_index.json"))).Append(';');
             }
-            catch { sb.Append("bad;"); }
+            catch
+            {
+                sb.Append("bad;");
+            }
         }
         return sb.ToString();
     }
@@ -881,7 +1218,10 @@ public sealed class SkillMemoryService
             var fi = new FileInfo(path);
             return fi.LastWriteTimeUtc.Ticks + ":" + fi.Length;
         }
-        catch { return "?"; }
+        catch
+        {
+            return "?";
+        }
     }
 
     private void InvalidateMergedCacheLocked()
@@ -902,7 +1242,16 @@ public sealed class SkillMemoryService
         string tmp = $"{full}.{Guid.NewGuid():N}.tmp";
         try
         {
-            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (
+                var fs = new FileStream(
+                    tmp,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    4096,
+                    FileOptions.WriteThrough
+                )
+            )
             using (var sw = new StreamWriter(fs, Utf8NoBom))
             {
                 sw.Write(content);
@@ -915,7 +1264,13 @@ public sealed class SkillMemoryService
         {
             if (File.Exists(tmp))
             {
-                try { File.Delete(tmp); } catch { /* 忽略残留 */ }
+                try
+                {
+                    File.Delete(tmp);
+                }
+                catch
+                { /* 忽略残留 */
+                }
             }
         }
     }
@@ -929,7 +1284,16 @@ public sealed class SkillMemoryService
         string tmp = $"{full}.{Guid.NewGuid():N}.tmp";
         try
         {
-            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (
+                var fs = new FileStream(
+                    tmp,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    4096,
+                    FileOptions.WriteThrough
+                )
+            )
             {
                 fs.Write(content, 0, content.Length);
                 fs.Flush(flushToDisk: true);
@@ -940,18 +1304,27 @@ public sealed class SkillMemoryService
         {
             if (File.Exists(tmp))
             {
-                try { File.Delete(tmp); } catch { /* 忽略残留 */ }
+                try
+                {
+                    File.Delete(tmp);
+                }
+                catch
+                { /* 忽略残留 */
+                }
             }
         }
     }
 
     private static void WriteJsonAtomic(string filePath, object data)
     {
-        string json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
-        });
+        string json = JsonSerializer.Serialize(
+            data,
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true,
+            }
+        );
         WriteTextAtomic(filePath, json);
     }
 

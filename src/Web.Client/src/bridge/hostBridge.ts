@@ -60,13 +60,17 @@ function markBridgeMock(on: boolean): void {
       if (on) sessionStorage.setItem('halo-bridge-mock', '1');
       else sessionStorage.removeItem('halo-bridge-mock');
     }
-  } catch (e) { console.warn('[hostBridge] mock flag failed:', e); }
+  } catch (e) {
+    console.warn('[hostBridge] mock flag failed:', e);
+  }
 }
 /** Mock 是否生效（App.vue 红色横幅“桥接未连接（Mock数据）”+重试按钮依据）。 */
 export function isBridgeMock(): boolean {
   try {
     if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('halo-bridge-mock') === '1') return true;
-  } catch (e) { console.warn('[hostBridge] mock flag read failed:', e); }
+  } catch (e) {
+    console.warn('[hostBridge] mock flag read failed:', e);
+  }
   return (window as unknown as { __haloBridgeMock?: boolean }).__haloBridgeMock === true;
 }
 
@@ -75,4 +79,75 @@ export { wrapNativeHostBridge } from './client';
 export { normalizeGlobalProxyMode, normalizeProviderProxyMode, normalizeLlmProtocol } from './client';
 export { createBrowserMockBridge, isMockMode, setMockMode, shouldShowMockBanner } from './mock';
 export { normalizeVisionFlag } from './types';
-export type { AgentConfigDocument, BridgeResponse, ChatImageRef, CompactionResultDto, ContextBudgetStatusDto, CustomHeaderEntry, GlobalNetworkSettings, GlobalProxyMode, GoalMilestoneDto, HeaderResolutionContextDto, HistoryDeleteResultDto, HistoryHealResultDto, HistoryTruncateResultDto, HostBridgeApi, HostEventEnvelope, LastSentPromptSnapshot, LlmProtocolType, LogChannelStatus, ManualProxyConfig, ModelConfig, PromptBlockPreview, PromptConfigDocument, PromptDiagnosticsDto, PromptPreviewDto, ProviderConfig, ProviderEndpointPreviewDto, ProviderProxyMode, ProvidersConfigDocument, ProxyConnectivityTestResult, SessionGoalDto, SessionMetadata, SessionStreamEventDto, SkillMemoryDetail, SkillMemoryKind, SkillMemoryListItem, SkillMemoryOpResult, SkillMemoryScope, SkillMemoryScopeFilter, StorageConfigInfo, StorageMigrationResult, StorageValidationResult, SubPolicyDto, SubRejectionInfo, SubRuntimeInfo, SubRuntimeItem, SubSessionDetailDto, SystemProxySnapshot, SystemRuntimeInfo, UnifiedChatMessage, UnifiedChatMessageDto, UnifiedLlmRequestDto, UnifiedStreamEventKind, UnifiedTokenUsageDto, UnifiedToolCallDto, UnifiedToolDefinitionDto, UsageDbStatus, UsageFilter, UsageFilterOptions, UsageModelOption, UsageOverview, UsagePage, UsagePreset, UsageProviderOption, UsageProviderShareItem, UsageRowDto, UsageSourceOption, UsageTrend, UsageTrendSeries, WorkspaceInfo } from './types';
+export type {
+  AgentConfigDocument,
+  BridgeResponse,
+  ChatImageRef,
+  CompactionResultDto,
+  ContextBudgetStatusDto,
+  CustomHeaderEntry,
+  GlobalNetworkSettings,
+  GlobalProxyMode,
+  GoalMilestoneDto,
+  HeaderResolutionContextDto,
+  HistoryDeleteResultDto,
+  HistoryHealResultDto,
+  HistoryTruncateResultDto,
+  HostBridgeApi,
+  HostEventEnvelope,
+  LastSentPromptSnapshot,
+  LlmProtocolType,
+  LogChannelStatus,
+  ManualProxyConfig,
+  ModelConfig,
+  PromptBlockPreview,
+  PromptConfigDocument,
+  PromptDiagnosticsDto,
+  PromptPreviewDto,
+  ProviderConfig,
+  ProviderEndpointPreviewDto,
+  ProviderProxyMode,
+  ProvidersConfigDocument,
+  ProxyConnectivityTestResult,
+  SessionGoalDto,
+  SessionMetadata,
+  SessionStreamEventDto,
+  SkillMemoryDetail,
+  SkillMemoryKind,
+  SkillMemoryListItem,
+  SkillMemoryOpResult,
+  SkillMemoryScope,
+  SkillMemoryScopeFilter,
+  StorageConfigInfo,
+  StorageMigrationResult,
+  StorageValidationResult,
+  SubPolicyDto,
+  SubRejectionInfo,
+  SubRuntimeInfo,
+  SubRuntimeItem,
+  SubSessionDetailDto,
+  SystemProxySnapshot,
+  SystemRuntimeInfo,
+  UiActiveState,
+  UnifiedChatMessage,
+  UnifiedChatMessageDto,
+  UnifiedLlmRequestDto,
+  UnifiedStreamEventKind,
+  UnifiedTokenUsageDto,
+  UnifiedToolCallDto,
+  UnifiedToolDefinitionDto,
+  UsageDbStatus,
+  UsageFilter,
+  UsageFilterOptions,
+  UsageModelOption,
+  UsageOverview,
+  UsagePage,
+  UsagePreset,
+  UsageProviderOption,
+  UsageProviderShareItem,
+  UsageRowDto,
+  UsageSourceOption,
+  UsageTrend,
+  UsageTrendSeries,
+  WorkspaceInfo,
+} from './types';

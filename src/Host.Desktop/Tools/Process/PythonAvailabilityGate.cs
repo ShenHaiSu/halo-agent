@@ -15,13 +15,15 @@ public static class PythonAvailabilityGate
     public const string Line1 = "当前电脑环境中没有检测到或者没有安装python，如果必须py，请引导用户前往官网进行下载和安装配置后重启HaloAgent。";
 
     /// <summary>冻结第 2 段（同一 Error 内换行追加，不另起码）。</summary>
-    public const string Line2 = "已收到 runner:'python'，本次未执行。请改用 runner:'cmd' 重试（如 {\"command\":\"dir /b\",\"runner\":\"cmd\"}）；或请用户安装 Python 后重试。";
+    public const string Line2 =
+        "已收到 runner:'python'，本次未执行。请改用 runner:'cmd' 重试（如 {\"command\":\"dir /b\",\"runner\":\"cmd\"}）；或请用户安装 Python 后重试。";
 
     /// <summary>
     /// 全仓库唯一中文 Hint（HintForTool("exec_command", "PYTHON_NOT_AVAILABLE") 返回此值，逐字断言）。
     /// 注意首字符为空格，与既有 HintForTool 返回风格一致。
     /// </summary>
-    public const string HintText = " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
+    public const string HintText =
+        " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
 
     /// <summary>
     /// 冻结拒绝全文（含码前缀 + 第 1 段 + 换行 + 第 2 段）。
@@ -38,16 +40,22 @@ public static class PythonAvailabilityGate
     /// 时返回 true；runner 为 cmd/其它/空一律返回 false（不受快照影响）。
     /// 快照为 null 时按缺失处理（fail-closed）。
     /// </summary>
-    public static bool ShouldReject(string? runner, PythonAvailabilitySnapshot? snapshotOverride = null)
+    public static bool ShouldReject(
+        string? runner,
+        PythonAvailabilitySnapshot? snapshotOverride = null
+    )
     {
         if (!string.Equals(runner?.Trim(), "python", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
-        PythonAvailabilitySnapshot? snapshot = snapshotOverride ?? PythonAvailabilitySnapshot.Current;
-        if (snapshot is null) return true;
+        PythonAvailabilitySnapshot? snapshot =
+            snapshotOverride ?? PythonAvailabilitySnapshot.Current;
+        if (snapshot is null)
+            return true;
         // need17联调：从未探测（Unknown，ProbedAtUtc==MinValue）时不预拒，留给本次 Probe 双保险判定，避免单测/首启误杀。
-        if (snapshot.ProbedAtUtc == DateTimeOffset.MinValue) return false;
+        if (snapshot.ProbedAtUtc == DateTimeOffset.MinValue)
+            return false;
         return !snapshot.Found;
     }
 

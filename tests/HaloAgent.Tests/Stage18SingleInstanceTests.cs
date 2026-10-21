@@ -17,8 +17,16 @@ public sealed class Stage18SingleInstanceTests
         var lines = new List<string>();
         var prev = SingleInstanceGuard.TraceSink;
         var prevAct = NativeWindowActivator.TraceSink;
-        SingleInstanceGuard.TraceSink = s => { lock (lines) lines.Add(s); };
-        NativeWindowActivator.TraceSink = s => { lock (lines) lines.Add(s); };
+        SingleInstanceGuard.TraceSink = s =>
+        {
+            lock (lines)
+                lines.Add(s);
+        };
+        NativeWindowActivator.TraceSink = s =>
+        {
+            lock (lines)
+                lines.Add(s);
+        };
         restore = () =>
         {
             SingleInstanceGuard.TraceSink = prev;
@@ -61,7 +69,10 @@ public sealed class Stage18SingleInstanceTests
     [Fact]
     public void SecondAcquire_SameProcess_IsNotFirst()
     {
-        var probe = Path.Combine(Path.GetTempPath(), "halo-need18-" + Guid.NewGuid().ToString("N") + ".json");
+        var probe = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-" + Guid.NewGuid().ToString("N") + ".json"
+        );
         var salt = NewSalt();
         var g1 = SingleInstanceGuard.TryAcquireApp(probe, salt, out var n1);
         Assert.NotNull(g1);
@@ -83,7 +94,10 @@ public sealed class Stage18SingleInstanceTests
     [Fact]
     public void AbandonedMutex_CanReacquire()
     {
-        var probe = Path.Combine(Path.GetTempPath(), "halo-need18-ab-" + Guid.NewGuid().ToString("N") + ".json");
+        var probe = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-ab-" + Guid.NewGuid().ToString("N") + ".json"
+        );
         var salt = NewSalt();
         // worker 独占创建并持有后直接退出（不 Release、不 Dispose，常驻泄漏），模拟崩溃遗留。
         // 主线程此前无任何该命名 Mutex 句柄 → 下一个 new Mutex(true) 必得 Abandoned。
@@ -93,7 +107,8 @@ public sealed class Stage18SingleInstanceTests
         var t = new Thread(() =>
         {
             var m = new Mutex(true, doomedName, out _);
-            lock (leaked) leaked.Add(m); // 常驻泄漏，防终结器提前关柄
+            lock (leaked)
+                leaked.Add(m); // 常驻泄漏，防终结器提前关柄
             owned.Set();
             // 线程结束即 abandon，不 Release。
         });
@@ -118,8 +133,16 @@ public sealed class Stage18SingleInstanceTests
             {
                 foreach (var m in leaked)
                 {
-                    try { m.ReleaseMutex(); } catch { }
-                    try { m.Dispose(); } catch { }
+                    try
+                    {
+                        m.ReleaseMutex();
+                    }
+                    catch { }
+                    try
+                    {
+                        m.Dispose();
+                    }
+                    catch { }
                 }
                 leaked.Clear();
             }
@@ -129,7 +152,10 @@ public sealed class Stage18SingleInstanceTests
     [Fact]
     public void DataLock_SecondFails_ThenSucceedsAfterDispose()
     {
-        var root = Path.Combine(Path.GetTempPath(), "halo-need18-data-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-data-" + Guid.NewGuid().ToString("N")
+        );
         Directory.CreateDirectory(root);
         var salt = NewSalt();
         try
@@ -151,14 +177,21 @@ public sealed class Stage18SingleInstanceTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { }
+            try
+            {
+                Directory.Delete(root, true);
+            }
+            catch { }
         }
     }
 
     [Fact]
     public void DataLock_FileContent_HasPid()
     {
-        var root = Path.Combine(Path.GetTempPath(), "halo-need18-pid-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-pid-" + Guid.NewGuid().ToString("N")
+        );
         Directory.CreateDirectory(root);
         var salt = NewSalt();
         try
@@ -177,7 +210,11 @@ public sealed class Stage18SingleInstanceTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { }
+            try
+            {
+                Directory.Delete(root, true);
+            }
+            catch { }
         }
     }
 
@@ -187,13 +224,20 @@ public sealed class Stage18SingleInstanceTests
         var prev = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
         try
         {
-            var custom = Path.Combine(Path.GetTempPath(), "halo-need18-" + Guid.NewGuid().ToString("N") + ".json");
+            var custom = Path.Combine(
+                Path.GetTempPath(),
+                "halo-need18-" + Guid.NewGuid().ToString("N") + ".json"
+            );
             Environment.SetEnvironmentVariable("HALO_BOOTSTRAP_PATH", custom);
             Assert.Equal(Path.GetFullPath(custom), SingleInstanceGuard.ResolveBootstrapProbePath());
 
             Environment.SetEnvironmentVariable("HALO_BOOTSTRAP_PATH", null);
             var fallback = SingleInstanceGuard.ResolveBootstrapProbePath();
-            Assert.EndsWith(Path.Combine("HaloAgent", "bootstrap.json"), fallback, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith(
+                Path.Combine("HaloAgent", "bootstrap.json"),
+                fallback,
+                StringComparison.OrdinalIgnoreCase
+            );
         }
         finally
         {
@@ -221,7 +265,10 @@ public sealed class Stage18SingleInstanceTests
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        var probe = Path.Combine(Path.GetTempPath(), "halo-need18-" + Guid.NewGuid().ToString("N") + ".json");
+        var probe = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-" + Guid.NewGuid().ToString("N") + ".json"
+        );
         var g = SingleInstanceGuard.TryAcquireApp(probe, NewSalt(), out _);
         Assert.NotNull(g);
         g!.Dispose();
@@ -231,7 +278,10 @@ public sealed class Stage18SingleInstanceTests
     [Fact]
     public void FileLockDenied_FallsBack_MutexOnly()
     {
-        var root = Path.Combine(Path.GetTempPath(), "halo-need18-deny-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "halo-need18-deny-" + Guid.NewGuid().ToString("N")
+        );
         Directory.CreateDirectory(root);
         var salt = NewSalt();
         // 预占 .app.lock 为目录，使 FileStream Create 抛 UnauthorizedAccessException，触发 mutex-only 降级。
@@ -249,7 +299,11 @@ public sealed class Stage18SingleInstanceTests
         finally
         {
             restore();
-            try { Directory.Delete(root, true); } catch { }
+            try
+            {
+                Directory.Delete(root, true);
+            }
+            catch { }
         }
     }
 }

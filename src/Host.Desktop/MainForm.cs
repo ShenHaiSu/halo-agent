@@ -53,18 +53,20 @@ public sealed class MainForm : Form
         BackColor = Color.FromArgb(13, 17, 23); // #0d1117 防止启动瞬间白屏闪烁
 
         var initialUrl = ResolveInitialUrl();
-        HaloLogger.App.Info($"MainForm initializing ChromiumWebBrowser (isDevelopment={_isDevelopment}, url={initialUrl})");
+        HaloLogger.App.Info(
+            $"MainForm initializing ChromiumWebBrowser (isDevelopment={_isDevelopment}, url={initialUrl})"
+        );
 
         CefSharpSettings.ConcurrentTaskExecution = true;
 
-         _chromeBrowser = new ChromiumWebBrowser(initialUrl)
-         {
-             Dock = DockStyle.Fill,
-             MenuHandler = new CustomMenuHandler(_isDevelopment),
-             LifeSpanHandler = new CustomLifeSpanHandler(),
-             // 导航守卫：外部链接永不进主帧（http(s) 转系统浏览器），杜绝 markdown 链接点击白屏
-             RequestHandler = new ExternalNavigationRequestHandler()
-         };
+        _chromeBrowser = new ChromiumWebBrowser(initialUrl)
+        {
+            Dock = DockStyle.Fill,
+            MenuHandler = new CustomMenuHandler(_isDevelopment),
+            LifeSpanHandler = new CustomLifeSpanHandler(),
+            // 导航守卫：外部链接永不进主帧（http(s) 转系统浏览器），杜绝 markdown 链接点击白屏
+            RequestHandler = new ExternalNavigationRequestHandler()
+        };
         _hostBridgeFacade = new HostBridgeFacade(this, _storageManager, _gpuDisabled);
 
         // 注册异步 JS Bridge 对象至 window.hostBridge
@@ -72,7 +74,8 @@ public sealed class MainForm : Form
         _chromeBrowser.JavascriptObjectRepository.Register(
             "hostBridge",
             _hostBridgeFacade,
-            options: BindingOptions.DefaultBinder);
+            options: BindingOptions.DefaultBinder
+        );
 
         _chromeBrowser.IsBrowserInitializedChanged += OnBrowserInitializedChanged;
         _chromeBrowser.FrameLoadEnd += OnFrameLoadEnd;
@@ -80,19 +83,32 @@ public sealed class MainForm : Form
 
         Controls.Add(_chromeBrowser);
         // need22-P4 H9：启动时孤儿 tool_calls 全量扫描（后台执行，不阻塞 UI；随窗体关闭取消；异常进日志不吞）
-        _ = Task.Run(async () =>
-        {
-            try
+        _ = Task.Run(
+            async () =>
             {
-                var response = await _hostBridgeFacade.ScanAndHealAllSessions(_orphanScanCts.Token).ConfigureAwait(false);
-                if (!response.Ok)
+                try
                 {
-                    HaloLogger.App.Error($"[History] startup orphan scan reported failure: {response.Code}");
+                    var response = await _hostBridgeFacade
+                        .ScanAndHealAllSessions(_orphanScanCts.Token)
+                        .ConfigureAwait(false);
+                    if (!response.Ok)
+                    {
+                        HaloLogger.App.Error(
+                            $"[History] startup orphan scan reported failure: {response.Code}"
+                        );
+                    }
                 }
-            }
-            catch (OperationCanceledException) { HaloLogger.App.Info("[History] startup orphan scan cancelled."); }
-            catch (Exception ex) { HaloLogger.App.Error("[History] startup orphan scan failed", ex); }
-        }, _orphanScanCts.Token);
+                catch (OperationCanceledException)
+                {
+                    HaloLogger.App.Info("[History] startup orphan scan cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Error("[History] startup orphan scan failed", ex);
+                }
+            },
+            _orphanScanCts.Token
+        );
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
     }
 
@@ -131,8 +147,10 @@ public sealed class MainForm : Form
         HaloLogger.App.Info($"Main frame loaded: url={e.Url}, httpStatus={e.HttpStatusCode}");
 
         var autoVerifyOutput = Environment.GetEnvironmentVariable("HALO_AUTOVERIFY_OUTPUT");
-        if (!string.IsNullOrWhiteSpace(autoVerifyOutput) &&
-            Interlocked.CompareExchange(ref _autoVerifyTriggered, 1, 0) == 0)
+        if (
+            !string.IsNullOrWhiteSpace(autoVerifyOutput)
+            && Interlocked.CompareExchange(ref _autoVerifyTriggered, 1, 0) == 0
+        )
         {
             _ = RunAutoVerifyProbeAsync(autoVerifyOutput);
         }
@@ -145,7 +163,9 @@ public sealed class MainForm : Form
             return;
         }
 
-        HaloLogger.App.Error($"Browser LoadError: url={e.FailedUrl}, code={e.ErrorCode}, text={e.ErrorText}");
+        HaloLogger.App.Error(
+            $"Browser LoadError: url={e.FailedUrl}, code={e.ErrorCode}, text={e.ErrorText}"
+        );
     }
 
     /// <summary>
@@ -159,7 +179,8 @@ public sealed class MainForm : Form
             // 等待 Vue 3 挂载与 CefSharp.BindObjectAsync('hostBridge') 完成初始化
             await Task.Delay(1800).ConfigureAwait(false);
 
-            const string inspectScript = @"
+            const string inspectScript =
+                @"
 (async function() {
   if (window.CefSharp && !window.hostBridge) {
     await window.CefSharp.BindObjectAsync('hostBridge');
@@ -236,14 +257,15 @@ public sealed class MainForm : Form
   });
 })();";
 
-            var evalResponse = await _chromeBrowser.EvaluateScriptAsync(inspectScript, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-            var jsonPayload = evalResponse.Success && evalResponse.Result is string str
-                ? str
-                : JsonSerializer.Serialize(new
-                {
-                    error = evalResponse.Message,
-                    success = evalResponse.Success
-                });
+            var evalResponse = await _chromeBrowser
+                .EvaluateScriptAsync(inspectScript, TimeSpan.FromSeconds(10))
+                .ConfigureAwait(false);
+            var jsonPayload =
+                evalResponse.Success && evalResponse.Result is string str
+                    ? str
+                    : JsonSerializer.Serialize(
+                        new { error = evalResponse.Message, success = evalResponse.Success }
+                    );
 
             var dir = Path.GetDirectoryName(Path.GetFullPath(reportFilePath));
             if (!string.IsNullOrEmpty(dir))
@@ -275,12 +297,16 @@ public sealed class MainForm : Form
         {
             try
             {
-                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-                TopMost = true; TopMost = false; // 闪置顶一次，抢回任务栏焦点
+                if (WindowState == FormWindowState.Minimized)
+                    WindowState = FormWindowState.Normal;
+                TopMost = true;
+                TopMost = false; // 闪置顶一次，抢回任务栏焦点
                 Activate();
                 HaloLogger.App.Info("MainForm activated by second-instance WM_SHOWME.");
             }
-            catch { /* 关闭期吞掉 */ }
+            catch
+            { /* 关闭期吞掉 */
+            }
             return;
         }
         base.WndProc(ref m);
@@ -288,7 +314,13 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        try { _orphanScanCts.Cancel(); } catch { /* 关闭期忽略 */ }
+        try
+        {
+            _orphanScanCts.Cancel();
+        }
+        catch
+        { /* 关闭期忽略 */
+        }
         _orphanScanCts.Dispose();
         JsEventDispatcher.Shutdown();
         _hostBridgeFacade.HttpClientFactory.Dispose();

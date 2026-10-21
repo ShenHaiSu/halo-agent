@@ -14,31 +14,56 @@ public sealed class ListDirTool : IToolHandler
     public const int DefaultMaxDepth = 2;
     public const int MaxAllowedDepth = 10;
 
-    private static readonly HashSet<string> ExcludedDirNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".git", "node_modules", "bin", "obj", "dist", "__pycache__", ".vs",
-    };
+    private static readonly HashSet<string> ExcludedDirNames =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".git",
+            "node_modules",
+            "bin",
+            "obj",
+            "dist",
+            "__pycache__",
+            ".vs",
+        };
 
     public string Name => "list_dir";
 
     // NEED17 PromptBrief: List directory contents
     public string Description =>
-        "List directory structure in the workspace with file sizes. " +
-        "Supports recursion depth control; noisy directories (.git, node_modules, bin, obj, ...) are auto-excluded. " +
-        "Directories end with /. Empty dir returns an empty marker, not an error. " +
-        "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
+        "List directory structure in the workspace with file sizes. "
+        + "Supports recursion depth control; noisy directories (.git, node_modules, bin, obj, ...) are auto-excluded. "
+        + "Directories end with /. Empty dir returns an empty marker, not an error. "
+        + "Large outputs are truncated to head+tail within a fixed budget; the full text is spilled to a log file path in the result. Use read_file(offset,limit) or grep_search to page, never re-run a broad command to dump everything.";
 
     public ToolDefinition GetDefinition()
     {
         string schema = new ToolSchemaBuilder()
-            .AddString("path", "Relative directory path from workspace root or absolute path. Defaults to \".\".", defaultValue: ".")
-            .AddBoolean("recursive", "Recurse into subdirectories. Defaults to false.", defaultValue: false)
-            .AddInteger("max_depth", "Maximum recursion depth (1-10). Defaults to 2.", minimum: 1, maximum: 10, defaultValue: 2)
+            .AddString(
+                "path",
+                "Relative directory path from workspace root or absolute path. Defaults to \".\".",
+                defaultValue: "."
+            )
+            .AddBoolean(
+                "recursive",
+                "Recurse into subdirectories. Defaults to false.",
+                defaultValue: false
+            )
+            .AddInteger(
+                "max_depth",
+                "Maximum recursion depth (1-10). Defaults to 2.",
+                minimum: 1,
+                maximum: 10,
+                defaultValue: 2
+            )
             .Build();
         return new(Name, Description, schema);
     }
 
-    public Task<ToolResult> ExecuteAsync(ToolCallDto call, ToolContext context, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(
+        ToolCallDto call,
+        ToolContext context,
+        CancellationToken ct = default
+    )
     {
         var sw = Stopwatch.StartNew();
         try
@@ -65,9 +90,12 @@ public sealed class ListDirTool : IToolHandler
             }
             catch (JsonException ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。请检查 path/recursive/max_depth 字段后重试。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        $"参数 JSON 解析失败：{ex.Message}。请检查 path/recursive/max_depth 字段后重试。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             if (maxDepth < 1)
@@ -84,10 +112,15 @@ public sealed class ListDirTool : IToolHandler
             // need22-P0 S1：读路径强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
             string fullPath;
             {
-                var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(workspaceRoot, string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg);
+                var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
+                    workspaceRoot,
+                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg
+                );
                 if (!ok)
                 {
-                    return Task.FromResult(ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds)
+                    );
                 }
                 fullPath = resolved;
             }
@@ -97,19 +130,24 @@ public sealed class ListDirTool : IToolHandler
                 if (File.Exists(fullPath))
                 {
                     var fi = new FileInfo(fullPath);
-                    return Task.FromResult(ToolResult.Ok(
-                        $"路径 '{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是文件而非目录（{fi.Length} 字节）。请用 read_file 读取。",
-                        durationMs: sw.ElapsedMilliseconds));
+                    return Task.FromResult(
+                        ToolResult.Ok(
+                            $"路径 '{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是文件而非目录（{fi.Length} 字节）。请用 read_file 读取。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
                 }
 
-                return Task.FromResult(ToolResult.Fail(
-                    $"目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请检查 path 参数后重试。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail(
+                        $"目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请检查 path 参数后重试。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             var sb = new StringBuilder();
-            sb.Append("目录树：").Append(fullPath)
-              .Append("（深度≤").Append(effectiveDepth).Append(')');
+            sb.Append("目录树：").Append(fullPath).Append("（深度≤").Append(effectiveDepth).Append(')');
             int dirCount = 0;
             int fileCount = 0;
 
@@ -119,19 +157,24 @@ public sealed class ListDirTool : IToolHandler
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResult.Fail(
-                    $"目录遍历失败：{ex.Message}。",
-                    durationMs: sw.ElapsedMilliseconds));
+                return Task.FromResult(
+                    ToolResult.Fail($"目录遍历失败：{ex.Message}。", durationMs: sw.ElapsedMilliseconds)
+                );
             }
 
             sb.AppendLine().Append($"共 {dirCount} 个目录，{fileCount} 个文件。");
-            return Task.FromResult(ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds));
+            return Task.FromResult(
+                ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds)
+            );
         }
         catch (Exception ex)
         {
-            return Task.FromResult(ToolResult.Fail(
-                $"list_dir 执行异常：{ex.Message}。请修正参数后重试。",
-                durationMs: sw.ElapsedMilliseconds));
+            return Task.FromResult(
+                ToolResult.Fail(
+                    $"list_dir 执行异常：{ex.Message}。请修正参数后重试。",
+                    durationMs: sw.ElapsedMilliseconds
+                )
+            );
         }
         finally
         {
@@ -145,7 +188,8 @@ public sealed class ListDirTool : IToolHandler
         int maxDepth,
         StringBuilder sb,
         ref int dirCount,
-        ref int fileCount)
+        ref int fileCount
+    )
     {
         string[] entries;
         try
@@ -196,7 +240,11 @@ public sealed class ListDirTool : IToolHandler
         foreach (string subDir in dirs)
         {
             dirCount++;
-            sb.AppendLine().Append(indent).Append("├─ ").Append(Path.GetFileName(subDir)).Append('/');
+            sb.AppendLine()
+                .Append(indent)
+                .Append("├─ ")
+                .Append(Path.GetFileName(subDir))
+                .Append('/');
             if (depth + 1 < maxDepth)
             {
                 Walk(subDir, depth + 1, maxDepth, sb, ref dirCount, ref fileCount);

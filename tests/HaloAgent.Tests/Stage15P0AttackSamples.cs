@@ -43,24 +43,37 @@ public sealed class Stage15P0AttackSamples : IDisposable
         _storageManager = StoragePathManager.Initialize(
             customBootstrapFilePath: Path.Combine(_bootstrapRoot, "bootstrap.json"),
             customDefaultDataRoot: _tempRoot,
-            customFallbackDataRoot: _tempRoot);
+            customFallbackDataRoot: _tempRoot
+        );
         _repository = new SessionRepository(_storageManager);
         _service = new WorkspaceSessionService(_repository);
         _registry = new ToolRegistry();
         _projectDir = Path.Combine(_tempRoot, "Projects", "Need22P0");
         Directory.CreateDirectory(_projectDir);
-        _workspace = _service.AddOrUpdateWorkspaceAsync(_projectDir, "need22 P0 attack").GetAwaiter().GetResult();
+        _workspace = _service
+            .AddOrUpdateWorkspaceAsync(_projectDir, "need22 P0 attack")
+            .GetAwaiter()
+            .GetResult();
         _session = _service.CreateSessionAsync(_workspace.Id, "atk").GetAwaiter().GetResult();
-        _context = new ToolContext { WorkspaceRoot = _projectDir, WorkspaceId = _workspace.Id, SessionId = _session.Id, DataRoot = _tempRoot };
+        _context = new ToolContext
+        {
+            WorkspaceRoot = _projectDir,
+            WorkspaceId = _workspace.Id,
+            SessionId = _session.Id,
+            DataRoot = _tempRoot
+        };
     }
 
     public void Dispose()
     {
         try
         {
-            if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, recursive: true);
-            if (Directory.Exists(_bootstrapRoot)) Directory.Delete(_bootstrapRoot, recursive: true);
-            if (Directory.Exists(_outsideDir)) Directory.Delete(_outsideDir, recursive: true);
+            if (Directory.Exists(_tempRoot))
+                Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(_bootstrapRoot))
+                Directory.Delete(_bootstrapRoot, recursive: true);
+            if (Directory.Exists(_outsideDir))
+                Directory.Delete(_outsideDir, recursive: true);
         }
         catch { }
     }
@@ -71,7 +84,10 @@ public sealed class Stage15P0AttackSamples : IDisposable
     public async Task A1_Write_Traversal_Rejected()
     {
         string evilOutside = Path.Combine(_outsideDir, "evil_a1.txt");
-        var r = await Call("write_file", new { file_path = "../../evil_a1.txt", content = "pwned\n" });
+        var r = await Call(
+            "write_file",
+            new { file_path = "../../evil_a1.txt", content = "pwned\n" }
+        );
         Assert.False(r.Success);
         Assert.Contains("PATH_OUTSIDE_WORKSPACE", r.Error ?? string.Empty);
         Assert.False(File.Exists(evilOutside));
@@ -139,7 +155,10 @@ public sealed class Stage15P0AttackSamples : IDisposable
     [Fact(DisplayName = "A2-1: 越界 workdir 拒绝")]
     public async Task A2_WorkdirOutside_Rejected()
     {
-        var r = await CallRaw("exec_command", "{\"command\":\"echo hi\",\"workdir\":\"" + _outsideDir.Replace("\\", "\\\\") + "\"}");
+        var r = await CallRaw(
+            "exec_command",
+            "{\"command\":\"echo hi\",\"workdir\":\"" + _outsideDir.Replace("\\", "\\\\") + "\"}"
+        );
         Assert.False(r.Success);
         Assert.Contains("PATH_OUTSIDE_WORKSPACE", r.Error ?? string.Empty);
     }
@@ -175,7 +194,11 @@ public sealed class Stage15P0AttackSamples : IDisposable
     [Fact(DisplayName = "A2-5: 白名单内 echo 放行（Windows）")]
     public async Task A2_Allowlist_Echo_Ok()
     {
-        if (!System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        if (
+            !System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Windows
+            )
+        )
         {
             return;
         }
@@ -192,7 +215,10 @@ public sealed class Stage15P0AttackSamples : IDisposable
         var v = ToolCallValidator.Validate("nope_tool_xyz", "{}");
         Assert.False(v.Success);
         Assert.Equal("UNKNOWN_TOOL", v.Code);
-        var d = await _registry.DispatchAsync(new ToolCallDto("c1", "nope_tool_xyz", "{}"), _context);
+        var d = await _registry.DispatchAsync(
+            new ToolCallDto("c1", "nope_tool_xyz", "{}"),
+            _context
+        );
         Assert.False(d.Success);
         Assert.Equal("UNKNOWN_TOOL", d.ErrorCode);
     }
@@ -202,7 +228,10 @@ public sealed class Stage15P0AttackSamples : IDisposable
     [Fact(DisplayName = "A4-1: skill_tool create 走通校验")]
     public void A4_Skill_Create_Valid()
     {
-        var r = ToolCallValidator.Validate("skill_tool", "{\"action\":\"create\",\"name\":\"ab\",\"content\":\"# T\\nbody\"}");
+        var r = ToolCallValidator.Validate(
+            "skill_tool",
+            "{\"action\":\"create\",\"name\":\"ab\",\"content\":\"# T\\nbody\"}"
+        );
         Assert.True(r.Success, r.Message);
     }
 
@@ -220,8 +249,13 @@ public sealed class Stage15P0AttackSamples : IDisposable
     {
         string f = Path.Combine(_projectDir, "conc.txt");
         File.WriteAllText(f, "concurrent-base-line\n", new UTF8Encoding(false));
-        var tasks = Enumerable.Range(0, 20).Select(_ => Task.Run(() =>
-            BackupStore.WriteBackup(f, _tempRoot, _workspace.Id, _session.Id, "atk")));
+        var tasks = Enumerable
+            .Range(0, 20)
+            .Select(_ =>
+                Task.Run(
+                    () => BackupStore.WriteBackup(f, _tempRoot, _workspace.Id, _session.Id, "atk")
+                )
+            );
         var results = await Task.WhenAll(tasks);
         byte[] expect = File.ReadAllBytes(f);
         foreach (var r in results)
@@ -239,9 +273,14 @@ public sealed class Stage15P0AttackSamples : IDisposable
         {
             BackupStore.GlobalQuotaBytes = 10; // 极小配额必超
             string f = Path.Combine(_projectDir, "quota.txt");
-            File.WriteAllText(f, "quota-base-line-longer-than-ten-bytes\n", new UTF8Encoding(false));
-            var ex = Assert.Throws<InvalidOperationException>(() =>
-                BackupStore.WriteBackup(f, _tempRoot, _workspace.Id, _session.Id, "atk"));
+            File.WriteAllText(
+                f,
+                "quota-base-line-longer-than-ten-bytes\n",
+                new UTF8Encoding(false)
+            );
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => BackupStore.WriteBackup(f, _tempRoot, _workspace.Id, _session.Id, "atk")
+            );
             Assert.Contains("BACKUP_QUOTA_EXCEEDED", ex.Message);
         }
         finally
@@ -257,19 +296,26 @@ public sealed class Stage15P0AttackSamples : IDisposable
         const string orig = "original-undo-line\n";
         var w = await Call("write_file", new { file_path = f, content = orig });
         Assert.True(w.Success, w.Error);
-        var e = await Call("edit_file", new
-        {
-            file_path = f,
-            old_string = "original-undo-line\n",
-            new_string = "tampered-undo-line\n",
-            match_mode = "exact",
-        });
+        var e = await Call(
+            "edit_file",
+            new
+            {
+                file_path = f,
+                old_string = "original-undo-line\n",
+                new_string = "tampered-undo-line\n",
+                match_mode = "exact",
+            }
+        );
         Assert.True(e.Success, e.Error);
         string dir = BackupStore.SessionBackupDir(_tempRoot, _workspace.Id, _session.Id);
-        string bak = Directory.GetFiles(dir, "*.bak").OrderByDescending(File.GetLastWriteTimeUtc).First();
+        string bak = Directory
+            .GetFiles(dir, "*.bak")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .First();
         // 删除 meta，强制走 index.json 精确回查
         string meta = bak + ".meta.json";
-        if (File.Exists(meta)) File.Delete(meta);
+        if (File.Exists(meta))
+            File.Delete(meta);
         var u = await Call("undo_edit", new { backup_path = bak });
         Assert.True(u.Success, u.Error);
         Assert.Equal(orig, File.ReadAllText(Path.Combine(_projectDir, f), Encoding.UTF8));
@@ -284,7 +330,9 @@ public sealed class Stage15P0AttackSamples : IDisposable
         var (display, spilled) = ToolOutputGuard.ApplyGuard(big, _tempRoot, "w", "s", "../../x");
         Assert.Null(spilled);
         Assert.Contains("INVALID_CALL_ID", display);
-        Assert.False(Directory.Exists(Path.Combine(_tempRoot, "sessions", "w", "s", "tool-outputs", "x")));
+        Assert.False(
+            Directory.Exists(Path.Combine(_tempRoot, "sessions", "w", "s", "tool-outputs", "x"))
+        );
     }
 
     [Fact(DisplayName = "A6-2: spill 落盘前脱敏无 sk- 明文")]
@@ -292,7 +340,13 @@ public sealed class Stage15P0AttackSamples : IDisposable
     {
         string secret = "sk-proj-abcdef1234567890SECRET";
         string big = "prefix " + secret + " " + new string('z', 17000);
-        var (display, spilled) = ToolOutputGuard.ApplyGuard(big, _tempRoot, _workspace.Id, _session.Id, "call_a6secret");
+        var (display, spilled) = ToolOutputGuard.ApplyGuard(
+            big,
+            _tempRoot,
+            _workspace.Id,
+            _session.Id,
+            "call_a6secret"
+        );
         Assert.NotNull(spilled);
         string onDisk = File.ReadAllText(spilled!);
         Assert.DoesNotContain(secret, onDisk);
@@ -303,7 +357,9 @@ public sealed class Stage15P0AttackSamples : IDisposable
     [Fact(DisplayName = "A6-3: MaskSecret 全掩码不泄露首尾")]
     public void A6_Mask_Full()
     {
-        string m = Host.Desktop.Infrastructure.Storage.SecretProtector.MaskSecret("sk-proj-abcdef-9876543210");
+        string m = Host.Desktop.Infrastructure.Storage.SecretProtector.MaskSecret(
+            "sk-proj-abcdef-9876543210"
+        );
         Assert.DoesNotContain("9876543210", m);
         Assert.DoesNotContain("abcdef", m);
         Assert.Contains("****", m);
@@ -319,10 +375,22 @@ public sealed class Stage15P0AttackSamples : IDisposable
     }
 
     private string Abs(string n) => Path.Combine(_projectDir, n);
+
     private Task<ToolResult> Call(string name, object args) =>
-        _registry.DispatchAsync(new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)), _context);
+        _registry.DispatchAsync(
+            new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, Args(args)),
+            _context
+        );
+
     private Task<ToolResult> CallRaw(string name, string json) =>
-        _registry.DispatchAsync(new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, json), _context);
+        _registry.DispatchAsync(
+            new ToolCallDto("call_" + Guid.NewGuid().ToString("N"), name, json),
+            _context
+        );
+
     private static string Args(object o) =>
-        JsonSerializer.Serialize(o, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        JsonSerializer.Serialize(
+            o,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+        );
 }
