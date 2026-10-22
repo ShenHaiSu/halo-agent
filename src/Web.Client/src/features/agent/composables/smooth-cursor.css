@@ -1,0 +1,20 @@
+.smooth-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.75;
+  animation: smooth-blink 1s steps(2, start) infinite;
+}
+@keyframes smooth-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smooth-cursor {
+    animation: none;
+  }
+}

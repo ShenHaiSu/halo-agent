@@ -14,8 +14,8 @@
         {{ runnerLabel }}
       </n-tag>
 
-      <span v-if="summaryText" class="font-mono text-secondary truncate flex-1 min-w-0" :title="summaryText">
-        {{ summaryText }}
+      <span v-if="headText" class="font-mono text-secondary truncate flex-1 min-w-0" :title="headText">
+        {{ headText }}
       </span>
 
       <!-- diff stats -->
@@ -27,12 +27,13 @@
 
       <!-- status -->
       <n-tag
-        :type="card.status === 'done' ? 'success' : card.status === 'error' ? 'error' : 'info'"
+        :type="effectiveStatus === 'done' ? 'success' : effectiveStatus === 'error' ? 'error' : 'info'"
         size="tiny"
         :bordered="false"
         class="shrink-0"
+        :role="isExec ? 'status' : undefined"
       >
-        {{ card.status === 'done' ? '已完成' : card.status === 'error' ? '失败' : '执行中' }}
+        {{ effectiveStatus === 'done' ? '已完成' : effectiveStatus === 'error' ? '失败' : '执行中' }}
       </n-tag>
       <span v-if="card.durationMs !== null && card.durationMs !== undefined" class="font-mono text-[11px] text-secondary shrink-0">
         {{ card.durationMs }}ms
@@ -62,7 +63,7 @@
     </div>
     <!-- Body -->
     <n-collapse-transition :show="expanded">
-      <div class="border-t border-subtle">
+      <div v-if="expanded" class="border-t border-subtle">
         <!-- (1) edit_file / write_file -> Unified Diff -->
         <div v-if="isFileEdit" class="font-mono app-text-small leading-relaxed">
           <div
@@ -284,7 +285,38 @@ const filePath = computed(() => {
   return typeof v === 'string' ? v : '';
 });
 
-const summaryText = computed(() => {
+// bigChange P2-6: head 运行/完成两套文案；Bash 以 shell exit 覆盖调用状态。
+const effectiveStatus = computed<'running' | 'done' | 'error'>(() => {
+  if (isExec.value && props.card.exitCode !== null && props.card.exitCode !== undefined) {
+    return props.card.exitCode === 0 ? 'done' : 'error';
+  }
+  if (props.card.status === 'error') return 'error';
+  if (props.card.status === 'done') return 'done';
+  return 'running';
+});
+const headRunning = computed(() => {
+  const a = argsObj.value;
+  const s = (v: unknown): string => (typeof v === 'string' ? v : '');
+  switch (props.card.functionName) {
+    case 'read_file':
+      return filePath.value ? `正在读取 ${filePath.value}` : '正在读取文件';
+    case 'write_file':
+      return filePath.value ? `正在写入 ${filePath.value}` : '正在写入文件';
+    case 'edit_file':
+      return filePath.value ? `正在修改 ${filePath.value}` : '正在修改文件';
+    case 'list_dir':
+      return s(a['path'] || a['dir']) ? `正在浏览 ${s(a['path'] || a['dir'])}` : '正在浏览目录';
+    case 'grep_search':
+      return s(a['pattern'] || a['query']) ? `正在检索 ${s(a['pattern'] || a['query'])}` : '正在检索';
+    case 'exec_command':
+      return '正在运行';
+    case 'view_image':
+      return filePath.value ? `正在查看 ${filePath.value}` : '正在查看图片';
+    default:
+      return '正在执行';
+  }
+});
+const headCompleted = computed(() => {
   const a = argsObj.value;
   const s = (v: unknown): string => (typeof v === 'string' ? v : '');
   switch (props.card.functionName) {
@@ -306,6 +338,7 @@ const summaryText = computed(() => {
       return filePath.value;
   }
 });
+const headText = computed(() => (effectiveStatus.value === 'running' ? headRunning.value : headCompleted.value));
 
 interface DiffLine {
   kind: 'add' | 'del' | 'ctx';
