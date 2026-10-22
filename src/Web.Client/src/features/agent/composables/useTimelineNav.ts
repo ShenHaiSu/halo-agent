@@ -2,7 +2,8 @@
  * need19：时间轴锚点注册表 + 跳转（模块内 Map，非响应式）。
  * 使用方：WorkbenchView provide → MessageTimeline/SubHistoryView 注册 → HistoryTocPanel 跳转
  */
-import { inject, provide, type InjectionKey } from 'vue';
+import { inject, provide, ref, type InjectionKey } from 'vue';
+import { reduceTranscriptScroll, type ScrollGesture, type ScrollState } from '@features/session/utils/transcriptScroll';
 
 export type JumpBehavior = 'auto' | 'smooth';
 export interface ScrollToAnchorOptions {
@@ -241,4 +242,55 @@ export function createBottomPin(getEl: () => HTMLElement | null, opts: BottomPin
     }
   }
   return { forceToBottom, scheduleToBottom, cancelScheduled, isPinnedToBottom, scrollIfNeeded, bindUserScroll, unbindUserScroll };
+}
+/** bigChange P2-3: pinned/showJump dual-mode state machine (reducer-backed). */
+export interface FollowState {
+  pinned: boolean;
+  showJump: boolean;
+}
+export function useFollowMode(initial?: Partial<ScrollState>): {
+  pinnedRef: ReturnType<typeof ref<boolean>>;
+  showJump: ReturnType<typeof ref<boolean>>;
+  releaseFollow: () => void;
+  jumpToLatest: (scrollToBottom: () => void, onReturnToLatest?: () => void) => void;
+  onSendRisingEdge: (scrollToBottom: () => void) => void;
+  ingest: (distanceFromBottom: number, gesture: ScrollGesture) => void;
+} {
+  const pinnedRef = ref(initial?.pinned ?? true);
+  const showJump = ref(initial?.showJump ?? !pinnedRef.value);
+  function apply(s: ScrollState): void {
+    pinnedRef.value = s.pinned;
+    showJump.value = s.showJump;
+  }
+  function ingest(distanceFromBottom: number, gesture: ScrollGesture): void {
+    apply(reduceTranscriptScroll(distanceFromBottom, gesture, { pinned: pinnedRef.value, showJump: showJump.value }));
+  }
+  function releaseFollow(): void {
+    pinnedRef.value = false;
+    showJump.value = true;
+  }
+  function jumpToLatest(scrollToBottom: () => void, onReturnToLatest?: () => void): void {
+    pinnedRef.value = true;
+    showJump.value = false;
+    try {
+      onReturnToLatest?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      scrollToBottom();
+    } catch (e) {
+      console.warn('[timelineNav] jumpToLatest failed:', e);
+    }
+  }
+  function onSendRisingEdge(scrollToBottom: () => void): void {
+    pinnedRef.value = true;
+    showJump.value = false;
+    try {
+      scrollToBottom();
+    } catch (e) {
+      console.warn('[timelineNav] send edge failed:', e);
+    }
+  }
+  return { pinnedRef, showJump, releaseFollow, jumpToLatest, onSendRisingEdge, ingest };
 }
