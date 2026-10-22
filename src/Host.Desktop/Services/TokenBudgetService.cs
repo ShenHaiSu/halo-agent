@@ -16,8 +16,12 @@ namespace Host.Desktop.Services;
 public sealed partial class TokenBudgetService : ITokenBudgetService
 {
     public const string TruncationNotice = "[注：为适配当前模型最大上下文限制，较早的历史对话已自动折叠省略]";
-    public const int DefaultSafetyBuffer = 1024;
 
+    /// <summary>bigChange P1-2：字符/token 换算系数（英文 3.5 chars/token；旧 3.6 已替换）。</summary>
+    public const double CharsPerToken = 3.5;
+
+    /// <summary>bigChange P1-2：单张存活图片按 4800 字符计费。</summary>
+    public const int ImageCharsPerImage = 4800;
     private readonly ProviderConfigService? _providerConfigService;
     private readonly IWorkspaceSessionService? _workspaceSessionService;
 
@@ -32,7 +36,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
 
     /// <summary>
     /// 纯 C# 离线启发式 Token 估算：
-    /// ASCII 英文字符/代码符号：约 3.6 chars / token
+    /// ASCII 英文字符/代码符号：约 3.5 chars / token
     /// CJK 中日韩字符：约 1.55 tokens / 字符
     /// 其余字符：约 1.2 tokens / 字符
     /// </summary>
@@ -67,7 +71,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
             }
         }
 
-        double tokens = (asciiCount / 3.6) + (cjkCount * 1.55) + (otherCount * 1.2);
+        double tokens = (asciiCount / CharsPerToken) + (cjkCount * 1.55) + (otherCount * 1.2);
         return Math.Max(1, (int)Math.Ceiling(tokens));
     }
 
@@ -79,8 +83,8 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
     /// <summary>
     /// need04-05：纯启发式估算（不再消费 InputTokens/OutputTokens 快照，避免总量被当增量累加）。
     /// 需要会话总量请用 <see cref="ResolveUsedInputTokens"/>。
-    /// need09-02：图片开销 = 每张存活引用 image:&lt;sha16&gt;:&lt;w&gt;x&lt;h&gt;:&lt;mime&gt; 计 <see cref="ImageTokensPerImage"/>（默认约1000，可配）；
-    /// 已被裁剪为 <see cref="ImageOmittedPlaceholder"/> 的占位只按文本计费，不再加图片开销。
+    /// bigChange P1-2：图片开销按 4800 字符折算（见 ImageTokensPerImage，可配）；
+    /// 已被裁剪为占位的只按文本计费，不再加图片开销。
     /// </summary>
     public static int EstimateMessageTokens(UnifiedChatMessage message)
     {
@@ -109,8 +113,9 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
     /// <summary>need09-02：图片引用被裁剪后的占位（保留文字，只去图片开销）。</summary>
     public const string ImageOmittedPlaceholder = "[image omitted]";
 
-    /// <summary>need09-02：单张存活图片引用的固定开销（tokens，默认约1000，可配）。</summary>
-    public static int ImageTokensPerImage { get; set; } = 1000;
+    /// <summary>bigChange P1-2：单张存活图片引用的固定开销（tokens，默认 4800 字符折算，可配）。</summary>
+    public static int ImageTokensPerImage { get; set; } =
+        (int)Math.Ceiling(ImageCharsPerImage / CharsPerToken);
     private static readonly Regex ImageRefRegex =
         new(@"image:[0-9A-Fa-f]{16}:\d+x\d+:[A-Za-z0-9/+.\-]+", RegexOptions.Compiled);
 
