@@ -193,7 +193,13 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
 
         try
         {
-            response = await SendRequestAsync(client, request, endpointUrl, requestPayload, ct)
+            response = await SendThroughPipelineAsync(
+                    client,
+                    request,
+                    endpointUrl,
+                    requestPayload,
+                    ct
+                )
                 .ConfigureAwait(false);
 
             // 针对部分老旧接口不识别 stream_options 返回 400 Bad Request 的自动降级重试机制
@@ -211,7 +217,13 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
                 requestPayload = adapter.SerializeRequest(request, includeUsageInStream: false);
 
                 response.Dispose();
-                response = await SendRequestAsync(client, request, endpointUrl, requestPayload, ct)
+                response = await SendThroughPipelineAsync(
+                        client,
+                        request,
+                        endpointUrl,
+                        requestPayload,
+                        ct
+                    )
                     .ConfigureAwait(false);
             }
 
@@ -230,7 +242,7 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
                     );
                     requestPayload = StripStrictFromPayload(requestPayload);
                     response.Dispose();
-                    response = await SendRequestAsync(
+                    response = await SendThroughPipelineAsync(
                             client,
                             request,
                             endpointUrl,
