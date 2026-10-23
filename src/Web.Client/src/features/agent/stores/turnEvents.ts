@@ -27,7 +27,50 @@ function touchSessionClock(sessionId: string, iso?: string): void {
   }
 }
 
-// need04-03：分流刷新：tool-completed 只内存更新（调用方已标脏）；persisted/finish 才拉全量对账
+// need23-R4：全量重拉合并窗口。同一 session 在 400ms 内的多次"需重拉"请求只执行最后一次，
+// 且 "finish" 优先级高于 "persisted"（保证收尾那次一定发生）；finishTurn 走 reloadNow 立即拉并取消待定定时器。
+const RELOAD_DEBOUNCE_MS = 400;
+const pendingReload = new Map<string, { reason: 'persisted' | 'finish'; timer: number }>();
+
+const reloadPriority = (r: string): number => (r === 'finish' ? 2 : 1);
+
+async function doReload(sid: string, reason: string): Promise<void> {
+  try {
+    if (sid !== activeSessionId.value) return;
+    if (reason !== 'persisted' && reason !== 'finish') {
+      await agentRuntime().refreshBudget();
+      return;
+    }
+    await agentRuntime().loadSessionMessages(sid);
+    await agentRuntime().refreshBudget();
+  } catch (err) {
+    console.error('[agent-turn] reload failed:', err);
+  }
+}
+
+function scheduleReload(sid: string, reason: 'persisted' | 'finish'): void {
+  const cur = pendingReload.get(sid);
+  const nextReason: 'persisted' | 'finish' =
+    cur && reloadPriority(cur.reason) > reloadPriority(reason) ? cur.reason : reason;
+  if (cur) window.clearTimeout(cur.timer);
+  const timer = window.setTimeout(() => {
+    pendingReload.delete(sid);
+    void doReload(sid, nextReason);
+  }, RELOAD_DEBOUNCE_MS);
+  pendingReload.set(sid, { reason: nextReason, timer });
+}
+
+/** 立即重拉（取消该 session 的待定定时器），供 finishTurn 在清空容器前保证内容已就位。 */
+async function reloadNow(sid: string): Promise<void> {
+  const cur = pendingReload.get(sid);
+  if (cur) {
+    window.clearTimeout(cur.timer);
+    pendingReload.delete(sid);
+  }
+  await doReload(sid, 'finish');
+}
+
+// need04-03：分流刷新：tool-completed 只内存更新（调用方已标脏）；persisted/finish 才拉全量对账（need23-R4 起走合并窗口）
 export async function refreshAfterTool(targetSessionId?: string, reason?: string): Promise<void> {
   try {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
@@ -38,8 +81,7 @@ export async function refreshAfterTool(targetSessionId?: string, reason?: string
       await agentRuntime().refreshBudget();
       return;
     }
-    await agentRuntime().loadSessionMessages(sid);
-    await agentRuntime().refreshBudget();
+    scheduleReload(sid, reason as 'persisted' | 'finish');
   } catch (err) {
     console.error('[agent-turn] refreshAfterTool failed:', err);
   }
@@ -60,12 +102,10 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   } catch (e) {
     console.warn('[agent-turn] snapshot failed:', e);
   }
-  if (dirtyPersisted.value[sid]) {
-    await refreshAfterTool(sid, 'finish');
-    dirtyPersisted.value[sid] = false;
-  } else {
-    await refreshAfterTool(sid, 'finish');
-  }
+  // need23-R4：先立即重拉（取消该 session 待定的防抖定时器），保证内容已在视图里，
+  // 再清空流式容器 —— 避免"内容先消失、400ms 后才回来"的闪烁。
+  dirtyPersisted.value[sid] = false;
+  await reloadNow(sid);
   try {
     agentRuntime().reconcileTimes();
   } catch (e) {
@@ -179,7 +219,17 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
       t.isGenerating = false;
       t.streamingActive = false;
-      t.turnNotice = '已达到单轮最大迭代次数（25），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
+      // need23-R6：文案按后端回传的 maxIterations / reason 渲染（不再硬编码 25；无限轮次不显示数字）。
+      const maxIt = num(payload['maxIterations']);
+      const truncReason = str(payload['reason']);
+      const truncCode = str(payload['errorCode']);
+      if (truncReason === 'repeated-tool-error') {
+        t.turnNotice = `工具调用连续失败（${truncCode || '错误'}），已暂停自动执行。发送“继续”以恢复任务。`;
+      } else if (maxIt > 0) {
+        t.turnNotice = `已达到单轮最大迭代次数（${maxIt}），已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。`;
+      } else {
+        t.turnNotice = '已达到单轮迭代上限，已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
+      }
       touch(t);
       void finishTurn(sid);
       agentRuntime().generateTitle(sid);

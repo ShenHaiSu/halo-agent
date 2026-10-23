@@ -44,6 +44,8 @@ export function ensureAgentWiring(): void {
     },
     askPending: (sid) => ask.hasPending(sid),
     clearAskPending: (sid) => ask.clearPending(sid),
+    // need23-R1：把后端已落盘的单条 tool 消息增量合并进视图（避免全量重拉）
+    mergePersistedMessage: (sid, msg) => ws.mergePersistedMessage(sid, msg as import('@shared/bridge/protocol/domain').UnifiedChatMessage),
   });
   if (wiringDone) return;
   wiringDone = true;
@@ -60,6 +62,6 @@ export function ensureAgentWiring(): void {
   watch(() => ws.activeSessionId, syncSession);
   watch(
     () => ws.sessionMessages,
-    (msgs) => setPersistedMessages([...(msgs || [])])
+    (msgs) => setPersistedMessages(msgs || [])
   );
 }

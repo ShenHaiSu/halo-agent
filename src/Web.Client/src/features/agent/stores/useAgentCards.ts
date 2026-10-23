@@ -188,6 +188,31 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       touch(t);
       break;
     }
+    case 'ToolMessagePersisted': {
+      // need23-R1：tool 消息落盘即增量合并进视图（不再等下一轮全量重拉）
+      const callId = str(payload['callId']);
+      const messageId = str(payload['messageId']);
+      const card = cardById(t, callId);
+      if (card) {
+        card.messageId = messageId || card.messageId;
+        card.persisted = true;
+      }
+      try {
+        agentRuntime().mergePersistedMessage(sid, {
+          id: messageId,
+          role: 'tool',
+          content: str(payload['content']),
+          toolCallId: str(payload['toolCallId']) || callId,
+          name: str(payload['functionName']),
+          createdAtUtc: str(payload['createdAtUtc']) || new Date().toISOString(),
+          images: Array.isArray(payload['images']) ? payload['images'] : null,
+        });
+      } catch (e) {
+        console.warn('[agent-cards] mergePersistedMessage failed:', e);
+      }
+      touch(t);
+      break;
+    }
     case 'ToolExecutionCompleted': {
       const callId = str(payload['callId']);
       const card = cardById(t, callId);

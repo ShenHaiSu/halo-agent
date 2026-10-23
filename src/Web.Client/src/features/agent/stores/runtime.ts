@@ -20,6 +20,8 @@ export interface AgentRuntimeContext {
   reconcileTimes(): void;
   askPending(sessionId: string): boolean;
   clearAskPending(sessionId: string): void;
+  /** need23-R1：把后端已落盘的单条消息增量合并进视图（不触发全量重拉）。返回是否真的插入。 */
+  mergePersistedMessage(sessionId: string, msg: unknown): boolean;
 }
 const noopRuntime: AgentRuntimeContext = {
   workspaceId: () => '',
@@ -35,6 +37,7 @@ const noopRuntime: AgentRuntimeContext = {
   reconcileTimes: () => undefined,
   askPending: () => false,
   clearAskPending: () => undefined,
+  mergePersistedMessage: () => false,
 };
 let runtimeCtx: AgentRuntimeContext = noopRuntime;
 /** 旧转发（stores/agentStore.ts）唯一调用处：注入 workspace/session/config/askUser 适配实现。 */

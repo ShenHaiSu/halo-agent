@@ -36,6 +36,7 @@ function stubRuntime(): void {
     reconcileTimes: () => undefined,
     askPending: () => false,
     clearAskPending: () => undefined,
+    mergePersistedMessage: () => false,
   });
 }
 
