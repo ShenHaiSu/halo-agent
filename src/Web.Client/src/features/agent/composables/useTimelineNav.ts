@@ -155,6 +155,33 @@ export function useTimelineNav(): TimelineNav {
 export interface BottomPinOpts {
   isLocked(): boolean;
   release(): void;
+  /**
+   * M2-2：用户是否处于「跟随」意图（false = 用户主动上翻）。
+   * `pinnedRef` 是意图的真相源，几何距离只是它的近似——两者冲突时以意图为准。
+   */
+  isFollowing?(): boolean;
+}
+/**
+ * M2-2：视为「贴底」的容差。
+ * 需与 transcriptScroll 的手势判定（1px 上滚即解 pinned）保持同一量级，
+ * 否则会出现「手势判为脱离、几何判为贴底」→ 用户上翻后又被拽回底部（R4 第二隐患）。
+ */
+export const PIN_TOLERANCE_PX = 24;
+/** M2-1：单帧追上剩余距离的比例；配合 2px 下限，约 6~8 帧收敛。 */
+export const FOLLOW_EASE_RATIO = 0.35;
+/**
+ * M2-1：计算下一帧的 scrollTop（纯函数，便于单测）。
+ *
+ * 分级位移：
+ *  · force（发送/跳转/切会话）与大增量（> max(48, 0.6 × clientHeight)）→ 瞬移；
+ *  · 流式跟随的小增量 → 渐进逼近，避免「每帧硬赋值」造成的顿挫。
+ */
+export function nextScrollTop(current: number, target: number, clientHeight: number, force: boolean): number {
+  const delta = target - current;
+  if (delta <= 0) return current;
+  if (force || delta > Math.max(48, clientHeight * 0.6)) return target;
+  // 位移越小越缓：最大步长 = ceil(delta * 0.35)，下限 2px 避免永远差 1~2px 追不上
+  return current + Math.min(delta, Math.max(2, Math.ceil(delta * FOLLOW_EASE_RATIO)));
 }
 export interface BottomPin {
   forceToBottom(): void;
@@ -178,7 +205,7 @@ export function createBottomPin(getEl: () => HTMLElement | null, opts: BottomPin
     const el = getEl();
     if (!el) return true;
     try {
-      return el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+      return el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_TOLERANCE_PX;
     } catch (e) {
       console.warn('[timeline] pinned check failed:', e);
       return true;
@@ -192,11 +219,22 @@ export function createBottomPin(getEl: () => HTMLElement | null, opts: BottomPin
     } catch (e) {
       console.warn('[timeline] jump lock check failed:', e);
     }
-    if (!force && !isPinnedToBottom()) return false;
+    // M2-2：非强制路径额外尊重「跟随意图」，避免几何距离把上翻的用户拽回底部。
+    if (!force) {
+      try {
+        if (opts.isFollowing && !opts.isFollowing()) return false;
+      } catch (e) {
+        console.warn('[timeline] follow check failed:', e);
+      }
+      if (!isPinnedToBottom()) return false;
+    }
     const maxScroll = el.scrollHeight - el.clientHeight;
     if (maxScroll <= 0) return false;
-    if (!force && maxScroll - el.scrollTop <= 1.5) return false;
-    el.scrollTop = el.scrollHeight;
+    // 剩余距离 = 目标（maxScroll） - 当前 scrollTop。不能用 scrollHeight 直接相减：
+    // 那会把 clientHeight 也算进 delta，导致「贴着底也被判成大跳」→ 渐进分支永远走不到。
+    const delta = maxScroll - el.scrollTop;
+    if (!force && delta <= 1.5) return false;
+    el.scrollTop = nextScrollTop(el.scrollTop, maxScroll, el.clientHeight, !!force);
     return true;
   }
   function forceToBottom(): void {
