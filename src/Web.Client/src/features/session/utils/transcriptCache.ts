@@ -16,7 +16,7 @@ function paneKeyOf(generation: number): string {
   return `gen:${generation}`;
 }
 
-/** Unique write boundary for transcript projection (only caller: transcriptProjection.mergeLiveMessages). */
+/** Unique write boundary for transcript projection (唯一调用方：useTimeline.ts 的 historyEntries 投影). */
 export function syncTranscriptProjection(generation: number, history: unknown[], tail: unknown[]): void {
   const key = paneKeyOf(generation);
   lru.delete(key);

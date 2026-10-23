@@ -1,7 +1,5 @@
 /** bigChange P2-1: transcript projection — WeakMap snapshot + 64-block diff + history/tail split + generation guard. */
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import { syncTranscriptProjection } from './transcriptCache';
-
 export const BLOCK_SIZE = 64;
 
 export interface TranscriptEntry {
@@ -129,15 +127,4 @@ export function replaceMessages(messages: UnifiedChatMessage[], tailSize = 8): T
 
 export function checkGeneration(p: TranscriptProjection, expected: number): boolean {
   return p.generation === expected;
-}
-
-/** Canonical write boundary: history/tail memo + pane cache sync. historyEntries memo frozen, tail live. */
-export function mergeLiveMessages(
-  persisted: UnifiedChatMessage[],
-  live: TranscriptEntry[]
-): { full: TranscriptProjection; history: TranscriptEntry[]; tail: TranscriptEntry[] } {
-  const full = projectTranscript(persisted);
-  const tail: TranscriptEntry[] = [...full.tail, ...live];
-  syncTranscriptProjection(full.generation, full.history, tail);
-  return { full, history: full.history, tail };
 }
