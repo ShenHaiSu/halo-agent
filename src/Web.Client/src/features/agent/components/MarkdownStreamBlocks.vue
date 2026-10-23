@@ -10,7 +10,7 @@
  * 做法：复用历史区同一套 renderBlockHtml（markdown-it + highlight.js），按块切分；
  *      已 settled 的块只渲染一次（基于 cacheKey 的块缓存），只有尾块随增量重跑。
  * 降级：块超限（>100KB / >800 行 / 单行 >2000 列）或整源 >128KB → 纯文本 + 提示，
- *      与历史区 MarkdownBlock.vue 的口径一致。
+ *      与历史区 renderMarkdown 的口径一致（同一套 renderContentLimits 判定）。
  */
 import { computed } from 'vue';
 import {
@@ -19,10 +19,11 @@ import {
   checkJoin,
   splitBlocks,
   renderBlockHtml,
+  renderFallbackHtml,
   type BlockCache,
   type MarkdownBlockSlice,
 } from '@features/session/utils/markdownBlocks';
-import { classifyBlock, classifySource, overflowHint } from '@features/session/utils/renderContentLimits';
+import { classifyBlock, classifySource } from '@features/session/utils/renderContentLimits';
 import { escapeHtml } from '@features/session/utils/markdownRender';
 
 const props = defineProps<{
@@ -68,12 +69,11 @@ function entryOf(key: string): Entry {
 }
 
 function renderOne(raw: string, streaming: boolean): string {
-  if (classifyBlock(raw, streaming) !== 'ok') {
-    return `<div class="markdown-fallback"><pre>${escapeHtml(raw)}</pre></div>`;
-  }
-  // need23-R5：渲染形态与历史区一致。历史区 MarkdownBlock 直接走 renderBlockHtml（其 md 未注册
-  // highlight 钩子），代码块为 <code class="language-x">。此处保持同源，并对超大代码块做高亮保护，
-  // 保证 settled 块在活动容器 → 历史区切换时零跳变。
+  // 降级块与稳态共用同一套外观（M1-2），避免「纯文本 → 高亮」交接时整块重画。
+  if (classifyBlock(raw, streaming) !== 'ok') return renderFallbackHtml(raw, 'block-text');
+  // need23-R5：渲染形态与历史区一致。两态共用 markdownBlocks.ts 的 sharedMd 单实例
+  // （已注册 highlight 钩子），故代码块 token 结构两边相同；
+  // 「settled 块在活动容器 → 历史区切换时零跳变」以两者同源为前提才成立。
   return renderBlockHtml(raw);
 }
 
@@ -86,7 +86,7 @@ const blocks = computed<PreparedBlock[]>(() => {
   if (classifySource(src) !== 'ok') {
     if (e.oversizedFor !== src) {
       e.oversizedFor = src;
-      e.oversizedHtml = `<div class="markdown-fallback-hint">${overflowHint('source-text')}</div><pre>${escapeHtml(src)}</pre>`;
+      e.oversizedHtml = renderFallbackHtml(src, 'source-text');
     }
     return [{ start: 0, raw: src, settled: false, html: e.oversizedHtml }];
   }
