@@ -182,6 +182,25 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
+            // need23-R1：tool 消息落盘即告知前端（携带完整消息体，前端增量合并，
+            // 不必等下一轮 AssistantMessagePersisted 的全量重拉；旧前端 default 分支忽略，零影响）。
+            PublishTurnEvent(
+                sessionId,
+                "ToolMessagePersisted",
+                new
+                {
+                    iteration,
+                    messageId = toolMessage.Id,
+                    callId = call.CallId,
+                    role = "tool",
+                    functionName = call.FunctionName,
+                    toolCallId = toolMessage.ToolCallId,
+                    content = TruncateForEvent(toolText, 8000),
+                    images = toolMessage.Images,
+                    createdAtUtc = toolMessage.CreatedAtUtc.ToString("o"),
+                    updatedAtUtc = DateTime.UtcNow.ToString("o")
+                }
+            );
             PublishTurnEvent(
                 sessionId,
                 "ToolExecutionCompleted",
