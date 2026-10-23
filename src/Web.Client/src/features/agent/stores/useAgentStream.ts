@@ -151,6 +151,14 @@ export const useAgentStream = defineStore('agent-stream', () => {
 
   const segKillSwitch = ref(false);
 
+  /** need23-R5：流式 Markdown 逃生开关（localStorage 'halo-stream-md' = 'off' → 回落纯文本）。默认开启。 */
+  const streamMdKillSwitch = ref(false);
+  try {
+    streamMdKillSwitch.value = String(window.localStorage.getItem('halo-stream-md') || '').toLowerCase() === 'off';
+  } catch {
+    streamMdKillSwitch.value = false;
+  }
+
   const hasStreamingContent = computed(() => {
     const t = activeTurnRef.value;
     return t.streamingActive || t.streamingText.length > 0 || t.streamingReasoning.length > 0;
@@ -199,6 +207,7 @@ export const useAgentStream = defineStore('agent-stream', () => {
     streamingActive,
     isGenerating,
     segKillSwitch,
+    streamMdKillSwitch,
     hasStreamingContent,
     hasActiveTurn,
     visibleSegs,

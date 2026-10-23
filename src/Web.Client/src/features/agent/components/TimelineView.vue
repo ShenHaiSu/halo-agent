@@ -84,11 +84,12 @@
                 <div
                   v-else-if="seg.kind === 'text' && seg.text"
                   class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-                  style="white-space: pre-wrap"
                   :data-seg="seg.key"
                   @click="emit('link-click', $event)"
-                  v-html="renderStream(seg.text)"
-                />
+                >
+                  <MarkdownStreamBlocks v-if="!streamMdKillSwitch" :text="seg.text" :cache-key="seg.key" />
+                  <div v-else style="white-space: pre-wrap" v-html="renderStream(seg.text)" />
+                </div>
               </template>
             </template>
             <template v-else-if="segKillSwitch">
@@ -167,6 +168,7 @@ import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup
 import type { AgentToolCard } from '@features/agent/stores/model';
 import type { DisplaySeg } from '../composables/useTimeline';
 import ToolCallCard from './ToolCallCard.vue';
+import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import TimelineRow from './TimelineRow.vue';
 import TranscriptHistory from './TranscriptHistory.vue';
@@ -196,6 +198,8 @@ const props = defineProps<{
   isGenerating: boolean;
   segs: DisplaySeg[];
   segKillSwitch: boolean;
+  /** need23-R5：流式 Markdown 逃生开关（true=回落纯文本）。 */
+  streamMdKillSwitch?: boolean;
   fallbackCards: AgentToolCard[];
   streamingText: string;
   showThinking: boolean;
