@@ -9,7 +9,7 @@ import {
   ensureTurn,
   getTurn,
   lastTurnSnapshot,
-  markIterationPersisted,
+  markIterationTextPersisted,
   resolveTargetSession,
   toast,
   touch,
@@ -50,8 +50,7 @@ async function doReload(sid: string, reason: string): Promise<void> {
 
 function scheduleReload(sid: string, reason: 'persisted' | 'finish'): void {
   const cur = pendingReload.get(sid);
-  const nextReason: 'persisted' | 'finish' =
-    cur && reloadPriority(cur.reason) > reloadPriority(reason) ? cur.reason : reason;
+  const nextReason: 'persisted' | 'finish' = cur && reloadPriority(cur.reason) > reloadPriority(reason) ? cur.reason : reason;
   if (cur) window.clearTimeout(cur.timer);
   const timer = window.setTimeout(() => {
     pendingReload.delete(sid);
@@ -154,8 +153,10 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
     case 'AssistantMessagePersisted': {
       flushSegBufSync(sid);
       const pit = num(payload['iteration']);
-      if (pit > 0) markIterationPersisted(t, pit);
-      else if (t.curIteration > 0) markIterationPersisted(t, t.curIteration);
+      // need23-R7：只让正文/思考段毕业；工具段等 ToolMessagePersisted 逐条毕业，
+      // 否则工具会同时从活动容器与稳态消失（执行期完全不可见）。
+      if (pit > 0) markIterationTextPersisted(t, pit);
+      else if (t.curIteration > 0) markIterationTextPersisted(t, t.curIteration);
       t.telemetry.inputTokens = num(payload['inputTokens']);
       t.telemetry.outputTokens = num(payload['outputTokens']);
       t.telemetry.cachedTokens = num(payload['cachedTokens']);

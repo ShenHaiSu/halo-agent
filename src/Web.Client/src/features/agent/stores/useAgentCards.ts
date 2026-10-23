@@ -12,6 +12,7 @@ import {
   dirtyPersisted,
   ensureSessionSync,
   ensureTurn,
+  markToolSegPersisted,
   pushToolSeg,
   rebuildIndex,
   resolveTargetSession,
@@ -197,6 +198,8 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
         card.messageId = messageId || card.messageId;
         card.persisted = true;
       }
+      // need23-R7：该工具的回包已落盘 → 让对应工具段毕业（从活动容器移交给稳态折叠栏）
+      markToolSegPersisted(t, callId);
       try {
         agentRuntime().mergePersistedMessage(sid, {
           id: messageId,

@@ -237,12 +237,35 @@ export function pushToolSeg(t: AgentTurnState, callId: string): void {
   if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration) return;
   t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, callId });
 }
+/**
+ * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。
+ * 背景：assistant 消息落盘时只含 content/reasoning + tool_calls 声明，**不含 tool 回包**；
+ * 工具回包要等执行完才落盘（ToolMessagePersisted）。若此刻把工具段也标 persisted，
+ * 工具会同时从活动容器与稳态消失（成因 B 的时序洞）。
+ */
+export function markIterationTextPersisted(t: AgentTurnState, iteration: number): void {
+  if (!iteration) return;
+  for (const s of t.segs) {
+    if (s.iteration === iteration && s.kind !== 'tool') s.persisted = true;
+  }
+}
+
+/** need23-R7：按 callId 标记单条工具段已落盘（工具回包落盘时逐条毕业）。 */
+export function markToolSegPersisted(t: AgentTurnState, callId: string): void {
+  if (!callId) return;
+  for (const s of t.segs) {
+    if (s.kind === 'tool' && s.callId === callId) s.persisted = true;
+  }
+}
+
+/** 保留旧入口（全量标记）：仅供轮末收尾等确知"该轮全部落盘"的场景使用。 */
 export function markIterationPersisted(t: AgentTurnState, iteration: number): void {
   if (!iteration) return;
   for (const s of t.segs) {
     if (s.iteration === iteration) s.persisted = true;
   }
 }
+
 /** 事件目标会话：evt.sessionId 为空回退当前会话（旧 resolveTargetSession 语义；三 store 事件路由共用）。 */
 export function resolveTargetSession(evtSessionId: string | undefined | null): string {
   const s = (evtSessionId || '').trim();

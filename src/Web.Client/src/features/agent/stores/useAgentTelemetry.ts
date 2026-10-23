@@ -65,8 +65,25 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     return persistedMessages.value || [];
   }
   const activeTurnGroups = computed<TurnGroup[]>(() => buildTurnGroups(persistedOf()));
+  /**
+   * need23-R7：去重集合 = **当前活动容器里真正可见的工具段**（seg.kind==='tool' && !seg.persisted）。
+   * 修复前用的是整轮累计的 toolCards（只在 finishTurn 清空），导致已落盘的工具被永久拉黑：
+   *   · 工具落盘 → 稳态折叠栏被剥空（"收起来"）
+   *   · 下一轮新卡出现 → 又可见一下 → 落盘又消失（"又收起来"）
+   * 现在：工具回包一落盘就脱离 hidden → 立即在稳态出现；活动容器同步让位，永不重复。
+   */
+  const hiddenToolCallIds = computed<Set<string>>(() => {
+    const t = activeTurnRef.value;
+    const out = new Set<string>();
+    for (const s of t.segs || []) {
+      if (s.kind !== 'tool' || s.persisted) continue;
+      const cid = String(s.callId || '').trim();
+      if (cid) out.add(cid);
+    }
+    return out;
+  });
   const visibleTurnGroups = computed<TurnGroup[]>(() => {
-    const hidden = new Set(activeTurnRef.value.toolCards.map((c) => c.callId).filter(Boolean));
+    const hidden = hiddenToolCallIds.value;
     if (hidden.size === 0) return activeTurnGroups.value;
     const out: TurnGroup[] = [];
     for (const g of activeTurnGroups.value) {
@@ -78,7 +95,6 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
   });
   const activeTimelineEntries = computed<TimelineEntry[]>(() => buildTimelineEntries(persistedOf(), visibleTurnGroups.value));
   // 兼容别名：旧 hiddenToolCallIds 引用统一走 store 内归并
-  const hiddenToolCallIds = computed<Set<string>>(() => new Set(activeTurnRef.value.toolCards.map((c) => c.callId).filter(Boolean)));
 
   function bindTelemetry(): void {
     bindTelemetryListeners();
