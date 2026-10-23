@@ -12,6 +12,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// grep_search：纯 C# 跨代正则内容检索（Regex + 并行扫描，无外部二进制依赖）。
 /// 最多返回 100 条匹配。
 /// </summary>
+[HaloAgent.Tools.Tool("grep_search")]
 public sealed class GrepSearchTool : IToolHandler
 {
     public const int MaxMatches = 100;

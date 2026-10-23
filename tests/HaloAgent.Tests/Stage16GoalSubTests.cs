@@ -135,7 +135,7 @@ public sealed class Stage16GoalTests
         var main = new ToolRegistry(registerBuiltIns: true);
         Assert.Contains("goal_tool", main.ToolNames);
         Assert.Equal(15, main.ToolNames.Count);
-        var sub = ToolRegistryFactory.ForSub(new SubPolicySnapshot());
+        var sub = ToolRoleRegistries.ForSubRole(new SubPolicySnapshot());
         Assert.Contains("goal_tool", sub.ToolNames);
         var def = sub.GetDefinitions().First(d => d.Name == "goal_tool");
         Assert.Contains("get only", def.Description + def.Description);

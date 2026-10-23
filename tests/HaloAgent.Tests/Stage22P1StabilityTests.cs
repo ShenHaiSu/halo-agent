@@ -395,7 +395,7 @@ public sealed class Stage22P1StabilityTests : IDisposable
         {
             var handler = new P1CountingHandler(
                 Enumerable
-                    .Range(0, 10)
+                    .Range(0, 20)
                     .Select<int, Func<HttpRequestMessage, HttpResponseMessage>>(_ =>
                         _ => new HttpResponseMessage((HttpStatusCode)429)
                         {
@@ -410,7 +410,7 @@ public sealed class Stage22P1StabilityTests : IDisposable
             var events = new List<UnifiedStreamEvent>();
             await foreach (var evt in gateway.StreamAsync(NewLlmRequest()))
                 events.Add(evt);
-            Assert.Equal(4, handler.CallCount);
+            Assert.Equal(11, handler.CallCount);
             Assert.Contains(
                 events,
                 e => e.Kind == UnifiedStreamEventKind.StreamError && e.ErrorCode == "HTTP_429"

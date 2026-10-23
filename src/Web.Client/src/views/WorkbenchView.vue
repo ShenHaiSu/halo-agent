@@ -11,13 +11,13 @@
 </template>
 <script setup lang="ts">
 import { ref } from 'vue';
-import MessageTimeline from '@/components/chat/MessageTimeline.vue';
-import PromptComposer from '@/components/chat/PromptComposer.vue';
-import AskUserModal from '@/components/chat/AskUserModal.vue';
-import SubHistoryView from '@/components/sub/SubHistoryView.vue';
-import RightRailTrigger from '@/components/rightRail/RightRailTrigger.vue';
-import RightRailDrawer from '@/components/rightRail/RightRailDrawer.vue';
-import { createTimelineNav, provideTimelineNav } from '@/composables/useTimelineNav';
+import MessageTimeline from '@features/agent/components/MessageTimeline.vue';
+import PromptComposer from '@features/agent/components/PromptComposer.vue';
+import AskUserModal from '@features/agent/components/AskUserModal.vue';
+import SubHistoryView from '@features/settings/components/SubHistoryView.vue';
+import RightRailTrigger from '@features/shell/components/RightRailTrigger.vue';
+import RightRailDrawer from '@features/shell/components/RightRailDrawer.vue';
+import { createTimelineNav, provideTimelineNav } from '@features/agent/composables/useTimelineNav';
 import { useSubSessionStore } from '@/stores/subSessionStore';
 const sub = useSubSessionStore();
 const hostRef = ref<HTMLElement | null>(null);

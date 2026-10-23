@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 #nullable enable
+using Host.Desktop.Tools;
 using Host.Desktop.Tools.BuiltIn;
 using Xunit;
 
@@ -16,7 +17,7 @@ public sealed class Stage17ExecSearchTests
         var j = new ExecCommandTool().GetDefinition().ParametersJson;
         Assert.Contains("60000", j);
         Assert.Contains("300000", j);
-        Assert.Equal(60000, ExecCommandTool.DefaultTimeoutMs);
+        Assert.Equal(60000, ToolPolicy.DefaultTimeoutMs);
     }
 
     [Fact]

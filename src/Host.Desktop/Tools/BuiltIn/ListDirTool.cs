@@ -9,6 +9,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// <summary>
 /// list_dir：工作区目录结构浏览。自动排除构建产物与巨型依赖目录。
 /// </summary>
+[HaloAgent.Tools.Tool("list_dir")]
 public sealed class ListDirTool : IToolHandler
 {
     public const int DefaultMaxDepth = 2;

@@ -7,7 +7,7 @@ import {
   type StorageConfigInfo,
   type StorageMigrationResult,
   type BridgeResponse,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 import { useAppearanceStore } from '@/stores/appearanceStore';
 
 export const useSystemStore = defineStore('system', () => {
@@ -43,10 +43,7 @@ export const useSystemStore = defineStore('system', () => {
     loading.value = true;
     try {
       const bridge = getHostBridge();
-      const [sysRes, storageRes] = await Promise.all([
-        bridge.getSystemInfo(),
-        bridge.getStorageConfig(),
-      ]);
+      const [sysRes, storageRes] = await Promise.all([bridge.getSystemInfo(), bridge.getStorageConfig()]);
 
       if (sysRes.ok && sysRes.data) {
         systemInfo.value = sysRes.data;
@@ -78,10 +75,7 @@ export const useSystemStore = defineStore('system', () => {
     return null;
   }
 
-  async function changeStorageRoot(
-    newPath: string,
-    migrateExistingData: boolean
-  ): Promise<BridgeResponse<StorageMigrationResult>> {
+  async function changeStorageRoot(newPath: string, migrateExistingData: boolean): Promise<BridgeResponse<StorageMigrationResult>> {
     migrating.value = true;
     migrationPercent.value = 5;
     migrationStatusText.value = '正在校验并准备目标目录...';
@@ -96,9 +90,7 @@ export const useSystemStore = defineStore('system', () => {
     }
   }
 
-  async function resetToDefaultCDrive(
-    migrateExistingData = true
-  ): Promise<BridgeResponse<StorageMigrationResult>> {
+  async function resetToDefaultCDrive(migrateExistingData = true): Promise<BridgeResponse<StorageMigrationResult>> {
     migrating.value = true;
     migrationPercent.value = 10;
     migrationStatusText.value = '正在恢复默认 C:\\HaloAgentData...';
@@ -132,21 +124,18 @@ export const useSystemStore = defineStore('system', () => {
   }
 
   function setupEventListeners() {
-    haloEventBus.on<{ percent: number; message: string; targetPath: string }>(
-      'storage:migration-progress',
-      (payload, timestamp) => {
-        migrationPercent.value = payload.percent;
-        migrationStatusText.value = payload.message;
-        recentHostEvents.value.unshift({
-          type: 'storage:migration-progress',
-          summary: `[${payload.percent}%] ${payload.message}`,
-          timestamp,
-        });
-        if (recentHostEvents.value.length > 20) {
-          recentHostEvents.value.length = 20;
-        }
+    haloEventBus.on<{ percent: number; message: string; targetPath: string }>('storage:migration-progress', (payload, timestamp) => {
+      migrationPercent.value = payload.percent;
+      migrationStatusText.value = payload.message;
+      recentHostEvents.value.unshift({
+        type: 'storage:migration-progress',
+        summary: `[${payload.percent}%] ${payload.message}`,
+        timestamp,
+      });
+      if (recentHostEvents.value.length > 20) {
+        recentHostEvents.value.length = 20;
       }
-    );
+    });
 
     haloEventBus.on<{ oldDataRootPath: string; newDataRootPath: string; migratedFileCount: number }>(
       'storage:changed',

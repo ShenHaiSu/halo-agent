@@ -9,6 +9,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// <summary>
 /// read_file：带 1-based 行号分页与 BOM/UTF-8/GBK 自动识别的文件读取工具。
 /// </summary>
+[HaloAgent.Tools.Tool("read_file")]
 public sealed class ReadFileTool : IToolHandler
 {
     public const int DefaultLimit = 500;

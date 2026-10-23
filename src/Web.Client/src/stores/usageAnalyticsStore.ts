@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
-import { getHostBridge, type UsageFilter, type UsagePreset, type UsageOverview, type UsageTrend, type UsageProviderShareItem, type UsagePage, type UsageFilterOptions } from '@/bridge/hostBridge';
+import { ref, computed, watch } from 'vue';
+import {
+  getHostBridge,
+  type UsageFilter,
+  type UsagePreset,
+  type UsageOverview,
+  type UsageTrend,
+  type UsageProviderShareItem,
+  type UsagePage,
+  type UsageFilterOptions,
+} from '@shared/bridge/hostBridge';
 
 export const USAGE_PRESETS: Array<{ key: UsagePreset; label: string; testid: string }> = [
   { key: 'today', label: '今日', testid: 'usage-preset-today' },
@@ -49,14 +58,45 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
     return options.value.models.filter((m) => providerIds.value.includes(m.providerId));
   });
 
+  /**
+   * Provider 变更时剔除"不属于所选 Provider"的已选模型。
+   * 背景：后端 ApplyScope 对 provider 与 model 是 AND 关系
+   * （provider_id IN (...) AND (provider_id=P AND model_id=M)），
+   * 若保留跨 Provider 的 modelKeys，条件恒假 → 图表/明细全空。
+   */
+  function pruneModelKeys(): void {
+    const pids = providerIds.value;
+    if (!pids.length) return;
+    const models = options.value.models;
+    if (!models.length) return; // 选项未加载完时不裁剪，避免误删
+    const allowed = new Set(models.filter((m) => pids.includes(m.providerId)).map((m) => m.key));
+    const kept = modelKeys.value.filter((k) => allowed.has(k));
+    if (kept.length !== modelKeys.value.length) modelKeys.value = kept;
+  }
+  // deep：n-select 正常是整体替换数组，但就地改动也要兜住
+  watch(
+    providerIds,
+    () => {
+      pruneModelKeys();
+    },
+    { deep: true }
+  );
+
   async function loadOptions(): Promise<void> {
     try {
       const res = await getHostBridge().getUsageFilterOptions();
       if (res.ok && res.data) options.value = res.data;
-    } catch { /* 降级空选项 */ }
+    } catch {
+      /* 降级空选项 */
+    }
   }
 
+  // 并发刷新序号：只有最后一次请求的结果允许落地，
+  // 避免"旧筛选条件的慢响应"覆盖"新筛选条件的结果"（图表显示上一次筛选的数据）。
+  let reqSeq = 0;
+
   async function refresh(): Promise<void> {
+    const seq = ++reqSeq;
     loading.value = true;
     error.value = '';
     try {
@@ -68,6 +108,8 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
         bridge.getUsageProviderShare(f),
         bridge.queryUsagePage(f, page.value, pageSize.value),
       ]);
+      // 过期响应直接丢弃（期间已有更新的请求发起）
+      if (seq !== reqSeq) return;
       if (ov.ok && ov.data) overview.value = ov.data;
       else if (!ov.ok && ov.code === 'USAGE_DB_NOT_READY') error.value = '用量库初始化失败，不影响对话';
       if (tr.ok && tr.data) trend.value = tr.data;
@@ -77,13 +119,14 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
       } else if (!pg.ok && pg.code === 'USAGE_PAGE_OVERFLOW') {
         page.value = 1;
         const retry = await bridge.queryUsagePage(f, 1, pageSize.value);
+        if (seq !== reqSeq) return;
         if (retry.ok && retry.data) pageData.value = retry.data;
       }
       if (!ov.ok && ov.code && ov.code !== 'USAGE_DB_NOT_READY') error.value = ov.message || '查询失败';
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (seq === reqSeq) error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      if (seq === reqSeq) loading.value = false;
     }
   }
 
@@ -95,8 +138,26 @@ export const useUsageAnalyticsStore = defineStore('usageAnalytics', () => {
   }
 
   return {
-    preset, customRange, providerIds, modelKeys, sources, estimatedOnly, metric, page, pageSize,
-    loading, error, options, overview, trend, share, pageData,
-    filter, modelOptions, loadOptions, refresh, setPreset,
+    preset,
+    customRange,
+    providerIds,
+    modelKeys,
+    sources,
+    estimatedOnly,
+    metric,
+    page,
+    pageSize,
+    loading,
+    error,
+    options,
+    overview,
+    trend,
+    share,
+    pageData,
+    filter,
+    modelOptions,
+    loadOptions,
+    refresh,
+    setPreset,
   };
 });

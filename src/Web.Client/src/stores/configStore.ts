@@ -11,7 +11,7 @@ import {
   type ModelConfig,
   type ProviderEndpointPreviewDto,
   type BridgeResponse,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 
 export const useConfigStore = defineStore('config', () => {
   const networkSettings = ref<GlobalNetworkSettings>({
@@ -45,25 +45,19 @@ export const useConfigStore = defineStore('config', () => {
   const testingProxy = ref(false);
   const lastProxyTestResult = ref<ProxyConnectivityTestResult | null>(null);
 
-  let eventUnsubscribers: Array<() => void> = [];
+  const eventUnsubscribers: Array<() => void> = [];
 
   const activeProvider = computed<ProviderConfig | undefined>(() => {
     const list = providersDoc.value.providers;
     if (!list.length) return undefined;
-    return (
-      list.find((p) => p.id === providersDoc.value.activeProviderId) ||
-      list.find((p) => p.enabled) ||
-      list[0]
-    );
+    return list.find((p) => p.id === providersDoc.value.activeProviderId) || list.find((p) => p.enabled) || list[0];
   });
 
   const activeModel = computed<ModelConfig | undefined>(() => {
     const provider = activeProvider.value;
     if (!provider || !provider.models.length) return undefined;
     return (
-      provider.models.find((m) => m.id === providersDoc.value.activeModelId) ||
-      provider.models.find((m) => m.enabled) ||
-      provider.models[0]
+      provider.models.find((m) => m.id === providersDoc.value.activeModelId) || provider.models.find((m) => m.enabled) || provider.models[0]
     );
   });
 
@@ -85,11 +79,7 @@ export const useConfigStore = defineStore('config', () => {
   async function initialize(): Promise<void> {
     loading.value = true;
     try {
-      await Promise.all([
-        refreshNetworkSettings(),
-        refreshSystemProxySnapshot(),
-        refreshProvidersConfig(),
-      ]);
+      await Promise.all([refreshNetworkSettings(), refreshSystemProxySnapshot(), refreshProvidersConfig()]);
 
       if (eventUnsubscribers.length === 0) {
         eventUnsubscribers.push(

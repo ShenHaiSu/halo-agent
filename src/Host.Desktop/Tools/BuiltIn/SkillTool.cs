@@ -3,6 +3,7 @@ using Host.Desktop.Tools.Validation;
 namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>need09-07：skill_tool（能力包自主 CRUD，action 枚举内聚，默认写 project 域）。</summary>
+[HaloAgent.Tools.Tool("skill_tool")]
 public sealed class SkillTool : IToolHandler
 {
     // NEED17-05 §5.1: Exposure=Direct（编码任务默认不打扰；激活集/preset 裁剪由基础组 01 落子，本文件只定声明）。
@@ -55,5 +56,5 @@ public sealed class SkillTool : IToolHandler
         ToolCallDto call,
         ToolContext context,
         CancellationToken ct = default
-    ) => SkillToolShared.ExecuteKindAsync(isSkill: true, call, context, ct);
+    ) => SkillDispatcher.ExecuteKindAsync(isSkill: true, call, context, ct);
 }

@@ -296,9 +296,8 @@ public sealed class AgentConfigService
                     ? AgentDefaults.SubMaxIterationsDefault
                     : incoming.SubMaxIterations,
             SubAllowExecCommand = incoming.SubAllowExecCommand,
-            // need22-P1 T3/T4：新超时字段透传（老文件缺失=0，读时回默认；保存时 0 同样回默认后校验）。
-            TurnTimeoutMs =
-                incoming.TurnTimeoutMs <= 0 ? AgentDefaults.TurnTimeoutMs : incoming.TurnTimeoutMs,
+            // 单轮最大时间：0=无限时间（透传保留）；负数视为非法，校验阶段拒绝。
+            TurnTimeoutMs = incoming.TurnTimeoutMs,
             SubBarrierBufferMs =
                 incoming.SubBarrierBufferMs <= 0
                     ? AgentDefaults.SubBarrierBufferMs
@@ -375,15 +374,21 @@ public sealed class AgentConfigService
                 $"默认超时不得大于上限（默认 {doc.ExecDefaultTimeoutMs} > 上限 {doc.ExecMaxTimeoutMs}），请调大上限或调小默认"
             );
         }
-        // need22-P1 T3/T4：单轮总体超时与 Barrier buffer 范围校验（超限存时拒绝、读时回默认由 LoadInternal 兜底）。
+        // 单轮最大时间：0=无限时间；有限值须落在 [TurnTimeoutMinMs, TurnTimeoutMaxMs=600000即10min]。
         if (
-            doc.TurnTimeoutMs < AgentDefaults.TurnTimeoutMinMs
-            || doc.TurnTimeoutMs > AgentDefaults.HardTimeoutCeilMs
+            doc.TurnTimeoutMs < 0
+            || (
+                doc.TurnTimeoutMs > 0
+                && (
+                    doc.TurnTimeoutMs < AgentDefaults.TurnTimeoutMinMs
+                    || doc.TurnTimeoutMs > AgentDefaults.TurnTimeoutMaxMs
+                )
+            )
         )
         {
             throw new AgentConfigValidationException(
                 "turnTimeoutMs",
-                $"单轮总体超时非法：{doc.TurnTimeoutMs}（允许 {AgentDefaults.TurnTimeoutMinMs}..{AgentDefaults.HardTimeoutCeilMs} 毫秒，默认 {AgentDefaults.TurnTimeoutMs} 即 10min）"
+                $"单轮最大时间非法：{doc.TurnTimeoutMs}（允许 0=无限，或 {AgentDefaults.TurnTimeoutMinMs}..{AgentDefaults.TurnTimeoutMaxMs} 毫秒，默认 {AgentDefaults.TurnTimeoutMs} 即 10min/600s）"
             );
         }
         if (doc.SubBarrierBufferMs < 0 || doc.SubBarrierBufferMs > AgentDefaults.HardTimeoutCeilMs)

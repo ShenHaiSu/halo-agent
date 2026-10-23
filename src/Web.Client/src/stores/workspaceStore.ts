@@ -8,11 +8,11 @@ import {
   type UnifiedChatMessage,
   type ContextBudgetStatusDto,
   type UiActiveState,
-} from '@/bridge/hostBridge';
+} from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
-import { isBadTime } from '@/utils/timeFormat';
-import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@/utils/sessionTitle';
+import { isBadTime } from '@shared/utils/timeFormat';
+import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();
@@ -476,6 +476,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     return false;
   }
+  /**
+   * need23-R1：把后端已落盘的单条消息增量合并进 sessionMessages（不触发全量重拉）。
+   * 幂等：同 id 已存在则跳过；仅当前会话才写视图。返回是否真的插入。
+   */
+  function mergePersistedMessage(sessionId: string, msg: UnifiedChatMessage): boolean {
+    const sid = (sessionId || '').trim();
+    if (!sid || !msg || !msg.id) return false;
+    if (sid !== activeSessionId.value) return false;
+    const list = sessionMessages.value;
+    if (list.some((m) => String(m.id) === String(msg.id))) return false;
+    // 新数组引用 → 触发 watcher；投影层按内容指纹命中历史前缀，只重建尾部
+    sessionMessages.value = [...list, msg];
+    const cur = sessions.value.find((s) => s.id === sid) || activeSession.value;
+    if (cur) cur.messageCount = sessionMessages.value.length;
+    return true;
+  }
   // need03-03 T2：首轮响应结束后精炼一次（同模型小请求优先，失败则本地精炼兜底；手动锁/已生成/生成中直接跳过）
   async function generateTitleAfterFirstRound(sessionId: string): Promise<void> {
     const sid = (sessionId || '').trim();
@@ -750,6 +766,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     truncateHistory,
     branchFromMessage,
     appendMessage,
+    mergePersistedMessage,
     generateTitleAfterFirstRound,
     titleLocked,
     autoTitleDone,

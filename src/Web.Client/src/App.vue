@@ -86,23 +86,26 @@
 import { ref, computed, onMounted } from 'vue';
 import { darkTheme, zhCN, dateZhCN } from 'naive-ui';
 import { Monitor, HardDrive, Network, Hash } from 'lucide-vue-next';
-import { buildHaloThemeOverrides } from '@/theme/appearance';
+import { buildHaloThemeOverrides } from '@shared/ui/appearance';
 import { useAppearanceStore } from '@/stores/appearanceStore';
 import { useSystemStore } from '@/stores/systemStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentConfigStore } from '@/stores/agentConfigStore';
-import WorkspaceSessionSidebar from '@/components/sidebar/WorkspaceSessionSidebar.vue';
-import WorkbenchTopBar from '@/components/workbench/WorkbenchTopBar.vue';
+import WorkspaceSessionSidebar from '@features/workspace/components/WorkspaceSessionSidebar.vue';
+import WorkbenchTopBar from '@features/shell/components/WorkbenchTopBar.vue';
 import WorkbenchView from '@/views/WorkbenchView.vue';
-import SettingsCenterDrawer from '@/components/settings/SettingsCenterDrawer.vue';
-import { isBridgeMock } from '@/bridge/hostBridge';
-import { negotiate } from '@/bridge/proxy';
+import SettingsCenterDrawer from '@features/settings/components/SettingsCenterDrawer.vue';
+import { isBridgeMock } from '@shared/bridge/hostBridge';
+import { negotiate } from '@shared/bridge/proxy';
+import { ensureAgentWiring } from '@/stores/agentWiring';
 
 const systemStore = useSystemStore();
 const appearanceStore = useAppearanceStore();
 const configStore = useConfigStore();
 const workspaceStore = useWorkspaceStore();
+// need21-F05：agent 跨 store 接线（旧 stores/agentStore.ts 转发的继承者；幂等，需 pinia 上下文内调用）。
+ensureAgentWiring();
 
 const showSettingsModal = ref(false);
 const settingsModalTab = ref<'appearance' | 'providers' | 'network' | 'storage' | 'runtime'>('appearance');

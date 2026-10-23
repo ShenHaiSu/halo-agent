@@ -320,8 +320,8 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
 
         Assert.Equal(8192, status.TotalContextTokens);
         Assert.Equal(2048, status.MaxOutputTokens);
-        Assert.Equal(1024, status.SafetyBuffer);
-        Assert.Equal(8192 - 2048 - 1024 - 150, status.AvailableInputTokens); // need05-01：可用 = 总量 - 输出 - 安全 - 占用快照（末条 InputTokens=150）
+        Assert.Equal(4096, status.SafetyBuffer);
+        Assert.Equal(8192 - 2048 - 4096 - 150, status.AvailableInputTokens); // bigChange P1-2：安全位改 headroom 公式（8192 窗 → headroom 4096）；可用 = 总量 - 输出 - headroom - 占用快照（末条 InputTokens=150）
         Assert.Equal(150, status.UsedInputTokens); // 占用快照 = 末条 InputTokens（need05-01 覆盖语义）
         Assert.False(status.IsNearLimit);
     }

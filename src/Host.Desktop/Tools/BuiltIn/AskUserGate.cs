@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Host.Desktop.Bridge;
 using Host.Desktop.Infrastructure.Logging;
 
 namespace Host.Desktop.Tools.BuiltIn;
@@ -125,7 +124,7 @@ public static class AskUserGate
         );
         try
         {
-            JsEventDispatcher.Publish(
+            HaloAgent.Bridge.Contracts.BridgeEvents.Publish(
                 "agent:ask-user-resolved",
                 new
                 {
@@ -156,7 +155,7 @@ public static class AskUserGate
             pending.Tcs.TrySetResult(new AskUserOutcome { Resolved = false, Outcome = outcome });
             try
             {
-                JsEventDispatcher.Publish(
+                HaloAgent.Bridge.Contracts.BridgeEvents.Publish(
                     "agent:ask-user-resolved",
                     new
                     {
@@ -182,7 +181,7 @@ public static class AskUserGate
     {
         try
         {
-            JsEventDispatcher.Publish(
+            HaloAgent.Bridge.Contracts.BridgeEvents.Publish(
                 "agent:ask-user-requested",
                 new
                 {

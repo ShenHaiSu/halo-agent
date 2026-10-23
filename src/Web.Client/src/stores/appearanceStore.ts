@@ -9,7 +9,7 @@ import {
   type AppearanceSettings,
   type ChatWidthMode,
   type ThemeMode,
-} from '@/theme/appearance';
+} from '@shared/ui/appearance';
 
 /** localStorage 读取 + 与默认值深合并（容错：坏 JSON / 越界值 / 未知字段忽略） */
 function mergeWithDefaults(raw: unknown): AppearanceSettings {

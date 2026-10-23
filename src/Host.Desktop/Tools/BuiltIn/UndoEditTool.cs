@@ -12,6 +12,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 /// need22-P0 S4：删除 GuessOriginal 文件名猜测，改为 .meta.json → index.json 精确回查；
 /// 找不到时要求显式 restore_to（BACKUP_INDEX_MISS）。
 /// </summary>
+[HaloAgent.Tools.Tool("undo_edit")]
 public sealed class UndoEditTool : IToolHandler
 {
     public string Name => "undo_edit";

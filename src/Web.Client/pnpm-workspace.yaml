@@ -2,9 +2,7 @@ packages:
   - '.'
 storeDir: ../../.pnpm-store
 packageImportMethod: copy
-onlyBuiltDependencies:
-  - esbuild
-  - vue-demi
 allowBuilds:
   esbuild: true
+  unrs-resolver: true
   vue-demi: true

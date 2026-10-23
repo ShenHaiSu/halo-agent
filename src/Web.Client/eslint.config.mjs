@@ -7,6 +7,7 @@ import tseslint from 'typescript-eslint';
 import pluginVue from 'eslint-plugin-vue';
 import vueParser from 'vue-eslint-parser';
 import prettierConfig from 'eslint-config-prettier';
+import boundaries from 'eslint-plugin-boundaries';
 
 export default tseslint.config(
   {
@@ -64,5 +65,132 @@ export default tseslint.config(
       },
     },
   },
-  prettierConfig,
+  {
+    plugins: { boundaries },
+    settings: {
+      // need21-F01：别名解析（与 vite.config.ts / tsconfig.json 三处同源；F05 定 @/* 去留时同步改）。
+      'import/resolver': {
+        alias: {
+          map: [
+            ['@features', './src/features'],
+            ['@shared', './src/shared'],
+            ['@', './src'],
+          ],
+          extensions: ['.js', '.jsx', '.ts', '.tsx', '.vue', '.json', '.mjs', '.cjs'],
+        },
+        node: { extensions: ['.js', '.jsx', '.ts', '.tsx', '.vue', '.json', '.mjs', '.cjs'] },
+      },
+      'boundaries/elements': [
+        { type: 'feature-agent', pattern: 'src/features/agent' },
+        { type: 'feature-session', pattern: 'src/features/session' },
+        { type: 'feature-workspace', pattern: 'src/features/workspace' },
+        { type: 'feature-settings', pattern: 'src/features/settings' },
+        { type: 'feature-shell', pattern: 'src/features/shell' },
+        { type: 'shared', pattern: 'src/shared' },
+        { type: 'mocks', pattern: 'src/mocks' },
+      ],
+    },
+    rules: {
+      'boundaries/dependencies': [
+        'warn',
+        {
+          default: 'allow',
+          policies: [
+            {
+              from: { element: { type: 'feature-agent' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-session', 'feature-workspace', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-session' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-workspace', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-workspace' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-settings' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-workspace', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-shell' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-workspace', 'feature-settings'] } } },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/features/agent/stores/**/*.ts'],
+    rules: {
+      // need21-F03：新 stores 单向数据流卡死（error）：禁止跨 feature 直连 + 禁止直 import 其他 store。
+      'boundaries/dependencies': [
+        'error',
+        {
+          default: 'allow',
+          policies: [
+            {
+              from: { element: { type: 'feature-agent' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-session', 'feature-workspace', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-session' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-workspace', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-workspace' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-settings', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-settings' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-workspace', 'feature-shell'] } } },
+              },
+            },
+            {
+              from: { element: { type: 'feature-shell' } },
+              disallow: {
+                to: { element: { types: { anyOf: ['feature-agent', 'feature-session', 'feature-workspace', 'feature-settings'] } } },
+              },
+            },
+          ],
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@/stores/workspaceStore',
+                '@/stores/sessionStore',
+                '@/stores/configStore',
+                '@/stores/askUserStore',
+                '@/stores/agentStore',
+              ],
+              message: 'need21-F03: agent 新 store 禁止直调其他 store，请走 runtime 参数或 haloEventBus 事件。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  prettierConfig
 );

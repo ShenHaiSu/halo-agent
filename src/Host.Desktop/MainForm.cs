@@ -23,7 +23,27 @@ public sealed class MainForm : Form
     private readonly CancellationTokenSource _orphanScanCts = new();
     private int _autoVerifyTriggered;
 
+    /// <summary>need21-B01: DI 构造（CompositionRoot 路径）。复用已有初始化，仅桥对象改由 IServiceProvider 解析。</summary>
+    public MainForm(
+        IServiceProvider provider,
+        StoragePathManager storageManager,
+        bool gpuDisabled = false
+    )
+        : this(
+            storageManager,
+            gpuDisabled,
+            provider?.GetService(typeof(Host.Desktop.Bridge.HostBridgeFacade))
+                as Host.Desktop.Bridge.HostBridgeFacade
+        ) { }
+
     public MainForm(StoragePathManager storageManager, bool gpuDisabled = false)
+        : this(storageManager, gpuDisabled, null) { }
+
+    private MainForm(
+        StoragePathManager storageManager,
+        bool gpuDisabled,
+        HostBridgeFacade? injectedBridge
+    )
     {
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
         _gpuDisabled = gpuDisabled;
@@ -67,7 +87,9 @@ public sealed class MainForm : Form
             // 导航守卫：外部链接永不进主帧（http(s) 转系统浏览器），杜绝 markdown 链接点击白屏
             RequestHandler = new ExternalNavigationRequestHandler()
         };
-        _hostBridgeFacade = new HostBridgeFacade(this, _storageManager, _gpuDisabled);
+        _hostBridgeFacade =
+            injectedBridge ?? new HostBridgeFacade(this, _storageManager, _gpuDisabled);
+        _hostBridgeFacade.AttachForm(this);
 
         // 注册异步 JS Bridge 对象至 window.hostBridge
         _chromeBrowser.JavascriptObjectRepository.Settings.LegacyBindingEnabled = false;
@@ -323,7 +345,7 @@ public sealed class MainForm : Form
         }
         _orphanScanCts.Dispose();
         JsEventDispatcher.Shutdown();
-        _hostBridgeFacade.HttpClientFactory.Dispose();
+        _hostBridgeFacade.HttpClientFactoryInternal.Dispose();
         if (!_chromeBrowser.IsDisposed)
         {
             _chromeBrowser.Dispose();
