@@ -233,6 +233,11 @@ export function useTimeline() {
   );
   const toolCount = computed(() => cards.toolCards.length);
   const curIteration = computed(() => turn.activeTurn.curIteration || 1);
+  // need23-R6：本轮（当前 iteration）工具数；toolCards 跨轮不清空，直接取 length 会误导。
+  const curIterToolCount = computed(() => {
+    const it = turn.activeTurn.curIteration || 1;
+    return cards.toolCards.filter((c) => (c.iteration || 0) === it).length;
+  });
   const showThinking = computed(() => !stream.visibleSegs.length && !stream.streamingText && stream.streamingActive && stream.isGenerating);
   const showLiveTelemetry = computed(() => {
     const t = telemetry.telemetry;
@@ -318,6 +323,23 @@ export function useTimeline() {
       if (!loading && paneVisible.value && follow.pinnedRef.value) pin.forceToBottom();
     }
   );
+  // need23-R3：活动容器内文本增长不改变 timelineItems.length，但会撑高内容；
+  // pinned 状态下需节流跟随（250ms 尾随），避免长正文流式时视口不动。
+  let streamFollowTimer: number | null = null;
+  watch(
+    () => (stream.streamingText?.length || 0) + (stream.streamingReasoning?.length || 0),
+    (len, prev) => {
+      if (!len || (prev !== undefined && len <= prev)) return;
+      if (!paneVisible.value || !follow.pinnedRef.value) return;
+      if (readingWindow.value) return;
+      if (streamFollowTimer !== null) return;
+      streamFollowTimer = window.setTimeout(() => {
+        streamFollowTimer = null;
+        if (!follow.pinnedRef.value || readingWindow.value) return;
+        pin.scheduleToBottom();
+      }, 250);
+    }
+  );
   watch(
     () => timelineItems.value.map((i) => i.key),
     (keys) => {
@@ -338,7 +360,14 @@ export function useTimeline() {
       console.warn('[timeline] nav init failed:', e);
     }
   });
-  onUnmounted(() => detachContainer());
+  onUnmounted(() => {
+    detachContainer();
+    // need23-R3：清掉流式跟随的尾随定时器
+    if (streamFollowTimer !== null) {
+      window.clearTimeout(streamFollowTimer);
+      streamFollowTimer = null;
+    }
+  });
   return {
     chatWidthMode,
     persistedMessages,
@@ -381,6 +410,7 @@ export function useTimeline() {
     displaySegs,
     toolCount,
     curIteration,
+    curIterToolCount,
     showThinking,
     showLiveTelemetry,
     liveCachePercent,
