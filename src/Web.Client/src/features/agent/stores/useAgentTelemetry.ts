@@ -4,7 +4,7 @@
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
 import { haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
-import { buildTurnGroups, buildTimelineEntries, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
+import { buildTurnGroupsIncremental, buildTimelineEntries, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
 import {
   activeSessionId,
   ensureSessionSync,
@@ -64,7 +64,31 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
   function persistedOf(): import('@shared/bridge/hostBridge').UnifiedChatMessage[] {
     return persistedMessages.value || [];
   }
-  const activeTurnGroups = computed<TurnGroup[]>(() => buildTurnGroups(persistedOf()));
+  /**
+   * M4-§3.2：把 buildTurnGroups 换成增量版本（`turnGroup.ts` 的 buildTurnGroupsIncremental）。
+   *
+   * 现状问题：`mergePersistedMessage` 每次替换 `sessionMessages` 数组引用，都会触发
+   * activeTurnGroups → visibleTurnGroups → activeTimelineEntries 三级 computed 重算，
+   * 而 `buildTurnGroups` 是**全量**重跑。多工具轮次（一轮 5 个工具）＝ 连续 5 次全量。
+   *
+   * 为什么把记忆体放在闭包里、而不是 `computed` 之外再开一个 ref + watchEffect：
+   * 这里的记忆体是**纯 memo**，键就是输入数组的引用（`msgs === memoMsgs` 直接返回上次结果）。
+   * 它不承载任何「依赖不变时也必须推进」的状态，因此即使 computed 的 getter 被跳过、
+   * 直接返回缓存值，也不可能出现状态漂移（这正是 99 §14 警告的反模式，这里刻意规避）。
+   * 回退条件由 buildTurnGroupsIncremental 自己保证：消息减少 / 末 assistant 落在旧前缀内
+   * 且后缀非纯 tool 时，它内部整体回退到全量重建。
+   */
+  let memoMsgs: import('@shared/bridge/hostBridge').UnifiedChatMessage[] | null = null;
+  let memoGroups: TurnGroup[] = [];
+  const activeTurnGroups = computed<TurnGroup[]>(() => {
+    const msgs = persistedOf();
+    if (msgs === memoMsgs) return memoGroups;
+    const prevCount = memoMsgs ? memoMsgs.length : 0;
+    const r = buildTurnGroupsIncremental(memoGroups, prevCount, msgs);
+    memoMsgs = msgs;
+    memoGroups = r.groups;
+    return memoGroups;
+  });
   /**
    * need23-R7：去重集合 = **当前活动容器里真正可见的工具段**（seg.kind==='tool' && !seg.persisted）。
    * 修复前用的是整轮累计的 toolCards（只在 finishTurn 清空），导致已落盘的工具被永久拉黑：
