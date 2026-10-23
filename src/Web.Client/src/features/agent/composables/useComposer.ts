@@ -1,3 +1,4 @@
+import { enterAction } from './composerGates';
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -233,15 +234,19 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     }
   }
   function onKeydown(e: KeyboardEvent): void {
-    // need22-F03：IME 组合态不拦；面板优先（Enter = 选中候选，不发送）
-    if ((e as unknown as { isComposing?: boolean }).isComposing) return;
-    if (slash.handleKeydown(e)) return;
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handlers.onSend();
-    } else if (e.key === 'Escape' && isGenerating.value) {
+    // bigChange P2-8: Enter/IME/Alt+Enter 语义 — composing/229 全拦；面板优先；Alt+Enter 运行中走 steering。
+    if (e.key === 'Escape' && isGenerating.value) {
       e.preventDefault();
       handlers.onStop();
+      return;
+    }
+    const composing =
+      (e as unknown as { isComposing?: boolean }).isComposing === true || (e as unknown as { keyCode?: number }).keyCode === 229;
+    if (slash.handleKeydown(e)) return;
+    const action = enterAction(e, { enterToSend: true, isComposing: composing, runActive: isGenerating.value });
+    if (action === 'send' || action === 'steer') {
+      e.preventDefault();
+      handlers.onSend();
     }
   }
   function plainTextOfDraft(): string {

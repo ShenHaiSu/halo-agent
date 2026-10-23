@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
-import { blockHash } from '@features/session/utils/turnGroup';
+import { advanceBlocks, checkJoin, createBlockCache, renderBlockHtml, type BlockCache } from './markdownBlocks';
+import { classifySource, overflowHint } from './renderContentLimits';
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -30,25 +31,40 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self): string => {
   if (defaultLinkOpenRender) return defaultLinkOpenRender(tokens, idx, options, env, self);
   return self.renderToken(tokens, idx, options);
 };
-const mdRenderCache = new Map<string, string>();
-const MD_CACHE_MAX = 200;
+
+const blockCaches = new Map<string, BlockCache>();
+const BLOCK_CACHE_MAX = 200;
+function cacheOf(key: string): BlockCache {
+  let c = blockCaches.get(key);
+  if (!c) {
+    c = createBlockCache();
+    blockCaches.set(key, c);
+    if (blockCaches.size > BLOCK_CACHE_MAX) {
+      const oldest = blockCaches.keys().next();
+      if (!oldest.done) blockCaches.delete(oldest.value);
+    }
+  }
+  return c;
+}
+/**
+ * 整源 renderMarkdown 语义已替换为块管线：advanceBlocks 只重切 tail，
+ * settled 块零重跑；超限源降级纯文本 + 提示。保留同名导出兼容旧调用点。
+ */
 export function renderMarkdown(content: string): string {
-  const key = blockHash(content || '');
-  const hit = mdRenderCache.get(key);
-  if (hit !== undefined) return hit;
-  let html: string;
+  const src = content || '';
+  if (classifySource(src) !== 'ok') {
+    return `<pre>${escapeHtml(src)}</pre><div class="markdown-fallback-hint">${overflowHint(classifySource(src))}</div>`;
+  }
   try {
-    html = md.render(content || '');
+    const key = 'default';
+    const next = advanceBlocks(cacheOf(key), src);
+    blockCaches.set(key, next);
+    if (!checkJoin(src, next.blocks)) return renderBlockHtml(src);
+    return next.blocks.map((b) => renderBlockHtml(b.raw)).join('');
   } catch (e) {
     console.warn('[markdown] render failed:', e);
-    html = `<pre>${escapeHtml(content || '')}</pre>`;
+    return `<pre>${escapeHtml(src)}</pre>`;
   }
-  mdRenderCache.set(key, html);
-  if (mdRenderCache.size > MD_CACHE_MAX) {
-    const oldest = mdRenderCache.keys().next();
-    if (!oldest.done) mdRenderCache.delete(oldest.value);
-  }
-  return html;
 }
 export function renderStreamingText(content: string): string {
   return escapeHtml(content || '');

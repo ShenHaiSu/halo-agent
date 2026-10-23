@@ -237,19 +237,21 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
     public List<UnifiedChatMessage> TruncateToBudget(
         ModelConfig model,
         IReadOnlyList<UnifiedChatMessage> messages,
-        int safetyBuffer = DefaultSafetyBuffer,
+        int safetyBuffer = -1,
         int residentStableTokens = 0
     )
     {
         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
+        int headroom =
+            safetyBuffer >= 0 ? safetyBuffer : ContextBudgetLimits.FromModel(model).Headroom;
         var (prompt, _, _) = ResolveOccupancy(messages);
         int used = prompt ?? (ResolveUsedInputTokens(messages) + Math.Max(0, residentStableTokens));
         double ratio = maxContext > 0 ? (double)used / maxContext : 0;
         if (ratio < HighWaterMark)
             return messages.ToList(); // 未达线：原样返回，前缀零抖动
         int target = (int)(maxContext * LowWaterMark);
-        int budget = Math.Max(1000, target - maxOutput - safetyBuffer);
+        int budget = Math.Max(1000, target - maxOutput - headroom);
         return BuildWithinBudget(messages, budget); // 达线才进现有原子组裁剪
     }
 
@@ -266,7 +268,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
     {
         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
-        int safetyBuffer = DefaultSafetyBuffer;
+        int safetyBuffer = ContextBudgetLimits.FromModel(model).Headroom;
         var (prompt, cached, isEst) = ResolveOccupancy(messages);
         int msgCount = messages?.Count ?? 0;
         int resident = Math.Max(0, residentStableTokens);

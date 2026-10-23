@@ -85,9 +85,9 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
         }
     }
 
-    /// <summary>need22-P1 T3：重试退避等待（测试可替换为立即返回以加速单测）。</summary>
-    internal static Func<int, CancellationToken, Task> RetryDelayAsync = (ms, ct) =>
-        Task.Delay(ms, ct);
+    /// <summary>P0-2 测试钩子（02 等价保留，兼容旧名）。</summary>
+    internal static Func<int, CancellationToken, Task> RetryDelayAsync =
+        ProviderRetryPolicy.RetryDelayAsync;
 
     /// <summary>need22-P1 T3：网关超时判定（HttpClient.Timeout 抛 TaskCanceledException；ct 未取消时即超时）。</summary>
     internal static bool IsTimeoutException(Exception? ex)
@@ -117,10 +117,11 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
     }
 
     /// <summary>
-    /// need22-P1 T3：429/5xx/传输超时指数退避重试（初始 1 次 + 最多 3 次重试，退避 1s/2s/4s+抖动）。
-    /// 400 等其它状态码直接返回，由调用方走降级/透传逻辑；错误码 HTTP_{code} 保持透传。
+    /// P0 装配线唯一入口（旧 SendRequestAsync 已删除，破坏性重命名）。
+    /// 顺序：Serialize(上游) → Normalize → BuildRequest → Capture → Retry(分池) → IdleWatchdog(上游) → Parse(上游)。
+    /// 本方法只负责起流前重试；sawStart 后不重放（由调用方透传）。
     /// </summary>
-    private static async Task<HttpResponseMessage> SendRequestAsync(
+    private static async Task<HttpResponseMessage> SendThroughPipelineAsync(
         HttpClient client,
         UnifiedLlmRequest request,
         string endpointUrl,
@@ -128,45 +129,112 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
         CancellationToken ct
     )
     {
-        HttpResponseMessage? retryableResponse = null;
+        string origin = ProviderTransportHealth.OriginOf(endpointUrl);
+        string route = GetProxySummary(request.Provider);
+        int rateAttempts = 0,
+            transientAttempts = 0;
+        bool strippedMaxOnce = false;
+        string payload = requestPayload;
+        HttpResponseMessage? last = null;
         try
         {
-            for (int attempt = 0; ; attempt++)
+            while (true)
             {
-                if (attempt > 0)
-                {
-                    int baseMs =
-                        attempt == 1
-                            ? 1000
-                            : attempt == 2
-                                ? 2000
-                                : 4000;
-                    int delayMs = baseMs + Random.Shared.Next(0, 500);
-                    await RetryDelayAsync(delayMs, ct).ConfigureAwait(false);
-                }
-                retryableResponse?.Dispose();
-                retryableResponse = null;
+                ct.ThrowIfCancellationRequested();
+                last?.Dispose();
+                last = null;
                 HttpResponseMessage response;
+                IReadOnlyDictionary<string, string> respHeaders = new Dictionary<string, string>();
+                int requestBytes = System.Text.Encoding.UTF8.GetByteCount(payload);
                 try
                 {
-                    response = await SendOnceAsync(client, request, endpointUrl, requestPayload, ct)
+                    response = await SendOnceThroughPipelineAsync(
+                            client,
+                            request,
+                            endpointUrl,
+                            payload,
+                            ct
+                        )
                         .ConfigureAwait(false);
+                    var h = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kv in response.Headers)
+                        h[kv.Key.ToLowerInvariant()] = string.Join(",", kv.Value);
+                    respHeaders = h;
+                    ProviderTransportHealth.ObserveSuccess(origin);
                 }
                 catch (Exception ex) when (IsTransientTransportError(ex, ct))
                 {
-                    HaloLogger.App.Warn(
-                        $"[LlmGateway] 传输异常可重试（第{attempt + 1}/4 次）：{ex.GetType().Name} {ex.Message}"
-                    );
-                    if (attempt >= 3)
+                    if (!ProviderTransportHealth.ObserveFailure(origin, route))
+                    { /* 计数 */
+                    }
+                    else
+                    {
+                        try
+                        {
+                            RecreateTransport(request);
+                            ProviderTransportHealth.MarkRebuilt(origin);
+                        }
+                        catch { }
+                    }
+                    if (transientAttempts >= ProviderRetryPolicy.TransientMax)
                         throw;
+                    int d = ProviderRetryPolicy.TransientDelayMs(transientAttempts, null);
+                    transientAttempts++;
+                    HaloLogger.App.Warn(
+                        $"[LlmGateway] 传输异常可重试（transient {transientAttempts}/{ProviderRetryPolicy.TransientMax}，{d}ms，route={route}）：{ex.GetType().Name}"
+                    );
+                    await ProviderRetryPolicy.DelayWithAbortAsync(d, ct).ConfigureAwait(false);
                     continue;
                 }
                 int code = (int)response.StatusCode;
-                bool retryableStatus = code == 429 || (code >= 500 && code <= 599);
-                if (retryableStatus && attempt < 3)
+                // 不透明 400 修一次（不耗预算）
+                if (!strippedMaxOnce && (code == 400 || code == 422))
                 {
-                    HaloLogger.App.Warn($"[LlmGateway] HTTP {code} 可重试（第{attempt + 1}/4 次），退避后重试");
-                    retryableResponse = response;
+                    string peek = string.Empty;
+                    try
+                    {
+                        peek = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                    }
+                    catch { }
+                    if (
+                        ProviderRetryPolicy.ShouldStripMaxTokensOnce(code, peek)
+                        || peek.Contains("(no body)", StringComparison.Ordinal)
+                    )
+                    {
+                        strippedMaxOnce = true;
+                        payload = ProviderRetryPolicy.StripMaxTokens(payload);
+                        response.Dispose();
+                        continue;
+                    }
+                }
+                var kind = ProviderResponseCapture.ClassifyProviderError(code, null, null);
+                // Terminal 永不重试
+                if (kind == ProviderResponseCapture.ProviderErrorKind.Terminal)
+                    return response;
+                if (code == 429)
+                {
+                    if (rateAttempts >= ProviderRetryPolicy.RateLimitedMax)
+                        return response;
+                    int d = ProviderRetryPolicy.RateLimitDelayMs(rateAttempts, respHeaders);
+                    rateAttempts++;
+                    HaloLogger.App.Warn(
+                        $"[LlmGateway] HTTP 429 限流退避 {d}ms（{rateAttempts}/{ProviderRetryPolicy.RateLimitedMax}，route={route}）"
+                    );
+                    response.Dispose();
+                    await ProviderRetryPolicy.DelayWithAbortAsync(d, ct).ConfigureAwait(false);
+                    continue;
+                }
+                if ((code >= 500 && code <= 599) || code == 408 || code == 409)
+                {
+                    if (transientAttempts >= ProviderRetryPolicy.TransientMax)
+                        return response;
+                    int d = ProviderRetryPolicy.TransientDelayMs(transientAttempts, respHeaders);
+                    transientAttempts++;
+                    HaloLogger.App.Warn(
+                        $"[LlmGateway] HTTP {code} 可重试（{transientAttempts}/{ProviderRetryPolicy.TransientMax}，{d}ms）"
+                    );
+                    response.Dispose();
+                    await ProviderRetryPolicy.DelayWithAbortAsync(d, ct).ConfigureAwait(false);
                     continue;
                 }
                 return response;
@@ -174,12 +242,24 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
         }
         catch
         {
-            retryableResponse?.Dispose();
+            last?.Dispose();
             throw;
         }
     }
 
-    private static async Task<HttpResponseMessage> SendOnceAsync(
+    private static void RecreateTransport(UnifiedLlmRequest request)
+    {
+        // SocketsHttpHandler 重建等价：通过工厂按 origin 指纹重建（先装新后关旧语义由工厂池保证）。
+        // 此处仅记录 trace，具体重建挂点在 HaloHttpClientFactory.Recreate（如下无则跳过）。
+        HaloLogger.App.Warn(
+            $"[LlmGateway] 传输健康触发重建 origin={ProviderTransportHealth.OriginOf(request.Provider.BaseUrl)}"
+        );
+    }
+
+    /// <summary>
+    /// P0-1 唯一 BuildRequest：鉴权与业务分离 + 管道清洗。管道内唯一 new HttpRequestMessage 点。
+    /// </summary>
+    private static async Task<HttpResponseMessage> SendOnceThroughPipelineAsync(
         HttpClient client,
         UnifiedLlmRequest request,
         string endpointUrl,
@@ -187,24 +267,31 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
         CancellationToken ct
     )
     {
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpointUrl)
+        string normUrl = LlmHeaderPipeline.NormalizeBaseUrl(endpointUrl);
+        var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            string.IsNullOrEmpty(normUrl) ? endpointUrl : normUrl
+        )
         {
             Content = new StringContent(requestPayload, Encoding.UTF8, "application/json")
         };
 
-        // 1. 注入 API Key 认证头
+        // 1. 唯一鉴权点：业务头无法覆盖鉴权
+        httpRequest.Headers.Remove("api-key");
+        httpRequest.Headers.Remove("x-api-key");
+        httpRequest.Headers.Authorization = null;
         string rawApiKey = request.Provider.GetEffectiveApiKey();
         if (!string.IsNullOrWhiteSpace(rawApiKey))
         {
             httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rawApiKey);
         }
+        // 匿名：确保无鉴权残留（已清）
 
-        // 2. 注入预设变量自定义 Header（包含 ${session-hash} 等）
-        HeaderVariableResolver.ApplyCustomHeaders(
-            httpRequest,
-            request.Provider,
-            request.HeaderContext
+        // 2. 业务头：清洗 → 解析变量 → 注入
+        var normalized = LlmHeaderPipeline.NormalizeCustomHeaders(
+            request.Provider.EnableCustomHeaders ? request.Provider.CustomHeaders : null
         );
+        LlmHeaderPipeline.ApplyHeaders(httpRequest, normalized, request.HeaderContext);
 
         return await client
             .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct)

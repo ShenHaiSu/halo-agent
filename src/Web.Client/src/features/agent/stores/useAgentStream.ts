@@ -21,19 +21,19 @@ import {
   type TurnEventPayload,
 } from './model';
 
-// ---- seg 分片缓冲（旧 store 模块态原样上移；语义不变） ----
-const SEG_FLUSH_MS = 100;
+import { enqueueFrame, flushNow as flushBatcherNow, messageKey } from '@shared/utils/frameBatcher';
+
+// ---- seg 分片缓冲（frameBatcher 接管合批；SEG_FLUSH_MS 旧定时器已删除，由 frameBatcher rAF 合批） ----
 const SEG_DISPLAY_CAP = 20000;
 interface SegBuf {
   text: string;
   reasoning: string;
-  timer: number | null;
 }
 const segBufs: Record<string, SegBuf> = {};
 function segBufOf(sid: string): SegBuf {
   let b = segBufs[sid];
   if (!b) {
-    b = { text: '', reasoning: '', timer: null };
+    b = { text: '', reasoning: '' };
     segBufs[sid] = b;
   }
   return b;
@@ -42,7 +42,6 @@ export function flushSegBuf(sid: string): void {
   const t = turns.value[sid];
   const buf = segBufs[sid];
   if (!t || !buf) return;
-  buf.timer = null;
   const hasText = !!buf.text;
   const hasReason = !!buf.reasoning;
   if (!hasText && !hasReason) return;
@@ -62,41 +61,28 @@ export function flushSegBuf(sid: string): void {
   t.isGenerating = true;
   touch(t);
 }
+/** 同 key 合并：流文本 append 非替换；经 frameBatcher rAF 合批进 Pinia。 */
 export function queueSegDelta(sid: string, kind: 'text' | 'reasoning', chunk: string): void {
   if (!chunk) return;
   ensureTurn(sid);
   const buf = segBufOf(sid);
   if (kind === 'text') buf.text += chunk;
   else buf.reasoning += chunk;
-  if (buf.timer !== null) return;
-  buf.timer = window.setTimeout(() => {
+  enqueueFrame(messageKey(sid, kind), () => {
     try {
       flushSegBuf(sid);
     } catch (e) {
       console.warn('[agent-stream] flushSegBuf failed:', e);
     }
-  }, SEG_FLUSH_MS);
+  });
 }
+/** terminal 事件（message_end/tool_end/非流）先 flushNow，不等下一帧。 */
 export function flushSegBufSync(sid: string): void {
-  const buf = segBufs[sid];
-  if (buf && buf.timer !== null) {
-    try {
-      window.clearTimeout(buf.timer);
-    } catch (e) {
-      console.warn('[agent-stream] clear flush timer failed:', e);
-    }
-    buf.timer = null;
-  }
+  flushBatcherNow();
   flushSegBuf(sid);
 }
 export function dropSegBuf(sid: string): void {
-  try {
-    const b = segBufs[sid];
-    if (b && b.timer !== null) window.clearTimeout(b.timer);
-    delete segBufs[sid];
-  } catch (e) {
-    console.warn('[agent-stream] clear buf failed:', e);
-  }
+  delete segBufs[sid];
 }
 
 let listenersBound = false;

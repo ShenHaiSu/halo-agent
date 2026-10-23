@@ -10,7 +10,9 @@ import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { imagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
-import { createBottomPin, useTimelineNav } from './useTimelineNav';
+import { createBottomPin, useFollowMode, useTimelineNav } from './useTimelineNav';
+import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
+import { INITIAL_MOUNT, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
 
 export interface DisplaySeg {
@@ -43,6 +45,86 @@ export function useTimeline() {
     expandedTurns[key] = !isTurnExpanded(key);
   };
   const timelineItems = computed<TimelineEntry[]>(() => telemetry.activeTimelineEntries);
+  // bigChange P2-1/P2-3: history memo frozen + tail live. key = message/turn id; reuseRef keeps refs stable.
+  const TAIL_SIZE = 8;
+  const entryRefs = new Map<string, TimelineEntry>();
+  let projGeneration = 0;
+  function reuseRef(e: TimelineEntry): TimelineEntry {
+    const prev = entryRefs.get(e.key);
+    if (prev && prev.kind === e.kind && prev.msg === e.msg && prev.group === e.group) return prev;
+    entryRefs.set(e.key, e);
+    return e;
+  }
+  function pruneRefs(live: TimelineEntry[]): void {
+    if (entryRefs.size <= 600) return;
+    const keep = new Set(live.map((e) => e.key));
+    for (const k of entryRefs.keys()) if (!keep.has(k)) entryRefs.delete(k);
+  }
+  const historyEntries = computed<TimelineEntry[]>(() => {
+    const all = timelineItems.value;
+    const split = Math.max(0, all.length - TAIL_SIZE);
+    const hist = all.slice(0, split).map(reuseRef);
+    pruneRefs(all);
+    try {
+      syncTranscriptProjection(++projGeneration, hist, all.slice(split));
+    } catch {
+      /* cache sync never blocks render */
+    }
+    return hist;
+  });
+  const tailEntries = computed<TimelineEntry[]>(() => {
+    const all = timelineItems.value;
+    return all.slice(Math.max(0, all.length - TAIL_SIZE));
+  });
+  // bigChange P2-3: pinned/showJump dual mode; hidden pane never follows/pages/samples.
+  const follow = useFollowMode();
+  const paneVisible = ref(true);
+  function setPaneVisible(v: boolean): void {
+    paneVisible.value = v;
+  }
+  // readingWindow: historical focus degrades running lights + hides action cards.
+  const readingWindow = ref(false);
+  function setReadingWindow(v: boolean): void {
+    readingWindow.value = v;
+  }
+  function clearReadingWindow(): void {
+    readingWindow.value = false;
+  }
+  const transcriptRunning = computed(() => stream.isGenerating && !readingWindow.value);
+  // Windowed top expansion: near-top first grows +STEP, window-covered only then loadOlder; prepend anchors via scrollTop += delta.
+  const hiddenAbove = ref(0);
+  const visibleHistoryEntries = computed<TimelineEntry[]>(() => historyEntries.value.slice(hiddenAbove.value));
+  function ensureMountWindow(): void {
+    hiddenAbove.value = Math.max(0, timelineItems.value.length - INITIAL_MOUNT);
+    requestAnimationFrame(() => {
+      if (!follow.pinnedRef.value || !paneVisible.value) return;
+      hiddenAbove.value = Math.max(0, timelineItems.value.length - WINDOW_MIN);
+      pin.forceToBottom();
+    });
+  }
+  function growWindowTop(step = STEP): boolean {
+    if (hiddenAbove.value <= 0) return false;
+    hiddenAbove.value = Math.max(0, hiddenAbove.value - step);
+    return true;
+  }
+  function anchorPrepend(el: HTMLElement | null, beforeHeight: number): void {
+    if (!el) return;
+    try {
+      const delta = el.scrollHeight - beforeHeight;
+      if (delta > 0) el.scrollTop += delta;
+    } catch (e) {
+      console.warn('[timeline] anchor prepend failed:', e);
+    }
+  }
+  async function handleTopReach(loadOlder: () => void | Promise<void>): Promise<void> {
+    if (!paneVisible.value) return;
+    if (growWindowTop()) return;
+    const el = scrollEl.value;
+    const before = el ? el.scrollHeight : 0;
+    await loadOlder();
+    await nextTick();
+    anchorPrepend(el, before);
+  }
   function setAnchor(key: string) {
     return (el: Element | ComponentPublicInstance | null) => {
       try {
@@ -176,6 +258,8 @@ export function useTimeline() {
     }
   }
   async function onRetryTurn(): Promise<void> {
+    clearReadingWindow();
+    if (paneVisible.value) follow.onSendRisingEdge(() => pin.forceToBottom());
     try {
       await turn.retryLastTurn();
     } catch (err) {
@@ -198,7 +282,7 @@ export function useTimeline() {
       console.warn('[timeline] nav init failed:', e);
     }
     pin.bindUserScroll();
-    void nextTick(() => pin.scheduleToBottom());
+    ensureMountWindow();
   }
   function detachContainer(): void {
     pin.unbindUserScroll();
@@ -215,19 +299,23 @@ export function useTimeline() {
     () => workspaceStore.activeSessionId,
     () => {
       menu.closeMenu();
-      pin.forceToBottom();
+      clearReadingWindow();
+      if (!paneVisible.value) return;
+      follow.onSendRisingEdge(() => pin.forceToBottom());
+      ensureMountWindow();
     }
   );
   watch(
     () => timelineItems.value.length,
     () => {
+      if (!paneVisible.value || !follow.pinnedRef.value) return;
       void nextTick(() => pin.scheduleToBottom());
     }
   );
   watch(
     () => workspaceStore.loadingMessages,
     (loading) => {
-      if (!loading) pin.forceToBottom();
+      if (!loading && paneVisible.value && follow.pinnedRef.value) pin.forceToBottom();
     }
   );
   watch(
@@ -242,7 +330,7 @@ export function useTimeline() {
     { immediate: true }
   );
   onMounted(() => {
-    void nextTick(() => pin.scheduleToBottom());
+    if (paneVisible.value && follow.pinnedRef.value) void nextTick(() => pin.scheduleToBottom());
     menu.bindMenuGlobalClose();
     try {
       nav.setOrder(timelineItems.value.map((i) => i.key));
@@ -255,6 +343,28 @@ export function useTimeline() {
     chatWidthMode,
     persistedMessages,
     timelineItems,
+    historyEntries,
+    tailEntries,
+    visibleHistoryEntries,
+    hiddenAbove,
+    ensureMountWindow,
+    growWindowTop,
+    handleTopReach,
+    anchorPrepend,
+    pinnedRef: follow.pinnedRef,
+    showJump: follow.showJump,
+    releaseFollow: follow.releaseFollow,
+    jumpToLatest: (onReturnToLatest?: () => void) => follow.jumpToLatest(() => pin.forceToBottom(), onReturnToLatest ?? clearReadingWindow),
+    notifySend: () => {
+      clearReadingWindow();
+      if (paneVisible.value) follow.onSendRisingEdge(() => pin.forceToBottom());
+    },
+    paneVisible,
+    setPaneVisible,
+    readingWindow,
+    setReadingWindow,
+    clearReadingWindow,
+    transcriptRunning,
     isTurnExpanded,
     toggleTurn,
     setAnchor,

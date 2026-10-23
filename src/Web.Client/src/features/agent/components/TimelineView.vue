@@ -1,5 +1,10 @@
 <template>
-  <div ref="scroll" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden" data-testid="message-timeline">
+  <div
+    ref="scroll"
+    class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative"
+    data-testid="message-timeline"
+    :data-transcript-settling="veilCovering ? 'true' : undefined"
+  >
     <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <div v-if="isEmpty" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
@@ -8,103 +13,103 @@
         <p class="text-sm text-primary font-medium">在下方输入任务指令，Agent 将自动编排工具完成</p>
         <p class="text-xs text-secondary font-mono">默认 Runner：CMD 优先 / PYTHON 次之 · 禁用 PowerShell 专属语法</p>
       </div>
-      <template v-for="item in items" :key="item.key">
-        <div v-if="item.kind === 'user'" :ref="anchorRef(item.key)" class="flex justify-end">
-          <div
-            class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
-            @contextmenu.prevent="emit('user-menu', $event, item)"
-          >
-            <template v-for="(part, pi) in userParts(String(item.msg?.content ?? ''))" :key="pi">
-              <span v-if="part.type === 'text'">{{ part.text }}</span>
-              <SkillPillChip v-else :scope="part.scope" :name="part.name" class="inline-chip" />
-            </template>
-            <div v-if="msgImages(item.msg).length" class="mt-1.5 flex flex-wrap gap-1.5" data-testid="msg-images">
-              <template v-for="img in msgImages(item.msg)" :key="img.imageId">
-                <n-image
-                  v-if="thumbOf(img)"
-                  :src="thumbOf(img)"
-                  :alt="img.fileName"
-                  width="96"
-                  object-fit="cover"
-                  class="rounded border"
-                  :data-testid="`msg-image-${img.imageId}`"
-                />
-                <n-tag v-else size="small" :bordered="true" :title="img.fileName">{{ img.fileName }}</n-tag>
-              </template>
-            </div>
-            <div v-if="hasLost(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
-          </div>
-        </div>
-        <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
-          {{ item.msg?.content }}
-        </div>
-        <div v-else :ref="anchorRef(item.key)">
-          <TurnGroupItem
-            v-if="item.group"
-            :group="item.group"
-            :expanded="isExpanded(item.group.key || item.key)"
-            :has-failed="hasFailed(item.group)"
-            :show-telemetry="showTelemetry(item.group)"
-            :protocol="protocolOf(item.group)"
-            :cache-line="cacheLineOf(item.group)"
+      <TranscriptHistory :entries="historyList">
+        <template #default="{ entry }">
+          <TimelineRow
+            :item="entry as TimelineEntry"
+            :is-expanded="isExpanded"
+            :anchor-ref="anchorRef"
+            :msg-images="msgImages"
+            :thumb-of="thumbOf"
+            :has-lost="hasLost"
             :render-html="renderHtml"
-            :card-for="(m) => cardFor(m, item.group!)"
+            :card-for="cardFor"
             :tool-key="toolKey"
+            :has-failed="hasFailed"
+            :show-telemetry="showTelemetry"
+            :protocol-of="protocolOf"
+            :cache-line-of="cacheLineOf"
             @toggle="emit('toggle', $event)"
-            @content-menu="emit('assistant-menu', $event, item)"
+            @user-menu="(e, item) => emit('user-menu', e, item)"
+            @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
           />
-        </div>
-      </template>
-      <div
-        v-if="hasActiveTurn"
-        data-testid="active-turn-container"
-        class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
-      >
-        <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
-          <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-          <span>{{ thinkingLine }}</span>
-          <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
-        </div>
-        <template v-if="!segKillSwitch && segs.length">
-          <template v-for="seg in segs" :key="seg.key">
-            <div
-              v-if="seg.kind === 'reasoning' && seg.text"
-              class="whitespace-pre-wrap break-words app-text-small text-[var(--reasoning-text)] max-h-24 overflow-y-auto"
-              :data-seg="seg.key"
-            >
-              {{ seg.text }}
-            </div>
-            <div v-else-if="seg.kind === 'tool' && seg.card" data-testid="active-turn-tools" :data-seg="seg.key">
-              <ToolCallCard :card="seg.card" :default-collapsed="true" />
-            </div>
-            <div
-              v-else-if="seg.kind === 'text' && seg.text"
-              class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-              style="white-space: pre-wrap"
-              :data-seg="seg.key"
-              @click="emit('link-click', $event)"
-              v-html="renderStream(seg.text)"
-            />
-          </template>
         </template>
-        <template v-else-if="segKillSwitch">
-          <div v-if="fallbackCards.length" class="space-y-1.5" data-testid="active-turn-tools">
-            <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
-          </div>
-          <div
-            v-if="streamingText"
-            class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-            style="white-space: pre-wrap"
-            @click="emit('link-click', $event)"
-            v-html="renderStream(streamingText)"
+      </TranscriptHistory>
+      <TranscriptTail :entries="tailList">
+        <template #default="{ entry }">
+          <TimelineRow
+            :item="entry as TimelineEntry"
+            :is-expanded="isExpanded"
+            :anchor-ref="anchorRef"
+            :msg-images="msgImages"
+            :thumb-of="thumbOf"
+            :has-lost="hasLost"
+            :render-html="renderHtml"
+            :card-for="cardFor"
+            :tool-key="toolKey"
+            :has-failed="hasFailed"
+            :show-telemetry="showTelemetry"
+            :protocol-of="protocolOf"
+            :cache-line-of="cacheLineOf"
+            @toggle="emit('toggle', $event)"
+            @user-menu="(e, item) => emit('user-menu', e, item)"
+            @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
+            @link-click="emit('link-click', $event)"
           />
         </template>
-        <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
-          <Loader2 class="w-3.5 h-3.5 animate-spin" />
-          <span>Agent 推理中...</span>
-        </div>
-      </div>
+        <template #live>
+          <div
+            v-if="hasActiveTurn"
+            data-testid="active-turn-container"
+            class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
+          >
+            <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
+              <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span>{{ thinkingLine }}</span>
+              <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
+            </div>
+            <template v-if="!segKillSwitch && segs.length">
+              <template v-for="seg in segs" :key="seg.key">
+                <div
+                  v-if="seg.kind === 'reasoning' && seg.text"
+                  class="whitespace-pre-wrap break-words app-text-small text-[var(--reasoning-text)] max-h-24 overflow-y-auto"
+                  :data-seg="seg.key"
+                >
+                  {{ seg.text }}
+                </div>
+                <div v-else-if="seg.kind === 'tool' && seg.card" data-testid="active-turn-tools" :data-seg="seg.key">
+                  <ToolCallCard :card="seg.card" :default-collapsed="true" />
+                </div>
+                <div
+                  v-else-if="seg.kind === 'text' && seg.text"
+                  class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
+                  style="white-space: pre-wrap"
+                  :data-seg="seg.key"
+                  @click="emit('link-click', $event)"
+                  v-html="renderStream(seg.text)"
+                />
+              </template>
+            </template>
+            <template v-else-if="segKillSwitch">
+              <div v-if="fallbackCards.length" class="space-y-1.5" data-testid="active-turn-tools">
+                <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
+              </div>
+              <div
+                v-if="streamingText"
+                class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
+                style="white-space: pre-wrap"
+                @click="emit('link-click', $event)"
+                v-html="renderStream(streamingText)"
+              />
+            </template>
+            <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
+              <Loader2 class="w-3.5 h-3.5 animate-spin" />
+              <span>Agent 推理中...</span>
+            </div>
+          </div>
+        </template>
+      </TranscriptTail>
       <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">
         {{ turnNotice }}
       </n-alert>
@@ -137,10 +142,25 @@
         @delete="emit('menu-delete')"
       />
     </div>
+    <div v-if="veilCovering" class="transcript-veil" aria-hidden="true">
+      <div class="transcript-skeleton" />
+      <div class="transcript-skeleton short" />
+      <div class="transcript-skeleton" />
+    </div>
+    <button
+      v-if="showJumpVisible"
+      type="button"
+      class="show-jump-pill"
+      data-testid="show-jump"
+      title="回到底部"
+      @click="emit('jump-latest')"
+    >
+      回到底部
+    </button>
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, onUnmounted, useTemplateRef, type ComponentPublicInstance } from 'vue';
+import { computed, onMounted, onUnmounted, useTemplateRef, type ComponentPublicInstance } from 'vue';
 import { Bot, BrainCircuit, Loader2 } from 'lucide-vue-next';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
@@ -148,12 +168,13 @@ import type { AgentToolCard } from '@features/agent/stores/model';
 import type { DisplaySeg } from '../composables/useTimeline';
 import ToolCallCard from './ToolCallCard.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
-import TurnGroupItem from './TurnGroupItem.vue';
-// need22-F04：user 消息分段渲染（文本段 + skill chip）
-import SkillPillChip from './SkillPillChip.vue';
-import { userParts } from '../utils/userParts';
+import TimelineRow from './TimelineRow.vue';
+import TranscriptHistory from './TranscriptHistory.vue';
+import TranscriptTail from './TranscriptTail.vue';
 
-defineProps<{
+const TAIL_FALLBACK = 8;
+
+const props = defineProps<{
   isEmpty: boolean;
   items: TimelineEntry[];
   chatWidthMode: string;
@@ -187,6 +208,11 @@ defineProps<{
   menuY: number;
   menuBusy: boolean;
   menuCanCopy: boolean;
+  historyItems?: TimelineEntry[] | null;
+  tailItems?: TimelineEntry[] | null;
+  showJumpBtn?: boolean;
+  readingWindow?: boolean;
+  veilCovering?: boolean;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
@@ -200,9 +226,62 @@ const emit = defineEmits<{
   'menu-replay': [];
   'menu-branch': [];
   'menu-delete': [];
+  'jump-latest': [];
 }>();
 const scroll = useTemplateRef<HTMLElement>('scroll');
 onMounted(() => emit('ready', scroll.value));
 onUnmounted(() => emit('ready', null));
+
+const historyList = computed<TimelineEntry[]>(() => {
+  if (props.historyItems) return props.historyItems;
+  return props.items.slice(0, Math.max(0, props.items.length - TAIL_FALLBACK));
+});
+const tailList = computed<TimelineEntry[]>(() => {
+  if (props.tailItems) return props.tailItems;
+  if (props.historyItems) return [];
+  return props.items.slice(Math.max(0, props.items.length - TAIL_FALLBACK));
+});
+// 显示条件 (showJump||readingWindow)&&!veilCovering
+const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
 </script>
-<style scoped></style>
+<style scoped>
+.transcript-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--n-body-color, #fff);
+  pointer-events: auto;
+  z-index: 5;
+}
+.transcript-skeleton {
+  height: 56px;
+  border-radius: 8px;
+  margin: 12px 16px;
+  background: linear-gradient(90deg, #8881 25%, #8883 50%, #8881 75%);
+  background-size: 200% 100%;
+  animation: veil-shimmer 1.2s linear infinite;
+}
+.transcript-skeleton.short {
+  width: 60%;
+}
+@keyframes veil-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.show-jump-pill {
+  position: sticky;
+  bottom: 12px;
+  float: right;
+  margin-right: 16px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--n-primary-color, #2080f0);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  z-index: 6;
+}
+</style>

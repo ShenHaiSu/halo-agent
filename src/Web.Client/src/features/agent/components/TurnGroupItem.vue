@@ -1,5 +1,17 @@
 <template>
-  <div class="space-y-2 min-w-0">
+  <div class="space-y-2 min-w-0" :class="phaseClass">
+    <div v-if="phaseLabel" class="flex items-center gap-1.5 text-[11px] text-secondary select-none" :class="{ active: isActive }">
+      <Loader2 v-if="isActive" class="w-3 h-3 animate-spin shrink-0" />
+      <span>{{ phaseLabel }}</span>
+      <span
+        v-if="(errorCount ?? 0) > 0"
+        class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40"
+        >{{ errorCount }} 个错误</span
+      >
+      <span v-if="toolTotal > 0" class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full border border-subtle"
+        >{{ toolTotal }} 个工具</span
+      >
+    </div>
     <div
       v-if="group.content"
       class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
@@ -48,10 +60,12 @@
   </div>
 </template>
 <script setup lang="ts">
-import { BrainCircuit, ChevronDown } from 'lucide-vue-next';
+import { computed } from 'vue';
+import { BrainCircuit, ChevronDown, Loader2 } from 'lucide-vue-next';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
+import { turnPhaseOf, turnDurationLabel, type TurnPhase } from '@features/session/utils/turnProcess';
 import ToolCallCard from './ToolCallCard.vue';
 
 const props = defineProps<{
@@ -64,11 +78,41 @@ const props = defineProps<{
   renderHtml: (text: string) => string;
   cardFor: (m: UnifiedChatMessage) => AgentToolCard;
   toolKey: (m: UnifiedChatMessage) => string;
+  isActive?: boolean;
+  stopped?: boolean;
+  startedAt?: number | null;
+  errorCount?: number;
 }>();
 const emit = defineEmits<{
   toggle: [key: string];
   'content-menu': [e: MouseEvent];
   'link-click': [e: MouseEvent];
 }>();
-void props;
+
+const phase = computed<TurnPhase>(() =>
+  turnPhaseOf({
+    hasOwnError: props.hasFailed,
+    stopped: !!props.stopped,
+    isActive: !!props.isActive,
+    hasContent: !!props.group.content,
+  })
+);
+const phaseLabel = computed(() => {
+  const dur = turnDurationLabel(props.startedAt ?? null);
+  const suffix = dur ? ` · ${dur}` : '';
+  const heads: Record<TurnPhase, string> = {
+    failed: `失败${suffix}`,
+    stopped: `已停止${suffix}`,
+    running: `运行中…${suffix}`,
+    completed: `已完成${suffix}`,
+  };
+  return heads[phase.value];
+});
+const phaseClass = computed(() => (phase.value === 'running' || props.isActive ? 'turn-running' : ''));
+const toolTotal = computed(() => props.group.toolMessages?.length ?? 0);
 </script>
+<style scoped>
+.turn-running {
+  position: relative;
+}
+</style>
