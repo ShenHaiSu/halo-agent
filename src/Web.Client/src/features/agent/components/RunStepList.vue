@@ -1,5 +1,7 @@
 <template>
-  <div class="space-y-2 min-w-0" data-testid="turn-run-steps">
+  <!-- need-02：space-y-2 → .run-steps（显式 margin），与消息块同一套间距口径，
+       避免「有无 reasoning」改变后续兄弟的 margin-top 造成抖动。 -->
+  <div class="run-steps min-w-0" data-testid="turn-run-steps">
     <div v-for="(group, i) in groups" :key="group.key" class="min-w-0" :data-testid="`turn-run-step-${i + 1}`">
       <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
         <span class="font-mono shrink-0 opacity-70">{{ i + 1 }}</span>

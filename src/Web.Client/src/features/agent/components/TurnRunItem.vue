@@ -1,6 +1,8 @@
 <template>
-  <div class="space-y-2 min-w-0" :class="phaseClass" data-testid="turn-run-item" :data-run-key="run.key">
-    <div class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden">
+  <!-- need-02：根容器由 space-y-2 改为 .turn-body（显式 margin，兄弟数量无关）。
+       汇总行就是折叠栏 header 本身，因此这里恒为「首个子元素」，上边距 0。 -->
+  <div class="turn-body min-w-0" :class="phaseClass" data-testid="turn-run-item" :data-run-key="run.key">
+    <div class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 overflow-hidden" :class="alertAccent">
       <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="emit('toggle', run.key)">
         <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] min-w-0">
           <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -72,6 +74,11 @@ const isActive = computed(() => props.run.isRunning && !props.readingWindow);
 const phaseLabel = computed(() => runPhaseLabel(props.run, { failed: props.run.failedCount > 0, stopped: false }));
 const failedTitle = computed(() => `${props.run.failedCount} 个工具调用失败`);
 const phaseClass = computed(() => (isActive.value ? 'turn-running' : ''));
+/**
+ * need-02 决策 2-A：与 TurnGroupItem 同口径——失败态左侧竖线换 rose，不额外占一行。
+ * （run 无 stopped 输入，故只判 failed。）
+ */
+const alertAccent = computed(() => (props.run.failedCount > 0 ? 'border-rose-500' : 'border-indigo-500/70'));
 </script>
 <style scoped>
 .turn-running {
