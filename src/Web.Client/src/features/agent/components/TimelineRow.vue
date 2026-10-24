@@ -41,6 +41,7 @@
       :group="item.group"
       :expanded="isExpanded(item.group.key || item.key)"
       :has-failed="hasFailed(item.group)"
+      :failed-count="failedCount?.(item.group)"
       :show-telemetry="showTelemetry(item.group)"
       :protocol="protocolOf(item.group)"
       :cache-line="cacheLineOf(item.group)"
@@ -73,6 +74,8 @@ const props = defineProps<{
   cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
   toolKey: (m: UnifiedChatMessage) => string;
   hasFailed: (g: TurnGroup) => boolean;
+  /** 该轮失败 tool 条数；缺省时 TurnGroupItem 回落到 hasFailed 的布尔语义（1 个红点）。 */
+  failedCount?: (g: TurnGroup) => number;
   showTelemetry: (g: TurnGroup) => boolean;
   protocolOf: (g: TurnGroup) => string;
   cacheLineOf: (g: TurnGroup) => string;

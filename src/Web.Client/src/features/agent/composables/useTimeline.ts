@@ -202,7 +202,10 @@ export function useTimeline() {
     })();
     return '';
   }
-  const hasFailedTool = (g: TurnGroup): boolean => g.toolMessages.some((m) => String(m.content || '').includes('[Tool Error'));
+  /** 该轮内失败的 tool 条数（单一数据源：判定口径与 hasFailedTool 完全同源）。 */
+  const failedToolCount = (g: TurnGroup): number =>
+    (g.toolMessages || []).reduce((n, m) => n + (String(m.content || '').includes('[Tool Error') ? 1 : 0), 0);
+  const hasFailedTool = (g: TurnGroup): boolean => failedToolCount(g) > 0;
   const cachePercentOf = (cached: number, input: number): string => (!input || input <= 0 ? '-' : `${Math.round((cached / input) * 100)}%`);
   const hasTelemetryGroup = (g: TurnGroup): boolean =>
     !!g.telemetry && (g.telemetry.inputTokens != null || g.telemetry.outputTokens != null);
@@ -446,6 +449,7 @@ export function useTimeline() {
     isImageLost,
     thumbOf,
     hasFailedTool,
+    failedToolCount,
     cachePercentOf,
     hasTelemetryGroup,
     protocolOf,

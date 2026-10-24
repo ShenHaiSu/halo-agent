@@ -27,6 +27,7 @@
             :card-for="cardFor"
             :tool-key="toolKey"
             :has-failed="hasFailed"
+            :failed-count="failedCount"
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
@@ -51,6 +52,7 @@
             :card-for="cardFor"
             :tool-key="toolKey"
             :has-failed="hasFailed"
+            :failed-count="failedCount"
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
@@ -196,6 +198,7 @@ const props = defineProps<{
   cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
   toolKey: (m: UnifiedChatMessage) => string;
   hasFailed: (g: TurnGroup) => boolean;
+  failedCount?: (g: TurnGroup) => number;
   showTelemetry: (g: TurnGroup) => boolean;
   protocolOf: (g: TurnGroup) => string;
   cacheLineOf: (g: TurnGroup) => string;

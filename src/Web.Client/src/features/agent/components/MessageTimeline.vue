@@ -21,6 +21,7 @@
         :card-for="t.toCard"
         :tool-key="t.toolKeyOf"
         :has-failed="t.hasFailedTool"
+        :failed-count="t.failedToolCount"
         :show-telemetry="t.hasTelemetryGroup"
         :protocol-of="t.protocolOf"
         :cache-line-of="t.cacheLineOf"
