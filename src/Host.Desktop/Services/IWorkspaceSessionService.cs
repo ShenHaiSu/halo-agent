@@ -22,6 +22,16 @@ public interface IWorkspaceSessionService
         string? customName = null,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 设置工作区显示别名（纯前端视觉；不触碰 Name/RootPath，不影响提示词与请求头）。
+    /// 传 null/空白 = 清除别名（界面回退显示 Name）。工作区不存在返回 null。
+    /// </summary>
+    Task<WorkspaceInfo?> SetWorkspaceAliasAsync(
+        string workspaceId,
+        string? alias,
+        CancellationToken ct = default
+    );
     Task<bool> RemoveWorkspaceAsync(
         string workspaceId,
         bool deletePhysicalSessionFolder = true,

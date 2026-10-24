@@ -56,6 +56,37 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    /// <summary>设置工作区别名（纯前端视觉）。alias 传空串/null = 清除别名。</summary>
+    public async Task<BridgeResponse<WorkspaceInfo>> RenameWorkspace(
+        string workspaceId,
+        string? alias
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId))
+            {
+                return BridgeResponse<WorkspaceInfo>.Fail("INVALID_WORKSPACE_ID", "工作区 ID 不能为空");
+            }
+            var ws = await _workspaceSessionService
+                .SetWorkspaceAliasAsync(workspaceId, alias)
+                .ConfigureAwait(false);
+            if (ws == null)
+            {
+                return BridgeResponse<WorkspaceInfo>.Fail(
+                    "WORKSPACE_NOT_FOUND",
+                    $"工作区不存在：'{workspaceId}'"
+                );
+            }
+            return BridgeResponse<WorkspaceInfo>.Success(ws);
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"RenameWorkspace failed for id '{workspaceId}'", ex);
+            return BridgeResponse<WorkspaceInfo>.Fail(ex.Message, "WORKSPACE_ERROR");
+        }
+    }
+
     public async Task<BridgeResponse<bool>> RemoveWorkspace(string workspaceId)
     {
         try

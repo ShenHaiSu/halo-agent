@@ -99,6 +99,8 @@ export interface HostBridgeApi {
   // Stage 04: Workspace, Session & Budget
   getWorkspaces: () => Promise<BridgeResponse<WorkspaceInfo[]>>;
   addWorkspace: (rootPath: string, name?: string) => Promise<BridgeResponse<WorkspaceInfo>>;
+  /** 设置工作区别名（纯前端视觉）；alias 传空串 = 清除别名。 */
+  renameWorkspace: (workspaceId: string, alias?: string | null) => Promise<BridgeResponse<WorkspaceInfo>>;
   removeWorkspace: (workspaceId: string) => Promise<BridgeResponse<boolean>>;
   browseWorkspaceFolder: (initialPath?: string) => Promise<BridgeResponse<string | null>>;
   getSessions: (workspaceId: string) => Promise<BridgeResponse<SessionMetadata[]>>;

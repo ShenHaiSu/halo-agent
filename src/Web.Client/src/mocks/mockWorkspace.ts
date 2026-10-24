@@ -71,6 +71,14 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       delete s.mockSessions[workspaceId];
       return { ok: true, data: true };
     },
+    async renameWorkspace(workspaceId: string, alias?: string | null) {
+      const ws = s.mockWorkspaces.find((w) => w.id === workspaceId);
+      if (!ws) return { ok: false, code: 'WORKSPACE_NOT_FOUND', message: `工作区不存在：'${workspaceId}'` };
+      const trimmed = (alias ?? '').trim().slice(0, 40);
+      ws.alias = trimmed ? trimmed : null;
+      ws.displayName = trimmed || ws.name;
+      return { ok: true, data: ws };
+    },
     async browseWorkspaceFolder(_initialPath?: string) {
       return {
         ok: true,

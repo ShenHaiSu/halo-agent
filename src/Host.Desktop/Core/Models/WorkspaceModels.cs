@@ -17,9 +17,22 @@ public sealed class WorkspaceInfo
     public string Id { get; init; } = $"ws_{Guid.NewGuid():N}"[..11];
 
     /// <summary>
-    /// 显示名称（默认取文件夹名，允许用户自定义别名）
+    /// 显示名称（默认取文件夹名；提示词 {{WorkspaceName}} 与请求头 ${workspace-name} 的实际数据源）。
+    /// 注意：用户可见的个性化名称请用 Alias，勿与此字段混用。
     /// </summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 用户自定义别名（纯前端视觉；为空则界面回退显示 Name）。
+    /// 永不进入提示词 / 请求头 / 上下文，仅用于侧边栏与顶栏展示。
+    /// </summary>
+    public string? Alias { get; set; }
+
+    /// <summary>
+    /// 界面展示名：Alias 优先，空则回退 Name（运行时计算，不落盘）。
+    /// </summary>
+    [JsonIgnore]
+    public string DisplayName => string.IsNullOrWhiteSpace(Alias) ? Name : Alias!;
 
     /// <summary>
     /// 规范化后的本地绝对路径（如 "F:\MyProgram\CSharp\halo-agent"）
