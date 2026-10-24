@@ -1,5 +1,7 @@
 /** need04-04：轮次聚合纯函数（assistant + 后续 tool* 归为一组，不改落盘结构）。 */
 import type { UnifiedChatMessage, ChatImageRef } from '@shared/bridge/hostBridge';
+// need-01：仅取类型（运行时依赖方向为 turnRun → turnGroup，反向不得引入值依赖）。
+import type { TurnRun } from './turnRun';
 
 export interface TurnToolRef {
   id: string;
@@ -48,9 +50,11 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
 /** need19：时间轴条目（主时间轴与目录共用；key 即锚点 key）。 */
 export interface TimelineEntry {
   key: string;
-  kind: 'user' | 'system' | 'turn';
+  kind: 'user' | 'system' | 'turn' | 'turn-run';
   msg?: UnifiedChatMessage;
   group?: TurnGroup;
+  /** need-01：无正文轮次合并体（kind === 'turn-run' 时存在；不落盘）。 */
+  run?: TurnRun;
 }
 
 /**
