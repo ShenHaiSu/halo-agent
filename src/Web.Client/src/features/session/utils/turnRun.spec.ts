@@ -199,6 +199,45 @@ describe('buildTurnRuns', () => {
   });
 });
 
+describe('P3-A 活动轨连续化（activeStepId）', () => {
+  const entryOf = (g: TurnGroup): TimelineEntry => ({ key: g.key, kind: 'turn', group: g });
+
+  it('运行中：只有 1 步时仍退化为普通 turn（D1 不被活动态打破）', () => {
+    const g = ghostStepGroups(1)[0]!;
+    const merged = buildTurnRuns([entryOf(g)], { activeStepId: 'a1' });
+    expect(merged[0]?.kind).toBe('turn');
+    expect(merged[0]?.key).toBe('a1');
+  });
+
+  it('运行中：左侧已有 run，最新活动步并入同一舱而非另起一条', () => {
+    const left = ghostStepGroups(1);
+    const active = ghostStepGroups(2);
+    const merged = buildTurnRuns([...left, ...active].map(entryOf), { activeStepId: 'a2' });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.key).toBe('run-a1'); // 首组 key 不变 → 锚点稳定（05 陷阱 3）
+    expect(merged[0]?.run?.stepCount).toBe(2);
+    expect(merged[0]?.run?.groups[1]?.assistantId).toBe('a2');
+  });
+
+  it('未命中活动步时行为与 D1 一致（静态历史不受影响）', () => {
+    const left = ghostStepGroups(1);
+    const active = ghostStepGroups(2);
+    const merged = buildTurnRuns([...left, ...active].map(entryOf), { activeStepId: 'a9' });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.run?.stepCount).toBe(2);
+    // 单步时仍退化
+    expect(buildTurnRuns([entryOf(ghostStepGroups(3)[0]!)], { activeStepId: 'a9' })[0]?.kind).toBe('turn');
+  });
+
+  it('活动步并入后 run.key 仍由首组派生（同输入两次一致）', () => {
+    const entries = [...ghostStepGroups(1), ...ghostStepGroups(2), ...ghostStepGroups(3)].map(entryOf);
+    const once = buildTurnRuns(entries, { activeStepId: 'a3' });
+    const twice = buildTurnRuns(entries, { activeStepId: 'a3' });
+    expect(once[0]?.key).toBe(twice[0]?.key);
+    expect(once[0]?.key).toBe('run-a1');
+    expect(once[0]?.run?.stepCount).toBe(3);
+  });
+});
 describe('汇总行文案', () => {
   const g = ghostStepGroups(1, 3, { failTools: 2 })[0]!;
   const run: TurnRun = {

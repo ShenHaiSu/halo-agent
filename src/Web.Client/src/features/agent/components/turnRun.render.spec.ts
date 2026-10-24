@@ -8,6 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
+import { NMessageProvider } from 'naive-ui';
 import { createPinia, setActivePinia } from 'pinia';
 import TimelineView from '@features/agent/components/TimelineView.vue';
 import TurnRunItem from '@features/agent/components/TurnRunItem.vue';
@@ -129,7 +130,7 @@ describe('need-01 P2 合并舱渲染', () => {
     const wrapper = mount(
       {
         // ToolCallCard 内部 useMessage() 需要外层 provider（naive 的硬要求），故包一层
-        components: { NMessageProvider: naive.NMessageProvider, TurnRunItem },
+        components: { NMessageProvider, TurnRunItem },
         setup: () => ({ run, cardFor, toolKey }),
         template: `<n-message-provider><TurnRunItem :run="run" :expanded="true" :card-for="cardFor" :tool-key="toolKey" /></n-message-provider>`,
       },

@@ -68,6 +68,15 @@ export function hasRunDetail(run: TurnRun): boolean {
 export interface BuildTurnRunsOpts {
   /** 末组是否仍处于「活动轨」（流式进行中）；缺省视为非运行态。 */
   isAssistantActive?: (assistantId: string) => boolean;
+  /**
+   * need-01 P3-A（活动轨连续化）：本轮仍在生成时，末尾那条「已落盘但还没有工具回包」的
+   * assistant 步骤即使只有 1 组也要并入前一个 run。
+   *
+   * 为什么需要：否则运行中会先出现「1 个折叠舱」，下一轮落盘后再塌成「1 个」/或反之，
+   * 表现为舱体忽隐忽现。只有「正在跑且带工具声明的最新一步」满足这个条件，
+   * 静态历史永远不会命中——D1（单步不合并）的点击成本因此不受影响。
+   */
+  activeStepId?: string;
 }
 
 /** 由若干组构造 run（派生量一次性算好，避免模板里反复 reduce）。 */
@@ -104,7 +113,8 @@ export function makeTurnRun(groups: TurnGroup[], opts: BuildTurnRunsOpts = {}): 
  *  · user / system        → 断开；
  *  · turn 且 !isGhostTurn → 断开，自身独立渲染（有正文必须直出）；
  *  · turn 且 isGhostTurn  → 并入当前 run（无则新建）；
- *  · run 内只有 1 个 group → 不合并，退化为普通 turn（决策 D1 = A）。
+ *  · run 内只有 1 个 group → 不合并，退化为普通 turn（决策 D1 = A）；
+ *    例外（P3-A）：started 且 activeStepId 命中时，单步并入当前 run（见 BuildTurnRunsOpts）。
  *
  * 只新建 entry 对象，绝不修改传入的 TurnGroup / TimelineEntry（05 陷阱 1）。
  */
@@ -115,6 +125,7 @@ export function buildTurnRuns(entries: TimelineEntry[], opts: BuildTurnRunsOpts 
     if (!buf.length) return;
     const groups = buf;
     buf = [];
+    // 单步退化（D1 = A）；但 P3-A 的活动步允许并入左侧 run —— 那种情况下 buf 里已含前面的组。
     if (groups.length < 2) {
       const g = groups[0];
       out.push({ key: g.key, kind: 'turn', group: g });
@@ -125,6 +136,15 @@ export function buildTurnRuns(entries: TimelineEntry[], opts: BuildTurnRunsOpts 
   };
   for (const e of entries) {
     if (e.kind === 'turn' && e.group && isGhostTurn(e.group)) {
+      // P3-A（活动轨连续化）：正在运行的那一步把「左侧已成型 run」收回同一舱，
+      // 避免运行中忽隐忽现（run → run+独立一步 → run）。静态历史永不命中（activeStepId 为空）。
+      if (opts.activeStepId && e.group.assistantId === opts.activeStepId && buf.length === 0) {
+        const prev = out[out.length - 1];
+        if (prev && prev.kind === 'turn-run' && prev.run) {
+          out.pop();
+          buf.push(...prev.run.groups);
+        }
+      }
       buf.push(e.group);
       continue;
     }

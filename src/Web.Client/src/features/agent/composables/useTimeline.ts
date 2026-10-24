@@ -82,7 +82,10 @@ export function useTimeline() {
   // 只改这一处计算链：activeTimelineEntries →（可选）buildTurnRuns。
   const timelineItems = computed<TimelineEntry[]>(() => {
     const raw = telemetry.activeTimelineEntries;
-    return turnRunKillSwitch.value ? raw : buildTurnRuns(raw, { isAssistantActive: runIsActive });
+    if (turnRunKillSwitch.value) return raw;
+    // P3-A：本轮仍在跑时把「正在执行的最后一步」当作活动锚点，并入同一个舱。
+    const activeStepId = turn.activeTurn?.isGenerating ? lastPersistedAssistantId.value : '';
+    return buildTurnRuns(raw, { isAssistantActive: runIsActive, activeStepId });
   });
   /** 合并舱索引（纯派生视图，供展开态默认值与「首次合并补一次跟随」判定使用）。 */
   const runByKey = computed<Map<string, TurnRun>>(() => {
