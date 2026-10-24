@@ -258,8 +258,8 @@ public static class MiniYamlParser
         var q = new AskUserQuestion { Id = id, Question = question };
         if (m.TryGetValue("multiSelect", out var msO))
             q.MultiSelect = IsTrue(msO);
-        if (m.TryGetValue("allowCustom", out var acO))
-            q.AllowCustom = IsTrue(acO);
+        // allowCustom 冻结为 true：历史包的 false 仅兼容忽略，保证输入框永远显示。
+        q.AllowCustom = true;
         if (m.TryGetValue("default", out var dO))
             q.Default = dO?.ToString();
         if (m.TryGetValue("options", out var oO) && oO is List<object?> opts)

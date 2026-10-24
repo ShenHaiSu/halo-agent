@@ -1,33 +1,26 @@
 <template>
-  <div class="space-y-2 min-w-0" :class="phaseClass">
-    <div v-if="phaseLabel" class="flex items-center gap-1.5 text-[11px] text-secondary select-none" :class="{ active: isActive }">
-      <Loader2 v-if="isActive" class="w-3 h-3 animate-spin shrink-0" />
-      <span>{{ phaseLabel }}</span>
-      <span
-        v-if="(errorCount ?? 0) > 0"
-        class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40"
-        >{{ errorCount }} 个错误</span
-      >
-      <span v-if="toolTotal > 0" class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full border border-subtle"
-        >{{ toolTotal }} 个工具</span
-      >
-    </div>
+  <div class="turn-body min-w-0" :class="phaseClass">
+    <!-- need-02：状态行已删除（「已完成 · 3s」不再单独占一行）。
+         状态词/耗时/失败数全部下沉到折叠栏 header 右侧，正文成为消息块第一个元素，
+         间距因此不再随「这一行在不在」在 8px / 16px 之间抖动。 -->
     <div
       v-if="group.content"
-      class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+      class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-content"
       @click="emit('link-click', $event)"
       @contextmenu.prevent="emit('content-menu', $event)"
       v-html="renderHtml(group.content || '')"
     />
     <div
-      v-if="group.reasoning || (group.toolMessages?.length || 0) > 0"
-      class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70 overflow-hidden"
+      v-if="hasDetail"
+      class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 overflow-hidden"
+      :class="alertAccent"
       data-testid="turn-thinking-tools"
     >
       <div class="flex items-center justify-between px-2.5 h-7 cursor-pointer select-none" @click="emit('toggle', group.key)">
         <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] min-w-0">
-          <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-          <span class="truncate">🧠 思考与工具调用 · {{ group.toolMessages.length || 0 }} 个工具</span>
+          <Loader2 v-if="isActive" class="w-3 h-3 animate-spin shrink-0 text-indigo-400" data-testid="turn-phase-spinner" />
+          <BrainCircuit v-else class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          <span class="truncate">🧠 思考与工具调用 · {{ toolTotal }} 个工具</span>
           <!-- 失败指示：1~2 个直接画红点；3 个及以上「红点 ×N」。静态终态，不做呼吸动画。 -->
           <span
             v-if="failedDots > 0"
@@ -46,7 +39,15 @@
           </span>
         </span>
         <span class="flex items-center gap-1 text-[11px] text-[var(--reasoning-text)] opacity-80 shrink-0">
-          <span>{{ expanded ? '点击折叠' : '点击展开' }}</span>
+          <!-- need-02：状态词/耗时角标（原独立状态行下沉至此，同为 TurnRunItem 的 turn-run-phase 样式）。
+               「已完成」静默（opacity 更低）；失败/已停止保持醒目（rose-500）。 -->
+          <span
+            class="font-mono text-[10px] leading-none"
+            :class="phase === 'completed' ? 'opacity-60' : 'text-rose-500 font-semibold'"
+            data-testid="turn-phase-badge"
+            >{{ phaseLabel }}</span
+          >
+          <span class="opacity-60">{{ expanded ? '点击折叠' : '点击展开' }}</span>
           <ChevronDown class="w-3 h-3 transition-transform" :class="expanded ? 'rotate-180' : ''" />
         </span>
       </div>
@@ -123,10 +124,22 @@ const phaseLabel = computed(() => {
 });
 const phaseClass = computed(() => (phase.value === 'running' || props.isActive ? 'turn-running' : ''));
 const toolTotal = computed(() => props.group.toolMessages?.length ?? 0);
-/** 需要点亮的红点数量：优先用精确失败条数，缺省时布尔回落为 1。 */
+/**
+ * need-02：折叠栏是否可展开。与旧的内联 v-if 等价，抽成 computed 是为了让
+ * 「状态角标只在有 detail 载体时才存在」这条不变量有单一事实源（无 detail 时
+ * phaseLabel 无处安放，属于可接受的静默——简单问答不显示「已完成」）。
+ */
+const hasDetail = computed(() => !!props.group.reasoning || toolTotal.value > 0);
+/**
+ * need-02 决策 2-A：失败/已停止用左侧竖线换色做警示，**不额外占一行**。
+ * 已完成/运行中维持 indigo 中性色。
+ */
+const alertAccent = computed(() => (phase.value === 'failed' || phase.value === 'stopped' ? 'border-rose-500' : 'border-indigo-500/70'));
+/** 需要点亮的红点数量：优先用精确失败条数，缺省时布尔回落为 1。errorCount 是同一语义的旧入口。 */
 const failedDots = computed(() => {
   const n = props.failedCount;
   if (typeof n === 'number') return Math.max(0, n);
+  if (typeof props.errorCount === 'number') return Math.max(0, props.errorCount);
   return props.hasFailed ? 1 : 0;
 });
 const failedTitle = computed(() => (failedDots.value > 0 ? `${failedDots.value} 个工具调用失败` : ''));

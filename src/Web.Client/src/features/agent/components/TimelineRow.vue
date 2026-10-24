@@ -35,6 +35,18 @@
   <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
     {{ item.msg?.content }}
   </div>
+  <!-- need-01：无正文轮次合并舱（独立 kind，显式分支；不影响任何 item.group 断言） -->
+  <div v-else-if="item.kind === 'turn-run'" :ref="anchorRef(item.key)">
+    <TurnRunItem
+      v-if="item.run"
+      :run="item.run"
+      :expanded="isExpanded(item.run.key || item.key)"
+      :reading-window="!!readingWindow"
+      :card-for="cardFor"
+      :tool-key="toolKey"
+      @toggle="emit('toggle', $event)"
+    />
+  </div>
   <div v-else :ref="anchorRef(item.key)">
     <TurnGroupItem
       v-if="item.group"
@@ -60,6 +72,7 @@ import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import TurnGroupItem from './TurnGroupItem.vue';
+import TurnRunItem from './TurnRunItem.vue';
 import SkillPillChip from './SkillPillChip.vue';
 import { userParts } from '../utils/userParts';
 
@@ -81,6 +94,8 @@ const props = defineProps<{
   cacheLineOf: (g: TurnGroup) => string;
   /** M1-4：单图丢失判定（调用方提供精确判定时优先；缺省回落到 img.lost）。 */
   imgLost?: (img: ChatImageRef) => boolean;
+  /** need-01：历史阅读窗口内不点亮合并舱的「运行中」态（与 useTimeline.readingWindow 同源）。 */
+  readingWindow?: boolean;
 }>();
 /** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
 function isImgLost(img: ChatImageRef): boolean {

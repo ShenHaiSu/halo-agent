@@ -18,6 +18,7 @@
           <TimelineRow
             :item="entry as TimelineEntry"
             :is-expanded="isExpanded"
+            :is-run-expanded="isRunExpanded"
             :anchor-ref="anchorRef"
             :msg-images="msgImages"
             :thumb-of="thumbOf"
@@ -31,6 +32,7 @@
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
+            :reading-window="!!readingWindow"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
@@ -43,6 +45,7 @@
           <TimelineRow
             :item="entry as TimelineEntry"
             :is-expanded="isExpanded"
+            :is-run-expanded="isRunExpanded"
             :anchor-ref="anchorRef"
             :msg-images="msgImages"
             :thumb-of="thumbOf"
@@ -56,6 +59,7 @@
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
+            :reading-window="!!readingWindow"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
@@ -187,6 +191,8 @@ const props = defineProps<{
   items: TimelineEntry[];
   chatWidthMode: string;
   isExpanded: (key: string) => boolean;
+  /** need-01：合并舱展开态（缺省回落到 isExpanded，保证老调用方/测试不炸）。 */
+  isRunExpanded?: (key: string) => boolean;
   anchorRef: (key: string) => (el: Element | ComponentPublicInstance | null) => void;
   msgImages: (msg: UnifiedChatMessage | undefined) => ChatImageRef[];
   thumbOf: (img: ChatImageRef) => string;

@@ -39,21 +39,25 @@ function normalizeQuestions(raw: unknown): AskUserQuestion[] {
     const rawOpts = q['options'];
     let options: AskUserOption[] | null = null;
     if (Array.isArray(rawOpts)) {
-      options = (rawOpts as unknown[]).slice(0, 6).map((o) => {
-        if (typeof o === 'string') return { label: o };
-        const oo = o as Record<string, unknown>;
-        return {
-          label: String(oo['label'] ?? oo['value'] ?? oo['id'] ?? ''),
-          description: oo['description'] != null ? String(oo['description']) : null,
-        };
-      }).filter((o) => o.label.trim().length > 0);
+      options = (rawOpts as unknown[])
+        .slice(0, 6)
+        .map((o) => {
+          if (typeof o === 'string') return { label: o };
+          const oo = o as Record<string, unknown>;
+          return {
+            label: String(oo['label'] ?? oo['value'] ?? oo['id'] ?? ''),
+            description: oo['description'] != null ? String(oo['description']) : null,
+          };
+        })
+        .filter((o) => o.label.trim().length > 0);
     }
     out.push({
       id,
       question,
       options,
       multiSelect: q['multiSelect'] === true,
-      allowCustom: q['allowCustom'] !== false,
+      // 冻结为 true：历史包的 false 仅兼容忽略，保证输入框永远显示
+      allowCustom: true,
       default: (q['default'] ?? q['defaultValue'] ?? null) as AskUserQuestion['default'],
     });
   }
@@ -69,7 +73,9 @@ function defaultDraftFor(q: AskUserQuestion): AskUserAnswerDraft {
     } else if (Array.isArray(def)) {
       d.selected = def.map((s) => String(s)).filter(Boolean);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return d;
 }
 

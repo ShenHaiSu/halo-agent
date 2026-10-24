@@ -11,6 +11,7 @@
         :veil-covering="veilCovering"
         :chat-width-mode="t.chatWidthMode"
         :is-expanded="t.isTurnExpanded"
+        :is-run-expanded="t.isRunExpanded"
         :anchor-ref="t.setAnchor"
         :msg-images="t.msgImages"
         :thumb-of="t.thumbOf"
@@ -44,7 +45,7 @@
         :menu-busy="t.menu.menuBusy"
         :menu-can-copy="t.menu.menuCanCopy"
         @ready="onReady"
-        @toggle="t.toggleTurn($event)"
+        @toggle="onToggle($event)"
         @user-menu="(e, item) => onUserMenu(e, item)"
         @assistant-menu="(e, item) => onAssistantMenu(e, item)"
         @link-click="t.onMarkdownLinkClick($event)"
@@ -147,6 +148,14 @@ const liveTelemetry = computed(() =>
       }
     : null
 );
+/**
+ * need-01：合并舱与普通轮共用同一条 toggle 事件；按 key 前缀分流，
+ * 避免在 TimelineView 里再加一个 emit 通道（两处 slot 模板都要跟着改）。
+ */
+function onToggle(key: string): void {
+  if (key.startsWith('run-')) t.toggleRun(key);
+  else t.toggleTurn(key);
+}
 function onUserMenu(e: MouseEvent, item: TimelineEntry): void {
   t.menu.openMenu(e, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') });
 }

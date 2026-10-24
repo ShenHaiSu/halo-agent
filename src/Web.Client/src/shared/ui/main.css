@@ -190,6 +190,34 @@ html.light {
 .markdown-body img { max-width: 100%; border-radius: 6px; border: 1px solid var(--md-divider); }
 .markdown-body input[type=checkbox] { accent-color: var(--accent-primary); }
 
+/* need-02 时间线稳态行间距：**禁止用 space-y-* 管消息块内部间距**。
+   根因：space-y-* 是「兄弟数量驱动」（`> * + *`），任何 v-if 块（正文 / 折叠栏）出现与否
+   都会改变后续兄弟的 margin-top，表现为「有时 8px、有时 16px」的抖动。
+   规范：间距一律由元素自身显式 margin 承担，与兄弟数量无关。
+   · .turn-body 恒为 flex 纵向容器，首个子元素 margin-top 永远为 0；
+   · 正文（.turn-content）上边距 0 —— 它就是消息块的第一个可见元素；
+   · 折叠栏 / telemetry 统一 8px 上边距。 */
+.turn-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.turn-body > * {
+  margin-top: 0;
+}
+.turn-body > * + * {
+  margin-top: 8px;
+}
+/* 折叠舱内「按 iteration 分节」的步骤列表（RunStepList）与消息块同一套口径。 */
+.run-steps {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.run-steps > * + * {
+  margin-top: 8px;
+}
+
 /* need19 右侧栏：icon rail */
 .rail-tab { width: 100%; height: 36px; display: flex; align-items: center; justify-content: center;
   position: relative; border-radius: 8px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer;

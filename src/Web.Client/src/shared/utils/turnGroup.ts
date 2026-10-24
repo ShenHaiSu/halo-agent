@@ -9,3 +9,17 @@ export {
   exportSessionMarkdown,
 } from '@features/session/utils/turnGroup';
 export type { TurnGroup, TurnToolRef, TimelineEntry } from '@features/session/utils/turnGroup';
+
+/** need-01：无正文轮次合并——同一 shared 入口约定（agent 域不直连 feature-session）。 */
+export {
+  buildTurnRuns,
+  makeTurnRun,
+  isGhostTurn,
+  hasRunDetail,
+  failedCountOfGroup,
+  runSummaryText,
+  runPhaseOf,
+  runPhaseLabel,
+  runDurationLabel,
+} from '@features/session/utils/turnRun';
+export type { TurnRun, BuildTurnRunsOpts } from '@features/session/utils/turnRun';

@@ -9,6 +9,7 @@ import { useAgentCards } from '@features/agent/stores/useAgentCards';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { imagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
+import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, useFollowMode, useTimelineNav } from './useTimelineNav';
 import { useSmoothText } from './useSmoothText';
@@ -49,7 +50,61 @@ export function useTimeline() {
   const toggleTurn = (key: string): void => {
     expandedTurns[key] = !isTurnExpanded(key);
   };
-  const timelineItems = computed<TimelineEntry[]>(() => telemetry.activeTimelineEntries);
+  /**
+   * need-01：无正文轮次合并（kill switch：localStorage['halo-turn-run'] = 'off' → 回到改动前行为）。
+   * 实现方式照 useAgentStream 的 streamMdKillSwitch（隐私模式下 localStorage 抛错时保持默认开启）。
+   */
+  const turnRunKillSwitch = ref(false);
+  try {
+    turnRunKillSwitch.value = String(window.localStorage.getItem('halo-turn-run') || '').toLowerCase() === 'off';
+  } catch {
+    turnRunKillSwitch.value = false;
+  }
+  /**
+   * need-01：末组是否仍在「活动轨」。
+   * 条件 = 本轮仍在生成 && 传入的末组 assistantId 就是最后一条已落盘的 assistant
+   * （否则历史里的旧 run 会被误判成运行中，导致它默认展开 + 常亮转圈）。
+   */
+  const lastPersistedAssistantId = computed<string>(() => {
+    const msgs = persistedMessages.value;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i] as UnifiedChatMessage;
+      if (String(m.role || '').toLowerCase() === 'assistant') return String(m.id || '');
+    }
+    return '';
+  });
+  const runIsActive = (assistantId: string): boolean => {
+    const t = turn.activeTurn;
+    if (!t || t.isGenerating !== true) return false;
+    if (!assistantId) return true;
+    return assistantId === lastPersistedAssistantId.value;
+  };
+  // 只改这一处计算链：activeTimelineEntries →（可选）buildTurnRuns。
+  const timelineItems = computed<TimelineEntry[]>(() => {
+    const raw = telemetry.activeTimelineEntries;
+    if (turnRunKillSwitch.value) return raw;
+    // P3-A：本轮仍在跑时把「正在执行的最后一步」当作活动锚点，并入同一个舱。
+    const activeStepId = turn.activeTurn?.isGenerating ? lastPersistedAssistantId.value : '';
+    return buildTurnRuns(raw, { isAssistantActive: runIsActive, activeStepId });
+  });
+  /** 合并舱索引（纯派生视图，供展开态默认值与「首次合并补一次跟随」判定使用）。 */
+  const runByKey = computed<Map<string, TurnRun>>(() => {
+    const m = new Map<string, TurnRun>();
+    for (const e of timelineItems.value) if (e.kind === 'turn-run' && e.run) m.set(e.run.key, e.run);
+    return m;
+  });
+  /** 用户显式选择过的合并舱展开态（未命中时按「运行中展开、终态收起」——决策 D2 = A）。 */
+  const runExplicit = reactive<Record<string, boolean>>({});
+  const isRunExpanded = (key: string): boolean => {
+    if (key in runExplicit) return runExplicit[key] === true;
+    const hit = runByKey.value.get(key);
+    return !!hit && hit.isRunning;
+  };
+  const toggleRun = (key: string): void => {
+    const next = !isRunExpanded(key);
+    runExplicit[key] = next;
+    expandedTurns[key] = next;
+  };
   // bigChange P2-1/P2-3: history memo frozen + tail live. key = message/turn id; reuseRef keeps refs stable.
   const TAIL_SIZE = 8;
   const entryRefs = new Map<string, TimelineEntry>();
@@ -384,6 +439,21 @@ export function useTimeline() {
       if (prev && !v && paneVisible.value && follow.pinnedRef.value) pin.scheduleToBottom();
     }
   );
+  /**
+   * need-01（05 陷阱 5）：run 首次形成时总高度会一次性变短，与「轮末容器消失」同类，
+   * 补一次跟随即可；复用 pin.scheduleToBottom 的 rAF 双帧 + 200ms 兜底，**不新增定时器**。
+   * 判据用「主时间轴出现第一条 turn-run 的 key」——它从空到有时只会触发一次。
+   */
+  const firstRunKey = computed<string>(() => {
+    for (const e of timelineItems.value) if (e.kind === 'turn-run') return e.key;
+    return '';
+  });
+  watch(firstRunKey, (key, prev) => {
+    if (!key || key === prev) return;
+    if (!paneVisible.value || !follow.pinnedRef.value) return;
+    if (readingWindow.value) return;
+    pin.scheduleToBottom();
+  });
   watch(
     () => timelineItems.value.map((i) => i.key),
     (keys) => {
@@ -441,6 +511,11 @@ export function useTimeline() {
     transcriptRunning,
     isTurnExpanded,
     toggleTurn,
+    /** need-01：无正文轮次合并（kill switch + 汇总舱展开态）。 */
+    turnRunKillSwitch,
+    isRunExpanded,
+    toggleRun,
+    runByKey,
     setAnchor,
     toolKeyOf,
     toCard,
