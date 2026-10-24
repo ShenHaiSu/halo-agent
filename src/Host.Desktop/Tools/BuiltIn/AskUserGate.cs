@@ -201,7 +201,8 @@ public static class AskUserGate
                                 })
                                 .ToList(),
                             multiSelect = q.MultiSelect,
-                            allowCustom = q.AllowCustom,
+                            // 冻结下发 true，老前端也显示输入框。
+                            allowCustom = true,
                         })
                         .ToList(),
                 }

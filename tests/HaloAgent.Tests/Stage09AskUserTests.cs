@@ -208,6 +208,18 @@ questions:
         Assert.False(AskUserGate.HasPending(session));
     }
 
+    [Fact(DisplayName = "S09-A8: allowCustom 冻结为 true（历史 false 兼容忽略）")]
+    public void AllowCustom_FrozenTrue()
+    {
+        var (jq, _) = AskUserTool.ParseArguments(
+            "{\"questions\":[{\"id\":\"q1\",\"question\":\"选哪个？\",\"options\":[{\"label\":\"A\"}],\"allowCustom\":false}]}",
+            300
+        );
+        Assert.Single(jq);
+        Assert.True(jq[0].AllowCustom);
+        Assert.Null(AskUserTool.ValidateQuestions(jq));
+    }
+
     private static string JsonEscape(string s) =>
         "\""
         + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n")

@@ -26,7 +26,8 @@ public sealed class AskUserTool : IToolHandler
     public const string PromptBrief = "Ask the user a blocking question";
     public static readonly string[] PromptRules =
     {
-        "Ask only when blocked; never for progress updates."
+        "Ask only when blocked; never for progress updates.",
+        "Custom input is always available; allowCustom is legacy-ignored."
     };
 
     public string Description =>
@@ -47,7 +48,7 @@ public sealed class AskUserTool : IToolHandler
                 )
                 .AddArray(
                     "questions",
-                    "1-4 questions. Each: {id, question, options?[{label, description?}], multiSelect?, allowCustom?, default?}. Empty options means open question.",
+                    "1-4 questions. Each: {id, question, options?[{label, description?}], multiSelect?, allowCustom?(legacy-ignored, custom input always available), default?}. Empty options means open question.",
                     itemsType: "object"
                 )
                 .AddString(
@@ -298,11 +299,8 @@ public sealed class AskUserTool : IToolHandler
             && msEl.ValueKind is JsonValueKind.True or JsonValueKind.False
         )
             q.MultiSelect = msEl.GetBoolean();
-        if (
-            el.TryGetProperty("allowCustom", out var acEl)
-            && acEl.ValueKind is JsonValueKind.True or JsonValueKind.False
-        )
-            q.AllowCustom = acEl.GetBoolean();
+        // allowCustom 冻结为 true：历史包的 false 仅兼容忽略，保证输入框永远显示。
+        q.AllowCustom = true;
         if (el.TryGetProperty("default", out var dEl) && dEl.ValueKind == JsonValueKind.String)
             q.Default = dEl.GetString();
         if (el.TryGetProperty("options", out var oEl) && oEl.ValueKind == JsonValueKind.Array)

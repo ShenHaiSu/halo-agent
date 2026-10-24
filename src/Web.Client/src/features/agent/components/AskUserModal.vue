@@ -22,10 +22,11 @@
       >
         <div class="text-xs font-semibold text-primary">{{ q.question }}</div>
 
-        <!-- 单选 -->
+        <!-- 单选（同值再点可取消；有自定义输入时禁用互斥） -->
         <n-radio-group
           v-if="!q.multiSelect && q.options && q.options.length"
           :value="singleValue(q.id)"
+          :disabled="hasCustom(q.id)"
           @update:value="(v: string) => setSingle(q.id, String(v))"
         >
           <div class="space-y-1.5">
@@ -34,6 +35,7 @@
               :key="`${q.id}-${oi}`"
               :value="opt.label"
               :data-testid="`ask-user-option-${q.id}-${oi}`"
+              @click="toggleSingle(q.id, opt.label)"
             >
               <span class="text-xs">{{ opt.label }}</span>
               <span v-if="opt.description" class="ml-1.5 text-[11px] text-secondary">{{ opt.description }}</span>
@@ -41,10 +43,11 @@
           </div>
         </n-radio-group>
 
-        <!-- 多选 -->
+        <!-- 多选（有自定义输入时禁用互斥） -->
         <n-checkbox-group
           v-if="q.multiSelect && q.options && q.options.length"
           :value="draftOf(q.id).selected"
+          :disabled="hasCustom(q.id)"
           @update:value="(v: Array<string | number>) => setMulti(q.id, v)"
         >
           <div class="space-y-1.5">
@@ -60,9 +63,11 @@
           </div>
         </n-checkbox-group>
 
-        <!-- 自定义输入：选项题可附带 + 开放问答仅此项 -->
+        <!-- 自定义输入：永远显示（allowCustom 后端字段仅兼容，不再决定显隐） -->
+        <div v-if="hasCustom(q.id) && q.options && q.options.length" class="text-[11px] text-secondary">
+          已输入自定义答案，选项已互斥清空（清空输入框可恢复选项）
+        </div>
         <n-input
-          v-if="q.allowCustom !== false"
           :value="draftOf(q.id).customInput"
           type="textarea"
           :autosize="{ minRows: 2, maxRows: 4 }"
@@ -72,7 +77,18 @@
         />
 
         <div class="flex items-center justify-between">
-          <n-button text tiny :data-testid="`ask-user-skip-${q.id}`" @click="skipQuestion(q.id)"> 跳过此题 </n-button>
+          <div class="flex items-center gap-2">
+            <n-button text tiny :data-testid="`ask-user-skip-${q.id}`" @click="skipQuestion(q.id)"> 跳过此题 </n-button>
+            <n-button
+              text
+              tiny
+              :data-testid="`ask-user-clear-${q.id}`"
+              :disabled="hasCustom(q.id) || !draftOf(q.id).selected.length"
+              @click="clearSingle(q.id)"
+            >
+              清除选择
+            </n-button>
+          </div>
           <span v-if="isSkipped(q.id)" class="text-[11px] text-secondary">已跳过（提交时记 skipped）</span>
         </div>
       </div>
@@ -153,18 +169,34 @@ function singleValue(qid: string): string | null {
   return s.length ? s[0] : null;
 }
 
+function hasCustom(qid: string): boolean {
+  return !!draftOf(qid).customInput.trim();
+}
+
 function setSingle(qid: string, v: string): void {
   const sid = pending.value?.sessionId || '';
   if (!sid) return;
+  if (hasCustom(qid)) return;
   askUserStore.ensureDraft(sid, pending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
   bucket[qid].selected = v ? [v] : [];
 }
 
+function toggleSingle(qid: string, label: string): void {
+  if (hasCustom(qid)) return;
+  if (singleValue(qid) === label) setSingle(qid, '');
+}
+
+function clearSingle(qid: string): void {
+  if (hasCustom(qid)) return;
+  setSingle(qid, '');
+}
+
 function setMulti(qid: string, v: Array<string | number>): void {
   const sid = pending.value?.sessionId || '';
   if (!sid) return;
+  if (hasCustom(qid)) return;
   askUserStore.ensureDraft(sid, pending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
@@ -183,6 +215,8 @@ function setCustom(qid: string, v: string): void {
     message.warning('自定义答案已截断至 2000 字');
   }
   bucket[qid].customInput = text;
+  // 互斥：自定义输入非空即清空选项（单向，不偷删用户打的字；清空输入框可恢复选项）
+  if (text.trim()) bucket[qid].selected = [];
 }
 
 function skipQuestion(qid: string): void {
