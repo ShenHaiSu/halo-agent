@@ -265,3 +265,36 @@ html.light .toc-bubble--user { background: #eff6ff; }
 .skill-tag .skill-x:hover {
   color: #f43f5e;
 }
+
+/* M1-2 超限降级块：流式态与稳态共用同一套外观（renderFallbackHtml 产出）。
+   门槛差异（流式 32KB / 稳态 100KB）保留，但交接时结构一致 → 只「变彩色」不「重画」。 */
+.markdown-fallback pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  color: var(--code-text);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 6px 0;
+}
+.markdown-fallback-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  margin: 2px 0 6px;
+}
+
+/* M1-7 全局动效降级：无障碍 + 老显卡（Win7 核显）保护。
+   新增动画分散在各组件，统一兜底避免逐个补。Chrome109 完全支持。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -172,7 +172,11 @@ export function buildTurnGroupsIncremental(
   }
   const lastAsstId = String(messages[lastAsstIdx].id || '');
   const keepEnd = prevGroups.findIndex((g) => g.assistantId === lastAsstId);
-  const kept = keepEnd < 0 ? [] : prevGroups.slice(0, keepEnd);
+  // M4-§3.2：末 assistant **不在**旧投影里（新一轮的第一条持久化消息）时，
+  // 下面 slice(0, keepEnd) 在 keepEnd = -1 下会得到空前缀，把全部历史组丢掉。
+  // 该分支此前从未被生产代码调用，所以这个丢历史的缺陷一直没暴露；接入前必须改为整体回退全量。
+  if (keepEnd < 0) return full();
+  const kept = prevGroups.slice(0, keepEnd);
   const tail = buildTurnGroups(messages.slice(lastAsstIdx));
   return { groups: [...kept, ...tail], msgCount: messages.length };
 }

@@ -11,6 +11,7 @@ import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shar
 import { imagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, useFollowMode, useTimelineNav } from './useTimelineNav';
+import { useSmoothText } from './useSmoothText';
 import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
 import { INITIAL_MOUNT, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
@@ -34,9 +35,13 @@ export function useTimeline() {
   const { sessionMessages, budgetStatus } = storeToRefs(workspaceStore);
   const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
   const scrollEl = ref<HTMLElement | null>(null);
+  // bigChange P2-3: pinned/showJump dual mode; hidden pane never follows/pages/samples.
+  // M2-2：`follow` 必须声明在 `pin` 之前——`createBottomPin` 的 isFollowing 回调要用它（否则 TDZ）。
+  const follow = useFollowMode();
   const pin = createBottomPin(() => scrollEl.value, {
     isLocked: () => performance.now() < uiStore.jumpLockUntil,
     release: () => uiStore.releaseJumpLock(),
+    isFollowing: () => follow.pinnedRef.value === true,
   });
   const persistedMessages = computed<UnifiedChatMessage[]>(() => sessionMessages.value || []);
   const expandedTurns = reactive<Record<string, boolean>>({});
@@ -76,8 +81,7 @@ export function useTimeline() {
     const all = timelineItems.value;
     return all.slice(Math.max(0, all.length - TAIL_SIZE));
   });
-  // bigChange P2-3: pinned/showJump dual mode; hidden pane never follows/pages/samples.
-  const follow = useFollowMode();
+  // bigChange P2-3: pinned/showJump dual mode（`follow` 已在 pin 之前声明，见上）
   const paneVisible = ref(true);
   function setPaneVisible(v: boolean): void {
     paneVisible.value = v;
@@ -176,6 +180,8 @@ export function useTimeline() {
   const msgImages = (msg: UnifiedChatMessage | undefined): ChatImageRef[] => imagesOf(msg);
   const hasLostImage = (msg: UnifiedChatMessage | undefined): boolean =>
     msgImages(msg).some((i) => lostImageIds.value[i.imageId] || i.lost === true);
+  /** M1-4：单图丢失判定（供 TimelineRow 决定渲染标签槽位还是加载骨架）。 */
+  const isImageLost = (img: ChatImageRef): boolean => img.lost === true || lostImageIds.value[img.imageId] === true;
   function thumbOf(img: ChatImageRef): string {
     if (thumbnailCache.value[img.imageId] || img.lost === true || lostImageIds.value[img.imageId])
       return thumbnailCache.value[img.imageId] || '';
@@ -196,7 +202,10 @@ export function useTimeline() {
     })();
     return '';
   }
-  const hasFailedTool = (g: TurnGroup): boolean => g.toolMessages.some((m) => String(m.content || '').includes('[Tool Error'));
+  /** 该轮内失败的 tool 条数（单一数据源：判定口径与 hasFailedTool 完全同源）。 */
+  const failedToolCount = (g: TurnGroup): number =>
+    (g.toolMessages || []).reduce((n, m) => n + (String(m.content || '').includes('[Tool Error') ? 1 : 0), 0);
+  const hasFailedTool = (g: TurnGroup): boolean => failedToolCount(g) > 0;
   const cachePercentOf = (cached: number, input: number): string => (!input || input <= 0 ? '-' : `${Math.round((cached / input) * 100)}%`);
   const hasTelemetryGroup = (g: TurnGroup): boolean =>
     !!g.telemetry && (g.telemetry.inputTokens != null || g.telemetry.outputTokens != null);
@@ -228,9 +237,41 @@ export function useTimeline() {
       return null;
     }
   }
-  const displaySegs = computed<DisplaySeg[]>(() =>
-    stream.visibleSegs.map((s) => ({ kind: s.kind, key: s.key, text: segTextOf(s), card: s.kind === 'tool' ? segCardOf(s) : null }))
-  );
+  /**
+   * M2-4：只对「最后一个 text seg」套平滑。
+   * 不能整体套：多个 seg 各自跑一个 rAF 会同时开 N 个循环，且已稳定的历史 seg 被反复触发。
+   */
+  const tailSegKey = computed<string>(() => {
+    const segs = stream.visibleSegs;
+    if (!segs.length) return '';
+    const tail = segs[segs.length - 1];
+    return tail ? String(tail.key || '') : '';
+  });
+  const tailTextSource = computed<string>(() => {
+    const segs = stream.visibleSegs;
+    if (!segs.length) return '';
+    const tail = segs[segs.length - 1];
+    return tail && tail.kind === 'text' ? String(tail.text || '') : '';
+  });
+  // active 必须传：TurnCompleted 后 isGenerating=false → flushAll() 立即追平，
+  // 否则平滑仍在跑，会与 finishTurn 清空 segs 竞争，导致最后一段文字被截断。
+  const smoothTailText = useSmoothText(tailTextSource, {
+    active: computed(() => stream.isGenerating),
+    key: tailSegKey,
+  });
+  const displaySegs = computed<DisplaySeg[]>(() => {
+    const segs = stream.visibleSegs;
+    const lastIdx = segs.length - 1;
+    return segs.map((s, i) => {
+      const isTailText = i === lastIdx && s.kind === 'text';
+      return {
+        kind: s.kind,
+        key: s.key,
+        text: isTailText ? smoothTailText.value : segTextOf(s),
+        card: s.kind === 'tool' ? segCardOf(s) : null,
+      };
+    });
+  });
   const toolCount = computed(() => cards.toolCards.length);
   const curIteration = computed(() => turn.activeTurn.curIteration || 1);
   // need23-R6：本轮（当前 iteration）工具数；toolCards 跨轮不清空，直接取 length 会误导。
@@ -323,21 +364,24 @@ export function useTimeline() {
       if (!loading && paneVisible.value && follow.pinnedRef.value) pin.forceToBottom();
     }
   );
-  // need23-R3：活动容器内文本增长不改变 timelineItems.length，但会撑高内容；
-  // pinned 状态下需节流跟随（250ms 尾随），避免长正文流式时视口不动。
-  let streamFollowTimer: number | null = null;
+  // need23-R3 / M2-3：活动容器内文本增长不改变 timelineItems.length，但会撑高内容。
+  // 直接调 pin.scheduleToBottom()（内部 rAF 双帧 + 200ms 兜底，自带帧节流），
+  // 不再叠 250ms 定时器 —— 叠了会把窗口期内的增长全部丢弃，变成「每 250ms 猛拽一次」。
   watch(
     () => (stream.streamingText?.length || 0) + (stream.streamingReasoning?.length || 0),
     (len, prev) => {
       if (!len || (prev !== undefined && len <= prev)) return;
       if (!paneVisible.value || !follow.pinnedRef.value) return;
       if (readingWindow.value) return;
-      if (streamFollowTimer !== null) return;
-      streamFollowTimer = window.setTimeout(() => {
-        streamFollowTimer = null;
-        if (!follow.pinnedRef.value || readingWindow.value) return;
-        pin.scheduleToBottom();
-      }, 250);
+      pin.scheduleToBottom();
+    }
+  );
+  // M3-3：轮末活动容器消失（高度一次性塌陷）后补一次跟随，
+  // 让「淡出 + 视口归位」连续发生，而不是内容突然上跳。
+  watch(
+    () => stream.hasActiveTurn,
+    (v, prev) => {
+      if (prev && !v && paneVisible.value && follow.pinnedRef.value) pin.scheduleToBottom();
     }
   );
   watch(
@@ -362,11 +406,9 @@ export function useTimeline() {
   });
   onUnmounted(() => {
     detachContainer();
-    // need23-R3：清掉流式跟随的尾随定时器
-    if (streamFollowTimer !== null) {
-      window.clearTimeout(streamFollowTimer);
-      streamFollowTimer = null;
-    }
+    // M2-3：250ms 尾随定时器已删除（改由 pin.scheduleToBottom 的 rAF 双帧自节流），
+    // 这里只需确保未决的调度被取消。
+    pin.cancelScheduled();
   });
   return {
     chatWidthMode,
@@ -393,6 +435,9 @@ export function useTimeline() {
     readingWindow,
     setReadingWindow,
     clearReadingWindow,
+    displaySegs,
+    /** M2-4：经过逐字平滑的尾段文本（模板/测试可直接读；displaySegs 已包含它）。 */
+    smoothTailText,
     transcriptRunning,
     isTurnExpanded,
     toggleTurn,
@@ -401,13 +446,14 @@ export function useTimeline() {
     toCard,
     msgImages,
     hasLostImage,
+    isImageLost,
     thumbOf,
     hasFailedTool,
+    failedToolCount,
     cachePercentOf,
     hasTelemetryGroup,
     protocolOf,
     cacheLineOf,
-    displaySegs,
     toolCount,
     curIteration,
     curIterToolCount,

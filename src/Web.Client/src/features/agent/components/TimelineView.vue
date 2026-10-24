@@ -1,7 +1,7 @@
 <template>
   <div
     ref="scroll"
-    class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative"
+    class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative transcript-scroll"
     data-testid="message-timeline"
     :data-transcript-settling="veilCovering ? 'true' : undefined"
   >
@@ -22,10 +22,12 @@
             :msg-images="msgImages"
             :thumb-of="thumbOf"
             :has-lost="hasLost"
+            :img-lost="imgLost"
             :render-html="renderHtml"
             :card-for="cardFor"
             :tool-key="toolKey"
             :has-failed="hasFailed"
+            :failed-count="failedCount"
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
@@ -45,10 +47,12 @@
             :msg-images="msgImages"
             :thumb-of="thumbOf"
             :has-lost="hasLost"
+            :img-lost="imgLost"
             :render-html="renderHtml"
             :card-for="cardFor"
             :tool-key="toolKey"
             :has-failed="hasFailed"
+            :failed-count="failedCount"
             :show-telemetry="showTelemetry"
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
@@ -59,56 +63,58 @@
           />
         </template>
         <template #live>
-          <div
-            v-if="hasActiveTurn"
-            data-testid="active-turn-container"
-            class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
-          >
-            <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
-              <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-              <span>{{ thinkingLine }}</span>
-              <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
-            </div>
-            <template v-if="!segKillSwitch && segs.length">
-              <template v-for="seg in segs" :key="seg.key">
-                <div
-                  v-if="seg.kind === 'reasoning' && seg.text"
-                  class="whitespace-pre-wrap break-words app-text-small text-[var(--reasoning-text)] max-h-24 overflow-y-auto"
-                  :data-seg="seg.key"
-                >
-                  {{ seg.text }}
-                </div>
-                <div v-else-if="seg.kind === 'tool' && seg.card" data-testid="active-turn-tools" :data-seg="seg.key">
-                  <ToolCallCard :card="seg.card" :default-collapsed="true" />
-                </div>
-                <div
-                  v-else-if="seg.kind === 'text' && seg.text"
-                  class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-                  :data-seg="seg.key"
-                  @click="emit('link-click', $event)"
-                >
-                  <MarkdownStreamBlocks v-if="!streamMdKillSwitch" :text="seg.text" :cache-key="seg.key" />
-                  <div v-else style="white-space: pre-wrap" v-html="renderStream(seg.text)" />
-                </div>
-              </template>
-            </template>
-            <template v-else-if="segKillSwitch">
-              <div v-if="fallbackCards.length" class="space-y-1.5" data-testid="active-turn-tools">
-                <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
+          <!-- M3-1：活动容器整块进出过渡。只做 opacity + 极小位移，**不碰 height/max-height**
+               （聊天流只增不减，高度动画会与 overflow-anchor / 平滑跟随互相拉扯）。 -->
+          <Transition name="live-turn">
+            <div
+              v-if="hasActiveTurn"
+              data-testid="active-turn-container"
+              class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
+            >
+              <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
+                <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>{{ thinkingLine }}</span>
+                <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
               </div>
-              <div
-                v-if="streamingText"
-                class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-                style="white-space: pre-wrap"
-                @click="emit('link-click', $event)"
-                v-html="renderStream(streamingText)"
-              />
-            </template>
-            <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
-              <Loader2 class="w-3.5 h-3.5 animate-spin" />
-              <span>Agent 推理中...</span>
+              <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
+                   注意 CLAUDE 红线：`.seg-leave-active` 必须 position:absolute 脱流，否则「下移再上移」。 -->
+              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="seg-list space-y-2">
+                <StreamSegItem
+                  v-for="(seg, i) in segs"
+                  :key="seg.key"
+                  :seg="seg"
+                  :stream-md-kill-switch="!!streamMdKillSwitch"
+                  :render-stream="renderStream"
+                  :is-tail="i === segs.length - 1"
+                  :is-generating="isGenerating"
+                  @link-click="emit('link-click', $event)"
+                />
+              </TransitionGroup>
+              <template v-else-if="segKillSwitch">
+                <!-- M3-3：逃生分支（segKillSwitch）里的工具卡同样逐个淡入 -->
+                <TransitionGroup
+                  v-if="fallbackCards.length"
+                  name="seg"
+                  tag="div"
+                  class="space-y-1.5 seg-list"
+                  data-testid="active-turn-tools"
+                >
+                  <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
+                </TransitionGroup>
+                <div
+                  v-if="streamingText"
+                  class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
+                  style="white-space: pre-wrap"
+                  @click="emit('link-click', $event)"
+                  v-html="renderStream(streamingText)"
+                />
+              </template>
+              <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
+                <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                <span>Agent 推理中...</span>
+              </div>
             </div>
-          </div>
+          </Transition>
         </template>
       </TranscriptTail>
       <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">
@@ -168,7 +174,7 @@ import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup
 import type { AgentToolCard } from '@features/agent/stores/model';
 import type { DisplaySeg } from '../composables/useTimeline';
 import ToolCallCard from './ToolCallCard.vue';
-import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';
+import StreamSegItem from './StreamSegItem.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import TimelineRow from './TimelineRow.vue';
 import TranscriptHistory from './TranscriptHistory.vue';
@@ -185,11 +191,14 @@ const props = defineProps<{
   msgImages: (msg: UnifiedChatMessage | undefined) => ChatImageRef[];
   thumbOf: (img: ChatImageRef) => string;
   hasLost: (msg: UnifiedChatMessage | undefined) => boolean;
+  /** M1-4：单图丢失判定（可选，缺省时 TimelineRow 回落到 img.lost）。 */
+  imgLost?: (img: ChatImageRef) => boolean;
   renderHtml: (text: string) => string;
   renderStream: (text: string) => string;
   cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
   toolKey: (m: UnifiedChatMessage) => string;
   hasFailed: (g: TurnGroup) => boolean;
+  failedCount?: (g: TurnGroup) => number;
   showTelemetry: (g: TurnGroup) => boolean;
   protocolOf: (g: TurnGroup) => string;
   cacheLineOf: (g: TurnGroup) => string;
@@ -249,9 +258,67 @@ const tailList = computed<TimelineEntry[]>(() => {
 const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
 </script>
 <style scoped>
-.transcript-veil {
+/* M1-6 滚动锚定与滚动条槽位：配合 M2 的渐进跟随才真正生效——
+   单独声明时会被 scrollTop 硬赋值破坏锚定链，故此项只铺声明、不在 M1 验收。 */
+.transcript-scroll {
+  overflow-anchor: auto;
+  scrollbar-gutter: stable;
+}
+/* ---- M3 过渡动画 ----
+   核心约束（docs/99 §2、§4）：高度不做任何动画；leave 必须 absolute 脱流，
+   否则段毕业时会「下移（leaving 仍占位）→ 上移（移除）」两次抖动，比不加动画更糟。 */
+.live-turn-enter-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+.live-turn-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.live-turn-leave-active {
+  transition: opacity 0.14s ease;
+}
+.live-turn-leave-to {
+  opacity: 0;
+}
+.seg-list {
+  /* TransitionGroup 的 leave 元素 absolute 化后需要一个定位容器 */
+  position: relative;
+}
+.seg-enter-active {
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+}
+.seg-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.seg-leave-active {
   position: absolute;
+  left: 0;
+  right: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+.seg-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-turn-enter-active,
+  .live-turn-leave-active,
+  .seg-enter-active,
+  .seg-leave-active {
+    transition: none;
+  }
+}
+/* M1-3 注意：思考段的 `.reasoning-seg` 样式随 seg 渲染一起搬到 `StreamSegItem.vue` 的
+   scoped 样式里（scoped 规则不跨组件 DOM 生效，留在这里是死样式）。
+   M4-§2：settle veil 的骨架遮罩 —— 只在会话切换时由 MessageTimeline 驱动。 */
+.transcript-veil {
   inset: 0;
+  position: absolute;
   background: var(--n-body-color, #fff);
   pointer-events: auto;
   z-index: 5;

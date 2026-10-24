@@ -1,9 +1,9 @@
-/** need23-R5：流式 Markdown 块渲染单测（增量追加 / settled 复用 / 超限降级）。 */
+/** need23-R5 / M1：流式 Markdown 块渲染单测（增量追加 / settled 复用 / 超限降级 / 两态同源）。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h, ref } from 'vue';
 import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
-
+import { renderMarkdown } from '@features/session/utils/markdownRender';
 /** 用动态 props 的宿主组件，便于模拟「逐次追加」的流式过程。 */
 function makeHost(initial: string, cacheKey = 'k1') {
   const text = ref(initial);
@@ -45,13 +45,23 @@ describe('MarkdownStreamBlocks（need23-R5）', () => {
     expect(secondBlocks[0]?.html()).toContain('第一段');
   });
 
-  it('代码块渲染形态与历史区同源（language-x + pre/code）', async () => {
-    const { wrapper } = makeHost('```js\nconst x = 1;\n```\n', 'k2');
+  it('代码块在流式态与稳态产出同源 HTML（含 hljs 高亮）', async () => {
+    // M1-1：两态共用 sharedMd（已注册 highlight 钩子）。断言的是「同源」这一不变量，
+    // 而不是某个具体 class 名 —— 原用例断言 class="language-js"，恰恰依赖了「没有高亮」的旧状态。
+    const src = '```js\nconst x = 1;\n```\n';
+    const { wrapper } = makeHost(src, 'k2');
     await wrapper.vm.$nextTick();
-    const html = wrapper.html();
-    expect(html).toContain('<pre>');
-    expect(html).toContain('class="language-js"');
-    expect(html).toContain('const x = 1;');
+    const streamHtml = wrapper.html();
+    const stableHtml = renderMarkdown(src);
+    expect(streamHtml).toContain('<pre>');
+    // 两端都必须产出高亮 token（而不是 <code class="language-js"> 原文）
+    expect(streamHtml).toContain('hljs-');
+    expect(stableHtml).toContain('hljs-');
+    expect(streamHtml.replace(/\s+/g, '')).toContain('hljs-keyword');
+    expect(stableHtml.replace(/\s+/g, '')).toContain('hljs-keyword');
+    // 高亮把 token 拆成 <span>，故不断言「连续原文」，只断言两边都含关键词与数字 token
+    expect(stableHtml).toContain('hljs-number');
+    expect(streamHtml).toContain('hljs-number');
   });
 
   it('空文本不渲染任何块', async () => {

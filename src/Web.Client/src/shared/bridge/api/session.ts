@@ -23,6 +23,7 @@ export function createSessionApi(
   HostBridgeApi,
   | 'getWorkspaces'
   | 'addWorkspace'
+  | 'renameWorkspace'
   | 'removeWorkspace'
   | 'browseWorkspaceFolder'
   | 'getSessions'
@@ -57,6 +58,9 @@ export function createSessionApi(
     },
     async addWorkspace(rootPath: string, name?: string) {
       return normalizeBridgePayload<BridgeResponse<WorkspaceInfo>>(await t.call('addWorkspace', rootPath, name ?? ''));
+    },
+    async renameWorkspace(workspaceId: string, alias?: string | null) {
+      return normalizeBridgePayload<BridgeResponse<WorkspaceInfo>>(await t.call('renameWorkspace', workspaceId, alias ?? ''));
     },
     async removeWorkspace(workspaceId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('removeWorkspace', workspaceId));

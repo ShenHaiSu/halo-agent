@@ -4,6 +4,10 @@ import type { ChatImageRef } from './providers';
 export interface WorkspaceInfo {
   id: string;
   name: string;
+  /** 用户自定义别名（纯前端视觉；null/空 = 显示 name）。不进提示词/请求头。 */
+  alias?: string | null;
+  /** 展示名（= alias || name）；后端 computed 带出，前端可本地兜底。 */
+  displayName?: string;
   rootPath: string;
   workspaceHash: string;
   defaultProviderId?: string | null;

@@ -28,11 +28,22 @@
         <span class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] min-w-0">
           <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
           <span class="truncate">🧠 思考与工具调用 · {{ group.toolMessages.length || 0 }} 个工具</span>
+          <!-- 失败指示：1~2 个直接画红点；3 个及以上「红点 ×N」。静态终态，不做呼吸动画。 -->
           <span
-            v-if="hasFailed"
-            class="shrink-0 font-mono text-[10px] px-1.5 py-px rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40"
-            >有失败</span
+            v-if="failedDots > 0"
+            class="shrink-0 flex items-center gap-0.5"
+            :title="failedTitle"
+            :aria-label="failedTitle"
+            data-testid="turn-failed-dots"
           >
+            <template v-if="failedDots <= 2">
+              <span v-for="i in failedDots" :key="i" class="w-1.5 h-1.5 rounded-full bg-rose-500" data-testid="turn-failed-dot" />
+            </template>
+            <template v-else>
+              <span class="w-1.5 h-1.5 rounded-full bg-rose-500" data-testid="turn-failed-dot" />
+              <span class="font-mono text-[10px] leading-none text-rose-500" data-testid="turn-failed-dot-count">×{{ failedDots }}</span>
+            </template>
+          </span>
         </span>
         <span class="flex items-center gap-1 text-[11px] text-[var(--reasoning-text)] opacity-80 shrink-0">
           <span>{{ expanded ? '点击折叠' : '点击展开' }}</span>
@@ -72,6 +83,8 @@ const props = defineProps<{
   group: TurnGroup;
   expanded: boolean;
   hasFailed: boolean;
+  /** 失败 tool 条数；未提供时回落到 hasFailed 的布尔语义（1 个红点）。 */
+  failedCount?: number;
   showTelemetry: boolean;
   protocol: string;
   cacheLine: string;
@@ -110,6 +123,13 @@ const phaseLabel = computed(() => {
 });
 const phaseClass = computed(() => (phase.value === 'running' || props.isActive ? 'turn-running' : ''));
 const toolTotal = computed(() => props.group.toolMessages?.length ?? 0);
+/** 需要点亮的红点数量：优先用精确失败条数，缺省时布尔回落为 1。 */
+const failedDots = computed(() => {
+  const n = props.failedCount;
+  if (typeof n === 'number') return Math.max(0, n);
+  return props.hasFailed ? 1 : 0;
+});
+const failedTitle = computed(() => (failedDots.value > 0 ? `${failedDots.value} 个工具调用失败` : ''));
 </script>
 <style scoped>
 .turn-running {

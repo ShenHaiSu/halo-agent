@@ -164,6 +164,41 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
     }
 
+    /// <summary>别名长度上限（界面单行展示用；超长截断而非报错）。</summary>
+    private const int MaxWorkspaceAliasLength = 40;
+
+    /// <summary>
+    /// 设置/清除工作区别名。只写 Alias 一个字段；Name（提示词/请求头数据源）保持不动。
+    /// </summary>
+    public async Task<WorkspaceInfo?> SetWorkspaceAliasAsync(
+        string workspaceId,
+        string? alias,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return null;
+
+        var workspaces = await _sessionRepository
+            .LoadWorkspacesIndexAsync(ct)
+            .ConfigureAwait(false);
+        var ws = workspaces.FirstOrDefault(w =>
+            string.Equals(w.Id, workspaceId.Trim(), StringComparison.OrdinalIgnoreCase)
+        );
+        if (ws == null)
+            return null;
+
+        string trimmed = (alias ?? string.Empty).Trim();
+        if (trimmed.Length > MaxWorkspaceAliasLength)
+            trimmed = trimmed[..MaxWorkspaceAliasLength];
+
+        // 空白 = 清除别名（回退显示 Name）；同时清理历史误存的空串
+        ws.Alias = string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+
+        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
+        return ws;
+    }
+
     /// <summary>
     /// need09-01：移除工作区仅解绑 + 可选删会话物理目录；.haloagent/ 归项目所有，随项目文件夹走，永不删除。
     /// </summary>

@@ -6,8 +6,8 @@
     <!-- 左侧：工作区 / 会话 路径指示 -->
     <div class="flex items-center gap-2 min-w-0">
       <div class="flex items-center gap-1.5 text-xs text-primary font-medium min-w-0">
-        <span class="text-secondary truncate max-w-[140px]" :title="activeWorkspace?.name">
-          {{ activeWorkspace?.name || 'Halo' }}
+        <span class="text-secondary truncate max-w-[140px]" :title="wsLabel">
+          {{ wsLabel || 'Halo' }}
         </span>
         <span class="text-secondary/60">/</span>
         <button
@@ -218,6 +218,9 @@ const agentTurn = useAgentTurn();
 const agentTelemetry = useAgentTelemetry();
 const subStore = useSubSessionStore();
 const { activeWorkspace, activeSession, budgetStatus, budgetError } = storeToRefs(workspaceStore);
+
+/** 工作区展示名：alias 优先（纯视觉，不进提示词/请求头），空则回退 name。 */
+const wsLabel = computed(() => workspaceStore.workspaceLabel(activeWorkspace.value));
 // need22-P3 G6：budget/refreshAll 失败顶栏⚠角标（统一 {code,message}，点击重试）
 const budgetWarnText = computed(() => {
   const b = budgetError.value;

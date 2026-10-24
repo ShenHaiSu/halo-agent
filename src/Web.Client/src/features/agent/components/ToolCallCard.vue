@@ -50,7 +50,7 @@
 
     <!-- need12 R1：流式写入字节计数行（write_file/edit_file 专属） -->
     <div
-      v-if="showBytesRow"
+      v-show="bytesRowLatched"
       class="flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] text-secondary border-t border-subtle bytes-counter"
       data-testid="tool-bytes-counter"
       :title="bytesTooltip"
@@ -178,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useMessage } from 'naive-ui';
 import { ChevronDown, Copy, FileDiff, FilePlus2, FileText, FolderSearch, Search, Square, Terminal, Wrench } from 'lucide-vue-next';
 import type { AgentToolCard } from '@features/agent/stores/model';
@@ -212,6 +212,20 @@ const isViewImage = computed(() => props.card.functionName === 'view_image');
 // ---- need12 R1：字节计数行 ----
 const receivedBytes = computed(() => Math.max(0, Math.floor(props.card.receivedBytes || 0)));
 const showBytesRow = computed(() => isFileEdit.value);
+/**
+ * M1-5：单向锁存 —— 该行**一旦出现就不再消失**。
+ * 当前 showBytesRow 只依赖 functionName（在同一张卡内恒定），锁存是为防止将来把
+ * receivedBytes/status 纳入判定后，行反复显隐造成 ±20px 的高度抖动（治 R6.2）。
+ * 配合 `v-show` + `.bytes-counter { min-height: 20px }`，占位在出现后保持稳定。
+ */
+const bytesRowLatched = ref(showBytesRow.value);
+watch(
+  showBytesRow,
+  (v) => {
+    if (v) bytesRowLatched.value = true;
+  },
+  { immediate: true }
+);
 const isReceiving = computed(
   () => props.card.status === 'running' && (props.card.fileBytes === null || props.card.fileBytes === undefined)
 );
@@ -558,5 +572,7 @@ async function openSub() {
 }
 .bytes-counter {
   font-variant-numeric: tabular-nums;
+  /* M1-5：字节行占位高度固定，出现后不再改变卡片总高 */
+  min-height: 20px;
 }
 </style>

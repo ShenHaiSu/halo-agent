@@ -109,6 +109,35 @@ export function useSessionList() {
   async function handleRemoveWorkspace(workspaceId: string): Promise<void> {
     if (await workspaceStore.removeWorkspace(workspaceId)) message.success('已从列表移除该工作区');
   }
+  // —— 工作区别名内联编辑（与会话改名同构：editing + draft 两个 ref）——
+  const editingWorkspaceId = ref<string | null>(null);
+  const editingWorkspaceDraft = ref('');
+  function startWorkspaceRename(ws: { id: string; alias?: string | null; name: string }): void {
+    showWorkspacePopover.value = true; // 保持在切换器里编辑，不跳走
+    editingWorkspaceId.value = ws.id;
+    editingWorkspaceDraft.value = (ws.alias && ws.alias.trim()) || ws.name;
+  }
+  function setWorkspaceDraft(v: string): void {
+    editingWorkspaceDraft.value = v;
+  }
+  function cancelWorkspaceRename(): void {
+    editingWorkspaceId.value = null;
+    editingWorkspaceDraft.value = '';
+  }
+  /** 提交：空串 = 清除别名（回退文件夹名）；与 name 相同也视为清除，避免存脏别名。 */
+  async function handleSaveWorkspaceAlias(workspaceId: string): Promise<void> {
+    if (editingWorkspaceId.value !== workspaceId) return;
+    const raw = editingWorkspaceDraft.value.trim();
+    const target = workspaceStore.workspaces.find((w) => w.id === workspaceId);
+    const fallback = target?.name ?? '';
+    const next = raw === fallback ? '' : raw;
+    if (await workspaceStore.renameWorkspace(workspaceId, next)) {
+      message.success(next ? '别名已更新' : '已恢复显示文件夹名');
+    } else {
+      message.error('别名保存失败');
+    }
+    cancelWorkspaceRename();
+  }
   async function handleCreateNewSession(): Promise<void> {
     const blank = workspaceStore.sessions.find((s) => (s.title || '').trim() === '新建会话' && (s.messageCount ?? 0) === 0 && !s.isPinned);
     if (blank) {
@@ -219,6 +248,12 @@ export function useSessionList() {
     handleOpenActiveWorkspaceFolder,
     handleAddNewWorkspace,
     handleRemoveWorkspace,
+    editingWorkspaceId,
+    editingWorkspaceDraft,
+    startWorkspaceRename,
+    setWorkspaceDraft,
+    cancelWorkspaceRename,
+    handleSaveWorkspaceAlias,
     handleCreateNewSession,
     handleSelectSession,
     startInlineRename,

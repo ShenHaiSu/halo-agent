@@ -95,6 +95,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return workspaces.value.find((w) => w.id === activeWorkspaceId.value) || workspaces.value[0] || null;
   });
 
+  /** 工作区展示名：alias 优先（纯视觉），空则回退 name。 */
+  function workspaceLabel(ws: WorkspaceInfo | null | undefined): string {
+    if (!ws) return '';
+    return (ws.alias && ws.alias.trim()) || ws.name || '';
+  }
+
   const activeSession = computed<SessionMetadata | null>(() => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
@@ -198,6 +204,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
     } catch (err) {
       console.error('[workspaceStore] removeWorkspace failed:', err);
+    }
+    return false;
+  }
+
+  /**
+   * 设置/清除工作区别名（纯前端视觉，不进提示词/请求头/上下文）。
+   * alias 传空串 = 清除别名（回退显示文件夹名）。成功后只就地更新列表项，不重拉、不打断当前会话。
+   */
+  async function renameWorkspace(workspaceId: string, alias: string): Promise<boolean> {
+    const wid = (workspaceId || '').trim();
+    if (!wid) return false;
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.renameWorkspace(wid, alias.trim());
+      if (res.ok && res.data) {
+        const idx = workspaces.value.findIndex((w) => w.id === wid);
+        if (idx >= 0) {
+          const merged = { ...workspaces.value[idx], ...res.data };
+          merged.displayName = (merged.alias && merged.alias.trim()) || merged.name;
+          workspaces.value[idx] = merged;
+          workspaces.value = [...workspaces.value];
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('[workspaceStore] renameWorkspace failed:', err);
     }
     return false;
   }
@@ -751,6 +783,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     selectWorkspace,
     addWorkspace,
     browseAndAddWorkspace,
+    renameWorkspace,
+    workspaceLabel,
     removeWorkspace,
     loadSessions,
     touchSessionTime,

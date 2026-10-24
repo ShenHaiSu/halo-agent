@@ -16,7 +16,7 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5 min-w-0">
                 <FolderGit2 class="w-4 h-4 text-accent shrink-0" />
-                <span class="text-xs font-semibold truncate">{{ activeWorkspace?.name || '选择工作路径' }}</span>
+                <span class="text-xs font-semibold truncate">{{ labelOf(activeWorkspace) || '选择工作路径' }}</span>
               </div>
               <div class="flex items-center gap-1">
                 <n-tag v-if="activeWorkspace && !activeWorkspace.directoryExists" size="tiny" type="warning" :bordered="false">
@@ -51,13 +51,35 @@
                 <Folder v-else class="w-4 h-4 shrink-0 text-secondary" />
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1.5">
-                    <span class="text-xs font-medium truncate">{{ ws.name }}</span>
-                    <n-tag v-if="!ws.directoryExists" size="tiny" type="warning" :bordered="false" class="shrink-0">
-                      <template #icon>
-                        <AlertTriangle class="w-3 h-3" />
-                      </template>
-                      失效
-                    </n-tag>
+                    <div v-if="editingWorkspaceId === ws.id" class="min-w-0 flex-1" @click.stop>
+                      <n-input
+                        :value="workspaceDraft"
+                        size="tiny"
+                        autofocus
+                        placeholder="输入别名，留空恢复文件夹名"
+                        :data-testid="`workspace-alias-input-${ws.id}`"
+                        @update:value="emit('update:workspace-draft', $event)"
+                        @keyup.enter="emit('rename-workspace-save', ws.id)"
+                        @keyup.esc="emit('rename-workspace-cancel')"
+                        @blur="emit('rename-workspace-save', ws.id)"
+                      />
+                    </div>
+                    <template v-else>
+                      <span
+                        class="text-xs font-medium truncate"
+                        :title="aliasTitleOf(ws)"
+                        :data-testid="`workspace-name-${ws.id}`"
+                        @dblclick.stop="emit('rename-workspace-start', ws)"
+                        >{{ labelOf(ws) }}</span
+                      >
+                      <span v-if="hasAlias(ws)" class="text-[10px] text-secondary/70 truncate shrink-0">({{ ws.name }})</span>
+                      <n-tag v-if="!ws.directoryExists" size="tiny" type="warning" :bordered="false" class="shrink-0">
+                        <template #icon>
+                          <AlertTriangle class="w-3 h-3" />
+                        </template>
+                        失效
+                      </n-tag>
+                    </template>
                   </div>
                   <div class="text-[10px] text-secondary font-mono truncate" :title="ws.rootPath">
                     {{ ws.rootPath }}
@@ -65,6 +87,19 @@
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0 ml-2" @click.stop>
+                <n-button
+                  v-if="editingWorkspaceId !== ws.id"
+                  quaternary
+                  circle
+                  size="tiny"
+                  title="重命名别名（双击名称亦可）"
+                  :data-testid="`workspace-rename-btn-${ws.id}`"
+                  @click="emit('rename-workspace-start', ws)"
+                >
+                  <template #icon>
+                    <Pencil class="w-3.5 h-3.5" />
+                  </template>
+                </n-button>
                 <n-button quaternary circle size="tiny" title="在资源管理器中打开" @click="emit('open-explorer', ws.rootPath)">
                   <template #icon>
                     <ExternalLink class="w-3.5 h-3.5" />
@@ -90,6 +125,7 @@
               </template>
               添加新的工作路径 (绑定本地文件夹)
             </n-button>
+            <p class="mt-1.5 text-[10px] text-secondary/70 leading-snug">别名仅改变界面显示，不影响磁盘路径与提示词。</p>
           </div>
         </div>
       </n-popover>
@@ -201,9 +237,24 @@ import {
   ExternalLink,
   AlertTriangle,
   Pin,
+  Pencil,
 } from 'lucide-vue-next';
 import type { SessionMetadata, WorkspaceInfo } from '@shared/bridge/hostBridge';
 import SessionListItem from './SessionListItem.vue';
+
+/** 工作区展示名：alias 优先（纯视觉），空则回退 name。 */
+function labelOf(ws: WorkspaceInfo | null | undefined): string {
+  if (!ws) return '';
+  return (ws.alias && ws.alias.trim()) || ws.name || '';
+}
+/** 是否设置了与文件夹名不同的别名（用于展示"(文件夹名)"副标）。 */
+function hasAlias(ws: WorkspaceInfo): boolean {
+  return !!ws.alias && ws.alias.trim() !== ws.name;
+}
+/** 悬浮提示：有别名时给"别名 + 真实路径"，否则给路径。 */
+function aliasTitleOf(ws: WorkspaceInfo): string {
+  return hasAlias(ws) ? `${ws.alias}\n${ws.rootPath}` : ws.rootPath;
+}
 
 defineProps<{
   workspaces: WorkspaceInfo[];
@@ -223,6 +274,8 @@ defineProps<{
   nowTick: number;
   runningIds: string[];
   askIds: string[];
+  editingWorkspaceId: string | null;
+  workspaceDraft: string;
 }>();
 const emit = defineEmits<{
   'update:popover': [v: boolean];
@@ -232,6 +285,10 @@ const emit = defineEmits<{
   'open-explorer': [path: string];
   'remove-workspace': [id: string];
   'add-workspace': [];
+  'rename-workspace-start': [ws: WorkspaceInfo];
+  'update:workspace-draft': [v: string];
+  'rename-workspace-save': [id: string];
+  'rename-workspace-cancel': [];
   'create-session': [];
   'select-session': [id: string];
   'delete-session': [id: string];
