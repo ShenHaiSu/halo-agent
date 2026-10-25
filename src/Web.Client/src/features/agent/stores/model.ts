@@ -34,6 +34,9 @@ export interface AgentToolCard {
   messageId?: string;
   /** need23-R1：结果是否已落盘（ToolMessagePersisted 到达后为 true）。 */
   persisted?: boolean;
+  /** S6 §4.4：机器可判错误码（view_image 四态 IMAGE_TOO_LARGE/NOT_AN_IMAGE/IMAGE_MISSING/PATH_TRAVERSAL 等）；
+   *  空/缺省 = 成功或老后端未透传，渲染层按 status 兜底。 */
+  errorCode?: string | null;
 }
 
 /** need09-04：sendPrompt 可选第二参附件项 */

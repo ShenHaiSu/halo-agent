@@ -8,7 +8,7 @@ import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useAgentCards } from '@features/agent/stores/useAgentCards';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import { imagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
+import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, useFollowMode, useTimelineNav } from './useTimelineNav';
@@ -232,7 +232,8 @@ export function useTimeline() {
   const thumbnailCache = ref<Record<string, string>>({});
   const lostImageIds = ref<Record<string, boolean>>({});
   const thumbPending = new Set<string>();
-  const msgImages = (msg: UnifiedChatMessage | undefined): ChatImageRef[] => imagesOf(msg);
+  /** S6 §4.3：转录图片行顺序与发包一致（按占位符顺序；无占位符退化 images 数组序）。 */
+  const msgImages = (msg: UnifiedChatMessage | undefined): ChatImageRef[] => orderedImagesOf(msg);
   const hasLostImage = (msg: UnifiedChatMessage | undefined): boolean =>
     msgImages(msg).some((i) => lostImageIds.value[i.imageId] || i.lost === true);
   /** M1-4：单图丢失判定（供 TimelineRow 决定渲染标签槽位还是加载骨架）。 */

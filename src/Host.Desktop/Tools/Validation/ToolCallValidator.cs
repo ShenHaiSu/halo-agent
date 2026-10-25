@@ -94,6 +94,8 @@ public static partial class ToolCallValidator
             },
             ["view_image"] = new ToolSchemaSpec
             {
+                // S3 §4.1：结果侧四态错误码（IMAGE_TOO_LARGE / NOT_AN_IMAGE / IMAGE_MISSING / PATH_TRAVERSAL）
+                // 由 ViewImageTool 经 ToolResult.FailCode 抛出；此处只做参数校验，校验逻辑不变。
                 ToolName = "view_image",
                 Required = new[] { "file_path" },
                 Params = P(S("file_path"), S("path"), S("detail")),

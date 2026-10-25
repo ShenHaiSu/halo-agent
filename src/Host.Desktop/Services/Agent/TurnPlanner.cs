@@ -49,6 +49,15 @@ public sealed partial class AgentOrchestrator
                     return " Hint: the tool is not in this turn's preset; use an active tool or ask for Full preset.";
                 case "INVALID_JSON_ARGUMENTS":
                     return " Hint: resend with complete JSON (no truncation); keep strings escaped.";
+                // S3 §4.1：view_image 四态错误码 Hint（英文一句，模型可判下一步动作）。
+                case "IMAGE_TOO_LARGE":
+                    return " Hint: the image exceeds the per-image limit; compress/resize it or pick a smaller file, then retry.";
+                case "NOT_AN_IMAGE":
+                    return " Hint: only jpg/png/webp are readable (svg/gif/bmp rejected); convert the file first or pick another image.";
+                case "IMAGE_MISSING":
+                    return " Hint: verify the path with list_dir, then retry with the exact file name.";
+                case "PATH_TRAVERSAL":
+                    return " Hint: use a path inside the workspace root (no ../, no system dirs, no index files like _index.json).";
                 // NEED17-07 §7.1：全仓库唯一中文 Hint（逐字）。07 快照/Gate 落子后保持文案不变。
                 case "PYTHON_NOT_AVAILABLE":
                     return " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
@@ -267,15 +276,20 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(ctx.SystemPrompt))
             requestMessages.Add(UnifiedChatMessage.System(ctx.SystemPrompt));
         requestMessages.AddRange(budgeted);
+        // S3 §4.4：非视觉剥离告知（发包内存副本，不落盘）。
+        // 落盘的 assistant 通知保留（人类可见）；这里另给模型一句，避免「模型以为本轮有图」而幻觉。
+        string? nonVisionNotice = null;
         // need09-03：非视觉模型含图 → 剥离图片 + 通知 + 纯文本降级（仅一次；历史落盘不受影响，切换模型可恢复）
         if (!ctx.SnapVision && requestMessages.Any(m => m.Images != null && m.Images.Count > 0))
         {
-            int stripped = requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count);
+            // 就地剥离（requestMessages 为发包基列表；模型侧另由 StripForNonVision 前置告知句）。
+            nonVisionNotice = MultimodalPlanner.DropNotice.NonVisionStripped(
+                ctx.Model.Id,
+                requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count)
+            );
             foreach (var m in requestMessages)
                 m.Images = null;
-            var notice = UnifiedChatMessage.Assistant(
-                $"[图片已忽略] 当前模型 {ctx.Model.Id} 不支持看图，本轮 {stripped} 张图片已剥离，文字照常发送。"
-            );
+            var notice = UnifiedChatMessage.Assistant(nonVisionNotice);
             try
             {
                 await _sessionService
@@ -286,39 +300,101 @@ public sealed partial class AgentOrchestrator
             { /* 通知落盘失败不中断本轮 */
             }
         }
-        else if (ctx.SnapVision && ctx.SnapMaxImages > 0)
+        // S5 §4.3：图片三道盘按**冻结顺序**执行（顺序写死，单测锁定）：
+        //   ① 历史盘（raw，逆序，保最新丢最旧） → ② 当轮盘（raw，当前 user 轮 + view_image） → ③ 张数盘（MaxImagesPerTurn）
+        // 字节盘先行、张数盘最后：先按体积挤掉最旧历史，再让产品级张数护栏兜底。
+        // 与 S1 的 token 账关系：BuildWithinBudget（token 侧，含 DropOldestImageRefs 文本占位）在上方先跑，
+        // 这里只做字节账，两笔账方向一致（都保最新丢最旧），互不冲突。
+        // 切分边界：ctx.UserMessage.Id —— 该消息及其之后为本轮（当轮盘），之前的为历史（历史盘）。
+        // SessionImageStash.Take 取出的正是当前轮图，TurnSetup 已并入 ctx.UserMessage.Images 并落盘。
+        string historyDropNotice = string.Empty;
+        bool isCurrentTurnMsg(UnifiedChatMessage m) =>
+            m != null
+            && ctx.UserMessage != null
+            && string.Equals(m.Id, ctx.UserMessage.Id, StringComparison.Ordinal);
+
+        if (ctx.SnapVision)
         {
-            // need09-03：超 MaxImagesPerTurn 取最新 N 张（保 latest 丢最旧），前后端网关一致，Adapter 侧仍有兜底
-            int totalImgs = requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count);
-            if (totalImgs > ctx.SnapMaxImages)
+            var historyDropped = new List<(string FileName, string ImageId)>();
+            // ① 历史盘：逆序 raw 扣减；未准入的 Images 从发包副本摘除（落盘不动）
             {
-                var keepSet = new HashSet<ChatImageRef>();
-                for (
-                    int ri = requestMessages.Count - 1;
-                    ri >= 0 && keepSet.Count < ctx.SnapMaxImages;
-                    ri--
-                )
-                {
-                    var imgs = requestMessages[ri].Images;
-                    if (imgs == null)
-                        continue;
-                    for (
-                        int ki = imgs.Count - 1;
-                        ki >= 0 && keepSet.Count < ctx.SnapMaxImages;
-                        ki--
-                    )
-                        keepSet.Add(imgs[ki]);
-                }
+                var historyRefs = new List<ChatImageRef>();
                 foreach (var m in requestMessages)
                 {
-                    if (m.Images == null)
+                    if (isCurrentTurnMsg(m) || m.Images == null)
                         continue;
-                    var kept = m.Images.Where(r => keepSet.Contains(r)).ToList();
-                    m.Images = kept.Count == 0 ? null : kept;
+                    foreach (var img in m.Images)
+                    {
+                        if (img != null && !string.IsNullOrWhiteSpace(img.ImageId))
+                            historyRefs.Add(img);
+                    }
                 }
-                Infrastructure.Logging.HaloLogger.App.Warn(
-                    $"[Image] 本轮图片 {totalImgs} 张超限（上限 {ctx.SnapMaxImages}），已保留最新 {ctx.SnapMaxImages} 张"
-                );
+                if (historyRefs.Count > 0)
+                {
+                    var seq = historyRefs.Select(r => (r.ImageId.Trim(), r.SizeBytes)).ToList();
+                    var (admit, droppedIds) = ImageBudgetPlanner.PlanReverse(
+                        seq,
+                        ImageBudgetPlanner.ClampHistoryCap(VisionDefaults.MaxHistoryImageBytes)
+                    );
+                    if (droppedIds.Count > 0)
+                    {
+                        foreach (var id in droppedIds)
+                        {
+                            var hit = historyRefs.FirstOrDefault(r =>
+                                string.Equals(r.ImageId.Trim(), id, StringComparison.Ordinal)
+                            );
+                            historyDropped.Add((hit?.FileName ?? string.Empty, id));
+                        }
+                        var stripped = ImageBudgetPlanner.StripDropped(requestMessages, admit);
+                        requestMessages.Clear();
+                        requestMessages.AddRange(stripped);
+                        historyDropNotice = MultimodalPlanner.DropNotice.HistoryBudgetExceeded(
+                            VisionDefaults.MaxHistoryImageBytes,
+                            historyDropped
+                        );
+                        Infrastructure.Logging.HaloLogger.App.Warn(
+                            $"[Image] 历史盘超预算（{VisionDefaults.MaxHistoryImageBytes} raw），已丢弃最旧 {droppedIds.Count} 张（发包副本摘除，落盘保留）"
+                        );
+                    }
+                }
+            }
+
+            // ③ 张数盘：最后执行（保最新丢最旧）；② 当轮盘在下方 imgResolver 内按 raw 扣减
+            if (ctx.SnapMaxImages > 0)
+            {
+                int totalImgs = requestMessages
+                    .Where(m => m.Images != null)
+                    .Sum(m => m.Images!.Count);
+                if (totalImgs > ctx.SnapMaxImages)
+                {
+                    var keepSet = new HashSet<ChatImageRef>();
+                    for (
+                        int ri = requestMessages.Count - 1;
+                        ri >= 0 && keepSet.Count < ctx.SnapMaxImages;
+                        ri--
+                    )
+                    {
+                        var imgs = requestMessages[ri].Images;
+                        if (imgs == null)
+                            continue;
+                        for (
+                            int ki = imgs.Count - 1;
+                            ki >= 0 && keepSet.Count < ctx.SnapMaxImages;
+                            ki--
+                        )
+                            keepSet.Add(imgs[ki]);
+                    }
+                    foreach (var m in requestMessages)
+                    {
+                        if (m.Images == null)
+                            continue;
+                        var kept = m.Images.Where(r => keepSet.Contains(r)).ToList();
+                        m.Images = kept.Count == 0 ? null : kept;
+                    }
+                    Infrastructure.Logging.HaloLogger.App.Warn(
+                        $"[Image] 本轮图片 {totalImgs} 张超限（上限 {ctx.SnapMaxImages}），已保留最新 {ctx.SnapMaxImages} 张"
+                    );
+                }
             }
         }
         string requestId = Guid.NewGuid().ToString("N");
@@ -344,10 +420,16 @@ public sealed partial class AgentOrchestrator
             .Select(d => UnifiedToolDefinition.Create(d.Name, d.Description, d.ParametersJson))
             .ToList();
         // need11-01：读盘→dataURL 本轮内存缓存（重启/多会话安全，无全局锁；null 也缓存避免重复读丢失文件）
-        // need22-P1 T6：本轮图片字节预算 8MB（缩略图走 GetImageThumbnail 懒取；超预算原图降级跳过并 Warn，防多图 OOM）。
+        // S5 §4.3 ②：当轮盘（raw 口径）——当前 user 轮 + 本 turn view_image 工具图共享，
+        // 上限 VisionDefaults.MaxTurnImageBytes（32M 十进制 raw）；历史图不占此盘（历史已由①按历史盘过滤）。
+        // 扣减口径从 url.Length（含 base64，约 4/3 膨胀）改为 img.SizeBytes（raw），与上层历史盘同口径。
+        // dataUrl 仍缓存（避免重复读盘），只是预算按 raw 计。
         var imgCache = new Dictionary<string, string?>(StringComparer.Ordinal);
         long imgUsedBytes = 0;
-        const long ImgBudgetBytes = 8L * 1024 * 1024;
+        const long ImgBudgetBytes = VisionDefaults.MaxTurnImageBytes;
+        // S3 §4.2：熔断显式化——被预算跳过的图收集 (fileName, imageId)，发包前告知模型。
+        // 只收集不改变 resolver 语义（仍返回 null，adapter 的 Where(!IsNullOrWhiteSpace(DataUrl)) 过滤不动）。
+        var skippedKeys = new List<(string FileName, string ImageId)>();
         Func<ChatImageRef, string?> imgResolver = img =>
         {
             if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
@@ -355,25 +437,70 @@ public sealed partial class AgentOrchestrator
             string key = img.ImageId.Trim();
             if (imgCache.TryGetValue(key, out var hit))
                 return hit;
+            long rawSize = img.SizeBytes > 0 ? img.SizeBytes : 0;
+            if (imgUsedBytes + rawSize > ImgBudgetBytes)
+            {
+                // 当轮盘超限：不再读盘（省 LOH），直接判未发送并进入告知
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    $"[Image] 当轮图片盘超预算（{ImgBudgetBytes} raw），已跳过 {key}（raw={rawSize}，前端可经 GetImageThumbnail 懒取）"
+                );
+                imgCache[key] = null;
+                skippedKeys.Add((img.FileName ?? string.Empty, key));
+                return null;
+            }
             string? url = ImageAttachmentStore.ResolveDataUrl(
                 ctx.DataRoot,
                 workspaceId,
                 sessionId,
                 img
             );
-            if (url != null && imgUsedBytes + url.Length > ImgBudgetBytes)
-            {
-                Infrastructure.Logging.HaloLogger.App.Warn(
-                    $"[Image] 本轮图片字节超预算（{ImgBudgetBytes}），已跳过 {key}（前端可经 GetImageThumbnail 懒取）"
-                );
-                imgCache[key] = null;
-                return null;
-            }
             if (url != null)
-                imgUsedBytes += url.Length;
+                imgUsedBytes += rawSize;
             imgCache[key] = url;
             return url;
         };
+
+        // S3 §4.2/§4.4：组装发包消息副本（requestMessages 原对象落盘语义不动）。
+        // 顺序：剥离告知前置首条内容 → 熔断告知追加末条；两者都只进内存副本。
+        // S5 §4.4：告知文案区分两盘——当轮盘「本轮图片字节超预算」/ 历史盘「历史图片超预算未发送 N 张」。
+        string budgetNotice = MultimodalPlanner.DropNotice.BudgetExceeded(
+            ImgBudgetBytes,
+            skippedKeys
+        );
+        if (historyDropNotice.Length > 0)
+            budgetNotice =
+                budgetNotice.Length > 0
+                    ? historyDropNotice + "\n" + budgetNotice
+                    : historyDropNotice;
+        List<UnifiedChatMessage> sendMessages = requestMessages;
+        if (!string.IsNullOrEmpty(nonVisionNotice) || budgetNotice.Length > 0)
+        {
+            sendMessages = new List<UnifiedChatMessage>(requestMessages.Count);
+            for (int i = 0; i < requestMessages.Count; i++)
+            {
+                var src = requestMessages[i];
+                bool isFirst = i == 0;
+                bool isLast = i == requestMessages.Count - 1;
+                var copy = src;
+                if (isFirst && !string.IsNullOrEmpty(nonVisionNotice))
+                {
+                    copy = MultimodalPlanner.DropNotice.WithNotice(
+                        copy,
+                        nonVisionNotice,
+                        append: false
+                    );
+                }
+                if (isLast && budgetNotice.Length > 0)
+                {
+                    copy = MultimodalPlanner.DropNotice.WithNotice(
+                        copy,
+                        budgetNotice,
+                        append: true
+                    );
+                }
+                sendMessages.Add(copy);
+            }
+        }
         var request = new UnifiedLlmRequest
         {
             RequestId = requestId,
@@ -381,7 +508,7 @@ public sealed partial class AgentOrchestrator
             Model = ctx.Model,
             HeaderContext = headerContext,
             SystemInstructions = ctx.SystemPrompt,
-            Messages = requestMessages,
+            Messages = sendMessages,
             Tools = toolDefs,
             ImageResolver = imgResolver,
         };

@@ -10,7 +10,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>
 /// need09-05：view_image（第 7 号工具）。模型自主读取图片：
-/// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤8MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
+/// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤10MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
 /// → ToolResult.Success(摘要文本, Images=[ref])。base64 永不进事件/日志。
 /// </summary>
 [HaloAgent.Tools.Tool("view_image")]
@@ -21,11 +21,30 @@ public sealed class ViewImageTool : IToolHandler
     public string Name => "view_image";
 
     // NEED17 PromptBrief: Read an image file into the conversation
+    // S3 §4.1：追加错误码清单（英文，模型可读），模型可按 errorCode 分支重试/换图/放弃。
     public string Description =>
-        "Read an image file (jpg/png/webp, max 8MB) from the workspace into the conversation. "
+        "Read an image file (jpg/png/webp, max 10MB) from the workspace into the conversation. "
         + "Use path relative to workspace root or an absolute path. "
         + "Returns a short text summary plus the image reference for the model to see. "
-        + "Workspace image only. Non-image files fail fast. On non-vision models the image is stripped and text continues (see notice).";
+        + "Workspace image only. Non-image files fail fast. On non-vision models the image is stripped and text continues (see notice). "
+        + "GIF and SVG are not supported on the vision path: for SVG (or any text-based vector file) use read_file to read it as text instead. "
+        + "Error codes: IMAGE_TOO_LARGE|NOT_AN_IMAGE|IMAGE_MISSING|PATH_TRAVERSAL.";
+
+    /// <summary>
+    /// S7-E4：图片链路类型白名单的**唯一拒绝文案**（与前端 UNSUPPORTED_IMAGE_REASON 同口径）。
+    /// 决策：GIF 不做内联、SVG 永不进视觉（可携带脚本/外链）；SVG 走 read_file 文本通道。
+    /// </summary>
+    public const string UnsupportedTypeReason =
+        "仅支持 jpg/png/webp（GIF/SVG/BMP 等请先转成 png/jpg；SVG 可让模型用 read_file 按文本读取）";
+
+    /// <summary>S3 §3.1：view_image 四态机器可判错误码（成功时为 null）。</summary>
+    public static class ErrorCodes
+    {
+        public const string ImageTooLarge = "IMAGE_TOO_LARGE";
+        public const string NotAnImage = "NOT_AN_IMAGE";
+        public const string ImageMissing = "IMAGE_MISSING";
+        public const string PathTraversal = "PATH_TRAVERSAL";
+    }
 
     public ToolDefinition GetDefinition()
     {
@@ -90,9 +109,11 @@ public sealed class ViewImageTool : IToolHandler
             string trimmed = pathArg.Trim();
             if (IsTraversalInput(trimmed))
             {
+                // S3 §4.1：文案不变，只把 [PATH_TRAVERSAL] 后缀改前缀码形态（Error 首 token 必为 CODE：）。
                 return Task.FromResult(
-                    ToolResult.Fail(
-                        $"拒绝路径遍历：'{trimmed}'。请使用工作区内相对路径或合法绝对路径（禁止 ../ 逃逸）。[PATH_TRAVERSAL]",
+                    ToolResult.FailCode(
+                        ErrorCodes.PathTraversal,
+                        $"拒绝路径遍历：'{trimmed}'。请使用工作区内相对路径或合法绝对路径（禁止 ../ 逃逸）。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -101,8 +122,9 @@ public sealed class ViewImageTool : IToolHandler
             if (IsIndexFile(trimmed))
             {
                 return Task.FromResult(
-                    ToolResult.Fail(
-                        $"拒绝直接读写索引文件：'{trimmed}'。请通过 skill_tool / memory_tool 管理 Skill/Memory。[PATH_TRAVERSAL]",
+                    ToolResult.FailCode(
+                        ErrorCodes.PathTraversal,
+                        $"拒绝直接读写索引文件：'{trimmed}'。请通过 skill_tool / memory_tool 管理 Skill/Memory。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -129,8 +151,9 @@ public sealed class ViewImageTool : IToolHandler
             if (PathSafetyValidator.IsProtectedSystemPath(fullPath))
             {
                 return Task.FromResult(
-                    ToolResult.Fail(
-                        $"拒绝读取系统关键目录：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。view_image 严禁触碰系统目录。[PATH_TRAVERSAL]",
+                    ToolResult.FailCode(
+                        ErrorCodes.PathTraversal,
+                        $"拒绝读取系统关键目录：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。view_image 严禁触碰系统目录。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -138,9 +161,12 @@ public sealed class ViewImageTool : IToolHandler
 
             if (!ImageAttachmentStore.IsSupportedExtension(fullPath))
             {
+                // S3 §4.1：非 jpg/png/webp 一律 NOT_AN_IMAGE（含 svg/gif/bmp 一刀切拒绝）。
+                // S7-E4：文案统一走 UnsupportedTypeReason，并给 SVG 指路 read_file（不进视觉链路）。
                 return Task.FromResult(
-                    ToolResult.Fail(
-                        $"不支持的图片类型：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。仅支持 jpg/png/webp（按扩展名 + 文件头双重校验，gif/bmp/tiff 请先转换）。",
+                    ToolResult.FailCode(
+                        ErrorCodes.NotAnImage,
+                        $"不支持的图片类型：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。{UnsupportedTypeReason}。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -149,7 +175,8 @@ public sealed class ViewImageTool : IToolHandler
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(
-                    ToolResult.Fail(
+                    ToolResult.FailCode(
+                        ErrorCodes.ImageMissing,
                         $"文件不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请使用 list_dir 确认路径后重试。",
                         durationMs: sw.ElapsedMilliseconds
                     )
@@ -162,14 +189,43 @@ public sealed class ViewImageTool : IToolHandler
                 var fi = new FileInfo(fullPath);
                 if (fi.Length > ImageAttachmentStore.MaxImageBytes)
                 {
+                    // S3 §4.1：超限走 IMAGE_TOO_LARGE，payload 含 {limit, actual} 供模型/前端判量级。
                     return Task.FromResult(
-                        ToolResult.Fail(
-                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
+                        ToolResult.FailCode(
+                            ErrorCodes.ImageTooLarge,
+                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 10MB）。请压缩后重试。",
+                            payloadJson: BuildTooLargePayload(
+                                ImageAttachmentStore.MaxImageBytes,
+                                fi.Length
+                            ),
                             durationMs: sw.ElapsedMilliseconds
                         )
                     );
                 }
-                raw = File.ReadAllBytes(fullPath);
+                // S2 有界读：快筛之后仍走 take(limit+1) 限长读，防 TOCTOU（先 stat 后读之间文件被替换撑大）。
+                // S3：失败统一走 IMAGE_TOO_LARGE（含 io/empty），payload 记 limit 与 stat 到的 actual，不抛、不中断整轮。
+                if (
+                    !ImageAttachmentStore.TryReadBounded(
+                        fullPath,
+                        ImageAttachmentStore.MaxImageBytes,
+                        out byte[]? bounded
+                    )
+                    || bounded == null
+                )
+                {
+                    return Task.FromResult(
+                        ToolResult.FailCode(
+                            ErrorCodes.ImageTooLarge,
+                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 10MB）。请压缩后重试。",
+                            payloadJson: BuildTooLargePayload(
+                                ImageAttachmentStore.MaxImageBytes,
+                                fi.Length
+                            ),
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
+                }
+                raw = bounded;
             }
             catch (Exception ex)
             {
@@ -182,7 +238,8 @@ public sealed class ViewImageTool : IToolHandler
             if (!ImageAttachmentStore.CheckMagic(raw, mime))
             {
                 return Task.FromResult(
-                    ToolResult.Fail(
+                    ToolResult.FailCode(
+                        ErrorCodes.NotAnImage,
                         $"文件头校验失败：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 的内容不是有效的 {mime}（扩展名与魔数不符，可能已损坏或改名伪装）。",
                         durationMs: sw.ElapsedMilliseconds
                     )
@@ -244,6 +301,20 @@ public sealed class ViewImageTool : IToolHandler
         {
             sw.Stop();
         }
+    }
+
+    /// <summary>S3 §4.1：IMAGE_TOO_LARGE 的结构化负载（{limit, actual}，actual 取 stat 值；stat 不可得时为 null）。</summary>
+    private static string BuildTooLargePayload(long limitBytes, long? actualBytes)
+    {
+        return "{\"limit\":"
+            + limitBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + ",\"actual\":"
+            + (
+                actualBytes.HasValue
+                    ? actualBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : "null"
+            )
+            + "}";
     }
 
     internal static bool IsTraversalInput(string input)

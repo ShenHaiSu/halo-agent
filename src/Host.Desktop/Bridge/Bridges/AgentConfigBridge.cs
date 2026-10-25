@@ -15,6 +15,11 @@ public sealed class AgentConfigWithMeta : AgentConfigDocument
 /// <summary>need08 §6：智能体行为配置 Bridge（对标 HostBridgeFacade.Prompt.cs）。</summary>
 public sealed partial class HostBridgeFacade
 {
+    // S7-E1：入口三段式预算（后端复核用，与前端 composerModel 同值；十进制 raw）。
+    // 前端可先拦一道，这里兜底 Bridge 直调/老前端；超限逐条跳过并记 Warn（不抛、不中断整轮）。
+    internal const int S7MaxFilesPerTurn = 20;
+    internal const long S7MaxTotalBytes = 128_000_000L;
+
     public Task<BridgeResponse<AgentConfigWithMeta>> GetAgentConfig()
     {
         try
@@ -145,7 +150,8 @@ public sealed partial class HostBridgeFacade
         return meta;
     }
 
-    /// <summary>need09-05：startAgentTurn 附件落盘 + 占位符重写。attachmentsJson: [{fileName,mime?,base64|dataUrl}]；userText 内 [image:i] 按下标替换为[图片：fileName]。</summary>
+    /// <summary>need09-05：startAgentTurn 附件落盘 + 占位符重写。attachmentsJson: [{fileName,mime?,base64|dataUrl}]；
+    /// S6 起 userText 内 `[image:i]` 按下标重写为机器可解析形态 `[image:<短id>]`（保留位置与 imageId，不再整体展平为纯文本）。</summary>
     internal List<Core.Models.ChatImageRef> SaveTurnAttachments(
         string workspaceId,
         string sessionId,
@@ -163,11 +169,22 @@ public sealed partial class HostBridgeFacade
                 return refs;
             string dataRoot = _storageManager.CurrentDataRoot;
             int index = -1;
+            // S7-E1 §4.1-3：入口三段式预算的后端复核（防 Bridge 直调绕过前端）。
+            // 口径与前端 composerModel.validateAttachments 同值：个数 20 / 单体 10MB / 总量 128MB（十进制 raw）。
+            int accepted = 0;
+            long totalBytes = 0;
             foreach (var el in doc.RootElement.EnumerateArray())
             {
                 index++;
                 if (el.ValueKind != System.Text.Json.JsonValueKind.Object)
                     continue;
+                if (accepted >= S7MaxFilesPerTurn)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件数超上限 {S7MaxFilesPerTurn}，第 {index + 1} 张起跳过（占位符保留原文）"
+                    );
+                    continue;
+                }
                 string fileName =
                     el.TryGetProperty("fileName", out var fnEl)
                     && fnEl.ValueKind == System.Text.Json.JsonValueKind.String
@@ -212,22 +229,37 @@ public sealed partial class HostBridgeFacade
                 }
                 if (string.IsNullOrWhiteSpace(mime))
                     mime = Infrastructure.Storage.ImageAttachmentStore.MimeFromExtension(fileName);
-                byte[] raw;
-                try
-                {
-                    raw = Convert.FromBase64String(b64trim);
-                }
-                catch
-                {
-                    continue;
-                }
+                // S2 base64 有界：字符串 O(1) 前筛 + 解码后复核；超限走现有 continue
+                // （静默跳过语义本阶段不动，S3 统一加告知），不抛、不中断整轮。
                 if (
-                    raw.Length == 0
-                    || raw.Length > Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes
+                    !Infrastructure.Storage.ImageAttachmentStore.TryDecodeBase64Bounded(
+                        b64trim,
+                        Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes,
+                        out byte[]? raw0
+                    )
+                    || raw0 == null
                 )
                     continue;
+                byte[] raw = raw0;
                 if (!Infrastructure.Storage.ImageAttachmentStore.CheckMagic(raw, mime))
                     continue;
+                // S7-E1 ②单体复核：单张 > MaxImageBytes（TryDecodeBase64Bounded 已按同值拦过，这里显式再判一次
+                // 以便日志区分「单体超限」与「总量超限」）。
+                if (raw.LongLength > Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件单体超限（{raw.LongLength} > {Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes}），已跳过：{fileName}"
+                    );
+                    continue;
+                }
+                // S7-E1 ③总量复核：累计超 128MB 后不再落盘（保最新语义由前端负责，后端只做安全兜底）。
+                if (totalBytes + raw.LongLength > S7MaxTotalBytes)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件总量超限（{totalBytes}+{raw.LongLength} > {S7MaxTotalBytes}），已跳过：{fileName}"
+                    );
+                    continue;
+                }
                 // need09-fix：贴图与 tool 统一无损直存（原字节落盘，sha 去重），detail 只影响发模参数，不降质、不转码。
                 var (bytes, normMime, w, h) =
                     Infrastructure.Storage.ImageAttachmentStore.PrepareLossless(raw, mime);
@@ -242,12 +274,17 @@ public sealed partial class HostBridgeFacade
                     h
                 );
                 refs.Add(imgRef);
+                accepted++;
+                totalBytes += raw.LongLength;
                 try
                 {
-                    userText = userText.Replace(
-                        "[image:" + index + "]",
-                        "[图片：" + imgRef.FileName + "]"
-                    );
+                    // S6 §4.1：保留**机器可解析**的有序引用形态（`[image:<短id>]`），不再重写成
+                    // `[图片：fileName]` 纯文本——只有保留 imageId 才能在 TurnSetup 排序、
+                    // adapter 交错、转录渲染三处用同一个顺序函数对齐位置。
+                    // 人类可读性由转录层换回 fileName（前端 imagesOf + orderImagesByContent）。
+                    string marker = Core.Models.ImagePlaceholder.Marker(imgRef.ImageId);
+                    if (marker.Length > 0)
+                        userText = userText.Replace("[image:" + index + "]", marker);
                 }
                 catch
                 { /* 占位符重写永不阻断 */
@@ -283,7 +320,16 @@ public sealed partial class HostBridgeFacade
                 return Task.FromResult(
                     BridgeResponse<string>.Fail("IMAGE_MISSING", "图片已丢失（文件被删除）")
                 );
-            byte[] bytes = File.ReadAllBytes(abs);
+            // S2 有界读：缩略图同样走 take(limit+1) 限长读（附件链路，无界读零残留）。
+            if (
+                !Infrastructure.Storage.ImageAttachmentStore.TryReadBounded(
+                    abs,
+                    Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes,
+                    out byte[]? bytes
+                )
+                || bytes == null
+            )
+                return Task.FromResult(BridgeResponse<string>.Fail("IMAGE_DECODE_ERROR", "图片解码失败"));
             string? url = Infrastructure.Storage.ImageAttachmentStore.MakeThumbnailDataUrl(bytes);
             if (url == null)
                 return Task.FromResult(BridgeResponse<string>.Fail("IMAGE_DECODE_ERROR", "图片解码失败"));

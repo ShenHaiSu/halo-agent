@@ -11,6 +11,7 @@ using Xunit;
 namespace HaloAgent.Tests;
 
 /// <summary>need09-02：稳定装配线验收（Skill/Memory L0 常驻 + 高缓存命中）。</summary>
+[Collection("Serial-ImageCost")]
 public sealed class Stage09StablePromptTests
 {
     private static (PromptConfigDocument cfg, PromptContext ctx) Defaults()

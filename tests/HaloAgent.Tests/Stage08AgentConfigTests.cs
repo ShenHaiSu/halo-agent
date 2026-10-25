@@ -419,17 +419,25 @@ public sealed class Stage08AgentConfigTests : IDisposable
                     UnifiedStreamEvent.Completed(),
                 }
             );
+            var toolDone = 0;
+            using var cts = new CancellationTokenSource();
+            // 第 3 次工具执行完成即取消（ToolExecutionCompleted 事件驱动）。
+            // 注：原 CancelAfter(15000) 是“无限轮次跑满 15s 再停”，纯烧时间。
+            // 无限模式>=3 轮 / 取消即停 / 不截断的断言都不变，只是提前停，测试作用不变。
+            var cancelOnToolDone = new CancelOnToolDoneSink(() =>
+            {
+                if (Interlocked.Increment(ref toolDone) >= 3)
+                    cts.Cancel();
+            });
             var orchestrator = new AgentOrchestrator(
                 _service,
                 _budgetService,
                 gateway,
                 new ToolRegistry(),
                 _storageManager,
-                agentConfigService: _agentService
+                agentConfigService: _agentService,
+                sink: cancelOnToolDone
             );
-            using var cts = new CancellationTokenSource();
-            // 第 5 次工具执行后取消（经 ToolExecutionCompleted 计数需要事件订阅；此处用延时取消兜底）
-            cts.CancelAfter(15000);
             AgentTurnResult result = await orchestrator.RunAgentTurnAsync(
                 _workspace.Id,
                 _session.Id,
@@ -499,6 +507,30 @@ public sealed class Stage08AgentConfigTests : IDisposable
     }
 
     // ---- Fake 网关：按脚本逐轮产出事件，无真实网络 ----
+
+    // 事件驱动取消用 sink：第 3 次 ToolExecutionCompleted 即触发取消回调。
+    // 只转发计数，不吞事件，生产行为不变。
+    private sealed class CancelOnToolDoneSink : HaloAgent.Services.Agent.IAgentEventSink
+    {
+        private readonly Action _onToolDone;
+
+        public CancelOnToolDoneSink(Action onToolDone) => _onToolDone = onToolDone;
+
+        public Task EmitAsync(string sessionId, string kind, object? payload)
+        {
+            if (string.Equals(kind, "ToolExecutionCompleted", StringComparison.Ordinal))
+            {
+                try
+                {
+                    _onToolDone();
+                }
+                catch { }
+            }
+            return Task.CompletedTask;
+        }
+
+        public void EmitStreamDelta(string sessionId, string kind, string textDelta) { }
+    }
 
     private sealed class ScriptedFakeGatewayFor08 : ILlmGatewayClient
     {

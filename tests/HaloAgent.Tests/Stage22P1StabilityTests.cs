@@ -92,7 +92,7 @@ public sealed class Stage22P1StabilityTests : IDisposable
         {
             if (cond())
                 return;
-            Thread.Sleep(100);
+            Thread.Sleep(20);
         }
     }
 
@@ -346,8 +346,11 @@ public sealed class Stage22P1StabilityTests : IDisposable
     [Fact(DisplayName = "P1-B4a: 429 两次后成功共计 3 次调用")]
     public async Task T3_Gateway_Retry_429_Twice_Then_Success()
     {
-        var origDelay = LlmGatewayClient.RetryDelayAsync;
-        LlmGatewayClient.RetryDelayAsync = (_, _) => Task.CompletedTask;
+        // 注：真实延时走 ProviderRetryPolicy.RetryDelayAsync（LlmGatewayClient.RetryDelayAsync
+        // 只是旧兼容别名，生产路径不用它）。此处 mock 真正的延时静态，退避零等待，
+        // 调用次数/透传断言不变，测试作用不变。
+        var origDelay = ProviderRetryPolicy.RetryDelayAsync;
+        ProviderRetryPolicy.RetryDelayAsync = (_, _) => Task.CompletedTask;
         try
         {
             string okSse =
@@ -382,15 +385,16 @@ public sealed class Stage22P1StabilityTests : IDisposable
         }
         finally
         {
-            LlmGatewayClient.RetryDelayAsync = origDelay;
+            ProviderRetryPolicy.RetryDelayAsync = origDelay;
         }
     }
 
     [Fact(DisplayName = "P1-B4b: 持续 429 四次后明确失败并透传 HTTP_429")]
     public async Task T3_Gateway_Retry_429_Persistent_Fails_With_Code()
     {
-        var origDelay = LlmGatewayClient.RetryDelayAsync;
-        LlmGatewayClient.RetryDelayAsync = (_, _) => Task.CompletedTask;
+        // 同 B4a：mock 真正的 ProviderRetryPolicy 延时静态，退避零等待。
+        var origDelay = ProviderRetryPolicy.RetryDelayAsync;
+        ProviderRetryPolicy.RetryDelayAsync = (_, _) => Task.CompletedTask;
         try
         {
             var handler = new P1CountingHandler(
@@ -418,7 +422,7 @@ public sealed class Stage22P1StabilityTests : IDisposable
         }
         finally
         {
-            LlmGatewayClient.RetryDelayAsync = origDelay;
+            ProviderRetryPolicy.RetryDelayAsync = origDelay;
         }
     }
 

@@ -243,7 +243,9 @@ public sealed class Stage02ConfigAndProxyTests : IDisposable
         finally
         {
             listener.Stop();
-            await Task.WhenAny(serverTask, Task.Delay(500));
+            // 并行下 500ms 等 serverTask 收尾偏紧（抖动会 flake），放宽到 5s；
+            // 正常 server 一次 Accept 即结束，不会真等满，测试作用不变。
+            await Task.WhenAny(serverTask, Task.Delay(5000));
         }
     }
 

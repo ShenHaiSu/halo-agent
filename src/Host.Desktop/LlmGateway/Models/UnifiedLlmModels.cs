@@ -80,12 +80,304 @@ public static class ImageDataRegistry
 /// <summary>need09-05：adapter 共享的多模态轮次规划结果项。</summary>
 public sealed record ResolvedImage(ChatImageRef Ref, string? DataUrl);
 
+/// <summary>
+/// S5 §4.2：图片字节盘规划（纯函数，无 IO，可单测）。
+/// 两盘拆分的唯一实现点：
+/// - 历史盘：历史消息（旧→新输入，逆序扣减，最新优先保），上限 <see cref="VisionDefaults.MaxHistoryImageBytes"/>；
+/// - 当轮盘：当前 user 轮 + 本 turn view_image 工具图，上限 <see cref="VisionDefaults.MaxTurnImageBytes"/>。
+/// 口径为 raw 字节（<see cref="ChatImageRef.SizeBytes"/>），不用 dataUrl(含 base64) 长度：
+/// base64 约 4/3 膨胀，按 url.Length 计会导致实际可发容量只有账面 3/4。
+/// 元数据撒谎方向不影响安全：报大只会挤掉自己的名额（永不超读），S2 有界读兜底。
+/// 张数盘（MaxImagesPerTurn）不在此处，由 <see cref="MultimodalPlanner"/> 最后执行。
+/// </summary>
+public static class ImageBudgetPlanner
+{
+    /// <summary>
+    /// 逆序贪心：从最新到最旧逐张扣减，放得下就准入，放不下就跳过（继续尝试更旧的？否——保最新丢最旧，
+    /// 一旦超限即停，与参考 attachment-history 语义一致：被跳过的旧图不再续补，避免出现“旧图挤掉新图）。
+    /// 输入 sequence 按**时间从旧到新**排序（调用方保证）。
+    /// </summary>
+    /// <param name="sequence">(imageId, sizeBytes)，旧→新。</param>
+    /// <param name="capBytes">本盘上限（历史盘调用方须先 Math.Min 夹到常量以下）。</param>
+    public static (HashSet<string> Admit, List<string> Dropped) PlanReverse(
+        IReadOnlyList<(string ImageId, long SizeBytes)> sequence,
+        long capBytes
+    )
+    {
+        var admit = new HashSet<string>(StringComparer.Ordinal);
+        var dropped = new List<string>();
+        if (sequence == null || sequence.Count == 0)
+            return (admit, dropped);
+
+        long used = 0;
+        for (int i = sequence.Count - 1; i >= 0; i--)
+        {
+            string id = (sequence[i].ImageId ?? string.Empty).Trim();
+            if (id.Length == 0)
+                continue;
+            long size = sequence[i].SizeBytes > 0 ? sequence[i].SizeBytes : 0;
+            if (used + size <= capBytes)
+            {
+                used += size;
+                admit.Add(id);
+            }
+            else
+            {
+                dropped.Add(id);
+            }
+        }
+        dropped.Reverse(); // 输出按旧→新，日志/告知阅读顺序与历史一致
+        return (admit, dropped);
+    }
+
+    /// <summary>
+    /// 历史盘上限夹取：调用方只能下调不能上调（配置/单测传入值 &gt; 常量时按常量）。
+    /// </summary>
+    public static long ClampHistoryCap(long requested) =>
+        requested <= 0
+            ? VisionDefaults.MaxHistoryImageBytes
+            : Math.Min(requested, VisionDefaults.MaxHistoryImageBytes);
+
+    /// <summary>
+    /// 从发包副本中摘除未准入的图片引用（落盘对象不动）：返回新消息列表，
+    /// 只对 Images 非空的条目做 Eq 引用过滤；全部被摘则 Images=null（零抖动语义）。
+    /// </summary>
+    public static List<UnifiedChatMessage> StripDropped(
+        IReadOnlyList<UnifiedChatMessage> messages,
+        HashSet<string> admit
+    )
+    {
+        var result = new List<UnifiedChatMessage>(messages?.Count ?? 0);
+        if (messages == null)
+            return result;
+        foreach (var src in messages)
+        {
+            if (src?.Images == null || src.Images.Count == 0)
+            {
+                result.Add(src!);
+                continue;
+            }
+            var kept = new List<ChatImageRef>(src.Images.Count);
+            foreach (var img in src.Images)
+            {
+                if (
+                    img != null
+                    && !string.IsNullOrWhiteSpace(img.ImageId)
+                    && admit.Contains(img.ImageId.Trim())
+                )
+                    kept.Add(img);
+            }
+            if (kept.Count == src.Images.Count)
+            {
+                result.Add(src);
+                continue;
+            }
+            result.Add(
+                new UnifiedChatMessage
+                {
+                    Id = src.Id,
+                    CreatedAtUtc = src.CreatedAtUtc,
+                    Role = src.Role,
+                    Content = src.Content,
+                    ReasoningContent = src.ReasoningContent,
+                    ToolCalls = src.ToolCalls,
+                    ToolCallId = src.ToolCallId,
+                    Name = src.Name,
+                    InputTokens = src.InputTokens,
+                    OutputTokens = src.OutputTokens,
+                    CachedTokens = src.CachedTokens,
+                    Images = kept.Count == 0 ? null : kept,
+                }
+            );
+        }
+        return result;
+    }
+}
+
 /// <summary>need09-05：adapter 共享的多模态轮次规划（门控加取最新 N 保 latest 丢最旧加dataURL 解析）。</summary>
 public static class MultimodalPlanner
 {
+    /// <summary>
+    /// S3 §4.2/§4.3：丢图告知文本的唯一构造点（发包内存告知，永不落盘）。
+    /// 三种丢图各一句，均以 `[图片省略]`/`[图片已忽略]` 起头便于模型与日志检索。
+    /// </summary>
+    public static class DropNotice
+    {
+        /// <summary>熔断（本轮图片字节超预算，原图未发送）。skipped 为 (fileName, imageId)。</summary>
+        public static string BudgetExceeded(
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> skipped
+        )
+        {
+            if (skipped == null || skipped.Count == 0)
+                return string.Empty;
+            // S5 §4.4：口径统一为十进制 raw（32_000_000 → 32MB），与历史盘告知同口径。
+            int mb = (int)Math.Round(budgetBytes / 1_000_000d, MidpointRounding.AwayFromZero);
+            var labels = new List<string>(skipped.Count);
+            foreach (var (fileName, imageId) in skipped)
+            {
+                string name = string.IsNullOrWhiteSpace(fileName) ? "图片" : fileName.Trim();
+                string id = ShortId(imageId);
+                labels.Add(string.IsNullOrEmpty(id) ? name : $"{name}({id})");
+            }
+            return $"[图片省略] 本轮图片字节超预算（{mb}MB），以下 {skipped.Count} 张图未发送："
+                + string.Join("、", labels)
+                + "；可改用缩略图/小图重试。";
+        }
+
+        /// <summary>
+        /// S5 §4.4：历史盘丢图告知（与当轮盘可区分）。口径 raw，十进制 MB。
+        /// 建议方向不同：历史盘丢图 → 下轮精简历史；当轮盘丢图 → 用小图/缩略图重试。
+        /// </summary>
+        public static string HistoryBudgetExceeded(
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> dropped
+        )
+        {
+            if (dropped == null || dropped.Count == 0)
+                return string.Empty;
+            int mb = (int)Math.Round(budgetBytes / 1_000_000d, MidpointRounding.AwayFromZero);
+            var labels = new List<string>(dropped.Count);
+            foreach (var (fileName, imageId) in dropped)
+            {
+                string name = string.IsNullOrWhiteSpace(fileName) ? "图片" : fileName.Trim();
+                string id = ShortId(imageId);
+                labels.Add(string.IsNullOrEmpty(id) ? name : $"{name}({id})");
+            }
+            return $"[图片省略] 历史图片超预算未发送 {dropped.Count} 张（历史盘 {mb}MB，raw 计），以下最早的历史图未发送："
+                + string.Join("、", labels)
+                + "；如需继续分析这些图，请让用户在本轮重新附图，或先精简更早的历史。";
+        }
+
+        /// <summary>张数截断（超 MaxImagesPerTurn，保最新丢最旧）。</summary>
+        public static string CountTruncated(int sent, int dropped, int max)
+        {
+            if (dropped <= 0)
+                return string.Empty;
+            return $"（实发 {sent} 张，另有 {dropped} 张因超 MaxImagesPerTurn({max})未发送）";
+        }
+
+        /// <summary>非视觉剥离（当前模型不支持看图，图片未发送但文字照常）。</summary>
+        public static string NonVisionStripped(string modelId, int stripped) =>
+            $"[图片已忽略] 当前模型 {modelId} 不支持看图，本轮 {stripped} 张图片未发送，文字照常发送。";
+
+        /// <summary>
+        /// S3 §4.4：非视觉剥离的发包副本——图片全剥离（原列表不动），并在首条消息正文前置告知句。
+        /// 返回剥离后的消息副本；stripped=0 时原样返回入参（零抖动）。
+        /// </summary>
+        public static (IReadOnlyList<UnifiedChatMessage> Messages, int Stripped) StripForNonVision(
+            IReadOnlyList<UnifiedChatMessage> messages,
+            string modelId
+        )
+        {
+            if (messages == null || messages.Count == 0)
+                return (messages ?? Array.Empty<UnifiedChatMessage>(), 0);
+            int stripped = 0;
+            foreach (var m in messages)
+            {
+                if (m?.Images != null)
+                    stripped += m.Images.Count;
+            }
+            if (stripped == 0)
+                return (messages, 0);
+
+            string notice = NonVisionStripped(modelId, stripped);
+            var result = new List<UnifiedChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var src = messages[i];
+                var copy = new UnifiedChatMessage
+                {
+                    Id = src.Id,
+                    Role = src.Role,
+                    Content = src.Content,
+                    ReasoningContent = src.ReasoningContent,
+                    ToolCalls = src.ToolCalls,
+                    ToolCallId = src.ToolCallId,
+                    Name = src.Name,
+                    // 剥离图片：副本不带 Images（落盘历史不受影响）
+                    Images = null,
+                    CreatedAtUtc = src.CreatedAtUtc,
+                };
+                result.Add(i == 0 ? WithNotice(copy, notice, append: false) : copy);
+            }
+            return (result, stripped);
+        }
+
+        /// <summary>
+        /// S3 §4.2：熔断告知的发包副本——把「字节超预算未发送」句追加到末条消息正文（不落盘）。
+        /// skipped 为空时原样返回入参（零抖动）。
+        /// </summary>
+        public static IReadOnlyList<UnifiedChatMessage> WithBudgetNotice(
+            IReadOnlyList<UnifiedChatMessage> messages,
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> skipped
+        )
+        {
+            if (messages == null || messages.Count == 0)
+                return messages ?? Array.Empty<UnifiedChatMessage>();
+            string notice = BudgetExceeded(budgetBytes, skipped);
+            if (notice.Length == 0)
+                return messages;
+
+            var result = new List<UnifiedChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var src = messages[i];
+                result.Add(i == messages.Count - 1 ? WithNotice(src, notice, append: true) : src);
+            }
+            return result;
+        }
+
+        /// <summary>imageId 前 6 位（判定/检索用，不含敏感路径）。</summary>
+        internal static string ShortId(string? imageId)
+        {
+            string id = (imageId ?? string.Empty).Trim();
+            if (id.Length == 0)
+                return string.Empty;
+            return id.Length <= 6 ? id : id.Substring(0, 6);
+        }
+
+        /// <summary>
+        /// S3：把告知句并入一条内存消息副本（不落盘）。图像引用共享，只替换 Content。
+        /// append=true 追加到文末（user 直挂图截断用），false 前置（剥离通知用）。
+        /// </summary>
+        public static UnifiedChatMessage WithNotice(
+            UnifiedChatMessage src,
+            string notice,
+            bool append
+        )
+        {
+            var copy = new UnifiedChatMessage
+            {
+                Id = src.Id,
+                Role = src.Role,
+                Content = append
+                    ? ((src.Content ?? string.Empty) + notice)
+                    : (notice + (src.Content ?? string.Empty)),
+                ReasoningContent = src.ReasoningContent,
+                ToolCalls = src.ToolCalls,
+                ToolCallId = src.ToolCallId,
+                Name = src.Name,
+                Images = src.Images,
+                CreatedAtUtc = src.CreatedAtUtc,
+            };
+            return copy;
+        }
+    }
+
     /// <summary>规划本轮图片：非视觉模型含图抛 NonVisionModelException；超 Max 取最新 N 张。返回与 Messages 等长对齐的 kept 列表。</summary>
+    /// <param name="request">请求。</param>
+    /// <param name="lazyUserResolve">
+    /// S6：user 直挂图**不在规划期解析**（交给 adapter 按占位符顺序逐块解析）。原因有二：
+    /// ① S5 当轮盘（32M raw）在 resolver 内部扣减，规划期提前解析会把预算提前吃光；
+    /// ② 被预算/读盘摘除的图必须能被 adapter 看见（解析结果为 null），才能在其占位符处渲染
+    ///    `[image omitted]`，而不是整段文本静默消失。
+    /// tool 附图不受影响（仍在此处解析，trailing user 块直接取 DataUrl）。
+    /// </param>
     public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(
-        UnifiedLlmRequest request
+        UnifiedLlmRequest request,
+        bool lazyUserResolve = false
     )
     {
         var kept = new List<List<ResolvedImage>>();
@@ -100,11 +392,20 @@ public static class MultimodalPlanner
                     || msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
                 if (carries)
                 {
+                    bool lazy =
+                        lazyUserResolve
+                        && msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase);
                     foreach (var img in msg.Images)
                     {
                         if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
                             continue;
                         total++;
+                        if (lazy)
+                        {
+                            // 只保留引用，dataUrl 由 adapter 逐块解析（顺序与占位符一致）
+                            list.Add(new ResolvedImage(img, null));
+                            continue;
+                        }
                         string? url =
                             request.ImageResolver != null
                                 ? request.ImageResolver(img)
@@ -148,6 +449,95 @@ public static class MultimodalPlanner
             }
         }
         return (kept, dropped, total);
+    }
+
+    /// <summary>
+    /// S3 §4.3：把「超 MaxImagesPerTurn 未发送」告知并入发包消息副本（不落盘）。
+    /// 张数算法与 PlanTurn 完全一致（保最新丢最旧），这里只补文字告知。
+    /// 返回新列表：无告知时原样返回入参引用，避免无谓拷贝与前缀抖动。
+    /// </summary>
+    public static IReadOnlyList<UnifiedChatMessage> ApplyDropNotice(
+        IReadOnlyList<UnifiedChatMessage> messages,
+        int dropped,
+        int total,
+        int max,
+        IReadOnlyList<List<ResolvedImage>>? kept = null
+    )
+    {
+        if (messages == null || dropped <= 0 || total <= 0)
+            return messages ?? Array.Empty<UnifiedChatMessage>();
+        string notice = DropNotice.CountTruncated(total - dropped, dropped, max);
+        if (notice.Length == 0)
+            return messages;
+
+        // 告知挂在「最早的一条含图 user 消息」上（user 直挂图截断同理：内容文本尾追加）。
+        // tool 附图不走这里：它的告知由 BuildTrailingToolImageText 统一承载。
+        // S6：消息**自身还有图可发**（Images 与 Kept 终态有交集）时，按占位符位置追加到文尾占位符之后，
+        // 避免截断出「有 text 块但无图块」的 content 数组；自身一图不剩时改用纯文本 + 文尾追加，保持 S6 前的线上形态。
+        var result = new List<UnifiedChatMessage>(messages.Count);
+        bool placed = false;
+        for (int i = 0; i < messages.Count; i++)
+        {
+            var msg = messages[i];
+            result.Add(msg);
+            if (
+                !placed
+                && msg != null
+                && msg.Images != null
+                && msg.Images.Count > 0
+                && string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                // 「自身还有图可发」= 本消息的 Images 里至少有一张在 Kept[i] 中且已解析出 dataUrl。
+                bool stillCarries =
+                    kept != null
+                    && i < kept.Count
+                    && kept[i].Any(r => r.Ref != null && !string.IsNullOrWhiteSpace(r.DataUrl))
+                    && kept[i]
+                        .Any(r =>
+                            r.Ref != null
+                            && msg.Images.Any(img =>
+                                img != null
+                                && (
+                                    ReferenceEquals(img, r.Ref)
+                                    || string.Equals(
+                                        (img.ImageId ?? string.Empty).Trim(),
+                                        (r.Ref.ImageId ?? string.Empty).Trim(),
+                                        StringComparison.Ordinal
+                                    )
+                                )
+                            )
+                        );
+                var target = msg;
+                if (!stillCarries && !string.IsNullOrEmpty(msg.Content))
+                {
+                    // 纯文本形态：交给 adapter 走 content:string + 文尾图块的既有分支
+                    target = new UnifiedChatMessage
+                    {
+                        Id = msg.Id,
+                        CreatedAtUtc = msg.CreatedAtUtc,
+                        Role = msg.Role,
+                        Content = msg.Content,
+                        ReasoningContent = msg.ReasoningContent,
+                        ToolCalls = msg.ToolCalls,
+                        ToolCallId = msg.ToolCallId,
+                        Name = msg.Name,
+                        InputTokens = msg.InputTokens,
+                        OutputTokens = msg.OutputTokens,
+                        CachedTokens = msg.CachedTokens,
+                        Images = null,
+                    };
+                }
+                result[result.Count - 1] = DropNotice.WithNotice(target, notice, append: true);
+                placed = true;
+            }
+        }
+        if (!placed)
+        {
+            // 没有可挂的 user 图消息（例如全在 tool 上）⇒ 不追加，避免凭空多一条 user。
+            return messages;
+        }
+        return result;
     }
 }
 

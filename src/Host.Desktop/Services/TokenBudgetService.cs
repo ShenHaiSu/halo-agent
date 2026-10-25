@@ -149,14 +149,21 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         return n;
     }
 
-    /// <summary>need09-02：统计单条消息的（存活引用， 占位）数（扫描 Content + ReasoningContent）。</summary>
+    /// <summary>
+    /// need09-02：统计单条消息的（存活引用，占位）数。
+    /// 存活 = Images 列表条数（含 IsMissing，仍计费，占位裁剪会处理它）+ Content/ReasoningContent 文本正则（兼容老快照）；
+    /// 占位 = 文本中的 [image omitted] 个数（仅观测，不计费）。
+    /// S1：真实图片挂载在 Images 列表，Content 只有 [图片：FileName] 占位文本（AgentConfigBridge 重写），
+    /// 仅扫文本正则会恒~0（估算脱钩），故必须双源计数。
+    /// </summary>
     public static (int live, int omitted) CountMessageImages(UnifiedChatMessage? message)
     {
         if (message == null)
             return (0, 0);
         string combined =
             (message.Content ?? string.Empty) + "\n" + (message.ReasoningContent ?? string.Empty);
-        return (CountLiveImageRefs(combined), CountOmittedImagePlaceholders(combined));
+        int live = (message.Images?.Count ?? 0) + CountLiveImageRefs(combined);
+        return (live, CountOmittedImagePlaceholders(combined));
     }
 
     /// <summary>

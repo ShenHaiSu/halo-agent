@@ -3,6 +3,15 @@ import type { ComposerImageMime } from '@shared/utils/composerModel';
 
 export const ACCEPT_IMAGE_MIMES: ComposerImageMime[] = ['image/jpeg', 'image/png', 'image/webp'];
 
+/**
+ * S7-E4：图片链路类型白名单的**唯一拒绝文案**（前后端口径一致）。
+ * 决策（2026-10-25）：GIF 与 SVG 都不进视觉链路——
+ *   · GIF 不做内联（动图首帧语义 + 宽高解析需额外分支，收益不抵风险）；
+ *   · SVG 永不进视觉（可携带脚本/外链，与参考实现一致），转 SVG 需求走 read_file 按文本读。
+ * 故这里把「不支持」说清楚，避免用户以为只是没转换格式。
+ */
+export const UNSUPPORTED_IMAGE_REASON = '仅支持 jpg/png/webp（GIF/SVG/BMP 等请先转成 png/jpg；SVG 可让模型用 read_file 按文本读取）';
+
 export interface AcceptResult {
   ok: boolean;
   mime?: ComposerImageMime;
@@ -26,10 +35,10 @@ function normalizeMime(raw: string, fileName: string): ComposerImageMime | null 
   return null;
 }
 
-/** 白名单校验：仅 jpg/png/webp */
+/** 白名单校验：仅 jpg/png/webp（GIF/SVG 明确拒绝，文案见 UNSUPPORTED_IMAGE_REASON） */
 export function acceptImageFile(f: File): AcceptResult {
   const mime = normalizeMime(f.type, f.name);
-  if (!mime) return { ok: false, reason: '仅支持 jpg/png/webp，请转换后发送' };
+  if (!mime) return { ok: false, reason: UNSUPPORTED_IMAGE_REASON };
   return { ok: true, mime };
 }
 

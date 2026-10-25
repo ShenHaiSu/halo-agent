@@ -109,3 +109,56 @@ describe('ToolMessagePersisted（need23-R1）', () => {
     expect(mergeSpy).toHaveBeenCalledWith('s2', expect.any(Object));
   });
 });
+
+describe('S6 §4.4：ToolMessagePersisted 错误码透传', () => {
+  function pushCard(callId: string, functionName = 'view_image'): void {
+    const t = ensureTurn('s1');
+    t.toolCards.push({
+      callId,
+      functionName,
+      argsJson: '{}',
+      status: 'running',
+      resultText: '',
+      exitCode: null,
+      durationMs: null,
+      iteration: 1,
+      receivedBytes: 0,
+    });
+  }
+
+  it('带 errorCode ⇒ 卡片置 error 且记录四态码', () => {
+    pushCard('c_img');
+    emitTurn('ToolMessagePersisted', {
+      iteration: 1,
+      messageId: 'msg_err',
+      callId: 'c_img',
+      functionName: 'view_image',
+      toolCallId: 'c_img',
+      content: 'IMAGE_MISSING：文件不存在',
+      errorCode: 'IMAGE_MISSING',
+      createdAtUtc: '2026-01-01T00:00:00Z',
+    });
+    const card = ensureTurn('s1').toolCards[0];
+    expect(card.errorCode).toBe('IMAGE_MISSING');
+    expect(card.status).toBe('error');
+    expect(card.persisted).toBe(true);
+  });
+
+  it('不带 errorCode ⇒ 不改状态（不与成功态冲突）', () => {
+    pushCard('c_ok');
+    const t = ensureTurn('s1');
+    t.toolCards[0].status = 'done';
+    emitTurn('ToolMessagePersisted', {
+      iteration: 1,
+      messageId: 'msg_ok',
+      callId: 'c_ok',
+      functionName: 'view_image',
+      toolCallId: 'c_ok',
+      content: '已读取 a.png',
+      createdAtUtc: '2026-01-01T00:00:00Z',
+    });
+    const card = ensureTurn('s1').toolCards[0];
+    expect(card.errorCode).toBeUndefined();
+    expect(card.status).toBe('done');
+  });
+});

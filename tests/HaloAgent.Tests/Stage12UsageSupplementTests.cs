@@ -67,7 +67,7 @@ public sealed class Stage12UsageSupplementTests : IDisposable
         {
             if (cond())
                 return;
-            Thread.Sleep(100);
+            Thread.Sleep(20);
         }
     }
 

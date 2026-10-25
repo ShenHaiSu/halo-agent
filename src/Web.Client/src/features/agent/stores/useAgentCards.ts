@@ -197,6 +197,13 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       if (card) {
         card.messageId = messageId || card.messageId;
         card.persisted = true;
+        // S6 §4.4：机器可判错误码透传（view_image 四态等）；仅当事件带值时为 error，
+        // 否则沿用 ToolExecutionCompleted 已定的状态，不与成功态冲突。
+        const errCode = str(payload['errorCode']);
+        if (errCode) {
+          card.errorCode = errCode;
+          card.status = 'error';
+        }
       }
       // need23-R7：该工具的回包已落盘 → 让对应工具段毕业（从活动容器移交给稳态折叠栏）
       markToolSegPersisted(t, callId);

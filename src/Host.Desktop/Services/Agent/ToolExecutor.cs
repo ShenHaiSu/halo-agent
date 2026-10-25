@@ -197,6 +197,9 @@ public sealed partial class AgentOrchestrator
                     toolCallId = toolMessage.ToolCallId,
                     content = TruncateForEvent(toolText, 8000),
                     images = toolMessage.Images,
+                    // S6 §2-4 / §4.4：把 view_image 等工具的机器可判错误码透传给前端
+                    // （S3 已在 ToolResult.ErrorCode 落好，此前只进模型上下文，前端拿不到）。
+                    errorCode = toolResult.ErrorCode,
                     createdAtUtc = toolMessage.CreatedAtUtc.ToString("o"),
                     updatedAtUtc = DateTime.UtcNow.ToString("o")
                 }

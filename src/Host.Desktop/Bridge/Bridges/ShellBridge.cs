@@ -155,6 +155,45 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    /// <summary>
+    /// S7-E3 §4.3-2：附件 TTL 清理入口（先做“统计口径 + 手动触发”，自动清待观察一轮后再开）。
+    /// `dryRun=true` 只统计不删（默认，避免误删）；`retentionDays` 默认 30 天。
+    /// 只清附件文件与空目录，**不碰** `messages.jsonl`（缺文件即 IsMissing，读取链路已兜）。
+    /// </summary>
+    public Task<BridgeResponse<string>> CleanupImageAttachments(
+        int retentionDays = 30,
+        bool dryRun = true
+    )
+    {
+        try
+        {
+            int days = Math.Clamp(retentionDays, 1, 3650);
+            var report = ImageAttachmentCleanup.CleanupAttachments(
+                _storageManager.CurrentDataRoot,
+                dryRun: dryRun,
+                retentionDays: days
+            );
+            string payload = JsonSerializer.Serialize(
+                report,
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+            );
+            string msg = dryRun
+                ? $"统计完成：共 {report.ScannedFiles} 个附件（{report.ScannedBytes} 字节），其中 {report.ExpiredFiles} 个超期（{report.ExpiredBytes} 字节，超过 {days} 天），未删除。"
+                : $"清理完成：删除 {report.DeletedFiles} 个超期附件，释放 {report.ExpiredBytes} 字节。";
+            HaloLogger.App.Info(
+                $"[HostBridge] CleanupImageAttachments dryRun={dryRun} days={days}"
+            );
+            return Task.FromResult(BridgeResponse<string>.Success(payload, msg));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("CleanupImageAttachments failed", ex);
+            return Task.FromResult(
+                BridgeResponse<string>.Fail("ATTACHMENT_CLEANUP_ERROR", ex.Message)
+            );
+        }
+    }
+
     public async Task<BridgeResponse<int>> CleanupExpiredLogs(int retentionDays = 14)
     {
         try

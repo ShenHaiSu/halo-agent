@@ -83,7 +83,8 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                 Tools = request.Tools,
                 ImageResolver = request.ImageResolver,
             };
-            var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
+            // S6 §4.2：user 直挂图延迟解析（与 Chat 同口径），adapter 按占位符顺序逐块解析。
+            var mmPlan = MultimodalPlanner.PlanTurn(planRequest, lazyUserResolve: true);
             if (mmPlan.Dropped > 0)
             {
                 try
@@ -102,8 +103,22 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                 catch { }
             }
             string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            // S3 §4.3：截断告知显式化（与 Chat 同口径）：超 MaxImagesPerTurn 时并入发包副本，不落盘。
+            int maxImagesPerTurn = VisionDefaults.ResolveMaxImages(request.Model.MaxImagesPerTurn);
+            var outMessages =
+                mmPlan.Dropped > 0
+                    ? MultimodalPlanner.ApplyDropNotice(
+                        sendMessages,
+                        mmPlan.Dropped,
+                        mmPlan.Total,
+                        maxImagesPerTurn,
+                        mmPlan.Kept
+                    )
+                    : sendMessages;
             var pendingToolImages = new List<ResolvedImage>();
             var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
+            // S3 §4.3：tool 附图原始收集张数（含被截断丢掉的），供告知句算差值。
+            int pendingCollectedImages = 0;
             void FlushPendingToolImages()
             {
                 if (pendingToolImages.Count == 0)
@@ -118,7 +133,12 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                     "text",
                     ChatCompletionsAdapter.BuildTrailingToolImageText(
                         pendingToolRefs,
-                        pendingToolImages.Count
+                        pendingToolImages.Count,
+                        ChatCompletionsAdapter.CountDroppedImages(
+                            pendingCollectedImages,
+                            pendingToolImages.Count
+                        ),
+                        maxImagesPerTurn
                     )
                 );
                 writer.WriteEndObject();
@@ -134,36 +154,105 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                 writer.WriteEndObject();
                 pendingToolImages.Clear();
                 pendingToolRefs.Clear();
+                pendingCollectedImages = 0;
             }
             int mmIndex = -1;
             writer.WriteStartArray("input");
-            foreach (var msg in sendMessages)
+            foreach (var msg in outMessages)
             {
                 mmIndex++;
+                // S6：user 直挂图走 lazy（DataUrl 由本 adapter 按占位符顺序解析），不能按 DataUrl 预过滤；
+                // tool 附图仍按规划期解析结果过滤（与 Chat 同口径）。
                 var kept = mmPlan
                     .Kept[mmIndex]
-                    .Where(r => !string.IsNullOrWhiteSpace(r.DataUrl))
+                    .Where(r =>
+                        string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase)
+                            ? r.Ref != null
+                            : !string.IsNullOrWhiteSpace(r.DataUrl)
+                    )
                     .ToList();
                 bool isTool = msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
                 if (!isTool && pendingToolImages.Count > 0)
                     FlushPendingToolImages();
                 if (msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
                 {
+                    // S6 §4.2：input_text / input_image 交错（Responses 协议原生支持同一 message.content 内混合块）；
+                    // 无锚点 ⇒ 退化「文后追加」，与 S6 前字节一致。
+                    // 锚点全集 = 本消息 Images ∪ 规划器 Kept（被预算/读盘摘除的占位符就地渲染 [image omitted]）。
+                    var anchors = new List<ChatImageRef>(kept.Count + (msg.Images?.Count ?? 0));
+                    var anchorIds = new HashSet<string>(StringComparer.Ordinal);
+                    void AddAnchor(ChatImageRef? img)
+                    {
+                        string id = (img?.ImageId ?? string.Empty).Trim();
+                        if (id.Length == 0 || !anchorIds.Add(id))
+                            return;
+                        anchors.Add(img!);
+                    }
+                    foreach (var r in kept)
+                        AddAnchor(r.Ref);
+                    if (msg.Images != null)
+                    {
+                        foreach (var img in msg.Images)
+                            AddAnchor(img);
+                    }
+                    var urlCache = new Dictionary<string, string?>(StringComparer.Ordinal);
+                    string? ResolveOnce(ChatImageRef img)
+                    {
+                        string id = (img.ImageId ?? string.Empty).Trim();
+                        if (urlCache.TryGetValue(id, out var cached))
+                            return cached;
+                        string? found = kept.FirstOrDefault(r =>
+                            string.Equals(
+                                (r.Ref?.ImageId ?? string.Empty).Trim(),
+                                id,
+                                StringComparison.Ordinal
+                            )
+                        )?.DataUrl;
+                        if (string.IsNullOrWhiteSpace(found) && request.ImageResolver != null)
+                            found = request.ImageResolver(img);
+                        if (
+                            !string.IsNullOrWhiteSpace(found)
+                            && !found.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                        )
+                        {
+                            string mime = string.IsNullOrWhiteSpace(img.Mime)
+                                ? "image/jpeg"
+                                : img.Mime.Trim();
+                            found = "data:" + mime + ";base64," + found;
+                        }
+                        found = string.IsNullOrWhiteSpace(found) ? null : found.Trim();
+                        urlCache[id] = found;
+                        return found;
+                    }
+                    var blocks = ImagePlaceholder.BuildContentBlocks(
+                        msg.Content,
+                        anchors,
+                        ResolveOnce
+                    );
                     writer.WriteStartObject();
                     writer.WriteString("type", "message");
                     writer.WriteString("role", "user");
                     writer.WriteStartArray("content");
-                    writer.WriteStartObject();
-                    writer.WriteString("type", "input_text");
-                    writer.WriteString("text", msg.Content ?? string.Empty);
-                    writer.WriteEndObject();
-                    foreach (var r in kept)
+                    foreach (var block in blocks)
                     {
-                        writer.WriteStartObject();
-                        writer.WriteString("type", "input_image");
-                        writer.WriteString("image_url", r.DataUrl!);
-                        writer.WriteString("detail", visionDetail);
-                        writer.WriteEndObject();
+                        if (block.Kind == ImageContentBlockKind.Text)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteString("type", "input_text");
+                            writer.WriteString("text", block.Text ?? string.Empty);
+                            writer.WriteEndObject();
+                        }
+                        else
+                        {
+                            string? url = ResolveOnce(block.Image!);
+                            if (string.IsNullOrWhiteSpace(url))
+                                continue;
+                            writer.WriteStartObject();
+                            writer.WriteString("type", "input_image");
+                            writer.WriteString("image_url", url);
+                            writer.WriteString("detail", visionDetail);
+                            writer.WriteEndObject();
+                        }
                     }
                     writer.WriteEndArray();
                     writer.WriteEndObject();
@@ -225,6 +314,8 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                         pendingToolRefs.Add(
                             (msg.ToolCallId ?? string.Empty, msg.Name, msg.Content)
                         );
+                        // S3 §4.3：原始张数按消息 Images 计（含被截断丢掉的），供告知句算差值。
+                        pendingCollectedImages += msg.Images?.Count ?? kept.Count;
                     }
                 }
                 else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))
