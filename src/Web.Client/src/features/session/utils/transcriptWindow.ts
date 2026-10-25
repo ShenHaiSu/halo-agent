@@ -40,3 +40,16 @@ export function coversAllLoaded(w: TranscriptWindow, loadedCount: number): boole
 export function sliceWindow<T>(list: T[], w: TranscriptWindow): T[] {
   return list.slice(w.start, w.end);
 }
+
+/**
+ * 「近顶」阈值：距顶小于该 px 即认为用户已到顶附近，应扩窗预取。
+ *
+ * 取值权衡：太小 → 用户能滚到 DOM 边缘才发现没内容（视觉上"撞墙"）；
+ * 太大 → 一进入会话就白扩几轮窗。240px 约等于 2~3 条气泡，留出预取余量。
+ */
+export const NEAR_TOP_PX = 240;
+
+/** 纯函数：是否已到达顶部预取区。负 scrollTop（Safari 橡皮筋）按 0 处理。 */
+export function isNearTop(scrollTop: number, threshold = NEAR_TOP_PX): boolean {
+  return Math.max(0, scrollTop) <= threshold;
+}

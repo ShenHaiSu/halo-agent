@@ -11,10 +11,10 @@ import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shar
 import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import type { AgentToolCard } from '@features/agent/stores/model';
-import { createBottomPin, useFollowMode, useTimelineNav } from './useTimelineNav';
+import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode, useTimelineNav } from './useTimelineNav';
 import { useSmoothText } from './useSmoothText';
 import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
-import { INITIAL_MOUNT, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
+import { INITIAL_MOUNT, isNearTop, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
 
 export interface DisplaySeg {
@@ -161,6 +161,12 @@ export function useTimeline() {
       pin.forceToBottom();
     });
   }
+  /**
+   * 向上扩窗。返回 true 表示可见窗口真的变大了（调用方需据此做顶部锚定补偿）。
+   *
+   * 注意：`hiddenAbove` 一旦为 0，`visibleHistoryEntries` 已覆盖全部已加载条目，
+   * 此时再往上滚就是真的「到顶」——放手让 handleTopReach 走 loadOlder 分支。
+   */
   function growWindowTop(step = STEP): boolean {
     if (hiddenAbove.value <= 0) return false;
     hiddenAbove.value = Math.max(0, hiddenAbove.value - step);
@@ -183,6 +189,94 @@ export function useTimeline() {
     await loadOlder();
     await nextTick();
     anchorPrepend(el, before);
+  }
+  /** 顶部扩窗 + 锚定。同步路径（无需 loadOlder 的场景）用，避免 async 竞态。 */
+  function expandTopWithAnchor(step = STEP): boolean {
+    const el = scrollEl.value;
+    const before = el ? el.scrollHeight : 0;
+    if (!growWindowTop(step)) return false;
+    // 新增条目渲染在顶部 → 内容高度增加，必须等 DOM 落地再补 scrollTop，否则视口被「顶」上去。
+    //
+    // 注意：这里**绝不**调 pin.scheduleToBottom()。用户会滚到近顶说明他在往上读历史，
+    // 此时把他拽回底部既违背意图、又会让扩窗白做（刚加载的更早内容立刻滚出视口）。
+    // 「仍贴底时扩窗后回到底部」是 ensureMountWindow 的职责，与顶部扩窗互斥。
+    void nextTick(() => {
+      anchorPrepend(scrollEl.value, before);
+    });
+    return true;
+  }
+  /**
+   * 滚动事件入口（由 bindScrollWindow 注册）。
+   *
+   * 修复点：此前 growWindowTop/handleTopReach 只有定义、没有任何事件源，
+   * 导致 hiddenAbove 打开会话后就永久固定，用户滚到顶也无法看到更早的历史。
+   *
+   * 这里同时补上 pinned 的几何判定（此前只有 wheel/touchstart/keydown 的意图判定，
+   * 键盘 Home/End、滚动条拖拽、程序化滚动都感知不到 → R4「上翻被拽回底部」隐患）。
+   */
+  const SCROLL_IDLE_MS = 120;
+  /**
+   * 单次「触顶会话」内最多连续扩窗轮数。
+   *
+   * 为什么必须有这个兜底：限流原本只靠「锚定补偿把 scrollTop 抬出近顶区」，
+   * 但那依赖「新增条目撑高 > NEAR_TOP_PX」——消息很短时（例如多条一行 system 提示）
+   * 一轮只撑高几十 px，仍留在近顶区，于是每 120ms 又扩一轮，一瞬间就扩到全量。
+   * 用户离开近顶区（scrollTop > 阈值）时计数清零，下次触顶重新计。
+   */
+  const MAX_GROW_PER_REACH = 3;
+  let scrollRaf = 0;
+  let topGrowAt = 0;
+  let growThisReach = 0;
+  function onTranscriptScroll(): void {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      const el = scrollEl.value;
+      if (!el || !paneVisible.value) return;
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      // 几何跟随判定：只在状态与几何不一致时翻转，避免流式期间抖动。
+      const pinnedNow = distanceFromBottom <= PIN_TOLERANCE_PX;
+      const wasPinned = follow.pinnedRef.value;
+      if (pinnedNow !== wasPinned) {
+        // 用户主动往回贴底 → 重新进入跟随（回到底部按钮消失）；反之解除跟随并亮出按钮。
+        // 贴底分支用 ingest 的**状态部分**：几何已在位，不再调 pin.forceToBottom() 写
+        // scrollTop —— 那会二次触发本回调，形成隐式耦合。
+        // 同时清 readingWindow：回到底部即「离开历史阅读模式」，与 jumpToLatest 语义对齐。
+        if (pinnedNow) {
+          follow.ingest(distanceFromBottom, 'unknown');
+          clearReadingWindow();
+        } else {
+          follow.releaseFollow();
+        }
+      }
+      if (!isNearTop(el.scrollTop)) {
+        growThisReach = 0; // 已离开近顶区 → 本轮触顶结束，下次重新计数
+        return;
+      }
+      if (growThisReach >= MAX_GROW_PER_REACH) return;
+      // 向上扩窗天然限流：扩窗后 scrollTop 被锚定补偿抬回近顶阈值之上，
+      // 滚动事件不会连续刷屏；这里的 120ms 只是防「滚轮惯性」在同一帧内连发。
+      const now = performance.now();
+      if (now - topGrowAt < SCROLL_IDLE_MS) return;
+      topGrowAt = now;
+      if (expandTopWithAnchor()) growThisReach++;
+    });
+  }
+  function bindScrollWindow(): void {
+    const el = scrollEl.value;
+    if (!el) return;
+    el.addEventListener('scroll', onTranscriptScroll, { passive: true });
+  }
+  function unbindScrollWindow(): void {
+    const el = scrollEl.value;
+    if (!el) return;
+    try {
+      el.removeEventListener('scroll', onTranscriptScroll);
+    } catch (e) {
+      console.warn('[timeline] unbind scroll failed:', e);
+    }
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    scrollRaf = 0;
   }
   function setAnchor(key: string) {
     return (el: Element | ComponentPublicInstance | null) => {
@@ -384,10 +478,12 @@ export function useTimeline() {
       console.warn('[timeline] nav init failed:', e);
     }
     pin.bindUserScroll();
+    bindScrollWindow();
     ensureMountWindow();
   }
   function detachContainer(): void {
     pin.unbindUserScroll();
+    unbindScrollWindow();
     pin.cancelScheduled();
     try {
       nav.clear();
@@ -493,6 +589,9 @@ export function useTimeline() {
     growWindowTop,
     handleTopReach,
     anchorPrepend,
+    bindScrollWindow,
+    unbindScrollWindow,
+    onTranscriptScroll,
     pinnedRef: follow.pinnedRef,
     showJump: follow.showJump,
     releaseFollow: follow.releaseFollow,
