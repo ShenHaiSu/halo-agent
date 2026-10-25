@@ -145,7 +145,8 @@ public sealed partial class HostBridgeFacade
         return meta;
     }
 
-    /// <summary>need09-05：startAgentTurn 附件落盘 + 占位符重写。attachmentsJson: [{fileName,mime?,base64|dataUrl}]；userText 内 [image:i] 按下标替换为[图片：fileName]。</summary>
+    /// <summary>need09-05：startAgentTurn 附件落盘 + 占位符重写。attachmentsJson: [{fileName,mime?,base64|dataUrl}]；
+    /// S6 起 userText 内 `[image:i]` 按下标重写为机器可解析形态 `[image:<短id>]`（保留位置与 imageId，不再整体展平为纯文本）。</summary>
     internal List<Core.Models.ChatImageRef> SaveTurnAttachments(
         string workspaceId,
         string sessionId,
@@ -242,10 +243,13 @@ public sealed partial class HostBridgeFacade
                 refs.Add(imgRef);
                 try
                 {
-                    userText = userText.Replace(
-                        "[image:" + index + "]",
-                        "[图片：" + imgRef.FileName + "]"
-                    );
+                    // S6 §4.1：保留**机器可解析**的有序引用形态（`[image:<短id>]`），不再重写成
+                    // `[图片：fileName]` 纯文本——只有保留 imageId 才能在 TurnSetup 排序、
+                    // adapter 交错、转录渲染三处用同一个顺序函数对齐位置。
+                    // 人类可读性由转录层换回 fileName（前端 imagesOf + orderImagesByContent）。
+                    string marker = Core.Models.ImagePlaceholder.Marker(imgRef.ImageId);
+                    if (marker.Length > 0)
+                        userText = userText.Replace("[image:" + index + "]", marker);
                 }
                 catch
                 { /* 占位符重写永不阻断 */

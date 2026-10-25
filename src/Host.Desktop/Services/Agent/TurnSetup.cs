@@ -79,7 +79,15 @@ public sealed partial class AgentOrchestrator
         {
             var pendingImgs = Infrastructure.Storage.SessionImageStash.Take(sessionId);
             if (pendingImgs != null && pendingImgs.Count > 0)
-                userMessage.Images = pendingImgs;
+            {
+                // S6 §4.1-2：按占位符在 userText 中的出现顺序排序（imageId 不在文本中的图沉底，保兼容）。
+                // 与 adapter 交错（ChatCompletionsAdapter/ResponsesApiAdapter）共用同一纯函数，
+                // 落盘顺序 == 发包顺序 == 转录顺序。
+                userMessage.Images = Core.Models.ImagePlaceholder.OrderImagesByPlaceholder(
+                    userMessage.Content,
+                    pendingImgs
+                );
+            }
         }
         catch (Exception exImgs)
         {

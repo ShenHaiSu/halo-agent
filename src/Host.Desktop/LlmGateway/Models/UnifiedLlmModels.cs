@@ -367,8 +367,17 @@ public static class MultimodalPlanner
     }
 
     /// <summary>规划本轮图片：非视觉模型含图抛 NonVisionModelException；超 Max 取最新 N 张。返回与 Messages 等长对齐的 kept 列表。</summary>
+    /// <param name="request">请求。</param>
+    /// <param name="lazyUserResolve">
+    /// S6：user 直挂图**不在规划期解析**（交给 adapter 按占位符顺序逐块解析）。原因有二：
+    /// ① S5 当轮盘（32M raw）在 resolver 内部扣减，规划期提前解析会把预算提前吃光；
+    /// ② 被预算/读盘摘除的图必须能被 adapter 看见（解析结果为 null），才能在其占位符处渲染
+    ///    `[image omitted]`，而不是整段文本静默消失。
+    /// tool 附图不受影响（仍在此处解析，trailing user 块直接取 DataUrl）。
+    /// </param>
     public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(
-        UnifiedLlmRequest request
+        UnifiedLlmRequest request,
+        bool lazyUserResolve = false
     )
     {
         var kept = new List<List<ResolvedImage>>();
@@ -383,11 +392,20 @@ public static class MultimodalPlanner
                     || msg.Role.Equals("tool", StringComparison.OrdinalIgnoreCase);
                 if (carries)
                 {
+                    bool lazy =
+                        lazyUserResolve
+                        && msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase);
                     foreach (var img in msg.Images)
                     {
                         if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
                             continue;
                         total++;
+                        if (lazy)
+                        {
+                            // 只保留引用，dataUrl 由 adapter 逐块解析（顺序与占位符一致）
+                            list.Add(new ResolvedImage(img, null));
+                            continue;
+                        }
                         string? url =
                             request.ImageResolver != null
                                 ? request.ImageResolver(img)
@@ -442,7 +460,8 @@ public static class MultimodalPlanner
         IReadOnlyList<UnifiedChatMessage> messages,
         int dropped,
         int total,
-        int max
+        int max,
+        IReadOnlyList<List<ResolvedImage>>? kept = null
     )
     {
         if (messages == null || dropped <= 0 || total <= 0)
@@ -453,10 +472,13 @@ public static class MultimodalPlanner
 
         // 告知挂在「最早的一条含图 user 消息」上（user 直挂图截断同理：内容文本尾追加）。
         // tool 附图不走这里：它的告知由 BuildTrailingToolImageText 统一承载。
+        // S6：消息**自身还有图可发**（Images 与 Kept 终态有交集）时，按占位符位置追加到文尾占位符之后，
+        // 避免截断出「有 text 块但无图块」的 content 数组；自身一图不剩时改用纯文本 + 文尾追加，保持 S6 前的线上形态。
         var result = new List<UnifiedChatMessage>(messages.Count);
         bool placed = false;
-        foreach (var msg in messages)
+        for (int i = 0; i < messages.Count; i++)
         {
+            var msg = messages[i];
             result.Add(msg);
             if (
                 !placed
@@ -466,7 +488,47 @@ public static class MultimodalPlanner
                 && string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase)
             )
             {
-                result[result.Count - 1] = DropNotice.WithNotice(msg, notice, append: true);
+                // 「自身还有图可发」= 本消息的 Images 里至少有一张在 Kept[i] 中且已解析出 dataUrl。
+                bool stillCarries =
+                    kept != null
+                    && i < kept.Count
+                    && kept[i].Any(r => r.Ref != null && !string.IsNullOrWhiteSpace(r.DataUrl))
+                    && kept[i]
+                        .Any(r =>
+                            r.Ref != null
+                            && msg.Images.Any(img =>
+                                img != null
+                                && (
+                                    ReferenceEquals(img, r.Ref)
+                                    || string.Equals(
+                                        (img.ImageId ?? string.Empty).Trim(),
+                                        (r.Ref.ImageId ?? string.Empty).Trim(),
+                                        StringComparison.Ordinal
+                                    )
+                                )
+                            )
+                        );
+                var target = msg;
+                if (!stillCarries && !string.IsNullOrEmpty(msg.Content))
+                {
+                    // 纯文本形态：交给 adapter 走 content:string + 文尾图块的既有分支
+                    target = new UnifiedChatMessage
+                    {
+                        Id = msg.Id,
+                        CreatedAtUtc = msg.CreatedAtUtc,
+                        Role = msg.Role,
+                        Content = msg.Content,
+                        ReasoningContent = msg.ReasoningContent,
+                        ToolCalls = msg.ToolCalls,
+                        ToolCallId = msg.ToolCallId,
+                        Name = msg.Name,
+                        InputTokens = msg.InputTokens,
+                        OutputTokens = msg.OutputTokens,
+                        CachedTokens = msg.CachedTokens,
+                        Images = null,
+                    };
+                }
+                result[result.Count - 1] = DropNotice.WithNotice(target, notice, append: true);
                 placed = true;
             }
         }

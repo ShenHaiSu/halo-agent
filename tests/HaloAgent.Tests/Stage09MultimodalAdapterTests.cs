@@ -119,17 +119,56 @@ public sealed class Stage09MultimodalAdapterTests
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         using var doc = JsonDocument.Parse(payload);
         var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
-        var content = messages[1].GetProperty("content");
-        Assert.Equal(JsonValueKind.Array, content.ValueKind);
-        var parts = content.EnumerateArray().ToList();
+        // S6：无占位符但有可发图 ⇒ 退化「文后追加」（text 块 + image_url 块，与 S6 前内容等价）
+        var parts = messages[1].GetProperty("content").EnumerateArray().ToList();
         Assert.Equal(2, parts.Count);
         Assert.Equal("text", parts[0].GetProperty("type").GetString());
+        Assert.Equal("看这张图", parts[0].GetProperty("text").GetString());
         Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
         Assert.Equal(
             "data:image/png;base64,QUJD",
             parts[1].GetProperty("image_url").GetProperty("url").GetString()
         );
         Assert.Equal("high", parts[1].GetProperty("image_url").GetProperty("detail").GetString());
+    }
+
+    [Fact(DisplayName = "S6-M3b: 有占位符 chat content 交错为 text/image 块（顺序随占位符）")]
+    public void Chat_WithPlaceholder_Interleaves()
+    {
+        var model = new ModelConfig
+        {
+            Id = "gpt-4o",
+            Protocol = LlmProtocolType.Chat,
+            SupportsVision = true,
+            MaxImagesPerTurn = 4,
+            VisionDetail = "high",
+        };
+        var msg = UnifiedChatMessage.User("前[image:img_aaa]中[image:img_bbb]后");
+        msg.Images = new List<ChatImageRef> { Img("img_aaa"), Img("img_bbb") };
+        var req = ImgRequest(
+            model,
+            new List<UnifiedChatMessage> { msg },
+            img => "data:image/png;base64," + img.ImageId
+        );
+        string payload = new ChatCompletionsAdapter().SerializeRequest(req);
+        using var doc = JsonDocument.Parse(payload);
+        var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+        var parts = messages[1].GetProperty("content").EnumerateArray().ToList();
+        // text(前) / image(aaa) / text(中) / image(bbb) / text(后) ⇒ 5 块，顺序与占位符一致
+        Assert.Equal(5, parts.Count);
+        Assert.Equal("前", parts[0].GetProperty("text").GetString());
+        Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
+        Assert.Equal(
+            "data:image/png;base64,img_aaa",
+            parts[1].GetProperty("image_url").GetProperty("url").GetString()
+        );
+        Assert.Equal("中", parts[2].GetProperty("text").GetString());
+        Assert.Equal("image_url", parts[3].GetProperty("type").GetString());
+        Assert.Equal(
+            "data:image/png;base64,img_bbb",
+            parts[3].GetProperty("image_url").GetProperty("url").GetString()
+        );
+        Assert.Equal("后", parts[4].GetProperty("text").GetString());
     }
 
     [Fact(DisplayName = "S09-M4: 有图 resp 含 input_image")]
@@ -150,10 +189,44 @@ public sealed class Stage09MultimodalAdapterTests
         using var doc = JsonDocument.Parse(payload);
         var input = doc.RootElement.GetProperty("input").EnumerateArray().ToList();
         var parts = input[0].GetProperty("content").EnumerateArray().ToList();
+        // S6：无占位符 ⇒ 退化「文后追加」，仍是一个 input_text + 尾部 input_image
         Assert.Equal(2, parts.Count);
         Assert.Equal("input_text", parts[0].GetProperty("type").GetString());
         Assert.Equal("input_image", parts[1].GetProperty("type").GetString());
         Assert.Equal("data:image/png;base64,UVFC", parts[1].GetProperty("image_url").GetString());
+    }
+
+    [Fact(DisplayName = "S6-M4b: 有占位符 resp input_text/input_image 交错")]
+    public void Resp_WithPlaceholder_Interleaves()
+    {
+        var model = new ModelConfig
+        {
+            Id = "o3-mini",
+            Protocol = LlmProtocolType.Resp,
+            SupportsVision = true,
+            MaxImagesPerTurn = 4,
+            VisionDetail = "low",
+        };
+        var msg = UnifiedChatMessage.User("前[image:img_bbb]后");
+        msg.Images = new List<ChatImageRef> { Img("img_bbb") };
+        var req = ImgRequest(
+            model,
+            new List<UnifiedChatMessage> { msg },
+            _ => "data:image/png;base64,UVFC"
+        );
+        using var doc = JsonDocument.Parse(new ResponsesApiAdapter().SerializeRequest(req));
+        var parts = doc
+            .RootElement.GetProperty("input")
+            .EnumerateArray()
+            .ToList()[0]
+            .GetProperty("content")
+            .EnumerateArray()
+            .ToList();
+        Assert.Equal(3, parts.Count);
+        Assert.Equal("前", parts[0].GetProperty("text").GetString());
+        Assert.Equal("input_image", parts[1].GetProperty("type").GetString());
+        Assert.Equal("low", parts[1].GetProperty("detail").GetString());
+        Assert.Equal("后", parts[2].GetProperty("text").GetString());
     }
 
     [Fact(DisplayName = "S09-M5: 非视觉模型含图抛 NonVisionModelException（双协议）")]
@@ -204,7 +277,7 @@ public sealed class Stage09MultimodalAdapterTests
         };
         var m1 = UnifiedChatMessage.User("first");
         m1.Images = new List<ChatImageRef> { Img("img_old1"), Img("img_old2") };
-        var m2 = UnifiedChatMessage.User("second");
+        var m2 = UnifiedChatMessage.User("second[image:img_new]");
         m2.Images = new List<ChatImageRef> { Img("img_new") };
         var req = ImgRequest(
             model,
@@ -214,7 +287,8 @@ public sealed class Stage09MultimodalAdapterTests
         string payload = new ChatCompletionsAdapter().SerializeRequest(req);
         Assert.DoesNotContain("img_old1", payload);
         Assert.DoesNotContain("img_old2", payload);
-        Assert.Contains("img_new", payload);
+        // S6：最新那张挂在带占位符的 user 消息上 ⇒ 交错块里能定位到它的 image_url
+        Assert.Contains("data:image/png;base64,img_new", payload);
         int count = CountOccurrences(payload, "\"type\":\"image_url\"");
         Assert.Equal(1, count);
     }
@@ -285,7 +359,7 @@ public sealed class Stage09MultimodalAdapterTests
                 MaxImagesPerTurn = 4,
                 VisionDetail = "high"
             };
-            var msg = UnifiedChatMessage.User("看这张图");
+            var msg = UnifiedChatMessage.User("看这张图[image:" + r.ImageId + "]");
             msg.Images = new List<ChatImageRef> { r };
             var req = ImgRequest(
                 model,
@@ -307,7 +381,9 @@ public sealed class Stage09MultimodalAdapterTests
                 .GetProperty("content")
                 .EnumerateArray()
                 .ToList();
+            // S6：有占位符 ⇒ text("看这张图") + image_url 交错
             Assert.Equal(2, parts.Count);
+            Assert.Equal("看这张图", parts[0].GetProperty("text").GetString());
             Assert.StartsWith(
                 "data:image/png;base64,",
                 parts[1].GetProperty("image_url").GetProperty("url").GetString()
@@ -390,7 +466,31 @@ public sealed class Stage09MultimodalAdapterTests
             using (var cdoc = JsonDocument.Parse(chatPayload))
             {
                 var cm = cdoc.RootElement.GetProperty("messages").EnumerateArray().ToList();
-                Assert.Equal("文字仍在", cm[1].GetProperty("content").GetString());
+                // S6：该消息结构上带图（Kept 有引用）但一张也解析不出 ⇒ content 仍是数组，
+                // text 块保留、image 块被跳过（无 image_url），正文不消失。
+                // 注：messages[0] 是 system，messages[1] 才是本条 user。
+                var cparts = cm[1].GetProperty("content").EnumerateArray().ToList();
+                Assert.Single(cparts);
+                Assert.Equal("text", cparts[0].GetProperty("type").GetString());
+                Assert.Equal("文字仍在", cparts[0].GetProperty("text").GetString());
+            }
+            // S6：有占位符 + 文件丢失 ⇒ 占位符在原位渲染 [image omitted]，文字不丢、不产生 image 块
+            var anchored = UnifiedChatMessage.User("文字仍在[image:" + r.ImageId + "]");
+            anchored.Images = new List<ChatImageRef> { r };
+            string anchoredPayload = new ChatCompletionsAdapter().SerializeRequest(
+                ImgRequest(chatModel, new List<UnifiedChatMessage> { anchored }, resolver)
+            );
+            Assert.DoesNotContain("image_url", anchoredPayload);
+            using (var adoc = JsonDocument.Parse(anchoredPayload))
+            {
+                var am = adoc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+                var aparts = am[1].GetProperty("content").EnumerateArray().ToList();
+                Assert.Single(aparts);
+                Assert.Equal("text", aparts[0].GetProperty("type").GetString());
+                Assert.Equal(
+                    "文字仍在" + ImagePlaceholder.OmittedPlaceholder,
+                    aparts[0].GetProperty("text").GetString()
+                );
             }
         }
         finally
@@ -416,7 +516,7 @@ public sealed class Stage09MultimodalAdapterTests
             MaxImagesPerTurn = 4,
             VisionDetail = "low"
         };
-        var um = UnifiedChatMessage.User("看这张图");
+        var um = UnifiedChatMessage.User("看这张图[image:img_n11]");
         um.Images = new List<ChatImageRef> { Img("img_n11") };
         var req = ImgRequest(
             model,
@@ -431,6 +531,10 @@ public sealed class Stage09MultimodalAdapterTests
             .GetProperty("content")
             .EnumerateArray()
             .ToList();
+        // S6：占位符在文末 ⇒ 交错块为 text("看这张图") + input_image(detail=low)
+        Assert.Equal(2, parts.Count);
+        Assert.Equal("看这张图", parts[0].GetProperty("text").GetString());
+        Assert.Equal("input_image", parts[1].GetProperty("type").GetString());
         Assert.Equal("low", parts[1].GetProperty("detail").GetString());
         // tool 附图必须配对在 assistant(function_call) 之后；图收齐到 output 块尾单个 user
         var assistant = UnifiedChatMessage.Assistant(

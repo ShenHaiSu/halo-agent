@@ -75,7 +75,7 @@ public sealed class Stage09ImageDropNoticeTests
             SupportsVision = true,
             MaxImagesPerTurn = 2,
         };
-        var m1 = UnifiedChatMessage.User("第一批图");
+        var m1 = UnifiedChatMessage.User("第一批图[image:img_a][image:img_b]");
         m1.Images = new List<ChatImageRef> { Img("img_a"), Img("img_b") };
         var m2 = UnifiedChatMessage.User("第二批图");
         m2.Images = new List<ChatImageRef> { Img("img_c"), Img("img_d") };
@@ -95,11 +95,11 @@ public sealed class Stage09ImageDropNoticeTests
         // 被丢空的那条 user 已无图 ⇒ content 回落为 string（零抖动语义），告知句挂在它上面。
         using var doc = JsonDocument.Parse(payload);
         var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
-        var firstContent = messages[1].GetProperty("content");
-        Assert.Equal(JsonValueKind.String, firstContent.ValueKind);
-        string firstUserText = firstContent.GetString()!;
-        Assert.Contains("第一批图", firstUserText);
-        Assert.Contains("另有 2 张因超 MaxImagesPerTurn(2)未发送", firstUserText);
+        // S6：本条消息在规划器里已被丢空（img_a/img_b 都被截断）⇒ 回落纯文本形态（content=string），
+        // 告知句直接追加在正文尾（与 S6 前的线上形态一致）。
+        string firstText = messages[1].GetProperty("content").GetString()!;
+        Assert.Contains("第一批图", firstText);
+        Assert.Contains("另有 2 张因超 MaxImagesPerTurn(2)未发送", firstText);
         // 最新两张仍实发（该用例 resolver 不把 imageId 写进 URL，故按张数断言）。
         int emitted = 0;
         int idx = 0;

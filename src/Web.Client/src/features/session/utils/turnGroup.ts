@@ -38,6 +38,46 @@ export function imagesOf(msg: UnifiedChatMessage | null | undefined): ChatImageR
   return Array.isArray(imgs) ? imgs : [];
 }
 
+/** S6 §4.3：机器可解析占位符（与后端 ImagePlaceholder 同字符集；`[图片：x]` 旧形态不参与）。 */
+const IMAGE_PLACEHOLDER_RE = /\[image:([A-Za-z0-9_-]+)\]/g;
+
+/**
+ * S6 §4.3（与后端 `ImagePlaceholder.OrderImagesByPlaceholder` 同语义，转录渲染复用）：
+ * 按占位符在正文中的**首次出现位置**排序；文本里没有锚点的图保持原相对顺序并沉底；
+ * 无占位符/空列表/单图 ⇒ 原数组序（零抖动）。
+ * 目的：转录里的图片行顺序 == 实际发包顺序，避免「两图中间夹文字」场景读了错位。
+ */
+export function orderImagesByContent(content: string | null | undefined, images: ChatImageRef[] | null | undefined): ChatImageRef[] {
+  const list = Array.isArray(images) ? images : [];
+  if (list.length <= 1) return list.slice();
+  const text = String(content ?? '');
+  if (!text) return list.slice();
+
+  const order = new Map<string, number>();
+  IMAGE_PLACEHOLDER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = IMAGE_PLACEHOLDER_RE.exec(text)) !== null) {
+    const id = m[1];
+    if (!order.has(id)) order.set(id, order.size);
+  }
+  if (order.size === 0) return list.slice();
+
+  return list
+    .map((img, index) => {
+      const id = String(img?.imageId ?? '').trim();
+      const anchor = id && order.has(id) ? (order.get(id) as number) : Number.MAX_SAFE_INTEGER;
+      return { img, index, anchor };
+    })
+    .sort((a, b) => (a.anchor !== b.anchor ? a.anchor - b.anchor : a.index - b.index))
+    .map((x) => x.img);
+}
+
+/** S6 §4.3：转录用图片行 = 按占位符顺序对齐后的 Images（无占位符退化数组序）。 */
+export function orderedImagesOf(msg: UnifiedChatMessage | null | undefined): ChatImageRef[] {
+  if (!msg) return [];
+  return orderImagesByContent((msg as UnifiedChatMessage).content, imagesOf(msg));
+}
+
 /** need09-05：images 参与归并键——图片只跟随所属消息，不另起轮次；
  *  归并键 = 归属消息 id + 图片 sha16 指纹（同 assistant+tool 对逻辑不变）。 */
 export function mergeKeyOf(msg: UnifiedChatMessage): string {
