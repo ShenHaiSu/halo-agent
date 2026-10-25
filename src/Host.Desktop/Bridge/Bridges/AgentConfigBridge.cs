@@ -15,6 +15,11 @@ public sealed class AgentConfigWithMeta : AgentConfigDocument
 /// <summary>need08 §6：智能体行为配置 Bridge（对标 HostBridgeFacade.Prompt.cs）。</summary>
 public sealed partial class HostBridgeFacade
 {
+    // S7-E1：入口三段式预算（后端复核用，与前端 composerModel 同值；十进制 raw）。
+    // 前端可先拦一道，这里兜底 Bridge 直调/老前端；超限逐条跳过并记 Warn（不抛、不中断整轮）。
+    internal const int S7MaxFilesPerTurn = 20;
+    internal const long S7MaxTotalBytes = 128_000_000L;
+
     public Task<BridgeResponse<AgentConfigWithMeta>> GetAgentConfig()
     {
         try
@@ -164,11 +169,22 @@ public sealed partial class HostBridgeFacade
                 return refs;
             string dataRoot = _storageManager.CurrentDataRoot;
             int index = -1;
+            // S7-E1 §4.1-3：入口三段式预算的后端复核（防 Bridge 直调绕过前端）。
+            // 口径与前端 composerModel.validateAttachments 同值：个数 20 / 单体 10MB / 总量 128MB（十进制 raw）。
+            int accepted = 0;
+            long totalBytes = 0;
             foreach (var el in doc.RootElement.EnumerateArray())
             {
                 index++;
                 if (el.ValueKind != System.Text.Json.JsonValueKind.Object)
                     continue;
+                if (accepted >= S7MaxFilesPerTurn)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件数超上限 {S7MaxFilesPerTurn}，第 {index + 1} 张起跳过（占位符保留原文）"
+                    );
+                    continue;
+                }
                 string fileName =
                     el.TryGetProperty("fileName", out var fnEl)
                     && fnEl.ValueKind == System.Text.Json.JsonValueKind.String
@@ -227,6 +243,23 @@ public sealed partial class HostBridgeFacade
                 byte[] raw = raw0;
                 if (!Infrastructure.Storage.ImageAttachmentStore.CheckMagic(raw, mime))
                     continue;
+                // S7-E1 ②单体复核：单张 > MaxImageBytes（TryDecodeBase64Bounded 已按同值拦过，这里显式再判一次
+                // 以便日志区分「单体超限」与「总量超限」）。
+                if (raw.LongLength > Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件单体超限（{raw.LongLength} > {Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes}），已跳过：{fileName}"
+                    );
+                    continue;
+                }
+                // S7-E1 ③总量复核：累计超 128MB 后不再落盘（保最新语义由前端负责，后端只做安全兜底）。
+                if (totalBytes + raw.LongLength > S7MaxTotalBytes)
+                {
+                    HaloLogger.App.Warn(
+                        $"[HostBridge] 附件总量超限（{totalBytes}+{raw.LongLength} > {S7MaxTotalBytes}），已跳过：{fileName}"
+                    );
+                    continue;
+                }
                 // need09-fix：贴图与 tool 统一无损直存（原字节落盘，sha 去重），detail 只影响发模参数，不降质、不转码。
                 var (bytes, normMime, w, h) =
                     Infrastructure.Storage.ImageAttachmentStore.PrepareLossless(raw, mime);
@@ -241,6 +274,8 @@ public sealed partial class HostBridgeFacade
                     h
                 );
                 refs.Add(imgRef);
+                accepted++;
+                totalBytes += raw.LongLength;
                 try
                 {
                     // S6 §4.1：保留**机器可解析**的有序引用形态（`[image:<短id>]`），不再重写成

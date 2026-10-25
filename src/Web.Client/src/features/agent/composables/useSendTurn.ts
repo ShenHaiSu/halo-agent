@@ -7,7 +7,7 @@ import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useAgentCards } from '@features/agent/stores/useAgentCards';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
-import { toSendPayload } from '@shared/utils/composerModel';
+import { toSendPayload, validateAttachments, DROP_REASON_TEXT } from '@shared/utils/composerModel';
 import type { ComposerApi } from './useComposer';
 
 export function useSendTurn(c: ComposerApi) {
@@ -58,11 +58,28 @@ export function useSendTurn(c: ComposerApi) {
     let attachments = payload.attachments;
     let text = payload.text;
     const hasInvalid = c.attachmentList.value.some((a) => a.status !== 'ready');
-    if (attachments.length > c.maxImages.value) {
+    // S7-E1：入口三段式预算（个数 → 单体 → 总量），超限逐项提示；占位符同步清理，不留悬空 [image:attId]。
+    // 之后仍按模型 maxImages 截最新 N 张（产品级护栏，保最新丢最旧，与后端张数盘同向）。
+    const validated = validateAttachments(text, attachments);
+    attachments = validated.kept;
+    text = validated.text;
+    const overMax = attachments.length > c.maxImages.value;
+    if (overMax) {
       const kept = attachments.slice(attachments.length - c.maxImages.value);
       const keptIds = new Set(kept.map((a) => a.attId));
-      for (const a of attachments.filter((x) => !keptIds.has(x.attId))) text = text.split(`[image:${a.attId}]`).join('');
+      const cut = attachments.filter((x) => !keptIds.has(x.attId));
+      for (const a of cut) text = text.split(`[image:${a.attId}]`).join('');
       attachments = kept;
+    }
+    if (validated.dropped.length > 0) {
+      const detail = validated.dropped
+        .slice(0, 3)
+        .map((d) => `${d.fileName}（${DROP_REASON_TEXT[d.reason]}）`)
+        .join('、');
+      const more = validated.dropped.length > 3 ? ` 等共 ${validated.dropped.length} 张` : '';
+      message.warning(`已跳过 ${validated.dropped.length} 张图片：${detail}${more}`);
+    } else if (overMax) {
+      message.warning(`图片超限，仅发送最新 ${c.maxImages.value} 张`);
     }
     if (!text.trim() && attachments.length === 0) {
       if (hasInvalid) message.warning('图片不可用（超限或需重新添加），且无文字可发送');

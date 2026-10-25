@@ -14,7 +14,7 @@ import {
   type ComposerDraft,
   type ComposerImageMime,
 } from '@shared/utils/composerModel';
-import { acceptImageFile, collectImageFiles, extractPaste } from '@shared/utils/clipboardImage';
+import { acceptImageFile, collectImageFiles, extractPaste, UNSUPPORTED_IMAGE_REASON } from '@shared/utils/clipboardImage';
 import { formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
 import { pasteHtmlImage } from './composerEditorDom';
 
@@ -55,7 +55,7 @@ export function useComposerAttachments(deps: AttachmentDeps) {
   function addFile(f: File, source: AttachmentSource): void {
     const chk = acceptImageFile(f);
     if (!chk.ok) {
-      deps.error(chk.reason || '仅支持 jpg/png/webp，请转换后发送');
+      deps.error(chk.reason || UNSUPPORTED_IMAGE_REASON);
       return;
     }
     const mime = chk.mime as ComposerImageMime;
@@ -146,7 +146,7 @@ export function useComposerAttachments(deps: AttachmentDeps) {
     if (deps.isGenerating.value || deps.askMasked.value) return;
     const files = collectImageFiles(e.dataTransfer);
     if (files.length === 0 && e.dataTransfer && e.dataTransfer.files.length > 0) {
-      deps.error('仅支持 jpg/png/webp，请转换后发送');
+      deps.error(UNSUPPORTED_IMAGE_REASON);
       return;
     }
     for (const f of files) addFile(f, 'drop');

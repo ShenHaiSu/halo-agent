@@ -27,7 +27,15 @@ public sealed class ViewImageTool : IToolHandler
         + "Use path relative to workspace root or an absolute path. "
         + "Returns a short text summary plus the image reference for the model to see. "
         + "Workspace image only. Non-image files fail fast. On non-vision models the image is stripped and text continues (see notice). "
+        + "GIF and SVG are not supported on the vision path: for SVG (or any text-based vector file) use read_file to read it as text instead. "
         + "Error codes: IMAGE_TOO_LARGE|NOT_AN_IMAGE|IMAGE_MISSING|PATH_TRAVERSAL.";
+
+    /// <summary>
+    /// S7-E4：图片链路类型白名单的**唯一拒绝文案**（与前端 UNSUPPORTED_IMAGE_REASON 同口径）。
+    /// 决策：GIF 不做内联、SVG 永不进视觉（可携带脚本/外链）；SVG 走 read_file 文本通道。
+    /// </summary>
+    public const string UnsupportedTypeReason =
+        "仅支持 jpg/png/webp（GIF/SVG/BMP 等请先转成 png/jpg；SVG 可让模型用 read_file 按文本读取）";
 
     /// <summary>S3 §3.1：view_image 四态机器可判错误码（成功时为 null）。</summary>
     public static class ErrorCodes
@@ -154,10 +162,11 @@ public sealed class ViewImageTool : IToolHandler
             if (!ImageAttachmentStore.IsSupportedExtension(fullPath))
             {
                 // S3 §4.1：非 jpg/png/webp 一律 NOT_AN_IMAGE（含 svg/gif/bmp 一刀切拒绝）。
+                // S7-E4：文案统一走 UnsupportedTypeReason，并给 SVG 指路 read_file（不进视觉链路）。
                 return Task.FromResult(
                     ToolResult.FailCode(
                         ErrorCodes.NotAnImage,
-                        $"不支持的图片类型：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。仅支持 jpg/png/webp（按扩展名 + 文件头双重校验，gif/bmp/tiff 请先转换）（非 jpg/png/webp 一律此码，含 svg/gif）。",
+                        $"不支持的图片类型：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。{UnsupportedTypeReason}。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );

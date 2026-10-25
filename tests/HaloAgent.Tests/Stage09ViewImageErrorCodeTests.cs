@@ -109,7 +109,9 @@ public sealed class Stage09ViewImageErrorCodeTests : IDisposable
             Ctx()
         );
         AssertCode(result, ViewImageTool.ErrorCodes.NotAnImage);
-        Assert.Contains("非 jpg/png/webp 一律此码", result.Error);
+        // S7-E4：拒绝文案统一为 ViewImageTool.UnsupportedTypeReason（GIF 不进视觉、SVG 指路 read_file）。
+        Assert.Contains(ViewImageTool.UnsupportedTypeReason, result.Error);
+        Assert.Contains("read_file", result.Error);
     }
 
     [Fact(DisplayName = "S3-3: 魔数不符（伪装 png）→ NOT_AN_IMAGE")]

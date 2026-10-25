@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -105,6 +105,141 @@ public static class ImageAttachmentStore
             sessionId,
             "attachments"
         );
+
+    /// <summary>
+    /// S7-E2 §4.2：全局内容寻址区（跨会话同字节只落一份）。
+    /// 布局 `&lt;dataRoot&gt;/attachments/&lt;sha16&gt;/&lt;sha16&gt;_&lt;safeName&gt;`：
+    /// 用 sha16 建子目录而不是把百万文件平铺在一层（Windows 单目录文件多会拖慢枚举）。
+    /// 全局 blob 只是**副本**，会话目录仍保留自己的引用文件——这样单会话删除/TTL 清理不会
+    /// 让别的会话图片失效（硬链接方案在非 NTFS / 跨卷时不可靠，见 E2 落地记录）。
+    /// </summary>
+    public static string GetGlobalAttachmentsDir(string dataRoot) =>
+        Path.Combine(
+            string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot,
+            "attachments"
+        );
+
+    /// <summary>S7-E2：全局 blob 目录（按 sha16 分子目录）。</summary>
+    public static string GetGlobalBlobDir(string dataRoot, string sha16) =>
+        Path.Combine(GetGlobalAttachmentsDir(dataRoot), sha16 ?? string.Empty);
+
+    /// <summary>S7-E2：查全局 blob（跨会话去重命中）。找不到返回 null。</summary>
+    public static string? FindGlobalBlob(string dataRoot, string sha16)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(sha16))
+                return null;
+            string dir = GetGlobalBlobDir(dataRoot, sha16);
+            if (!Directory.Exists(dir))
+                return null;
+            string[] hits = Directory.GetFiles(dir, sha16 + "_*");
+            return hits.Length == 0 ? null : hits.OrderBy(h => h, StringComparer.Ordinal).First();
+        }
+        catch
+        { /* 查找永不抛 */
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// S7-E2：确保全局 blob 存在（跨会话内容寻址的唯一写入点）。
+    /// 命中即返回（不重复写）；未命中按 `CreateNew + EEXIST 复用` 抢写，并发同字节只留一份。
+    /// 返回 blob 绝对路径或 null（IO 异常不影响主链路：会话文件才是读取源，blob 只做去重与统计）。
+    /// </summary>
+    public static string? EnsureGlobalBlob(
+        string dataRoot,
+        string sha16,
+        string safeName,
+        byte[] bytes
+    )
+    {
+        if (string.IsNullOrWhiteSpace(sha16) || bytes == null || bytes.Length == 0)
+            return null;
+        try
+        {
+            string? hit = FindGlobalBlob(dataRoot, sha16);
+            if (hit != null)
+                return hit;
+            string dir = GetGlobalBlobDir(dataRoot, sha16);
+            Directory.CreateDirectory(dir);
+            string abs = Path.Combine(dir, sha16 + "_" + SanitizeFileName(safeName));
+            WriteFileCreateNewOrReuse(abs, bytes);
+            return abs;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                HaloLogger.App.Warn("[Image] 全局 blob 写入失败（不影响会话落盘）：" + sha16 + " " + ex.Message);
+            }
+            catch { }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// S7-E2 §4.2-3 / 验收 E2-2：独占创建语义（并发安全）。
+    /// 先用 `FileMode.CreateNew` 抢写；若目标已存在（IOException/EEXIST，说明并发下别的线程已写好），
+    /// 直接复用既有文件、不重复写、不写坏。写失败（非 EEXIST）则清理半成品后抛出，由上层决定降级。
+    /// </summary>
+    internal static void WriteFileCreateNewOrReuse(string absPath, byte[] bytes)
+    {
+        try
+        {
+            using var fs = new FileStream(
+                absPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                useAsync: false
+            );
+            fs.Write(bytes, 0, bytes.Length);
+        }
+        catch (IOException)
+        {
+            // EEXIST（并发同字节）：别人已经写好，直接复用；长度对得上就认为可用。
+            if (File.Exists(absPath))
+            {
+                try
+                {
+                    var fi = new FileInfo(absPath);
+                    if (fi.Length == bytes.LongLength)
+                        return;
+                }
+                catch
+                { /* 读元数据失败按下方清理处理 */
+                }
+                HaloLogger.App.Warn("[Image] 全局 blob 已存在但长度不符，重建：" + Path.GetFileName(absPath));
+                try
+                {
+                    File.Delete(absPath);
+                }
+                catch { }
+                using var fs2 = new FileStream(
+                    absPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None
+                );
+                fs2.Write(bytes, 0, bytes.Length);
+                return;
+            }
+            throw;
+        }
+        catch
+        {
+            // 其它失败：清掉可能写了一半的文件，避免留下坏 blob 被后续命中去重
+            try
+            {
+                if (File.Exists(absPath))
+                    File.Delete(absPath);
+            }
+            catch { }
+            throw;
+        }
+    }
 
     /// <summary>need09-05：按 imageId 扫描附件目录（跨日期去重命中即复用）。</summary>
     public static string? FindImagePath(
@@ -318,6 +453,10 @@ public static class ImageAttachmentStore
         string imageId = "img_" + sha16;
         lock (_writeLock)
         {
+            // S7-E2：先落全局 blob（跨会话同字节只写一次），再落会话引用文件。
+            // 全局 blob 只是副本，会话文件仍是读取主路径（FindImagePath 不变），
+            // 这样 TTL/会话删除不会让别的会话图失效（不用硬链接，规避 NTFS/跨卷限制）。
+            EnsureGlobalBlob(dataRoot, sha16, SanitizeFileName(fileName), bytes);
             string? existing = FindImagePath(dataRoot, workspaceId, sessionId, imageId);
             if (existing != null)
             {
@@ -352,7 +491,9 @@ public static class ImageAttachmentStore
             string dir = Path.Combine(GetAttachmentsDir(dataRoot, workspaceId, sessionId), date);
             Directory.CreateDirectory(dir);
             string abs = Path.Combine(dir, imageId + "_" + safe);
-            File.WriteAllBytes(abs, bytes);
+            // S7-E2 §4.2-3：会话文件同样用 CreateNew 语义（并发同字节抢写时复用已存在文件，
+            // 不重复写、不写坏；长度不符才重建），替代原 File.WriteAllBytes 的覆盖语义。
+            WriteFileCreateNewOrReuse(abs, bytes);
             string sessionDir = Path.Combine(
                 string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot,
                 "sessions",

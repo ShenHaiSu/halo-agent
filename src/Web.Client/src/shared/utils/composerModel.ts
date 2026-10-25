@@ -37,6 +37,8 @@ export interface SendAttachment {
   fileName: string;
   mime: string;
   base64: string;
+  /** S7-E1：raw 字节数（清单转 base64 前就已知，供三段式入口校验用，避免先转码再判超限） */
+  sizeBytes: number;
 }
 
 export interface SendPayload {
@@ -46,6 +48,11 @@ export interface SendPayload {
 
 // S4 单图 raw 上限（十进制，对齐 provider 单图 10MB；后端 ImageAttachmentStore.MaxImageBytes 须同值，跨语言硬编码镜像）。
 export const MAX_IMAGE_BYTES = 10_000_000;
+// S7-E1 入口三段式预算（个数 → 单体 → 总量，与参考 MAX_FILES=20 / 总量 128MB 同量级）：
+// 个数取 20（前端允许准备 20 张，实际发包仍受模型 MaxImagesPerTurn / 后端字节盘二次约束）；
+// 总量取十进制 128MB raw（base64 前口径，避免超长 payload 过 Bridge 字符串）。
+export const MAX_FILES_PER_TURN = 20;
+export const MAX_TOTAL_BYTES = 128_000_000;
 export const MAX_PASTE_TEXT = 20000;
 const IMAGE_PLACEHOLDER_RE = /\[image:([A-Za-z0-9_-]+)\]/g;
 
@@ -210,6 +217,104 @@ export function readyAttachments(draft: ComposerDraft): ComposerAttachment[] {
   return out;
 }
 
+/** S7-E1：入口逐项丢弃原因（前端提示逐项展示，不用一句笼统「超限」）。 */
+export type DropReason = 'over-count' | 'over-single' | 'over-total';
+
+export interface AttachmentDrop {
+  attId: string;
+  fileName: string;
+  reason: DropReason;
+}
+
+export interface ValidatedAttachments {
+  kept: SendAttachment[];
+  dropped: AttachmentDrop[];
+  /** 被占位符清理后的文本（dropped 的 attId 不留悬空 `[image:attId]`） */
+  text: string;
+}
+
+export const DROP_REASON_TEXT: Record<DropReason, string> = {
+  'over-count': `超过单轮张数上限 ${MAX_FILES_PER_TURN} 张`,
+  'over-single': '单张超过 10MB',
+  'over-total': '本轮图片总量超过 128MB',
+};
+
+/**
+ * S7-E1 §4.1：三段式入口校验（个数 → 单体 → 总量），纯函数、可单测。
+ *
+ * 语义（与文档一致，顺序冻结）：
+ *   ① 个数：超过 MAX_FILES_PER_TURN 时保**最新**（数组尾部）N 张，早的逐条丢；
+ *   ② 单体：单张 > MAX_IMAGE_BYTES 逐条丢（理论上入口已拦，这里防 Bridge 直调/老草稿）；
+ *   ③ 总量：累计 > MAX_TOTAL_BYTES 时从**最旧**开始继续丢，直到不超（保留最新，与①②同向）。
+ *
+ * 占位符清理：对每个 dropped 的 attId，把文本中**所有**出现处删掉（同一 attId 出现两次也一并清理），
+ * 保证不产生悬空 `[image:attId]`（否则后端会当成未知占位符）。
+ *
+ * 注意：这个函数只做「能不能发」的判定；返回的 attachments 已按 kept 过滤，text 已同步清理。
+ */
+export function validateAttachments(
+  text: string,
+  attachments: SendAttachment[],
+  limits: { maxFiles?: number; maxSingleBytes?: number; maxTotalBytes?: number } = {}
+): ValidatedAttachments {
+  const maxFiles = limits.maxFiles ?? MAX_FILES_PER_TURN;
+  const maxSingle = limits.maxSingleBytes ?? MAX_IMAGE_BYTES;
+  const maxTotal = limits.maxTotalBytes ?? MAX_TOTAL_BYTES;
+  const src = String(text ?? '');
+  const list = Array.isArray(attachments) ? attachments : [];
+  if (list.length === 0) return { kept: [], dropped: [], text: src };
+
+  const drops = new Map<string, DropReason>();
+  const drop = (a: SendAttachment, reason: DropReason): void => {
+    // 先命中的原因优先（三段式顺序：个数 > 单体 > 总量）
+    if (!drops.has(a.attId)) drops.set(a.attId, reason);
+  };
+
+  // ① 个数：保最新（尾部）N 张
+  let candidates = list.slice();
+  if (maxFiles > 0 && candidates.length > maxFiles) {
+    const cut = candidates.length - maxFiles;
+    for (const a of candidates.slice(0, cut)) drop(a, 'over-count');
+    candidates = candidates.slice(cut);
+  }
+
+  // ② 单体：逐张
+  candidates = candidates.filter((a) => {
+    const size = Number.isFinite(a.sizeBytes) ? a.sizeBytes : 0;
+    if (maxSingle > 0 && size > maxSingle) {
+      drop(a, 'over-single');
+      return false;
+    }
+    return true;
+  });
+
+  // ③ 总量：从最旧开始继续丢（保最新）
+  if (maxTotal > 0) {
+    let total = candidates.reduce((s, a) => s + (Number.isFinite(a.sizeBytes) ? a.sizeBytes : 0), 0);
+    let i = 0;
+    while (total > maxTotal && i < candidates.length) {
+      total -= Number.isFinite(candidates[i].sizeBytes) ? candidates[i].sizeBytes : 0;
+      drop(candidates[i], 'over-total');
+      i++;
+    }
+    if (i > 0) candidates = candidates.slice(i);
+  }
+
+  let cleaned = src;
+  for (const attId of drops.keys()) {
+    if (!attId) continue;
+    cleaned = cleaned.split(`[image:${attId}]`).join('');
+  }
+
+  return {
+    kept: candidates,
+    dropped: list
+      .filter((a) => drops.has(a.attId))
+      .map((a) => ({ attId: a.attId, fileName: a.fileName, reason: drops.get(a.attId) as DropReason })),
+    text: cleaned,
+  };
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
@@ -240,7 +345,14 @@ export async function toSendPayload(draft: ComposerDraft): Promise<SendPayload> 
   }
   const attachments: SendAttachment[] = [];
   for (const a of ready) {
-    attachments.push({ attId: a.attId, fileName: a.fileName, mime: a.mime, base64: await fileToBase64(a.file) });
+    attachments.push({
+      attId: a.attId,
+      fileName: a.fileName,
+      mime: a.mime,
+      base64: await fileToBase64(a.file),
+      // S7-E1：raw 字节数随清单下发，供三段式入口校验（避免先转码再判超限）
+      sizeBytes: a.sizeBytes,
+    });
   }
   return { text, attachments };
 }
