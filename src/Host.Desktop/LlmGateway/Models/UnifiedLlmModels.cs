@@ -80,6 +80,120 @@ public static class ImageDataRegistry
 /// <summary>need09-05：adapter 共享的多模态轮次规划结果项。</summary>
 public sealed record ResolvedImage(ChatImageRef Ref, string? DataUrl);
 
+/// <summary>
+/// S5 §4.2：图片字节盘规划（纯函数，无 IO，可单测）。
+/// 两盘拆分的唯一实现点：
+/// - 历史盘：历史消息（旧→新输入，逆序扣减，最新优先保），上限 <see cref="VisionDefaults.MaxHistoryImageBytes"/>；
+/// - 当轮盘：当前 user 轮 + 本 turn view_image 工具图，上限 <see cref="VisionDefaults.MaxTurnImageBytes"/>。
+/// 口径为 raw 字节（<see cref="ChatImageRef.SizeBytes"/>），不用 dataUrl(含 base64) 长度：
+/// base64 约 4/3 膨胀，按 url.Length 计会导致实际可发容量只有账面 3/4。
+/// 元数据撒谎方向不影响安全：报大只会挤掉自己的名额（永不超读），S2 有界读兜底。
+/// 张数盘（MaxImagesPerTurn）不在此处，由 <see cref="MultimodalPlanner"/> 最后执行。
+/// </summary>
+public static class ImageBudgetPlanner
+{
+    /// <summary>
+    /// 逆序贪心：从最新到最旧逐张扣减，放得下就准入，放不下就跳过（继续尝试更旧的？否——保最新丢最旧，
+    /// 一旦超限即停，与参考 attachment-history 语义一致：被跳过的旧图不再续补，避免出现“旧图挤掉新图）。
+    /// 输入 sequence 按**时间从旧到新**排序（调用方保证）。
+    /// </summary>
+    /// <param name="sequence">(imageId, sizeBytes)，旧→新。</param>
+    /// <param name="capBytes">本盘上限（历史盘调用方须先 Math.Min 夹到常量以下）。</param>
+    public static (HashSet<string> Admit, List<string> Dropped) PlanReverse(
+        IReadOnlyList<(string ImageId, long SizeBytes)> sequence,
+        long capBytes
+    )
+    {
+        var admit = new HashSet<string>(StringComparer.Ordinal);
+        var dropped = new List<string>();
+        if (sequence == null || sequence.Count == 0)
+            return (admit, dropped);
+
+        long used = 0;
+        for (int i = sequence.Count - 1; i >= 0; i--)
+        {
+            string id = (sequence[i].ImageId ?? string.Empty).Trim();
+            if (id.Length == 0)
+                continue;
+            long size = sequence[i].SizeBytes > 0 ? sequence[i].SizeBytes : 0;
+            if (used + size <= capBytes)
+            {
+                used += size;
+                admit.Add(id);
+            }
+            else
+            {
+                dropped.Add(id);
+            }
+        }
+        dropped.Reverse(); // 输出按旧→新，日志/告知阅读顺序与历史一致
+        return (admit, dropped);
+    }
+
+    /// <summary>
+    /// 历史盘上限夹取：调用方只能下调不能上调（配置/单测传入值 &gt; 常量时按常量）。
+    /// </summary>
+    public static long ClampHistoryCap(long requested) =>
+        requested <= 0
+            ? VisionDefaults.MaxHistoryImageBytes
+            : Math.Min(requested, VisionDefaults.MaxHistoryImageBytes);
+
+    /// <summary>
+    /// 从发包副本中摘除未准入的图片引用（落盘对象不动）：返回新消息列表，
+    /// 只对 Images 非空的条目做 Eq 引用过滤；全部被摘则 Images=null（零抖动语义）。
+    /// </summary>
+    public static List<UnifiedChatMessage> StripDropped(
+        IReadOnlyList<UnifiedChatMessage> messages,
+        HashSet<string> admit
+    )
+    {
+        var result = new List<UnifiedChatMessage>(messages?.Count ?? 0);
+        if (messages == null)
+            return result;
+        foreach (var src in messages)
+        {
+            if (src?.Images == null || src.Images.Count == 0)
+            {
+                result.Add(src!);
+                continue;
+            }
+            var kept = new List<ChatImageRef>(src.Images.Count);
+            foreach (var img in src.Images)
+            {
+                if (
+                    img != null
+                    && !string.IsNullOrWhiteSpace(img.ImageId)
+                    && admit.Contains(img.ImageId.Trim())
+                )
+                    kept.Add(img);
+            }
+            if (kept.Count == src.Images.Count)
+            {
+                result.Add(src);
+                continue;
+            }
+            result.Add(
+                new UnifiedChatMessage
+                {
+                    Id = src.Id,
+                    CreatedAtUtc = src.CreatedAtUtc,
+                    Role = src.Role,
+                    Content = src.Content,
+                    ReasoningContent = src.ReasoningContent,
+                    ToolCalls = src.ToolCalls,
+                    ToolCallId = src.ToolCallId,
+                    Name = src.Name,
+                    InputTokens = src.InputTokens,
+                    OutputTokens = src.OutputTokens,
+                    CachedTokens = src.CachedTokens,
+                    Images = kept.Count == 0 ? null : kept,
+                }
+            );
+        }
+        return result;
+    }
+}
+
 /// <summary>need09-05：adapter 共享的多模态轮次规划（门控加取最新 N 保 latest 丢最旧加dataURL 解析）。</summary>
 public static class MultimodalPlanner
 {
@@ -97,7 +211,8 @@ public static class MultimodalPlanner
         {
             if (skipped == null || skipped.Count == 0)
                 return string.Empty;
-            int mb = (int)Math.Round(budgetBytes / 1024d / 1024d, MidpointRounding.AwayFromZero);
+            // S5 §4.4：口径统一为十进制 raw（32_000_000 → 32MB），与历史盘告知同口径。
+            int mb = (int)Math.Round(budgetBytes / 1_000_000d, MidpointRounding.AwayFromZero);
             var labels = new List<string>(skipped.Count);
             foreach (var (fileName, imageId) in skipped)
             {
@@ -108,6 +223,30 @@ public static class MultimodalPlanner
             return $"[图片省略] 本轮图片字节超预算（{mb}MB），以下 {skipped.Count} 张图未发送："
                 + string.Join("、", labels)
                 + "；可改用缩略图/小图重试。";
+        }
+
+        /// <summary>
+        /// S5 §4.4：历史盘丢图告知（与当轮盘可区分）。口径 raw，十进制 MB。
+        /// 建议方向不同：历史盘丢图 → 下轮精简历史；当轮盘丢图 → 用小图/缩略图重试。
+        /// </summary>
+        public static string HistoryBudgetExceeded(
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> dropped
+        )
+        {
+            if (dropped == null || dropped.Count == 0)
+                return string.Empty;
+            int mb = (int)Math.Round(budgetBytes / 1_000_000d, MidpointRounding.AwayFromZero);
+            var labels = new List<string>(dropped.Count);
+            foreach (var (fileName, imageId) in dropped)
+            {
+                string name = string.IsNullOrWhiteSpace(fileName) ? "图片" : fileName.Trim();
+                string id = ShortId(imageId);
+                labels.Add(string.IsNullOrEmpty(id) ? name : $"{name}({id})");
+            }
+            return $"[图片省略] 历史图片超预算未发送 {dropped.Count} 张（历史盘 {mb}MB，raw 计），以下最早的历史图未发送："
+                + string.Join("、", labels)
+                + "；如需继续分析这些图，请让用户在本轮重新附图，或先精简更早的历史。";
         }
 
         /// <summary>张数截断（超 MaxImagesPerTurn，保最新丢最旧）。</summary>

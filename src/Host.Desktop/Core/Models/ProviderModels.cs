@@ -141,6 +141,18 @@ public static class VisionDefaults
     public const int MaxAllowedImages = 16;
     public const string DefaultDetail = "high";
 
+    /// <summary>
+    /// S5 §4.2：历史图片盘（raw 聚合，十进制）。历史消息（当前 user 轮之前）的图片逆序扣减此盘，
+    /// 调用方可下调不可上调（Math.Min 夹）。30M raw ≈ 40M base64，与参考 sidecar 的 40M 字符串上限同义。
+    /// </summary>
+    public const long MaxHistoryImageBytes = 30_000_000;
+
+    /// <summary>
+    /// S5 §4.2：当轮图片盘（raw 聚合，十进制）。当前 user 轮 + 本 turn 内 view_image 工具图共享，
+    /// 历史不占当轮盘、当轮不占历史盘；turn 结束即弃。
+    /// </summary>
+    public const long MaxTurnImageBytes = 32_000_000;
+
     /// <summary>0/负数 → 默认 4；正数原样返回（上限由校验层拒绝，不在此钳制）。</summary>
     public static int ResolveMaxImages(int configured) =>
         configured <= 0 ? DefaultMaxImages : configured;
