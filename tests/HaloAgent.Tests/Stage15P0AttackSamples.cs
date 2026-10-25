@@ -18,6 +18,10 @@ using Xunit;
 namespace HaloAgent.Tests;
 
 /// <summary>need22-01b §1 前置 + 01c 验收 A1–A6：P0 攻击样本库（5+3 条）。</summary>
+// 注：A5_Quota_Rejected 会改 BackupStore.GlobalQuotaBytes 进程静态（10 字节极小配额），
+// 并行下会污染同进程其它备份用例（P2_2b 55 备份 prune 被误拒 BACKUP_QUOTA_EXCEEDED）。
+// 故本类整体串行（集合内串行、不与其它集合并行），测试作用不变。
+[Collection("Serial-BackupQuota")]
 public sealed class Stage15P0AttackSamples : IDisposable
 {
     private readonly string _tempRoot;

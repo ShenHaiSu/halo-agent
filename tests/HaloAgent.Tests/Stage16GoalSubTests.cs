@@ -69,8 +69,10 @@ public sealed class Stage16GoalTests
             sub = "sess_sub";
         svc.SaveGoal(ws, sess, new SessionGoal { Title = "Parent" }, "main");
         string path = svc.GoalFilePath(ws, sess);
-        var mtime = File.GetLastWriteTimeUtc(path);
-        await Task.Delay(50);
+        // mtime 粒度在部分文件系统只有 ~1s/2s，直接 Equal 有 flake 风险（并行抖动放大）。
+        // 改为“写入字节未变”（拒绝写不断言时间），测试本意（sub 写被拒、不落盘）不变。
+        long sizeBefore = new FileInfo(path).Length;
+        string textBefore = File.ReadAllText(path);
         var tool = new GoalTool((w, s) => svc);
         var ctx = new ToolContext
         {
@@ -86,7 +88,8 @@ public sealed class Stage16GoalTests
         );
         Assert.False(r.Success);
         Assert.Contains("[GOAL_DENIED]", r.Error ?? r.Output);
-        Assert.Equal(mtime, File.GetLastWriteTimeUtc(path));
+        Assert.Equal(sizeBefore, new FileInfo(path).Length);
+        Assert.Equal(textBefore, File.ReadAllText(path));
         var g = await tool.ExecuteAsync(
             new ToolCallDto("c2", "goal_tool", "{\"action\":\"get\"}"),
             ctx
@@ -148,10 +151,8 @@ public sealed class Stage16SubDetailTests
     {
         root = Path.Combine(Path.GetTempPath(), "halo16sub_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        Environment.SetEnvironmentVariable(
-            "HALO_BOOTSTRAP_PATH",
-            Path.Combine(root, "bootstrap.json")
-        );
+        // 注：此处不再写 HALO_BOOTSTRAP_PATH 进程环境变量（并行下会竞态）。
+        // StoragePathManager.Initialize 已显式传参，不读环境变量，语义不变。
         var mgr = StoragePathManager.Initialize(
             customBootstrapFilePath: Path.Combine(root, "bootstrap.json"),
             customDefaultDataRoot: Path.Combine(root, "data"),
@@ -165,12 +166,12 @@ public sealed class Stage16SubDetailTests
     [Fact]
     public async Task Stage16Sub_MainId_Detail_NOT_A_SUB()
     {
-        var (_, svc) = NewEnv(out _);
+        var (mgr, svc) = NewEnv(out _);
         var ws = await svc.AddOrUpdateWorkspaceAsync(
             Path.GetTempPath() + "_" + Guid.NewGuid().ToString("N")
         );
         var main = await svc.CreateSessionAsync(ws.Id, "main");
-        var bridge = MakeBridge(ws.Id, svc);
+        var bridge = MakeBridge(ws.Id, svc, mgr);
         var r = await bridge.GetSubSessionDetail(ws.Id, main.Id);
         Assert.False(r.Ok);
         Assert.Equal("NOT_A_SUB", r.Code);
@@ -179,12 +180,12 @@ public sealed class Stage16SubDetailTests
     [Fact]
     public async Task Stage16Sub_Missing_SUB_NOT_FOUND()
     {
-        var (_, svc) = NewEnv(out _);
+        var (mgr, svc) = NewEnv(out _);
         var ws = await svc.AddOrUpdateWorkspaceAsync(
             Path.GetTempPath() + "_" + Guid.NewGuid().ToString("N")
         );
         var main = await svc.CreateSessionAsync(ws.Id, "main");
-        var bridge = MakeBridge(ws.Id, svc);
+        var bridge = MakeBridge(ws.Id, svc, mgr);
         var r = await bridge.GetSubSessionDetail(ws.Id, "nope");
         Assert.False(r.Ok);
         Assert.Equal("SUB_NOT_FOUND", r.Code);
@@ -193,7 +194,7 @@ public sealed class Stage16SubDetailTests
     [Fact]
     public async Task Stage16Sub_ReadOnly_Guards()
     {
-        var (_, svc) = NewEnv(out _);
+        var (mgr, svc) = NewEnv(out _);
         var ws = await svc.AddOrUpdateWorkspaceAsync(
             Path.GetTempPath() + "_" + Guid.NewGuid().ToString("N")
         );
@@ -210,7 +211,7 @@ public sealed class Stage16SubDetailTests
             "task"
         );
         await svc.AppendSessionMessageAsync(ws.Id, sub.Id, UnifiedChatMessage.User("hi"));
-        var bridge = MakeBridge(ws.Id, svc);
+        var bridge = MakeBridge(ws.Id, svc, mgr);
         var t = await bridge.TruncateSessionHistory(ws.Id, sub.Id, "x", false);
         Assert.False(t.Ok);
         Assert.Equal("SUB_READONLY", t.Code);
@@ -233,10 +234,10 @@ public sealed class Stage16SubDetailTests
 
     private static Host.Desktop.Bridge.HostBridgeFacade MakeBridge(
         string wsId,
-        WorkspaceSessionService svc
+        WorkspaceSessionService svc,
+        StoragePathManager mgr
     )
     {
-        var mgr = StoragePathManager.Initialize();
         return new Host.Desktop.Bridge.HostBridgeFacade(null, mgr, workspaceSessionService: svc);
     }
 }

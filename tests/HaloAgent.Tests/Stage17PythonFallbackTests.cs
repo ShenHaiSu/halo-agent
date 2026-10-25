@@ -8,6 +8,11 @@ using Xunit;
 namespace HaloAgent.Tests;
 
 // need17-07 验收：Python 缺失兜底（文案逐字 + 秒拒 + 注记 + 隔离）。
+// 注：PythonAvailabilitySnapshot.OverrideForTests 是进程级静态注入（Current 全局可见），
+// 本类多个用例 Override/Clear 交错在并行下会互相覆盖。
+// 为保断言不 flake，本类整体串行（集合内串行、不与其它集合并行），
+// 与 Serial-ImageCost 的进程静态隔离策略一致。
+[Collection("Serial-PythonSnapshot")]
 public sealed class Stage17PythonFallbackTests : IDisposable
 {
     public void Dispose()

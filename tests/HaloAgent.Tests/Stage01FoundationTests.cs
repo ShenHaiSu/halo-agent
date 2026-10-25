@@ -6,10 +6,14 @@ using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Storage;
 using Xunit;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
-
 namespace HaloAgent.Tests;
 
+// 注：本类独占 HaloLogger 进程静态单例（Initialize 会 SwitchLogsDirectory 切全局目录，
+// FlushAsync 读全局 Channel）。并行下其它用例的 Initialize 会把目录切走，
+// 导致日志断言/读文件 flake（The process cannot access the file / 路径漂移）。
+// 故本类整体串行（集合内串行、不与其它集合并行），与 Serial-ImageCost 策略一致。
+// 其它 50+ 类不受影响，保持默认并行。
+[Collection("Serial-HaloLogger")]
 public sealed class Stage01FoundationTests : IDisposable
 {
     private readonly string _tempRoot;

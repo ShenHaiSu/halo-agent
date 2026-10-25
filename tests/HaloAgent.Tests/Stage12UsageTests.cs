@@ -63,7 +63,7 @@ public sealed class Stage12UsageTests : IDisposable
         {
             if (cond())
                 return;
-            Thread.Sleep(100);
+            Thread.Sleep(20);
         }
     }
 
@@ -138,7 +138,12 @@ public sealed class Stage12UsageTests : IDisposable
         svc.EnqueueFlush(new List<PendingUsageRow> { row }, "s1", "w1");
         svc.EnqueueFlush(new List<PendingUsageRow> { row }, "s1", "w1");
         WaitFor(() => svc.GetOverview(new UsageFilter { Preset = "today" }).TotalRequests >= 1);
-        Thread.Sleep(1500); // 让第二批也落完
+        // 原 Sleep(1500) 硬等第二批落库：改为事件驱动等 SumInput==20（同 request_id 累加口径）。
+        // WaitFor 超时仅兜底不断言，失败仍由下方 Assert 按原口径判定，测试作用不变。
+        WaitFor(
+            () => svc.GetOverview(new UsageFilter { Preset = "today" }).SumInput == 20,
+            timeoutMs: 8000
+        );
         var ov = svc.GetOverview(new UsageFilter { Preset = "today" });
         // need22-P1 T7：同 request_id 仍只占一行，但用量累加（重试不丢），非 OR IGNORE 丢弃。
         Assert.Equal(1, ov.TotalRequests);

@@ -8,6 +8,7 @@ using Xunit;
 namespace HaloAgent.Tests;
 
 /// <summary>S1 图片估算脱钩验证（只读验证单测，先跑出 A 失败证实脱钩）。</summary>
+[Collection("Serial-ImageCost")]
 public sealed class Stage09ImageEstimateTests
 {
     private static ChatImageRef Img(string id) =>

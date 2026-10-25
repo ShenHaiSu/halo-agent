@@ -13,17 +13,13 @@ namespace HaloAgent.Tests;
 /// <summary>need09-06/08 §1：ask_user 解析/校验/超时/并发。</summary>
 public sealed class Stage09AskUserTests : IDisposable
 {
-    private readonly int _savedTimeout;
-
     public Stage09AskUserTests()
     {
-        _savedTimeout = AskUserGate.DefaultTimeoutSec;
         AskUserGate.ClearAll();
     }
 
     public void Dispose()
     {
-        AskUserGate.DefaultTimeoutSec = _savedTimeout;
         AskUserGate.ClearAll();
     }
 
@@ -130,7 +126,6 @@ questions:
     [Fact(DisplayName = "S09-A5: 超时不挂起（1s 超时）")]
     public async Task Timeout_DoesNotHang()
     {
-        AskUserGate.DefaultTimeoutSec = 1;
         string session = "sess_" + Guid.NewGuid().ToString("N")[..8];
         var tool = new AskUserTool();
         var sw = Stopwatch.StartNew();
@@ -138,7 +133,7 @@ questions:
             new ToolCallDto(
                 "c1",
                 "ask_user",
-                "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}]}"
+                "{\"questions\":[{\"id\":\"q1\",\"question\":\"继续吗？\"}],\"timeoutSec\":1}"
             ),
             Ctx(session)
         );
@@ -163,9 +158,9 @@ questions:
             Ctx(session)
         );
         string? ticket = null;
-        for (int i = 0; i < 100 && ticket == null; i++)
+        for (int i = 0; i < 250 && ticket == null; i++)
         {
-            await Task.Delay(50);
+            await Task.Delay(20);
             ticket = AskUserGate.TryGetTicket(session);
         }
         Assert.NotNull(ticket);
@@ -198,8 +193,8 @@ questions:
             Ctx(session),
             cts.Token
         );
-        for (int i = 0; i < 100 && !AskUserGate.HasPending(session); i++)
-            await Task.Delay(50);
+        for (int i = 0; i < 250 && !AskUserGate.HasPending(session); i++)
+            await Task.Delay(20);
         Assert.True(AskUserGate.HasPending(session));
         cts.Cancel();
         var result = await task;
