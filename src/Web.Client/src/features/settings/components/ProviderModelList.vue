@@ -174,7 +174,7 @@
                     </div>
                   </template>
                 </div>
-                <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤8MB 校验，超限自动取最新 N 张。</div>
+                <div class="text-[11px] text-secondary">关闭后发送图片将被拦截；图片按 jpg/png/webp ≤10MB 校验，超限自动取最新 N 张。</div>
               </div>
             </div>
             <div class="col-span-12 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-subtle/60 p-2">

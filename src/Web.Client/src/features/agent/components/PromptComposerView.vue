@@ -59,7 +59,7 @@
           当前模型不支持看图，发送时将自动忽略图片（文字仍发送）
         </n-alert>
         <div v-if="overLimitWarn" class="text-[11px] text-amber-500">图片超限，将只发送最新 {{ maxImages }} 张</div>
-        <div v-if="oversizeWarn" class="text-[11px] text-amber-500">部分图片超过 8MB，发送时将自动跳过（文字仍发送）</div>
+        <div v-if="oversizeWarn" class="text-[11px] text-amber-500">部分图片超过 10MB，发送时将自动跳过（文字仍发送）</div>
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
             <PresetPopover />

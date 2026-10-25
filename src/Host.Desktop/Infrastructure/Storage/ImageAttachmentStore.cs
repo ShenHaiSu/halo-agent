@@ -19,7 +19,9 @@ namespace Host.Desktop.Infrastructure.Storage;
 /// </summary>
 public static class ImageAttachmentStore
 {
-    public const long MaxImageBytes = 8L * 1024 * 1024;
+    // S4 单图 raw 上限（十进制，对齐 provider 单图 10MB；参考 D361）；
+    // 前端 composerModel.MAX_IMAGE_BYTES 须同值（跨语言硬编码镜像，见参考 01-ingest-limits §4）。
+    public const long MaxImageBytes = 10_000_000;
     public const int NormalizeMaxEdge = 2048;
     public const int ThumbnailMaxEdge = 256;
     private static readonly string[] AllowedExtensions = { ".jpg", ".jpeg", ".png", ".webp" };

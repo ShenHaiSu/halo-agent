@@ -44,7 +44,8 @@ export interface SendPayload {
   attachments: SendAttachment[];
 }
 
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// S4 单图 raw 上限（十进制，对齐 provider 单图 10MB；后端 ImageAttachmentStore.MaxImageBytes 须同值，跨语言硬编码镜像）。
+export const MAX_IMAGE_BYTES = 10_000_000;
 export const MAX_PASTE_TEXT = 20000;
 const IMAGE_PLACEHOLDER_RE = /\[image:([A-Za-z0-9_-]+)\]/g;
 

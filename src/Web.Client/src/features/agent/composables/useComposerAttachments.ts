@@ -70,13 +70,13 @@ export function useComposerAttachments(deps: AttachmentDeps) {
       file: f,
       source,
       status: oversize ? 'oversize' : 'ready',
-      error: oversize ? `单张超过 8MB（${formatSmartBytesShort(f.size)}），发送时自动跳过` : undefined,
+      error: oversize ? `单张超过 10MB（${formatSmartBytesShort(f.size)}），发送时自动跳过` : undefined,
     };
     const draft = deps.getDraft();
     draft.attachments[attId] = att;
     deps.setDraft(insertImage(draft, attId));
     deps.insertPillAtCaret(att);
-    if (oversize) deps.warn('图片超过 8MB，发送时将自动跳过（文字仍发送）');
+    if (oversize) deps.warn('图片超过 10MB，发送时将自动跳过（文字仍发送）');
     void compressImageIfNeeded(f).then((smaller) => {
       try {
         if (smaller === f) return;

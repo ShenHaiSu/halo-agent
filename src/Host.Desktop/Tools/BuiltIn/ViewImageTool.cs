@@ -10,7 +10,7 @@ namespace Host.Desktop.Tools.BuiltIn;
 
 /// <summary>
 /// need09-05：view_image（第 7 号工具）。模型自主读取图片：
-/// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤8MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
+/// 空路径 Fail → 相对/绝对判定 → 扩展名+魔数头 → ≤10MB → 无损直存（原字节落盘，sha16 去重，need09-fix）
 /// → ToolResult.Success(摘要文本, Images=[ref])。base64 永不进事件/日志。
 /// </summary>
 [HaloAgent.Tools.Tool("view_image")]
@@ -23,7 +23,7 @@ public sealed class ViewImageTool : IToolHandler
     // NEED17 PromptBrief: Read an image file into the conversation
     // S3 §4.1：追加错误码清单（英文，模型可读），模型可按 errorCode 分支重试/换图/放弃。
     public string Description =>
-        "Read an image file (jpg/png/webp, max 8MB) from the workspace into the conversation. "
+        "Read an image file (jpg/png/webp, max 10MB) from the workspace into the conversation. "
         + "Use path relative to workspace root or an absolute path. "
         + "Returns a short text summary plus the image reference for the model to see. "
         + "Workspace image only. Non-image files fail fast. On non-vision models the image is stripped and text continues (see notice). "
@@ -184,7 +184,7 @@ public sealed class ViewImageTool : IToolHandler
                     return Task.FromResult(
                         ToolResult.FailCode(
                             ErrorCodes.ImageTooLarge,
-                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
+                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 10MB）。请压缩后重试。",
                             payloadJson: BuildTooLargePayload(
                                 ImageAttachmentStore.MaxImageBytes,
                                 fi.Length
@@ -207,7 +207,7 @@ public sealed class ViewImageTool : IToolHandler
                     return Task.FromResult(
                         ToolResult.FailCode(
                             ErrorCodes.ImageTooLarge,
-                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
+                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 10MB）。请压缩后重试。",
                             payloadJson: BuildTooLargePayload(
                                 ImageAttachmentStore.MaxImageBytes,
                                 fi.Length
