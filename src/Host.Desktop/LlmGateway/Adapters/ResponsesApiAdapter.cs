@@ -102,8 +102,21 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                 catch { }
             }
             string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            // S3 §4.3：截断告知显式化（与 Chat 同口径）：超 MaxImagesPerTurn 时并入发包副本，不落盘。
+            int maxImagesPerTurn = VisionDefaults.ResolveMaxImages(request.Model.MaxImagesPerTurn);
+            var outMessages =
+                mmPlan.Dropped > 0
+                    ? MultimodalPlanner.ApplyDropNotice(
+                        sendMessages,
+                        mmPlan.Dropped,
+                        mmPlan.Total,
+                        maxImagesPerTurn
+                    )
+                    : sendMessages;
             var pendingToolImages = new List<ResolvedImage>();
             var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
+            // S3 §4.3：tool 附图原始收集张数（含被截断丢掉的），供告知句算差值。
+            int pendingCollectedImages = 0;
             void FlushPendingToolImages()
             {
                 if (pendingToolImages.Count == 0)
@@ -118,7 +131,12 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                     "text",
                     ChatCompletionsAdapter.BuildTrailingToolImageText(
                         pendingToolRefs,
-                        pendingToolImages.Count
+                        pendingToolImages.Count,
+                        ChatCompletionsAdapter.CountDroppedImages(
+                            pendingCollectedImages,
+                            pendingToolImages.Count
+                        ),
+                        maxImagesPerTurn
                     )
                 );
                 writer.WriteEndObject();
@@ -134,10 +152,11 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                 writer.WriteEndObject();
                 pendingToolImages.Clear();
                 pendingToolRefs.Clear();
+                pendingCollectedImages = 0;
             }
             int mmIndex = -1;
             writer.WriteStartArray("input");
-            foreach (var msg in sendMessages)
+            foreach (var msg in outMessages)
             {
                 mmIndex++;
                 var kept = mmPlan
@@ -225,6 +244,8 @@ public sealed partial class ResponsesApiAdapter : ILlmProtocolAdapter
                         pendingToolRefs.Add(
                             (msg.ToolCallId ?? string.Empty, msg.Name, msg.Content)
                         );
+                        // S3 §4.3：原始张数按消息 Images 计（含被截断丢掉的），供告知句算差值。
+                        pendingCollectedImages += msg.Images?.Count ?? kept.Count;
                     }
                 }
                 else if (msg.Role.Equals("system", StringComparison.OrdinalIgnoreCase))

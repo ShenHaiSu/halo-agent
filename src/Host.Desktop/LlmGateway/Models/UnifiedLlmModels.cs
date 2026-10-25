@@ -83,6 +83,150 @@ public sealed record ResolvedImage(ChatImageRef Ref, string? DataUrl);
 /// <summary>need09-05：adapter 共享的多模态轮次规划（门控加取最新 N 保 latest 丢最旧加dataURL 解析）。</summary>
 public static class MultimodalPlanner
 {
+    /// <summary>
+    /// S3 §4.2/§4.3：丢图告知文本的唯一构造点（发包内存告知，永不落盘）。
+    /// 三种丢图各一句，均以 `[图片省略]`/`[图片已忽略]` 起头便于模型与日志检索。
+    /// </summary>
+    public static class DropNotice
+    {
+        /// <summary>熔断（本轮图片字节超预算，原图未发送）。skipped 为 (fileName, imageId)。</summary>
+        public static string BudgetExceeded(
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> skipped
+        )
+        {
+            if (skipped == null || skipped.Count == 0)
+                return string.Empty;
+            int mb = (int)Math.Round(budgetBytes / 1024d / 1024d, MidpointRounding.AwayFromZero);
+            var labels = new List<string>(skipped.Count);
+            foreach (var (fileName, imageId) in skipped)
+            {
+                string name = string.IsNullOrWhiteSpace(fileName) ? "图片" : fileName.Trim();
+                string id = ShortId(imageId);
+                labels.Add(string.IsNullOrEmpty(id) ? name : $"{name}({id})");
+            }
+            return $"[图片省略] 本轮图片字节超预算（{mb}MB），以下 {skipped.Count} 张图未发送："
+                + string.Join("、", labels)
+                + "；可改用缩略图/小图重试。";
+        }
+
+        /// <summary>张数截断（超 MaxImagesPerTurn，保最新丢最旧）。</summary>
+        public static string CountTruncated(int sent, int dropped, int max)
+        {
+            if (dropped <= 0)
+                return string.Empty;
+            return $"（实发 {sent} 张，另有 {dropped} 张因超 MaxImagesPerTurn({max})未发送）";
+        }
+
+        /// <summary>非视觉剥离（当前模型不支持看图，图片未发送但文字照常）。</summary>
+        public static string NonVisionStripped(string modelId, int stripped) =>
+            $"[图片已忽略] 当前模型 {modelId} 不支持看图，本轮 {stripped} 张图片未发送，文字照常发送。";
+
+        /// <summary>
+        /// S3 §4.4：非视觉剥离的发包副本——图片全剥离（原列表不动），并在首条消息正文前置告知句。
+        /// 返回剥离后的消息副本；stripped=0 时原样返回入参（零抖动）。
+        /// </summary>
+        public static (IReadOnlyList<UnifiedChatMessage> Messages, int Stripped) StripForNonVision(
+            IReadOnlyList<UnifiedChatMessage> messages,
+            string modelId
+        )
+        {
+            if (messages == null || messages.Count == 0)
+                return (messages ?? Array.Empty<UnifiedChatMessage>(), 0);
+            int stripped = 0;
+            foreach (var m in messages)
+            {
+                if (m?.Images != null)
+                    stripped += m.Images.Count;
+            }
+            if (stripped == 0)
+                return (messages, 0);
+
+            string notice = NonVisionStripped(modelId, stripped);
+            var result = new List<UnifiedChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var src = messages[i];
+                var copy = new UnifiedChatMessage
+                {
+                    Id = src.Id,
+                    Role = src.Role,
+                    Content = src.Content,
+                    ReasoningContent = src.ReasoningContent,
+                    ToolCalls = src.ToolCalls,
+                    ToolCallId = src.ToolCallId,
+                    Name = src.Name,
+                    // 剥离图片：副本不带 Images（落盘历史不受影响）
+                    Images = null,
+                    CreatedAtUtc = src.CreatedAtUtc,
+                };
+                result.Add(i == 0 ? WithNotice(copy, notice, append: false) : copy);
+            }
+            return (result, stripped);
+        }
+
+        /// <summary>
+        /// S3 §4.2：熔断告知的发包副本——把「字节超预算未发送」句追加到末条消息正文（不落盘）。
+        /// skipped 为空时原样返回入参（零抖动）。
+        /// </summary>
+        public static IReadOnlyList<UnifiedChatMessage> WithBudgetNotice(
+            IReadOnlyList<UnifiedChatMessage> messages,
+            long budgetBytes,
+            IReadOnlyList<(string FileName, string ImageId)> skipped
+        )
+        {
+            if (messages == null || messages.Count == 0)
+                return messages ?? Array.Empty<UnifiedChatMessage>();
+            string notice = BudgetExceeded(budgetBytes, skipped);
+            if (notice.Length == 0)
+                return messages;
+
+            var result = new List<UnifiedChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var src = messages[i];
+                result.Add(i == messages.Count - 1 ? WithNotice(src, notice, append: true) : src);
+            }
+            return result;
+        }
+
+        /// <summary>imageId 前 6 位（判定/检索用，不含敏感路径）。</summary>
+        internal static string ShortId(string? imageId)
+        {
+            string id = (imageId ?? string.Empty).Trim();
+            if (id.Length == 0)
+                return string.Empty;
+            return id.Length <= 6 ? id : id.Substring(0, 6);
+        }
+
+        /// <summary>
+        /// S3：把告知句并入一条内存消息副本（不落盘）。图像引用共享，只替换 Content。
+        /// append=true 追加到文末（user 直挂图截断用），false 前置（剥离通知用）。
+        /// </summary>
+        public static UnifiedChatMessage WithNotice(
+            UnifiedChatMessage src,
+            string notice,
+            bool append
+        )
+        {
+            var copy = new UnifiedChatMessage
+            {
+                Id = src.Id,
+                Role = src.Role,
+                Content = append
+                    ? ((src.Content ?? string.Empty) + notice)
+                    : (notice + (src.Content ?? string.Empty)),
+                ReasoningContent = src.ReasoningContent,
+                ToolCalls = src.ToolCalls,
+                ToolCallId = src.ToolCallId,
+                Name = src.Name,
+                Images = src.Images,
+                CreatedAtUtc = src.CreatedAtUtc,
+            };
+            return copy;
+        }
+    }
+
     /// <summary>规划本轮图片：非视觉模型含图抛 NonVisionModelException；超 Max 取最新 N 张。返回与 Messages 等长对齐的 kept 列表。</summary>
     public static (List<List<ResolvedImage>> Kept, int Dropped, int Total) PlanTurn(
         UnifiedLlmRequest request
@@ -148,6 +292,51 @@ public static class MultimodalPlanner
             }
         }
         return (kept, dropped, total);
+    }
+
+    /// <summary>
+    /// S3 §4.3：把「超 MaxImagesPerTurn 未发送」告知并入发包消息副本（不落盘）。
+    /// 张数算法与 PlanTurn 完全一致（保最新丢最旧），这里只补文字告知。
+    /// 返回新列表：无告知时原样返回入参引用，避免无谓拷贝与前缀抖动。
+    /// </summary>
+    public static IReadOnlyList<UnifiedChatMessage> ApplyDropNotice(
+        IReadOnlyList<UnifiedChatMessage> messages,
+        int dropped,
+        int total,
+        int max
+    )
+    {
+        if (messages == null || dropped <= 0 || total <= 0)
+            return messages ?? Array.Empty<UnifiedChatMessage>();
+        string notice = DropNotice.CountTruncated(total - dropped, dropped, max);
+        if (notice.Length == 0)
+            return messages;
+
+        // 告知挂在「最早的一条含图 user 消息」上（user 直挂图截断同理：内容文本尾追加）。
+        // tool 附图不走这里：它的告知由 BuildTrailingToolImageText 统一承载。
+        var result = new List<UnifiedChatMessage>(messages.Count);
+        bool placed = false;
+        foreach (var msg in messages)
+        {
+            result.Add(msg);
+            if (
+                !placed
+                && msg != null
+                && msg.Images != null
+                && msg.Images.Count > 0
+                && string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                result[result.Count - 1] = DropNotice.WithNotice(msg, notice, append: true);
+                placed = true;
+            }
+        }
+        if (!placed)
+        {
+            // 没有可挂的 user 图消息（例如全在 tool 上）⇒ 不追加，避免凭空多一条 user。
+            return messages;
+        }
+        return result;
     }
 }
 

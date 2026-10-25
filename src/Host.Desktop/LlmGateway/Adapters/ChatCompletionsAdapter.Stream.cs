@@ -368,14 +368,36 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
         };
     }
 
-    /// <summary>tool 块尾随 user 文案：带 callId 归属，单条截断 200 字防 token 翻倍。</summary>
+    /// <summary>
+    /// S3 §4.3：本批 tool 附图里有几张被「超 MaxImagesPerTurn」丢掉。
+    /// Planner 只从最早处丢，故「原始收集到的张数 - 实发张数」即本批丢失数。
+    /// </summary>
+    internal static int CountDroppedImages(int collectedCount, int sentCount)
+    {
+        int diff = collectedCount - sentCount;
+        return diff > 0 ? diff : 0;
+    }
+
+    /// <summary>tool 块尾随 user 文案：带 callId 归属，单条截断 200 字防 token 翻倍。
+    /// S3 §4.3：droppedCount&gt;0 时追加「另有 M 张因超 MaxImagesPerTurn(N)未发送」，让模型知道丢了谁。
+    /// </summary>
     internal static string BuildTrailingToolImageText(
         List<(string CallId, string? Name, string? Text)> refs,
-        int imageCount
+        int imageCount,
+        int droppedCount = 0,
+        int maxImagesPerTurn = 0
     )
     {
+        string suffix =
+            droppedCount > 0
+                ? Models.MultimodalPlanner.DropNotice.CountTruncated(
+                    imageCount,
+                    droppedCount,
+                    maxImagesPerTurn
+                )
+                : string.Empty;
         if (refs == null || refs.Count == 0)
-            return $"[附图] 以上工具回包附图共 {imageCount} 张。";
+            return $"[附图] 以上工具回包附图共 {imageCount} 张。{suffix}";
         var parts = new List<string>();
         foreach (var (cid, name, text) in refs)
         {
@@ -389,7 +411,7 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
             if (string.Join("；", parts).Length > 800)
                 break;
         }
-        return $"[附图] 以下为上述工具回包附图（共 {imageCount} 张）：{string.Join("；", parts)}";
+        return $"[附图] 以下为上述工具回包附图（共 {imageCount} 张）：{string.Join("；", parts)}{suffix}";
     }
 
     private sealed class PartialToolCallState

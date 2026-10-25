@@ -99,6 +99,18 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
             };
             var mmPlan = MultimodalPlanner.PlanTurn(planRequest);
             string visionDetail = VisionDefaults.NormalizeDetail(request.Model.VisionDetail);
+            // S3 §4.3：截断告知显式化——超 MaxImagesPerTurn 时把「另有 M 张未发送」并入发包文本。
+            // 只改发包内存副本（sendMessages），不落盘；张数算法仍由 PlanTurn 保最新丢最旧。
+            int maxImagesPerTurn = VisionDefaults.ResolveMaxImages(request.Model.MaxImagesPerTurn);
+            var outMessages =
+                mmPlan.Dropped > 0
+                    ? MultimodalPlanner.ApplyDropNotice(
+                        sendMessages,
+                        mmPlan.Dropped,
+                        mmPlan.Total,
+                        maxImagesPerTurn
+                    )
+                    : sendMessages;
             if (mmPlan.Dropped > 0)
             {
                 try
@@ -118,6 +130,9 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
             }
             var pendingToolImages = new List<ResolvedImage>();
             var pendingToolRefs = new List<(string CallId, string? Name, string? Text)>();
+            // S3 §4.3：tool 附图「原始收集张数」（含被 MaxImagesPerTurn 丢掉的部分），
+            // 与实发 pendingToolImages.Count 相减即本批丢失数（Planner 只从最早处丢）。
+            int pendingCollectedImages = 0;
             void FlushPendingToolImages()
             {
                 if (pendingToolImages.Count == 0)
@@ -129,7 +144,12 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                 writer.WriteString("type", "text");
                 writer.WriteString(
                     "text",
-                    BuildTrailingToolImageText(pendingToolRefs, pendingToolImages.Count)
+                    BuildTrailingToolImageText(
+                        pendingToolRefs,
+                        pendingToolImages.Count,
+                        CountDroppedImages(pendingCollectedImages, pendingToolImages.Count),
+                        maxImagesPerTurn
+                    )
                 );
                 writer.WriteEndObject();
                 foreach (var r in pendingToolImages)
@@ -146,9 +166,12 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                 writer.WriteEndObject();
                 pendingToolImages.Clear();
                 pendingToolRefs.Clear();
+                pendingCollectedImages = 0;
             }
             int mmIndex = -1;
-            foreach (var msg in sendMessages)
+            // S3 §4.3：outMessages 与 sendMessages 等长同序（仅 Content 副本被补告知句），
+            // Kept 按 sendMessages 规划，故索引对齐不变。
+            foreach (var msg in outMessages)
             {
                 mmIndex++;
                 var kept = mmPlan
@@ -210,6 +233,11 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                         pendingToolRefs.Add(
                             (msg.ToolCallId ?? string.Empty, msg.Name, msg.Content)
                         );
+                        // S3 §4.3：原始张数按消息 Images 计（含被截断丢掉的），供告知句算差值。
+                        pendingCollectedImages +=
+                            msg.Images?.Count(i =>
+                                i != null && !string.IsNullOrWhiteSpace(i.ImageId)
+                            ) ?? kept.Count;
                     }
                     continue;
                 }

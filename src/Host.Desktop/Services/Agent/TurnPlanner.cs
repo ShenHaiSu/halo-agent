@@ -49,6 +49,15 @@ public sealed partial class AgentOrchestrator
                     return " Hint: the tool is not in this turn's preset; use an active tool or ask for Full preset.";
                 case "INVALID_JSON_ARGUMENTS":
                     return " Hint: resend with complete JSON (no truncation); keep strings escaped.";
+                // S3 §4.1：view_image 四态错误码 Hint（英文一句，模型可判下一步动作）。
+                case "IMAGE_TOO_LARGE":
+                    return " Hint: the image exceeds the per-image limit; compress/resize it or pick a smaller file, then retry.";
+                case "NOT_AN_IMAGE":
+                    return " Hint: only jpg/png/webp are readable (svg/gif/bmp rejected); convert the file first or pick another image.";
+                case "IMAGE_MISSING":
+                    return " Hint: verify the path with list_dir, then retry with the exact file name.";
+                case "PATH_TRAVERSAL":
+                    return " Hint: use a path inside the workspace root (no ../, no system dirs, no index files like _index.json).";
                 // NEED17-07 §7.1：全仓库唯一中文 Hint（逐字）。07 快照/Gate 落子后保持文案不变。
                 case "PYTHON_NOT_AVAILABLE":
                     return " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
@@ -267,15 +276,20 @@ public sealed partial class AgentOrchestrator
         if (!string.IsNullOrWhiteSpace(ctx.SystemPrompt))
             requestMessages.Add(UnifiedChatMessage.System(ctx.SystemPrompt));
         requestMessages.AddRange(budgeted);
+        // S3 §4.4：非视觉剥离告知（发包内存副本，不落盘）。
+        // 落盘的 assistant 通知保留（人类可见）；这里另给模型一句，避免「模型以为本轮有图」而幻觉。
+        string? nonVisionNotice = null;
         // need09-03：非视觉模型含图 → 剥离图片 + 通知 + 纯文本降级（仅一次；历史落盘不受影响，切换模型可恢复）
         if (!ctx.SnapVision && requestMessages.Any(m => m.Images != null && m.Images.Count > 0))
         {
-            int stripped = requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count);
+            // 就地剥离（requestMessages 为发包基列表；模型侧另由 StripForNonVision 前置告知句）。
+            nonVisionNotice = MultimodalPlanner.DropNotice.NonVisionStripped(
+                ctx.Model.Id,
+                requestMessages.Where(m => m.Images != null).Sum(m => m.Images!.Count)
+            );
             foreach (var m in requestMessages)
                 m.Images = null;
-            var notice = UnifiedChatMessage.Assistant(
-                $"[图片已忽略] 当前模型 {ctx.Model.Id} 不支持看图，本轮 {stripped} 张图片已剥离，文字照常发送。"
-            );
+            var notice = UnifiedChatMessage.Assistant(nonVisionNotice);
             try
             {
                 await _sessionService
@@ -348,6 +362,9 @@ public sealed partial class AgentOrchestrator
         var imgCache = new Dictionary<string, string?>(StringComparer.Ordinal);
         long imgUsedBytes = 0;
         const long ImgBudgetBytes = 8L * 1024 * 1024;
+        // S3 §4.2：熔断显式化——被预算跳过的图收集 (fileName, imageId)，发包前告知模型。
+        // 只收集不改变 resolver 语义（仍返回 null，adapter 的 Where(!IsNullOrWhiteSpace(DataUrl)) 过滤不动）。
+        var skippedKeys = new List<(string FileName, string ImageId)>();
         Func<ChatImageRef, string?> imgResolver = img =>
         {
             if (img == null || string.IsNullOrWhiteSpace(img.ImageId))
@@ -367,6 +384,7 @@ public sealed partial class AgentOrchestrator
                     $"[Image] 本轮图片字节超预算（{ImgBudgetBytes}），已跳过 {key}（前端可经 GetImageThumbnail 懒取）"
                 );
                 imgCache[key] = null;
+                skippedKeys.Add((img.FileName ?? string.Empty, key));
                 return null;
             }
             if (url != null)
@@ -374,6 +392,39 @@ public sealed partial class AgentOrchestrator
             imgCache[key] = url;
             return url;
         };
+
+        // S3 §4.2/§4.4：组装发包消息副本（requestMessages 原对象落盘语义不动）。
+        // 顺序：剥离告知前置首条内容 → 熔断告知追加末条；两者都只进内存副本。
+        var budgetNotice = MultimodalPlanner.DropNotice.BudgetExceeded(ImgBudgetBytes, skippedKeys);
+        List<UnifiedChatMessage> sendMessages = requestMessages;
+        if (!string.IsNullOrEmpty(nonVisionNotice) || budgetNotice.Length > 0)
+        {
+            sendMessages = new List<UnifiedChatMessage>(requestMessages.Count);
+            for (int i = 0; i < requestMessages.Count; i++)
+            {
+                var src = requestMessages[i];
+                bool isFirst = i == 0;
+                bool isLast = i == requestMessages.Count - 1;
+                var copy = src;
+                if (isFirst && !string.IsNullOrEmpty(nonVisionNotice))
+                {
+                    copy = MultimodalPlanner.DropNotice.WithNotice(
+                        copy,
+                        nonVisionNotice,
+                        append: false
+                    );
+                }
+                if (isLast && budgetNotice.Length > 0)
+                {
+                    copy = MultimodalPlanner.DropNotice.WithNotice(
+                        copy,
+                        budgetNotice,
+                        append: true
+                    );
+                }
+                sendMessages.Add(copy);
+            }
+        }
         var request = new UnifiedLlmRequest
         {
             RequestId = requestId,
@@ -381,7 +432,7 @@ public sealed partial class AgentOrchestrator
             Model = ctx.Model,
             HeaderContext = headerContext,
             SystemInstructions = ctx.SystemPrompt,
-            Messages = requestMessages,
+            Messages = sendMessages,
             Tools = toolDefs,
             ImageResolver = imgResolver,
         };
