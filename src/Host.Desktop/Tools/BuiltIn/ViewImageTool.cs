@@ -169,7 +169,25 @@ public sealed class ViewImageTool : IToolHandler
                         )
                     );
                 }
-                raw = File.ReadAllBytes(fullPath);
+                // S2 有界读：快筛之后仍走 take(limit+1) 限长读，防 TOCTOU（先 stat 后读之间文件被替换撑大）。
+                // 失败走现有超限 Fail 文案（错误码是 S3 的事，本阶段文案不动），不抛、不中断整轮。
+                if (
+                    !ImageAttachmentStore.TryReadBounded(
+                        fullPath,
+                        ImageAttachmentStore.MaxImageBytes,
+                        out byte[]? bounded
+                    )
+                    || bounded == null
+                )
+                {
+                    return Task.FromResult(
+                        ToolResult.Fail(
+                            $"图片超限：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'（{fi.Length / 1024} KB，上限 8MB）。请压缩后重试。",
+                            durationMs: sw.ElapsedMilliseconds
+                        )
+                    );
+                }
+                raw = bounded;
             }
             catch (Exception ex)
             {

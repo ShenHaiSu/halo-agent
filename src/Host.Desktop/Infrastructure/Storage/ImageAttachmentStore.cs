@@ -130,6 +130,149 @@ public static class ImageAttachmentStore
         return null;
     }
 
+    /// <summary>S2 有界读原语（take(limit+1) 语义，参考 pi-desktop 03-context-hydration Step 3）：
+    /// 限长读，最多读 limit+1 字节；读到 limit+1 即判超限并放弃，不把超限字节送进下游。
+    /// ok=false 表示超限或 IO 失败或空文件，调用方按“放弃该图”处理（null/Fail/continue，不抛、不中断整轮）。
+    /// 读盘与 stat 之间不一致（读中变大/变小）同样按放弃处理 + Warn 可观测。</summary>
+    public static bool TryReadBounded(string absPath, long limitBytes, out byte[]? bytes)
+    {
+        bytes = null;
+        if (string.IsNullOrWhiteSpace(absPath) || limitBytes <= 0)
+            return false;
+        try
+        {
+            using var fs = new FileStream(
+                absPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                4096,
+                useAsync: false
+            );
+            using var ms = new MemoryStream();
+            byte[] buf = new byte[4096];
+            long total = 0;
+            int n;
+            while ((n = fs.Read(buf, 0, buf.Length)) > 0)
+            {
+                // take(limit+1)：累计超过 limit 即停并判超限。
+                if (total + n > limitBytes)
+                {
+                    try
+                    {
+                        HaloLogger.App.Warn(
+                            "[Image] bounded-read reject path="
+                                + Path.GetFileName(absPath)
+                                + " reason=over-limit"
+                        );
+                    }
+                    catch { }
+                    return false;
+                }
+                ms.Write(buf, 0, n);
+                total += n;
+            }
+            if (total == 0)
+            {
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[Image] bounded-read reject path="
+                            + Path.GetFileName(absPath)
+                            + " reason=empty"
+                    );
+                }
+                catch { }
+                return false;
+            }
+            bytes = ms.ToArray();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                HaloLogger.App.Warn(
+                    "[Image] bounded-read reject path="
+                        + Path.GetFileName(absPath)
+                        + " reason=io "
+                        + ex.Message
+                );
+            }
+            catch { }
+            bytes = null;
+            return false;
+        }
+    }
+
+    /// <summary>S2 base64 侧有界原语（给 SaveTurnAttachments 用）：先按字符串长度 O(1) 前置快筛
+    /// （base64 约 4/3 膨胀：b64trim.Length &gt; limit*4/3 + 4 即拒，防超大 string 直接解码进内存），
+    /// 再 FromBase64String，解出后仍按同值复核长度。false 按“跳过该附件”处理。</summary>
+    public static bool TryDecodeBase64Bounded(string b64trim, long limitBytes, out byte[]? bytes)
+    {
+        bytes = null;
+        if (string.IsNullOrEmpty(b64trim) || limitBytes <= 0)
+            return false;
+        try
+        {
+            long maxB64Len = limitBytes * 4L / 3L + 4L;
+            if ((long)b64trim.Length > maxB64Len)
+            {
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[Image] bounded-read reject path=base64 reason=over-limit len="
+                            + b64trim.Length
+                    );
+                }
+                catch { }
+                return false;
+            }
+            byte[] raw;
+            try
+            {
+                raw = Convert.FromBase64String(b64trim);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[Image] bounded-read reject path=base64 reason=io " + ex.Message
+                    );
+                }
+                catch { }
+                return false;
+            }
+            if (raw.Length == 0 || (long)raw.Length > limitBytes)
+            {
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[Image] bounded-read reject path=base64 reason=over-limit bytes="
+                            + raw.Length
+                    );
+                }
+                catch { }
+                return false;
+            }
+            bytes = raw;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                HaloLogger.App.Warn(
+                    "[Image] bounded-read reject path=base64 reason=io " + ex.Message
+                );
+            }
+            catch { }
+            bytes = null;
+            return false;
+        }
+    }
+
     public static string? ResolveDataUrl(
         string dataRoot,
         string workspaceId,
@@ -144,8 +287,7 @@ public static class ImageAttachmentStore
             string? abs = FindImagePath(dataRoot, workspaceId, sessionId, img.ImageId.Trim());
             if (abs == null || !File.Exists(abs))
                 return null;
-            byte[] bytes = File.ReadAllBytes(abs);
-            if (bytes.Length == 0 || bytes.Length > MaxImageBytes)
+            if (!TryReadBounded(abs, MaxImageBytes, out byte[]? bytes) || bytes == null)
                 return null;
             string mime = MimeFromExtension(abs);
             if (!CheckMagic(bytes, mime))

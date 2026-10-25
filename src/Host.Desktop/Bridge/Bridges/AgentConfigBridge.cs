@@ -212,20 +212,18 @@ public sealed partial class HostBridgeFacade
                 }
                 if (string.IsNullOrWhiteSpace(mime))
                     mime = Infrastructure.Storage.ImageAttachmentStore.MimeFromExtension(fileName);
-                byte[] raw;
-                try
-                {
-                    raw = Convert.FromBase64String(b64trim);
-                }
-                catch
-                {
-                    continue;
-                }
+                // S2 base64 有界：字符串 O(1) 前筛 + 解码后复核；超限走现有 continue
+                // （静默跳过语义本阶段不动，S3 统一加告知），不抛、不中断整轮。
                 if (
-                    raw.Length == 0
-                    || raw.Length > Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes
+                    !Infrastructure.Storage.ImageAttachmentStore.TryDecodeBase64Bounded(
+                        b64trim,
+                        Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes,
+                        out byte[]? raw0
+                    )
+                    || raw0 == null
                 )
                     continue;
+                byte[] raw = raw0;
                 if (!Infrastructure.Storage.ImageAttachmentStore.CheckMagic(raw, mime))
                     continue;
                 // need09-fix：贴图与 tool 统一无损直存（原字节落盘，sha 去重），detail 只影响发模参数，不降质、不转码。
@@ -283,7 +281,16 @@ public sealed partial class HostBridgeFacade
                 return Task.FromResult(
                     BridgeResponse<string>.Fail("IMAGE_MISSING", "图片已丢失（文件被删除）")
                 );
-            byte[] bytes = File.ReadAllBytes(abs);
+            // S2 有界读：缩略图同样走 take(limit+1) 限长读（附件链路，无界读零残留）。
+            if (
+                !Infrastructure.Storage.ImageAttachmentStore.TryReadBounded(
+                    abs,
+                    Infrastructure.Storage.ImageAttachmentStore.MaxImageBytes,
+                    out byte[]? bytes
+                )
+                || bytes == null
+            )
+                return Task.FromResult(BridgeResponse<string>.Fail("IMAGE_DECODE_ERROR", "图片解码失败"));
             string? url = Infrastructure.Storage.ImageAttachmentStore.MakeThumbnailDataUrl(bytes);
             if (url == null)
                 return Task.FromResult(BridgeResponse<string>.Fail("IMAGE_DECODE_ERROR", "图片解码失败"));
