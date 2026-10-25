@@ -99,7 +99,10 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         return result;
     }
 
-    /// <summary>need09-02：浅克隆消息（Id/时间戳保留；ToolCalls 列表复制），供图片占位裁剪使用，不碰调用方原始对象。</summary>
+    /// <summary>
+    /// need09-02：浅克隆消息（Id/时间戳保留；ToolCalls/Images 列表复制），供图片占位裁剪使用，不碰调用方原始对象。
+    /// S1：必须复制 Images（与 WorkspaceSessionService.History.cs:81 分支克隆一致），否则第一阶裁剪会丢图（Clone 隔离失效）。
+    /// </summary>
     private static List<UnifiedChatMessage> CloneMessages(
         IReadOnlyList<UnifiedChatMessage> messages
     )
@@ -116,6 +119,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
                     Content = m.Content,
                     ReasoningContent = m.ReasoningContent,
                     ToolCalls = m.ToolCalls != null ? new List<UnifiedToolCall>(m.ToolCalls) : null,
+                    Images = m.Images != null ? new List<ChatImageRef>(m.Images) : null,
                     ToolCallId = m.ToolCallId,
                     Name = m.Name,
                     InputTokens = m.InputTokens,
@@ -127,7 +131,12 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         return list;
     }
 
-    /// <summary>need09-02：从最旧消息开始把存活图片引用替换为占位，直到达标或无引用可丢；返回是否发生过替换。</summary>
+    /// <summary>
+    /// need09-02：从最旧消息开始把存活图片引用替换为占位，直到达标或无引用可丢；返回是否发生过替换。
+    /// S1：Images 列表与文本正则双源。列表条目从最旧消息起整单摘除（发包侧不再读盘发送），
+    /// 每摘一条追加一个 [image omitted] 占位到 Content 尾（复用 ImageOmittedPlaceholder，保证 CountMessageImages().omitted 可观测）；
+    /// 文本正则替换逻辑保留（兼容老快照）。
+    /// </summary>
     private static bool DropOldestImageRefs(List<UnifiedChatMessage> working, int maxBudget)
     {
         bool dropped = false;
@@ -136,6 +145,18 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
             if (working.Sum(m => EstimateMessageTokens(m)) <= maxBudget)
                 break;
             var msg = working[i];
+            // S1：先摘 Images 列表（整单，最旧优先；发包侧不再读盘发送）。
+            if (msg.Images != null && msg.Images.Count > 0)
+            {
+                int n = msg.Images.Count;
+                msg.Images = null;
+                string tail = string.Join(
+                    " ",
+                    System.Linq.Enumerable.Repeat(ImageOmittedPlaceholder, n)
+                );
+                msg.Content = string.IsNullOrEmpty(msg.Content) ? tail : msg.Content + " " + tail;
+                dropped = true;
+            }
             if (!string.IsNullOrEmpty(msg.Content) && CountLiveImageRefs(msg.Content) > 0)
             {
                 msg.Content = ImageRefRegex.Replace(msg.Content, ImageOmittedPlaceholder);
