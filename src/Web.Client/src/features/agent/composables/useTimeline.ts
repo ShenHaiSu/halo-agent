@@ -16,6 +16,7 @@ import { useSmoothText } from './useSmoothText';
 import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
 import { INITIAL_MOUNT, isNearTop, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
+import { need02Attr as buildNeed02Attr, useNeed02Flags } from '@features/need02/utils/need02Flags';
 
 export interface DisplaySeg {
   kind: string;
@@ -60,6 +61,13 @@ export function useTimeline() {
   } catch {
     turnRunKillSwitch.value = false;
   }
+  /**
+   * need02-P0：总开关矩阵快照（只读透传，零行为变更）。
+   * P1–P4 的行为分支在各自阶段实现；本阶段仅把开关快照与 `data-need02` 透传串
+   * 交给模板（TimelineView 根节点 `data-need02`），供截图对比与调试面板使用。
+   */
+  const need02Flags = useNeed02Flags();
+  const need02Attr = computed<string>(() => buildNeed02Attr(need02Flags));
   /**
    * need-01：末组是否仍在「活动轨」。
    * 条件 = 本轮仍在生成 && 传入的末组 assistantId 就是最后一条已落盘的 assistant
@@ -613,6 +621,9 @@ export function useTimeline() {
     toggleTurn,
     /** need-01：无正文轮次合并（kill switch + 汇总舱展开态）。 */
     turnRunKillSwitch,
+    /** need02-P0：总开关快照 + data-need02 透传串（只读，零行为变更）。 */
+    need02Flags,
+    need02Attr,
     isRunExpanded,
     toggleRun,
     runByKey,

@@ -4,6 +4,7 @@
     class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative transcript-scroll"
     data-testid="message-timeline"
     :data-transcript-settling="veilCovering ? 'true' : undefined"
+    :data-need02="need02Attr"
   >
     <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <div v-if="isEmpty" class="py-10 text-center space-y-2">
@@ -232,6 +233,8 @@ const props = defineProps<{
   showJumpBtn?: boolean;
   readingWindow?: boolean;
   veilCovering?: boolean;
+  /** need02-P0：开关透传串（data-need02），缺省 undefined 时不渲染该属性，零视觉变更。 */
+  need02Attr?: string;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];

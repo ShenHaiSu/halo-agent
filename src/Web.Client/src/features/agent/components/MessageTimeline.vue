@@ -32,6 +32,7 @@
         :segs="t.displaySegs"
         :seg-kill-switch="t.stream.segKillSwitch"
         :stream-md-kill-switch="t.stream.streamMdKillSwitch"
+        :need02-attr="t.need02Attr"
         :fallback-cards="t.cards.toolCards"
         :streaming-text="t.stream.streamingText"
         :show-thinking="t.showThinking && t.transcriptRunning"
