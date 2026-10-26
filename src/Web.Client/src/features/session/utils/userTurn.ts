@@ -83,7 +83,10 @@ function toolRefsOf(msg: UnifiedChatMessage): Array<{ id: string; name: string }
   const list = (msg as unknown as { toolCalls?: Array<{ id?: string; function?: { name?: string } }> }).toolCalls;
   if (!Array.isArray(list)) return [];
   return list
-    .map((tc) => ({ id: String((tc as { id?: string }).id || ''), name: String(tc.function?.name || (tc as { name?: string }).name || 'tool') }))
+    .map((tc) => ({
+      id: String((tc as { id?: string }).id || ''),
+      name: String(tc.function?.name || (tc as { name?: string }).name || 'tool'),
+    }))
     .filter((t) => t.id);
 }
 
@@ -147,7 +150,13 @@ export function summaryOf(input: { duration: string; toolCount: number; failedCo
 }
 
 /** 完整汇总（含字数，0 字隐藏；供测试/展开区）。 */
-export function fullSummaryOf(input: { duration: string; toolCount: number; failedCount: number; contentChars: number; reasoningChars: number }): string {
+export function fullSummaryOf(input: {
+  duration: string;
+  toolCount: number;
+  failedCount: number;
+  contentChars: number;
+  reasoningChars: number;
+}): string {
   const parts: string[] = [];
   if (input.duration) parts.push(input.duration);
   if (input.toolCount > 0) parts.push(`工具${input.toolCount}`);
@@ -163,7 +172,11 @@ function makeStep(iteration: number, assistant: UnifiedChatMessage | null, tools
   const toolCalls = assistant ? toolRefsOf(assistant) : [];
   const telemetry =
     assistant && (assistant.inputTokens != null || assistant.outputTokens != null)
-      ? { inputTokens: assistant.inputTokens ?? null, cachedTokens: assistant.cachedTokens ?? null, outputTokens: assistant.outputTokens ?? null }
+      ? {
+          inputTokens: assistant.inputTokens ?? null,
+          cachedTokens: assistant.cachedTokens ?? null,
+          outputTokens: assistant.outputTokens ?? null,
+        }
       : null;
   return {
     iteration,
@@ -173,7 +186,9 @@ function makeStep(iteration: number, assistant: UnifiedChatMessage | null, tools
     toolMessages: tools.slice(),
     toolCalls,
     telemetry,
-    createdAtUtc: String((assistant as unknown as { createdAtUtc?: string } | null)?.createdAtUtc || tools[tools.length - 1]?.createdAtUtc || ''),
+    createdAtUtc: String(
+      (assistant as unknown as { createdAtUtc?: string } | null)?.createdAtUtc || tools[tools.length - 1]?.createdAtUtc || ''
+    ),
   };
 }
 
@@ -211,7 +226,10 @@ function finalizeTurn(args: {
   const generating = opts.isGenerating === true;
   const containsActive = activeId ? built.some((s) => s.assistantId === activeId) : false;
   const lastStepActive = activeId ? built.length > 0 && built[built.length - 1]?.assistantId === activeId : false;
-  const isRunning = generating && (containsActive || (lastStepActive && built.length > 0) || (activeId === '' && built.length === 0 && !!userMsg));
+  // P0-2：只有「本轮仍在生成」的候选轮才允许 running。是否真是最后一轮由 buildUserTurns 收尾统一裁决
+  // （它能看到全部轮次），此处只保证“没有 live 落点的轮绝不亮运行态”，避免旧轮抢先拿到 live 区。
+  const isRunning =
+    generating && (containsActive || (lastStepActive && built.length > 0) || (activeId === '' && built.length === 0 && !!userMsg));
   // 失败态：任一 tool 含 [Tool Error 即失败（与 failedToolCount 同源）。
   const stopped = opts.stoppedTurnKeys ? opts.stoppedTurnKeys.has(key) : false;
   const phase: TurnPhase = turnPhaseOf({ hasOwnError: failedCount > 0, stopped, isActive: isRunning, hasContent: contentChars > 0 });
@@ -259,91 +277,156 @@ function requestIdOf(msg: UnifiedChatMessage | null): string | null {
  * - system 独立 entry，不断轮；
  * - 无 user 开局残留（老数据/compact）归入孤儿轮（userMsg=null，key 按首条 id）。
  */
- export function buildUserTurns(messages: UnifiedChatMessage[] | null | undefined, opts: BuildUserTurnsOpts = {}): UserTurnEntry[] {
-   const list = Array.isArray(messages) ? messages : [];
-   const now = typeof opts.now === 'number' ? opts.now : Date.now();
-   const out: UserTurnEntry[] = [];
-   let curUser: UnifiedChatMessage | null = null;
-   let curRequestId: string | null = null;
-   let curSteps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }> = [];
-   let orphanSteps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }> = [];
-   let orphanHeadId = '';
-   let pendingStepAssistant: UnifiedChatMessage | null = null;
-   let pendingStepTools: UnifiedChatMessage[] = [];
+export function buildUserTurns(messages: UnifiedChatMessage[] | null | undefined, opts: BuildUserTurnsOpts = {}): UserTurnEntry[] {
+  const list = Array.isArray(messages) ? messages : [];
+  const now = typeof opts.now === 'number' ? opts.now : Date.now();
+  const out: UserTurnEntry[] = [];
+  let curUser: UnifiedChatMessage | null = null;
+  let curRequestId: string | null = null;
+  let curSteps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }> = [];
+  let orphanSteps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }> = [];
+  let orphanHeadId = '';
+  let pendingStepAssistant: UnifiedChatMessage | null = null;
+  let pendingStepTools: UnifiedChatMessage[] = [];
 
-   const pushStep = (target: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }>): void => {
-     if (!pendingStepAssistant && pendingStepTools.length === 0) return;
-     target.push({ assistant: pendingStepAssistant, tools: pendingStepTools });
-     if (target === orphanSteps && !orphanHeadId) orphanHeadId = String(pendingStepAssistant?.id || pendingStepTools[0]?.id || '');
-     pendingStepAssistant = null;
-     pendingStepTools = [];
-   };
-   const emitTurn = (userMsg: UnifiedChatMessage | null, steps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }>, requestId: string | null): void => {
-     if (!userMsg && steps.length === 0) return;
-     const t = finalizeTurn({ userMsg, orphanHeadId: userMsg ? String(userMsg.id || '') : orphanHeadId || `orphan-${out.length}`, steps, requestId, opts, now });
-     out.push({ key: t.key, kind: 'user-turn', turn: t });
-   };
-   const flushOrphans = (): void => {
-     if (!orphanSteps.length) return;
-     const t = finalizeTurn({ userMsg: null, orphanHeadId: orphanHeadId || `orphan-${out.length}`, steps: orphanSteps, requestId: null, opts, now });
-     out.push({ key: t.key, kind: 'user-turn', turn: t });
-     orphanSteps = [];
-     orphanHeadId = '';
-   };
+  const pushStep = (target: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }>): void => {
+    if (!pendingStepAssistant && pendingStepTools.length === 0) return;
+    target.push({ assistant: pendingStepAssistant, tools: pendingStepTools });
+    if (target === orphanSteps && !orphanHeadId) orphanHeadId = String(pendingStepAssistant?.id || pendingStepTools[0]?.id || '');
+    pendingStepAssistant = null;
+    pendingStepTools = [];
+  };
+  const emitTurn = (
+    userMsg: UnifiedChatMessage | null,
+    steps: Array<{ assistant: UnifiedChatMessage | null; tools: UnifiedChatMessage[] }>,
+    requestId: string | null
+  ): void => {
+    if (!userMsg && steps.length === 0) return;
+    const t = finalizeTurn({
+      userMsg,
+      orphanHeadId: userMsg ? String(userMsg.id || '') : orphanHeadId || `orphan-${out.length}`,
+      steps,
+      requestId,
+      opts,
+      now,
+    });
+    out.push({ key: t.key, kind: 'user-turn', turn: t });
+  };
+  const flushOrphans = (): void => {
+    if (!orphanSteps.length) return;
+    const t = finalizeTurn({
+      userMsg: null,
+      orphanHeadId: orphanHeadId || `orphan-${out.length}`,
+      steps: orphanSteps,
+      requestId: null,
+      opts,
+      now,
+    });
+    out.push({ key: t.key, kind: 'user-turn', turn: t });
+    orphanSteps = [];
+    orphanHeadId = '';
+  };
 
-   for (const msg of list) {
-     const role = String((msg as UnifiedChatMessage)?.role || '').toLowerCase();
-     if (role === 'user') {
-       // 断开上一轮：先落步骤，再落整轮，最后落 ранее攒的孤儿（孤儿恒在更早位置，已先落）。
-       pushStep(curUser ? curSteps : orphanSteps);
-       if (curUser || curSteps.length) emitTurn(curUser, curSteps, curRequestId);
-       else flushOrphans();
-       flushOrphans();
-       curUser = msg;
-       curRequestId = requestIdOf(msg);
-       curSteps = [];
-       pendingStepAssistant = null;
-       pendingStepTools = [];
-       continue;
-     }
-     if (role === 'system') {
-       // 系统独立 entry；已有实质步骤时先落整轮保证时序 [turn, system]，否则轮保持开放（不断轮）。
-       if (curUser && curSteps.length === 0 && !pendingStepAssistant && pendingStepTools.length === 0) {
-         out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
-       } else if (curUser && (curSteps.length > 0 || pendingStepAssistant || pendingStepTools.length > 0)) {
-         pushStep(curSteps);
-         emitTurn(curUser, curSteps, curRequestId);
-         curUser = null;
-         curRequestId = null;
-         curSteps = [];
-         out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
-       } else {
-         pushStep(orphanSteps);
-         flushOrphans();
-         out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
-       }
-       continue;
-     }
-     if (role === 'assistant') {
-       pushStep(curUser ? curSteps : orphanSteps);
-       pendingStepAssistant = msg;
-       pendingStepTools = [];
-       continue;
-     }
-     if (role === 'tool') {
-       pendingStepTools.push(msg);
-       if (!curUser && !orphanHeadId && !pendingStepAssistant && pendingStepTools.length === 1) {
-         orphanHeadId = String(msg.id || '');
-       }
-       continue;
-     }
-     out.push({ key: `s-${String((msg as UnifiedChatMessage).id || `unknown-${out.length}`)}`, kind: 'system', msg: msg as UnifiedChatMessage });
-   }
-   pushStep(curUser ? curSteps : orphanSteps);
-   if (curUser || curSteps.length) emitTurn(curUser, curSteps, curRequestId);
-   else flushOrphans();
-   return out;
- }
+  for (const msg of list) {
+    const role = String((msg as UnifiedChatMessage)?.role || '').toLowerCase();
+    if (role === 'user') {
+      // 断开上一轮：先落步骤，再落整轮，最后落 ранее攒的孤儿（孤儿恒在更早位置，已先落）。
+      pushStep(curUser ? curSteps : orphanSteps);
+      if (curUser || curSteps.length) emitTurn(curUser, curSteps, curRequestId);
+      else flushOrphans();
+      flushOrphans();
+      curUser = msg;
+      curRequestId = requestIdOf(msg);
+      curSteps = [];
+      pendingStepAssistant = null;
+      pendingStepTools = [];
+      continue;
+    }
+    if (role === 'system') {
+      // 系统独立 entry；已有实质步骤时先落整轮保证时序 [turn, system]，否则轮保持开放（不断轮）。
+      if (curUser && curSteps.length === 0 && !pendingStepAssistant && pendingStepTools.length === 0) {
+        out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
+      } else if (curUser && (curSteps.length > 0 || pendingStepAssistant || pendingStepTools.length > 0)) {
+        pushStep(curSteps);
+        emitTurn(curUser, curSteps, curRequestId);
+        curUser = null;
+        curRequestId = null;
+        curSteps = [];
+        out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
+      } else {
+        pushStep(orphanSteps);
+        flushOrphans();
+        out.push({ key: `s-${String(msg.id || `sys-${out.length}`)}`, kind: 'system', msg });
+      }
+      continue;
+    }
+    if (role === 'assistant') {
+      pushStep(curUser ? curSteps : orphanSteps);
+      pendingStepAssistant = msg;
+      pendingStepTools = [];
+      continue;
+    }
+    if (role === 'tool') {
+      pendingStepTools.push(msg);
+      if (!curUser && !orphanHeadId && !pendingStepAssistant && pendingStepTools.length === 1) {
+        orphanHeadId = String(msg.id || '');
+      }
+      continue;
+    }
+    out.push({
+      key: `s-${String((msg as UnifiedChatMessage).id || `unknown-${out.length}`)}`,
+      kind: 'system',
+      msg: msg as UnifiedChatMessage,
+    });
+  }
+  pushStep(curUser ? curSteps : orphanSteps);
+  if (curUser || curSteps.length) emitTurn(curUser, curSteps, curRequestId);
+  else flushOrphans();
+  // P0-2：运行态归属收敛到末轮。新 user 已断开旧轮时，旧轮即使仍含 lastPersistedAssistantId 也不再 running；
+  // 首个 assistant/tool 尚未落盘的间隙里，没有轮满足 containsActive，此时末轮兜底 running，live 段不再挂到旧轮上。
+  // 已是“仅末轮 running”的常规态时零操作，避免无谓重建引用。
+  if (opts.isGenerating === true) {
+    let lastIdx = -1;
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i].kind === 'user-turn') {
+        lastIdx = i;
+        break;
+      }
+    }
+    if (lastIdx >= 0) {
+      const needFix = out.some((e, i) => e.kind === 'user-turn' && e.turn.isRunning !== (i === lastIdx));
+      if (needFix) {
+        for (let i = 0; i < out.length; i++) {
+          const e = out[i];
+          if (e.kind !== 'user-turn') continue;
+          const t = e.turn;
+          const shouldRun = i === lastIdx;
+          t.isRunning = shouldRun;
+          if (!shouldRun) {
+            // 非末轮只收回运行态标志；phase/耗时/汇总保持 finalizeTurn 算好的 historical 值，
+            // 绝不按 ended→now 重算，避免历史摘要被就地改写（review 反馈）。
+            continue;
+          }
+          // 末轮被兜底点亮时，phase/耗时/汇总必须同步刷新，否则会停在「已完成」。
+          const stopped = opts.stoppedTurnKeys ? opts.stoppedTurnKeys.has(t.key) : false;
+          const phase: TurnPhase = turnPhaseOf({ hasOwnError: t.failedCount > 0, stopped, isActive: true, hasContent: t.contentChars > 0 });
+          const duration = durationLabel(t.startedAtUtc, new Date(now).toISOString(), now);
+          t.phase = phase;
+          t.phaseLabel = duration ? `${phaseWordOf(phase)} · ${duration}` : phaseWordOf(phase);
+          t.summary = summaryOf({ duration, toolCount: t.toolCount, failedCount: t.failedCount });
+          t.fullSummary = fullSummaryOf({
+            duration,
+            toolCount: t.toolCount,
+            failedCount: t.failedCount,
+            contentChars: t.contentChars,
+            reasoningChars: t.reasoningChars,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
 
 /** 汇总行状态图标（供 UserTurnSummary 直接用）。 */
 export function phaseIcon(turn: UserTurn): string {
@@ -389,7 +472,17 @@ function fingerprintOf(messages: UnifiedChatMessage[], opts: BuildUserTurnsOpts)
   for (let i = 0; i < n; i++) contentLen += String(messages[i]?.content || '').length;
   const lastLen = n > 0 ? String(messages[n - 1]?.content || '').length : 0;
   const stopped = opts.stoppedTurnKeys ? [...opts.stoppedTurnKeys].sort().join(',') : '';
-  return [n, first, last, contentLen, lastLen, String(opts.activeAssistantId || ''), opts.isGenerating === true ? '1' : '0', String(opts.liveTotalMs ?? ''), stopped].join('|');
+  return [
+    n,
+    first,
+    last,
+    contentLen,
+    lastLen,
+    String(opts.activeAssistantId || ''),
+    opts.isGenerating === true ? '1' : '0',
+    String(opts.liveTotalMs ?? ''),
+    stopped,
+  ].join('|');
 }
 
 function isPrefixAppend(prev: UnifiedChatMessage[], next: UnifiedChatMessage[]): boolean {
@@ -407,7 +500,7 @@ function isPrefixAppend(prev: UnifiedChatMessage[], next: UnifiedChatMessage[]):
 export function buildUserTurnsIncremental(
   messages: UnifiedChatMessage[] | null | undefined,
   opts: BuildUserTurnsOpts = {},
-  cache?: UserTurnsCache | null,
+  cache?: UserTurnsCache | null
 ): { entries: UserTurnEntry[]; reused: boolean } {
   const list = Array.isArray(messages) ? messages : [];
   const fp = fingerprintOf(list, opts);

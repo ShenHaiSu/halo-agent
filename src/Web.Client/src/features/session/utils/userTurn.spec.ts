@@ -17,7 +17,11 @@ const NOW = Date.parse('2026-10-26T12:00:00Z');
 function user(id: string, content: string, createdAtUtc = '2026-10-26T11:59:00Z'): UnifiedChatMessage {
   return { id, role: 'user', content, createdAtUtc } as unknown as UnifiedChatMessage;
 }
-function assistant(id: string, content: string, opts: { reasoning?: string; tools?: Array<{ id: string; name: string }>; createdAtUtc?: string } = {}): UnifiedChatMessage {
+function assistant(
+  id: string,
+  content: string,
+  opts: { reasoning?: string; tools?: Array<{ id: string; name: string }>; createdAtUtc?: string } = {}
+): UnifiedChatMessage {
   return {
     id,
     role: 'assistant',
@@ -50,7 +54,12 @@ describe('need02-P2 buildUserTurns', () => {
   it('2. 多步折叠（3 iteration 混合：2 正文 + 5 工具 + 失败 1）', () => {
     const msgs = [
       user('u1', '查一下'),
-      assistant('a1', '第一段', { tools: [{ id: 'c1', name: 'list' }, { id: 'c2', name: 'read' }] }),
+      assistant('a1', '第一段', {
+        tools: [
+          { id: 'c1', name: 'list' },
+          { id: 'c2', name: 'read' },
+        ],
+      }),
       tool('t1', 'c1', 'out1'),
       tool('t2', 'c2', '[Tool Error] boom'),
       assistant('a2', '', { reasoning: '思考中' }),
@@ -77,7 +86,10 @@ describe('need02-P2 buildUserTurns', () => {
   });
 
   it('3. 失败计数口径与 failedToolCount 同源', () => {
-    const entries = buildUserTurns([user('u1', 'x'), assistant('a1', 'y'), tool('t1', 'c1', 'ok'), tool('t2', 'c2', "xx [Tool Error: VIEW_IMAGE] yy")], { now: NOW });
+    const entries = buildUserTurns(
+      [user('u1', 'x'), assistant('a1', 'y'), tool('t1', 'c1', 'ok'), tool('t2', 'c2', 'xx [Tool Error: VIEW_IMAGE] yy')],
+      { now: NOW }
+    );
     const t = entries[0].kind === 'user-turn' ? entries[0].turn : null;
     expect(t!.failedCount).toBe(1);
     expect(t!.phase).toBe('failed');
@@ -133,7 +145,9 @@ describe('need02-P2 buildUserTurns', () => {
   });
 
   it('8. system 不断轮（阅读锚点独立 entry）', () => {
-    const entries = buildUserTurns([user('u1', 'x'), assistant('a1', 'y'), system('s1', '摘要'), user('u2', 'z'), assistant('a2', 'w')], { now: NOW });
+    const entries = buildUserTurns([user('u1', 'x'), assistant('a1', 'y'), system('s1', '摘要'), user('u2', 'z'), assistant('a2', 'w')], {
+      now: NOW,
+    });
     const turns = entries.filter((e) => e.kind === 'user-turn');
     const systems = entries.filter((e) => e.kind === 'system');
     expect(turns).toHaveLength(2);
@@ -157,5 +171,25 @@ describe('need02-P2 buildUserTurns', () => {
     const t = onlyUser[0].kind === 'user-turn' ? onlyUser[0].turn : null;
     expect(t!.stepCount).toBe(0);
     expect(isSingleFlatTurn(t!)).toBe(true);
+  });
+
+  it('11. P0-2：新 user 已发送、首个 assistant 未落盘时运行态归属末轮（旧轮不再 running）', () => {
+    const msgs = [user('u1', '第一问'), assistant('a1', '旧回复'), user('u2', '第二问')];
+    const entries = buildUserTurns(msgs, { now: NOW, activeAssistantId: 'a1', isGenerating: true });
+    expect(entries.filter((e) => e.kind === 'user-turn')).toHaveLength(2);
+    const t1 = entries[0].kind === 'user-turn' ? entries[0].turn : null;
+    const t2 = entries[1].kind === 'user-turn' ? entries[1].turn : null;
+    expect(t1!.isRunning).toBe(false);
+    expect(t2!.isRunning).toBe(true);
+    expect(t2!.phase).toBe('running');
+  });
+
+  it('12. P0-2：常规流式（末轮含 active）不挪动运行态', () => {
+    const msgs = [user('u1', '第一问'), assistant('a1', '旧回复'), user('u2', '第二问'), assistant('a2', '新回复中')];
+    const entries = buildUserTurns(msgs, { now: NOW, activeAssistantId: 'a2', isGenerating: true });
+    const t1 = entries[0].kind === 'user-turn' ? entries[0].turn : null;
+    const t2 = entries[1].kind === 'user-turn' ? entries[1].turn : null;
+    expect(t1!.isRunning).toBe(false);
+    expect(t2!.isRunning).toBe(true);
   });
 });

@@ -36,8 +36,8 @@
             :reading-window="!!readingWindow"
             :is-pending="isPending"
             :pending-status="pendingStatus"
-            :live-segs="liveSegs || []"
-            :streaming-text="streamingText"
+            :live-segs="[]"
+            :streaming-text="''"
             :is-generating="isGenerating"
             :stream-md-kill-switch="!!streamMdKillSwitch"
             :render-stream="renderStream"
@@ -76,8 +76,8 @@
             :reading-window="!!readingWindow"
             :is-pending="isPending"
             :pending-status="pendingStatus"
-            :live-segs="liveSegs || []"
-            :streaming-text="streamingText"
+            :live-segs="liveSegsFor(entry as TimelineEntry)"
+            :streaming-text="''"
             :is-generating="isGenerating"
             :stream-md-kill-switch="!!streamMdKillSwitch"
             :render-stream="renderStream"
@@ -304,6 +304,28 @@ const tailList = computed<TimelineEntry[]>(() => {
   if (props.historyItems) return [];
   return props.items.slice(Math.max(0, props.items.length - TAIL_FALLBACK));
 });
+/**
+ * live 归属键：最后一个 user-turn 条目（全量 items，不看 tail 切片）。
+ * 旧做法用 TranscriptTail 的 isLast（= 尾部数组末项）判定，末项往往是 user 或 system；
+ * 新 user 刚发出、尚无 assistant 条目时末项是旧轮，live 段被挂到旧轮 → 折叠栏跑到用户消息上方。
+ * 这里以「当前会话最后一个用户轮」为唯一归属，只有它能拿到 liveSegs。
+ */
+const liveOwnerKey = computed<string>(() => {
+  const all = props.items || [];
+  for (let i = all.length - 1; i >= 0; i--) {
+    const e = all[i] as TimelineEntry & { turn?: { key?: string } };
+    if (e.kind === 'user-turn') return String(e.turn?.key || e.key || '');
+  }
+  return '';
+});
+type LiveSeg = { kind: string; key: string; text: string; card: unknown };
+function liveSegsFor(entry: TimelineEntry): LiveSeg[] {
+  const e = entry as TimelineEntry & { turn?: { key?: string } };
+  if (e.kind !== 'user-turn') return [];
+  const key = String(e.turn?.key || e.key || '');
+  if (!key || key !== liveOwnerKey.value) return [];
+  return (props.liveSegs || []) as LiveSeg[];
+}
 // 显示条件 (showJump||readingWindow)&&!veilCovering
 const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
 </script>
