@@ -34,10 +34,13 @@
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
             :reading-window="!!readingWindow"
+            :is-pending="isPending"
+            :pending-status="pendingStatus"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
+            @retry-pending="(item) => emit('retry-pending', item)"
           />
         </template>
       </TranscriptHistory>
@@ -61,10 +64,13 @@
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
             :reading-window="!!readingWindow"
+            :is-pending="isPending"
+            :pending-status="pendingStatus"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
+            @retry-pending="(item) => emit('retry-pending', item)"
           />
         </template>
         <template #live>
@@ -235,6 +241,9 @@ const props = defineProps<{
   veilCovering?: boolean;
   /** need02-P0：开关透传串（data-need02），缺省 undefined 时不渲染该属性，零视觉变更。 */
   need02Attr?: string;
+  /** need02-P1：pending 判定/状态（可选，缺省时 TimelineRow 回落到 id 前缀）。 */
+  isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
+  pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
@@ -249,11 +258,11 @@ const emit = defineEmits<{
   'menu-branch': [];
   'menu-delete': [];
   'jump-latest': [];
+  'retry-pending': [item: TimelineEntry];
 }>();
 const scroll = useTemplateRef<HTMLElement>('scroll');
 onMounted(() => emit('ready', scroll.value));
 onUnmounted(() => emit('ready', null));
-
 const historyList = computed<TimelineEntry[]>(() => {
   if (props.historyItems) return props.historyItems;
   return props.items.slice(0, Math.max(0, props.items.length - TAIL_FALLBACK));

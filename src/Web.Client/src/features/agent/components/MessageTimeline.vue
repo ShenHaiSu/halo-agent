@@ -33,6 +33,8 @@
         :seg-kill-switch="t.stream.segKillSwitch"
         :stream-md-kill-switch="t.stream.streamMdKillSwitch"
         :need02-attr="t.need02Attr"
+        :is-pending="t.isPendingMessage"
+        :pending-status="t.pendingStatusOf"
         :fallback-cards="t.cards.toolCards"
         :streaming-text="t.stream.streamingText"
         :show-thinking="t.showThinking && t.transcriptRunning"
@@ -51,6 +53,7 @@
         @assistant-menu="(e, item) => onAssistantMenu(e, item)"
         @link-click="t.onMarkdownLinkClick($event)"
         @retry="t.onRetryTurn()"
+        @retry-pending="onRetryPending($event)"
         @dismiss="t.onDismissError()"
         @menu-copy="t.menu.onMenuCopy()"
         @menu-replay="t.menu.onMenuReplay()"
@@ -166,5 +169,10 @@ function onAssistantMenu(e: MouseEvent, item: TimelineEntry): void {
     id: String(item.group?.assistantId || item.group?.key || ''),
     text: String(item.group?.content || ''),
   });
+}
+/** need02-P1：pending 失败重发（新 requestId，带图，旧 failed 不复用）。 */
+function onRetryPending(_item: TimelineEntry): void {
+  void _item;
+  void t.onRetryTurn();
 }
 </script>

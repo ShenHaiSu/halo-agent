@@ -13,7 +13,10 @@ import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
-
+import { dropPendingUser, getTurn, turns } from '@features/agent/stores/model';
+import { isPendingForSession, matchConfirmed, toPendingMessage } from '@features/session/utils/pendingUser';
+import { readNeed02Flags } from '@features/need02/utils/need02Flags';
+import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();
 
@@ -32,10 +35,71 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     { flush: 'sync' }
   );
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
+  /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
+  function isP1On(): boolean {
+    try {
+      return readNeed02Flags().p1;
+    } catch {
+      return true;
+    }
+  }
+  function activePendingFor(sid: string): import('@features/session/utils/pendingUser').PendingUser | null {
+    if (!isP1On()) return null;
+    const id = (sid || '').trim();
+    if (!id) return null;
+    try {
+      const t = turns.value[id] || getTurn(id);
+      const p = t?.pendingUser || null;
+      if (!p) return null;
+      if (!isPendingForSession(p, id)) return null;
+      return p;
+    } catch {
+      return null;
+    }
+  }
+  /** need02-P1：对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  function tryConfirmPending(sid: string): void {
+    try {
+      if (!isP1On()) return;
+      const id = (sid || '').trim();
+      if (!id) return;
+      const t = turns.value[id];
+      const p = t?.pendingUser;
+      if (!p || p.status !== 'sending') return;
+      const hit = matchConfirmed(p, sessionMessages.value);
+      if (hit) {
+        need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId: (hit as UnifiedChatMessage).id });
+        dropPendingUser(id);
+      }
+    } catch {
+      /* 对账永不阻断 */
+    }
+  }
+  const pendingOverlayMessages = computed<UnifiedChatMessage[]>(() => {
+    const base = sessionMessages.value || [];
+    if (!isP1On()) return base;
+    const sid = activeSessionId.value || '';
+    const p = activePendingFor(sid);
+    if (!p) return base;
+    if (p.status === 'superseded') return base;
+    // 已被后端回包命中 → 只显示真实（避免双 user），并触发清理（下次即无 pending）。
+    try {
+      const hit = matchConfirmed(p, base);
+      if (hit) {
+        // computed 内不直接清（避免副作用循环），交由 loadSessionMessages 的 tryConfirmPending 清理；
+        // 这里先隐藏 pending，保证无闪烁双条。
+        return base;
+      }
+    } catch {
+      /* fallthrough */
+    }
+    if (p.status !== 'sending' && p.status !== 'failed') return base;
+    // 同一 key 原位（id=pending-<requestId>），DOM 不重建。
+    return [...base, toPendingMessage(p)];
+  });
   const budgetStatus = ref<ContextBudgetStatusDto | null>(null);
   // need22-P3 G6：budget 失败显式角标（顶栏⚠），统一 {code,message}
   const budgetError = ref<{ code: string; message: string } | null>(null);
-
   const searchQuery = ref<string>('');
   const loading = ref<boolean>(false);
   const loadingMessages = ref<boolean>(false);
@@ -458,6 +522,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       } else {
         sessionMessages.value = [];
       }
+      // need02-P1：首次回包对账转正（key 不变，只换 id/时间）。
+      tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
         sessionStore.discardStale(`loadSessionMessages-error(${sid.slice(-6)})`);
@@ -667,6 +733,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAnchor = true
   ): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+    // need02-P1：先清本 session pending，避免旧乐观串入新历史。
+    try {
+      dropPendingUser(activeSessionId.value);
+    } catch {
+      /* ignore */
+    }
     try {
       const bridge = getHostBridge();
       const res = await bridge.truncateSessionHistory(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, removeAnchor);
@@ -685,6 +757,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // need07：分支（user→排除锚点+草稿预填原文；assistant→含整轮+草稿空）
   async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant'): Promise<boolean> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+    try {
+      dropPendingUser(activeSessionId.value);
+    } catch {
+      /* ignore */
+    }
     const includeAnchor = kind === 'assistant';
     const anchor = sessionMessages.value.find((m) => String(m.id) === String(anchorMessageId));
     const draftText = kind === 'user' ? String(anchor?.content || '') : '';
@@ -734,6 +811,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
     if (!messageId) return { ok: false, message: '消息不存在' };
     try {
+      dropPendingUser(activeSessionId.value);
+    } catch {
+      /* ignore */
+    }
+    try {
       const bridge = getHostBridge();
       const res = await bridge.deleteSessionMessage(activeWorkspaceId.value, activeSessionId.value, messageId);
       if (res.ok && res.data) {
@@ -769,6 +851,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     sessionMessages,
+    /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */
+    pendingOverlayMessages,
     budgetStatus,
     budgetError,
     searchQuery,

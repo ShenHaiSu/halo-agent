@@ -1,7 +1,8 @@
 <template>
   <div v-if="item.kind === 'user'" :ref="anchorRef(item.key)" class="flex justify-end">
     <div
-      class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+      class="max-w-[85%] rounded-lg bg-elevated border px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+      :class="pendingCls"
       @contextmenu.prevent="emit('user-menu', $event, item)"
     >
       <template v-for="(part, pi) in userParts(String(item.msg?.content ?? ''))" :key="pi">
@@ -30,6 +31,30 @@
         </template>
       </div>
       <div v-if="hasLost(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
+      <!-- need02-P1：乐观 user 态（右下小字，不占高度跳变） -->
+      <div
+        v-if="pendingState === 'sending'"
+        data-testid="pending-sending"
+        class="mt-1 flex items-center justify-end gap-1 text-[11px] text-secondary select-none"
+      >
+        <span class="pending-spinner" aria-hidden="true" />
+        <span>发送中…</span>
+      </div>
+      <div
+        v-else-if="pendingState === 'failed'"
+        data-testid="pending-failed"
+        class="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-red-500 select-none"
+      >
+        <span>发送失败·点击重发</span>
+        <button
+          type="button"
+          class="pending-retry-btn"
+          data-testid="pending-retry-btn"
+          @click.stop="emit('retry-pending', item)"
+        >
+          重发
+        </button>
+      </div>
     </div>
   </div>
   <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
@@ -67,6 +92,7 @@
   </div>
 </template>
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
@@ -96,18 +122,45 @@ const props = defineProps<{
   imgLost?: (img: ChatImageRef) => boolean;
   /** need-01：历史阅读窗口内不点亮合并舱的「运行中」态（与 useTimeline.readingWindow 同源）。 */
   readingWindow?: boolean;
+  /** need02-P1：pending 判定/状态（缺省回落到 id 前缀，保证老调用方不炸）。 */
+  isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
+  pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
 }>();
 /** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
 function isImgLost(img: ChatImageRef): boolean {
   if (props.imgLost) return props.imgLost(img);
   return img.lost === true;
 }
+/** need02-P1：pending 态（sending/failed/''）。 */
+const pendingState = computed<string>(() => {
+  try {
+    if (props.pendingStatus) return String(props.pendingStatus(props.item.msg) || '');
+    const id = String(props.item.msg?.id || '');
+    return id.startsWith('pending-') ? 'sending' : '';
+  } catch {
+    return '';
+  }
+});
+const isPendingMsg = computed<boolean>(() => {
+  try {
+    if (props.isPending) return !!props.isPending(props.item.msg);
+    return String(props.item.msg?.id || '').startsWith('pending-');
+  } catch {
+    return false;
+  }
+});
+void isPendingMsg;
+const pendingCls = computed<string>(() => {
+  if (pendingState.value === 'failed') return 'border-red-400 pending-failed-bubble';
+  return 'border-subtle';
+});
 const emit = defineEmits<{
   toggle: [key: string];
   'user-menu': [e: MouseEvent, item: TimelineEntry];
   'assistant-menu': [e: MouseEvent, item: TimelineEntry];
   'link-click': [e: MouseEvent];
   'content-menu': [e: MouseEvent];
+  'retry-pending': [item: TimelineEntry];
 }>();
 void emit;
 </script>
@@ -138,5 +191,41 @@ void emit;
   .msg-thumb-skeleton {
     animation: none;
   }
+}
+/* need02-P1：pending 态只动 opacity，不做高度动画（05 R6）。 */
+.pending-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--border-subtle);
+  border-top-color: var(--text-secondary);
+  animation: pending-spin 0.9s linear infinite;
+  display: inline-block;
+}
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-spinner {
+    animation: none;
+  }
+}
+.pending-failed-bubble {
+  border-color: #f87171 !important;
+}
+.pending-retry-btn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  border: 1px solid #f87171;
+  color: #ef4444;
+  background: transparent;
+  cursor: pointer;
+}
+.pending-retry-btn:hover {
+  background: #fef2f2;
 }
 </style>

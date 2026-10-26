@@ -17,7 +17,7 @@ import { syncTranscriptProjection } from '@features/session/utils/transcriptCach
 import { INITIAL_MOUNT, isNearTop, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
 import { need02Attr as buildNeed02Attr, useNeed02Flags } from '@features/need02/utils/need02Flags';
-
+import { pendingPreviewOf } from '@features/session/utils/pendingUser';
 export interface DisplaySeg {
   kind: string;
   key: string;
@@ -34,7 +34,7 @@ export function useTimeline() {
   const telemetry = useAgentTelemetry();
   const nav = useTimelineNav();
   const menu = useTimelineMenu();
-  const { sessionMessages, budgetStatus } = storeToRefs(workspaceStore);
+  const { sessionMessages, budgetStatus, pendingOverlayMessages } = storeToRefs(workspaceStore);
   const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
   const scrollEl = ref<HTMLElement | null>(null);
   // bigChange P2-3: pinned/showJump dual mode; hidden pane never follows/pages/samples.
@@ -45,7 +45,16 @@ export function useTimeline() {
     release: () => uiStore.releaseJumpLock(),
     isFollowing: () => follow.pinnedRef.value === true,
   });
-  const persistedMessages = computed<UnifiedChatMessage[]>(() => sessionMessages.value || []);
+  /** need02-P1：persistedMessages 改读 overlay（含 pending）；p1 off 时 overlay 恒等于 sessionMessages，零行为变更。 */
+  const persistedMessages = computed<UnifiedChatMessage[]>(() => {
+    try {
+      const overlay = (pendingOverlayMessages as unknown as { value?: UnifiedChatMessage[] } | undefined)?.value;
+      if (Array.isArray(overlay)) return overlay;
+    } catch {
+      /* fallthrough */
+    }
+    return sessionMessages.value || [];
+  });
   const expandedTurns = reactive<Record<string, boolean>>({});
   const isTurnExpanded = (key: string): boolean => expandedTurns[key] === true;
   const toggleTurn = (key: string): void => {
@@ -119,7 +128,26 @@ export function useTimeline() {
   let projGeneration = 0;
   function reuseRef(e: TimelineEntry): TimelineEntry {
     const prev = entryRefs.get(e.key);
-    if (prev && prev.kind === e.kind && prev.msg === e.msg && prev.group === e.group) return prev;
+    if (!prev) {
+      entryRefs.set(e.key, e);
+      return e;
+    }
+    if (prev.kind !== e.kind) {
+      entryRefs.set(e.key, e);
+      return e;
+    }
+    // need02-P1（05 R2–R3）：pending 转正引用会变但 key 不变，必须按 key+id 复用。
+    // 旧逻辑只认 `msg/group` 引用，pending 期每次 toPendingMessage 新建对象会导致 DOM 重建（spinner 闪）。
+    // 这里改按 id+内容键复用：id 相同且 group 键相同即复用旧引用，保证 pending 期零重建。
+    try {
+      const prevMsgId = prev.msg ? String(prev.msg.id || '') : '';
+      const curMsgId = e.msg ? String(e.msg.id || '') : '';
+      const prevGroupKey = prev.group ? String(prev.group.key || prev.group.assistantId || '') : '';
+      const curGroupKey = e.group ? String(e.group.key || e.group.assistantId || '') : '';
+      if (prevMsgId === curMsgId && prevGroupKey === curGroupKey) return prev;
+    } catch {
+      /* fallthrough 重建 */
+    }
     entryRefs.set(e.key, e);
     return e;
   }
@@ -336,11 +364,50 @@ export function useTimeline() {
   const thumbPending = new Set<string>();
   /** S6 §4.3：转录图片行顺序与发包一致（按占位符顺序；无占位符退化 images 数组序）。 */
   const msgImages = (msg: UnifiedChatMessage | undefined): ChatImageRef[] => orderedImagesOf(msg);
-  const hasLostImage = (msg: UnifiedChatMessage | undefined): boolean =>
-    msgImages(msg).some((i) => lostImageIds.value[i.imageId] || i.lost === true);
+  /** need02-P1：是否 pending 消息（id 前缀 `pending-`，仅视图层合成，不写 jsonl）。 */
+  const isPendingMessage = (msg: UnifiedChatMessage | undefined): boolean => {
+    const id = String(msg?.id || '');
+    return id.startsWith('pending-');
+  };
+  /** need02-P1：pending 状态（sending/failed），供 TimelineRow 右下小 spinner/重发用；非 pending 返回 ''。 */
+  const pendingStatusOf = (msg: UnifiedChatMessage | undefined): string => {
+    try {
+      if (!isPendingMessage(msg)) return '';
+      const p = turn.activeTurn?.pendingUser;
+      if (p && String(p.key || '') === String(msg?.id || '')) return String(p.status || 'sending');
+      // 切会话/重载后 turn 桶可能已换，但 overlay 仍带 pending 消息（极短窗口）：按 sending 展示。
+      return 'sending';
+    } catch {
+      return '';
+    }
+  };
+  const hasLostImage = (msg: UnifiedChatMessage | undefined): boolean => {
+    // need02-P1：pending 期恒 false（本地预览必在，不判丢失）。
+    if (isPendingMessage(msg)) return false;
+    return msgImages(msg).some((i) => lostImageIds.value[i.imageId] || i.lost === true);
+  };
   /** M1-4：单图丢失判定（供 TimelineRow 决定渲染标签槽位还是加载骨架）。 */
-  const isImageLost = (img: ChatImageRef): boolean => img.lost === true || lostImageIds.value[img.imageId] === true;
+  const isImageLost = (img: ChatImageRef): boolean => {
+    // need02-P1：本地预览存在时永不判丢失。
+    try {
+      const p = turn.activeTurn?.pendingUser;
+      if (p && p.previews && String(p.previews[String(img?.imageId || '')] || '')) return false;
+    } catch {
+      /* fallthrough */
+    }
+    return img.lost === true || lostImageIds.value[img.imageId] === true;
+  };
   function thumbOf(img: ChatImageRef): string {
+    // need02-P1：pending 期直出本地 dataURL，不走缩略图懒取（复用 96px 槽，零高度跳变）。
+    try {
+      const p = turn.activeTurn?.pendingUser;
+      if (p) {
+        const preview = pendingPreviewOf(p, String(img?.imageId || ''));
+        if (preview) return preview;
+      }
+    } catch {
+      /* fallthrough 正常懒取 */
+    }
     if (thumbnailCache.value[img.imageId] || img.lost === true || lostImageIds.value[img.imageId])
       return thumbnailCache.value[img.imageId] || '';
     if (thumbPending.has(img.imageId)) return '';
@@ -631,6 +698,9 @@ export function useTimeline() {
     toolKeyOf,
     toCard,
     msgImages,
+    /** need02-P1：pending 判定/状态（TimelineRow 右下态用）。 */
+    isPendingMessage,
+    pendingStatusOf,
     hasLostImage,
     isImageLost,
     thumbOf,
