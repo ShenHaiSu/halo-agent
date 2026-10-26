@@ -7,7 +7,16 @@
     {{ seg.text }}
   </div>
   <div v-else-if="seg.kind === 'tool' && seg.card" data-testid="active-turn-tools" :data-seg="seg.key">
-    <ToolCallCard :card="seg.card" :default-collapsed="true" />
+    <ToolCallCard v-if="hasToolContent" :card="seg.card" :default-collapsed="true" />
+    <!-- P1：参数/结果尚未到达时卡片正文是空的，不再渲染可展开的空折叠，先占位明示接收中 -->
+    <div
+      v-else
+      class="rounded-md border border-subtle bg-surface px-2.5 py-1.5 text-[11px] text-secondary flex items-center gap-2 min-w-0"
+      data-testid="tool-card-pending"
+    >
+      <span class="tool-pending-dot" aria-hidden="true" />
+      <span class="font-mono truncate">{{ seg.card.functionName || 'tool' }} · 参数接收中…</span>
+    </div>
   </div>
   <div
     v-else-if="seg.kind === 'text' && seg.text"
@@ -28,12 +37,13 @@
  * 为什么必须抽：`v-for` 与 `v-if` 嵌在 `<template>` 上时无法直接套 `TransitionGroup`
  * （后者要求每个子节点是单一组件），所以把「三种 seg 的分支渲染」收进这里。
  */
+import { computed } from 'vue';
 import type { DisplaySeg } from '../composables/useTimeline';
 import ToolCallCard from './ToolCallCard.vue';
 import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';
 import '@features/agent/composables/smooth-cursor.css';
 
-defineProps<{
+const props = defineProps<{
   seg: DisplaySeg;
   /** need23-R5：流式 Markdown 逃生开关（true=回落纯文本）。 */
   streamMdKillSwitch: boolean;
@@ -43,11 +53,43 @@ defineProps<{
   isGenerating: boolean;
 }>();
 const emit = defineEmits<{ 'link-click': [e: MouseEvent] }>();
+/** P1：空卡判定——running 且参数/结果都还没到时不渲染空折叠。终态（done/error）恒展示卡片（状态本身即信息）。 */
+const hasToolContent = computed(() => {
+  const c = props.seg.card as unknown as { argsJson?: unknown; resultText?: unknown; status?: unknown } | null;
+  if (!c) return false;
+  if (String(c.status || '') !== 'running') return true;
+  return String(c.argsJson || '').trim().length > 0 || String(c.resultText || '').trim().length > 0;
+});
 </script>
 <style scoped>
 .reasoning-seg {
   /* 与 TimelineView 中的同类声明一致：滚动条出现时宽度不变 */
   scrollbar-gutter: stable;
   overflow-anchor: auto;
+}
+/* P1：空工具卡占位圆点（参数接收中呼吸态；终态卡片不受影响） */
+.tool-pending-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #3b82f6;
+  flex-shrink: 0;
+  animation: tool-pending-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tool-pending-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-pending-dot {
+    animation: none;
+  }
 }
 </style>

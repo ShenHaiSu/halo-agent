@@ -26,12 +26,23 @@ import { flushSegBufSync } from './useAgentStream';
 
 let listenersBound = false;
 
+/**
+ * 参数解析：兼容完整参数与增量字段。
+ * 后端 LlmCaller 的参数增量事件（kind=ToolCallUpdated）只带 argsDelta，不带 argsJson；
+ * 旧实现只认完整字段 → card.argsJson 恒空 → 工具卡展开后一片空白。
+ */
 function pickArgs(payload: Record<string, unknown>): string {
-  const cands = [payload['argsJson'], payload['argumentsJson'], payload['arguments']];
+  const cands = [payload['argsJson'], payload['argumentsJson'], payload['arguments'], payload['argsDelta']];
   for (const c of cands) {
     if (typeof c === 'string' && c) return c;
   }
   return '';
+}
+/** 是否为增量型事件（argsDelta 需要累加，不能覆盖）。 */
+function isDeltaPayload(payload: Record<string, unknown>): boolean {
+  const full = [payload['argsJson'], payload['argumentsJson'], payload['arguments']];
+  if (full.some((c) => typeof c === 'string' && c)) return false;
+  return typeof payload['argsDelta'] === 'string' && (payload['argsDelta'] as string).length > 0;
 }
 
 /** need13：子进度聚合（主桶隔离；subId 事件不污染主时间线，只更新 items） */
@@ -133,8 +144,15 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       const hasBytes = typeof payload['receivedBytes'] === 'number';
       const fallbackBytes = argsDelta ? estimateUtf8Bytes(argsDelta) : 0;
       const card = cardById(t, callId);
+      const deltaOnly = isDeltaPayload(payload);
       if (card) {
-        if (args) {
+        if (deltaOnly) {
+          // 增量：累加进参数串（后端分片下发），字节数与后端 receivedBytes 对齐。
+          card.argsJson = (card.argsJson || '') + argsDelta;
+          if (hasBytes) card.receivedBytes = num(payload['receivedBytes']);
+          else if (fallbackBytes > 0) card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+        } else if (args) {
+          // 完整参数：覆盖（ToolCallCompleted 带全量 argsJson）。
           card.argsJson = args;
           if (kind === 'ToolCallCompleted') card.receivedBytes = estimateUtf8Bytes(args);
           else if (hasBytes) card.receivedBytes = num(payload['receivedBytes']);
@@ -149,7 +167,7 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
         t.toolCards.push({
           callId,
           functionName: str(payload['functionName']) || 'tool',
-          argsJson: args,
+          argsJson: deltaOnly ? argsDelta : args,
           status: 'running',
           resultText: '',
           exitCode: null,
