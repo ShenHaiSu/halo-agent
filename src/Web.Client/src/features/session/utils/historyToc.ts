@@ -83,6 +83,18 @@ export function bubbleLabel(text: string, max = LABEL_MAX): string {
 }
 
 function textOfEntry(e: TimelineEntry): { text: string; createdAtUtc: string } {
+  // need02-P2：用户轮按轮一条（user 首 12 字 + 汇总，见 P4b#4；Toc off 时回 iteration）。
+  if (e.kind === 'user-turn') {
+    const t = (e as unknown as { turn?: Record<string, unknown> }).turn;
+    const um = t?.userMsg as unknown as { content?: unknown; createdAtUtc?: unknown } | null | undefined;
+    const steps = Array.isArray(t?.steps) ? (t!.steps as Array<Record<string, unknown>>) : [];
+    const last = steps.length ? steps[steps.length - 1] : null;
+    const userText = String(um?.content ?? '');
+    const lastText = String((last as { content?: unknown } | null)?.content ?? '');
+    const summary = String((t as { summary?: unknown } | undefined)?.summary ?? '');
+    const text = lastText ? userText + '\n' + lastText : userText;
+    return { text: summary ? text + '\n' + summary : text, createdAtUtc: String(um?.createdAtUtc || '') };
+  }
   if (e.kind === 'user' || e.kind === 'system') {
     return {
       text: String(e.msg?.content ?? ''),
@@ -98,6 +110,17 @@ function textOfEntry(e: TimelineEntry): { text: string; createdAtUtc: string } {
 }
 
 export function labelOfEntry(e: TimelineEntry): string {
+  // need02-P2：用户轮一条（user 首 12 字 + 汇总）。
+  if (e.kind === 'user-turn') {
+    const t = (e as unknown as { turn?: Record<string, unknown> }).turn;
+    const um = t?.userMsg as unknown as { content?: unknown; images?: unknown } | null | undefined;
+    const raw = String(um?.content ?? '');
+    const display = toDisplayText(raw);
+    const head = display ? bubbleLabel(display) : '[图片]';
+    const summary = String((t as { summary?: unknown } | undefined)?.summary ?? '');
+    if (summary) return head + ' · ' + summary;
+    return head;
+  }
   if (e.kind === 'user') {
     const t = toDisplayText(String(e.msg?.content ?? ''));
     if (t) return bubbleLabel(t);
@@ -138,7 +161,7 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
   let r = 0;
   for (const e of entries) {
     let role: TocRole;
-    if (e.kind === 'user') {
+    if (e.kind === 'user' || e.kind === 'user-turn') {
       role = 'user';
       r += 1;
     } else if (e.kind === 'turn') role = 'assistant';
@@ -175,8 +198,15 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
     const { text, createdAtUtc } = textOfEntry(e);
     const display = toDisplayText(text);
     const label = labelOfEntry(e);
-    const toolCount = e.kind === 'turn' ? (e.group?.toolMessages || []).length : 0;
-    const hasReasoning = e.kind === 'turn' ? !!e.group?.reasoning : false;
+    const uturn = e.kind === 'user-turn' ? (e as unknown as { turn?: Record<string, unknown> }).turn : null;
+    const toolCount =
+      e.kind === 'turn' ? (e.group?.toolMessages || []).length : uturn ? Number(uturn.toolCount || 0) : 0;
+    const hasReasoning =
+      e.kind === 'turn'
+        ? !!e.group?.reasoning
+        : uturn
+          ? Number(uturn.reasoningChars || 0) > 0
+          : false;
     out.push({
       anchorKey: e.key,
       role,

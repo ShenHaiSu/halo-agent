@@ -36,6 +36,11 @@
             :reading-window="!!readingWindow"
             :is-pending="isPending"
             :pending-status="pendingStatus"
+            :live-segs="liveSegs || []"
+            :streaming-text="streamingText"
+            :is-generating="isGenerating"
+            :stream-md-kill-switch="!!streamMdKillSwitch"
+            :render-stream="renderStream"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
@@ -66,6 +71,11 @@
             :reading-window="!!readingWindow"
             :is-pending="isPending"
             :pending-status="pendingStatus"
+            :live-segs="liveSegs || []"
+            :streaming-text="streamingText"
+            :is-generating="isGenerating"
+            :stream-md-kill-switch="!!streamMdKillSwitch"
+            :render-stream="renderStream"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
@@ -222,6 +232,8 @@ const props = defineProps<{
   segKillSwitch: boolean;
   /** need23-R5：流式 Markdown 逃生开关（true=回落纯文本）。 */
   streamMdKillSwitch?: boolean;
+  /** need02-P2: inner live body for UserTurnBlock (empty = steady render). */
+  liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
   fallbackCards: AgentToolCard[];
   streamingText: string;
   showThinking: boolean;

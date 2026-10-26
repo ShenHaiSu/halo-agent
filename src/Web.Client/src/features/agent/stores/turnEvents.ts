@@ -27,6 +27,17 @@ function touchSessionClock(sessionId: string, iso?: string): void {
   }
 }
 
+/** need02-P2：读 p2 开关（turnEvents 不直连 need02Flags 组合式，照 kill switch 写法直读 localStorage）。 */
+function isNeed02P2On(): boolean {
+  try {
+    const v = String(window.localStorage.getItem('halo-need02-p2') || '').toLowerCase();
+    if (!v) return true;
+    return v !== 'off';
+  } catch {
+    return true;
+  }
+}
+
 // need23-R4：全量重拉合并窗口。同一 session 在 400ms 内的多次"需重拉"请求只执行最后一次，
 // 且 "finish" 优先级高于 "persisted"（保证收尾那次一定发生）；finishTurn 走 reloadNow 立即拉并取消待定定时器。
 const RELOAD_DEBOUNCE_MS = 400;
@@ -86,7 +97,7 @@ export async function refreshAfterTool(targetSessionId?: string, reason?: string
   }
 }
 
-export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean }): Promise<void> {
+export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean; deferClearMs?: number }): Promise<void> {
   const sid = (targetSessionId ?? activeSessionId.value).trim();
   if (!sid) return;
   const t = ensureTurn(sid);
@@ -115,15 +126,32 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     touch(t);
     return;
   }
-  t.toolCards = [];
-  t.toolCardIndex = {};
-  t.segs = [];
-  t.curIteration = 0;
-  t.streamingText = '';
-  t.streamingReasoning = '';
-  t.streamingActive = false;
-  dropSegBuf(sid);
-  touch(t);
+  // need02-P2：终态已就位（reloadNow 先拉后清），流容器延迟 300ms 再清，供 P3 交接编排做交叉淡入淡出；
+  // p2 off 时保持立即清（旧行为）。Cancel/Error 路径不延迟（调用方只在 Completed/Truncated 传 defer）。
+  const deferMs = Math.max(0, Number(opts?.deferClearMs) || 0);
+  const doClear = (): void => {
+    t.toolCards = [];
+    t.toolCardIndex = {};
+    t.segs = [];
+    t.curIteration = 0;
+    t.streamingText = '';
+    t.streamingReasoning = '';
+    t.streamingActive = false;
+    dropSegBuf(sid);
+    touch(t);
+  };
+  if (deferMs > 0) {
+    touch(t);
+    window.setTimeout(() => {
+      try {
+        doClear();
+      } catch (e) {
+        console.warn('[agent-turn] deferred clear failed:', e);
+      }
+    }, deferMs);
+    return;
+  }
+  doClear();
 }
 
 /** llm:stream-event StreamError 分支（旧 ensureListeners 内同分支语义）。 */
@@ -185,7 +213,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.subAgents.done = t.subAgents.total;
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void finishTurn(sid);
+      void finishTurn(sid, isNeed02P2On() ? { deferClearMs: 300 } : undefined);
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -232,7 +260,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
         t.turnNotice = '已达到单轮迭代上限，已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
       }
       touch(t);
-      void finishTurn(sid);
+      void finishTurn(sid, isNeed02P2On() ? { deferClearMs: 300 } : undefined);
       agentRuntime().generateTitle(sid);
       break;
     }

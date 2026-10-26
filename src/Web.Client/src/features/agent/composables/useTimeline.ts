@@ -10,6 +10,7 @@ import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
+import { buildUserTurns } from '@features/session/utils/userTurn';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode, useTimelineNav } from './useTimelineNav';
 import { useSmoothText } from './useSmoothText';
@@ -96,8 +97,27 @@ export function useTimeline() {
     if (!assistantId) return true;
     return assistantId === lastPersistedAssistantId.value;
   };
-  // 只改这一处计算链：activeTimelineEntries →（可选）buildTurnRuns。
+  // need02-P2：投影分支（resolveTimelineMode 语义内联：p2 on 自动旁路 need-01 开关，无需用户手动关）。
+  // - p2 on → 走 buildUserTurns（activeUserTurnEntries，用户轮次粒度，D1=B）；
+  // - p2 off → 回落旧链（turnRunKillSwitch 决定是否再做 turn-run 合并）。
   const timelineItems = computed<TimelineEntry[]>(() => {
+    // need02-P2 + G1: overlay（含乐观 pending）是唯一真相源——发送瞬间本地即现，不等回包/首字/防抖。
+    // 运行态按“本轮含末条 live + 全局 generating”判定（03 §3.2，不猜末 assistant，05 A3）。
+    if (need02Flags.p2) {
+      const msgs = persistedMessages.value;
+      let liveTotalMs: number | null = null;
+      try {
+        const ms = turn.activeTurn?.telemetry?.totalMs;
+        liveTotalMs = typeof ms === 'number' ? ms : null;
+      } catch {
+        /* ignore */
+      }
+      return buildUserTurns(msgs, {
+        activeAssistantId: lastPersistedAssistantId.value,
+        isGenerating: turn.activeTurn?.isGenerating === true,
+        liveTotalMs,
+      }) as unknown as TimelineEntry[];
+    }
     const raw = telemetry.activeTimelineEntries;
     if (turnRunKillSwitch.value) return raw;
     // P3-A：本轮仍在跑时把「正在执行的最后一步」当作活动锚点，并入同一个舱。
@@ -107,7 +127,14 @@ export function useTimeline() {
   /** 合并舱索引（纯派生视图，供展开态默认值与「首次合并补一次跟随」判定使用）。 */
   const runByKey = computed<Map<string, TurnRun>>(() => {
     const m = new Map<string, TurnRun>();
-    for (const e of timelineItems.value) if (e.kind === 'turn-run' && e.run) m.set(e.run.key, e.run);
+    for (const e of timelineItems.value) {
+      if (e.kind === 'turn-run' && e.run) m.set(e.run.key, e.run);
+      // need02-P2：uturn- 与 run- 共用同一套显式展开态（runExplicit），运行中默认展开、终态默认收起。
+      else if (e.kind === 'user-turn' && (e as unknown as { turn?: { key?: unknown; isRunning?: unknown } }).turn) {
+        const t = (e as unknown as { turn: { key: string; isRunning: boolean } }).turn;
+        m.set(e.key, { key: String(t.key || e.key), isRunning: t.isRunning === true } as unknown as TurnRun);
+      }
+    }
     return m;
   });
   /** 用户显式选择过的合并舱展开态（未命中时按「运行中展开、终态收起」——决策 D2 = A）。 */
@@ -144,7 +171,30 @@ export function useTimeline() {
       const curMsgId = e.msg ? String(e.msg.id || '') : '';
       const prevGroupKey = prev.group ? String(prev.group.key || prev.group.assistantId || '') : '';
       const curGroupKey = e.group ? String(e.group.key || e.group.assistantId || '') : '';
-      if (prevMsgId === curMsgId && prevGroupKey === curGroupKey) return prev;
+      if (prevMsgId === curMsgId && prevGroupKey === curGroupKey) {
+        // need02-P2：user-turn 条目无 msg/group，改按 turn 指纹复用（引用新建但语义不变时复用旧引用，DOM 不重建）。
+        if (e.kind === 'user-turn') {
+          const pt = (prev as unknown as { turn?: Record<string, unknown> }).turn;
+          const ct = (e as unknown as { turn?: Record<string, unknown> }).turn;
+          if (pt && ct) {
+            const keys = ['userId', 'stepCount', 'toolCount', 'failedCount', 'contentChars', 'reasoningChars', 'isRunning', 'phase', 'endedAtUtc'] as const;
+            let same = true;
+            for (const k of keys) {
+              if (String(pt[k] ?? '') !== String(ct[k] ?? '')) {
+                same = false;
+                break;
+              }
+            }
+            if (same) {
+              const pSteps = Array.isArray((pt as { steps?: unknown[] }).steps) ? (pt as { steps: unknown[] }).steps.length : -1;
+              const cSteps = Array.isArray((ct as { steps?: unknown[] }).steps) ? (ct as { steps: unknown[] }).steps.length : -2;
+              if (pSteps === cSteps) return prev;
+            }
+          }
+        } else {
+          return prev;
+        }
+      }
     } catch {
       /* fallthrough 重建 */
     }
@@ -497,6 +547,29 @@ export function useTimeline() {
       };
     });
   });
+  // need02-P2：流态全量（含已 persisted 段，标灰但仍可见，直到交接；供 UserTurnBlock 内嵌 LiveBody）。
+  // visibleSegs 保持旧语义（毕业即过滤，旧测试不断言变更）；P2 新链读全量 segs 做分区渲染。
+  const liveInclusiveSegs = computed<DisplaySeg[]>(() => {
+    let segs: Array<{ key?: unknown; kind?: unknown; text?: unknown }> = [];
+    try {
+      segs = (turn.activeTurn?.segs || []) as Array<{ key?: unknown; kind?: unknown; text?: unknown }>;
+    } catch {
+      segs = [];
+    }
+    if (!segs.length) return [];
+    const lastIdx = segs.length - 1;
+    return segs.map((s, i) => {
+      const kind = String((s as { kind?: unknown }).kind || '');
+      const key = String((s as { key?: unknown }).key || `live-${i}`);
+      const isTailText = i === lastIdx && kind === 'text';
+      return {
+        kind,
+        key,
+        text: isTailText && tailSegKey.value === key ? smoothTailText.value : segTextOf(s as Parameters<typeof segTextOf>[0]),
+        card: kind === 'tool' ? segCardOf(s as Parameters<typeof segCardOf>[0]) : null,
+      };
+    });
+  });
   const toolCount = computed(() => cards.toolCards.length);
   const curIteration = computed(() => turn.activeTurn.curIteration || 1);
   // need23-R6：本轮（当前 iteration）工具数；toolCards 跨轮不清空，直接取 length 会误导。
@@ -681,6 +754,8 @@ export function useTimeline() {
     setReadingWindow,
     clearReadingWindow,
     displaySegs,
+    /** need02-P2：流态全量（含 persisted，UserTurnBlock 内嵌用；visibleSegs 旧语义保持）。 */
+    liveInclusiveSegs,
     /** M2-4：经过逐字平滑的尾段文本（模板/测试可直接读；displaySegs 已包含它）。 */
     smoothTailText,
     transcriptRunning,

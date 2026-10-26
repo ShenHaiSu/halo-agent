@@ -11,6 +11,8 @@ export interface StreamSeg {
   key: string;
   kind: StreamSegKind;
   iteration: number;
+  /** need02-P2：续写键 requestId（保留 iteration 做明细分节；05 R4 新 requestId 不复用）。 */
+  runId?: string;
   text?: string;
   callId?: string;
   persisted?: boolean;
@@ -251,19 +253,22 @@ export function tailSeg(t: AgentTurnState): StreamSeg | null {
   return t.segs.length ? t.segs[t.segs.length - 1] : null;
 }
 export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string): void {
+  // need02-P2：续写键放宽到 runId（= requestId，兼容旧 iteration 分节；05 R4 新轮新 requestId）。
+  const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted) {
+  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId) {
     tail.text = (tail.text || '') + chunk;
     return;
   }
   const n = t.segs.length;
-  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, text: chunk });
+  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk });
 }
 export function pushToolSeg(t: AgentTurnState, callId: string): void {
   if (!callId) return;
+  const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration) return;
-  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, callId });
+  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration && String(tail.runId || '') === runId) return;
+  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId });
 }
 /**
  * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。

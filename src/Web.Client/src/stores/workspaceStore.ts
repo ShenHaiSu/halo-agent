@@ -16,6 +16,7 @@ import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateR
 import { dropPendingUser, getTurn, turns } from '@features/agent/stores/model';
 import { isPendingForSession, matchConfirmed, toPendingMessage } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
+import { rememberPendingAlias } from '@features/session/utils/userTurn';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();
@@ -68,6 +69,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!p || p.status !== 'sending') return;
       const hit = matchConfirmed(p, sessionMessages.value);
       if (hit) {
+        // need02-P2: remember alias so UserTurn key stays on the pending key after confirm (05 R3).
+        try {
+          rememberPendingAlias(String((hit as UnifiedChatMessage).id || ''), String(p.key || ''));
+        } catch {
+          /* alias never blocks */
+        }
         need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId: (hit as UnifiedChatMessage).id });
         dropPendingUser(id);
       }

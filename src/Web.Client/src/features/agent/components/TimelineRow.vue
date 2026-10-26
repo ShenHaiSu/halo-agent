@@ -72,6 +72,32 @@
       @toggle="emit('toggle', $event)"
     />
   </div>
+  <!-- need02-P2：用户轮次块（D1=B；p2 off 时无此 kind，回旧链）。 -->
+  <div v-else-if="item.kind === 'user-turn'" :ref="anchorRef(item.key)">
+    <UserTurnBlock
+      v-if="item.turn"
+      :turn="item.turn"
+      :expanded="isExpanded(item.turn.key || item.key)"
+      :reading-window="!!readingWindow"
+      :render-html="renderHtml"
+      :render-stream="renderStreamFn"
+      :card-for="cardFor"
+      :tool-key="toolKey"
+      :msg-images="msgImages"
+      :thumb-of="thumbOf"
+      :img-lost="imgLost"
+      :live-segs="liveSegsValue"
+      :streaming-text="streamingTextValue"
+      :is-generating="!!isGeneratingValue"
+      :stream-md-kill-switch="!!streamMdKillSwitch"
+      :pending-status="pendingStatusOfTurn"
+      @toggle="emit('toggle', $event)"
+      @user-menu="(e) => emit('user-menu', e, item)"
+      @assistant-menu="(e) => emit('assistant-menu', e, item)"
+      @link-click="emit('link-click', $event)"
+      @retry-pending="emit('retry-pending', item)"
+    />
+  </div>
   <div v-else :ref="anchorRef(item.key)">
     <TurnGroupItem
       v-if="item.group"
@@ -99,6 +125,7 @@ import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup
 import type { AgentToolCard } from '@features/agent/stores/model';
 import TurnGroupItem from './TurnGroupItem.vue';
 import TurnRunItem from './TurnRunItem.vue';
+import UserTurnBlock from './UserTurnBlock.vue';
 import SkillPillChip from './SkillPillChip.vue';
 import { userParts } from '../utils/userParts';
 
@@ -125,6 +152,12 @@ const props = defineProps<{
   /** need02-P1：pending 判定/状态（缺省回落到 id 前缀，保证老调用方不炸）。 */
   isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
   pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
+  /** need02-P2：内嵌 LiveBody 用（仅运行轮消费；稳态轮忽略）。 */
+  liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
+  streamingText?: string;
+  isGenerating?: boolean;
+  streamMdKillSwitch?: boolean;
+  renderStream?: (text: string) => string;
 }>();
 /** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
 function isImgLost(img: ChatImageRef): boolean {
@@ -141,6 +174,40 @@ const pendingState = computed<string>(() => {
     return '';
   }
 });
+/** need02-P2：user-turn 头的 pending 态（复用 pendingStatus(msg) 于 turn.userMsg）。 */
+const pendingStatusOfTurn = computed<string>(() => {
+  try {
+    const t = (props.item as unknown as { turn?: { userMsg?: UnifiedChatMessage } }).turn;
+    const um = t?.userMsg;
+    if (!um) return '';
+    if (props.pendingStatus) return String(props.pendingStatus(um) || '');
+    const id = String(um.id || '');
+    return id.startsWith('pending-') ? 'sending' : '';
+  } catch {
+    return '';
+  }
+});
+const liveSegsValue = computed(() => {
+  try {
+    return (props.liveSegs || []) as never[];
+  } catch {
+    return [];
+  }
+});
+const streamingTextValue = computed(() => String(props.streamingText || ''));
+const isGeneratingValue = computed(() => props.isGenerating === true);
+const renderStreamFn = (t: string): string => {
+  try {
+    if (props.renderStream) return String(props.renderStream(t) || '');
+  } catch {
+    /* fallthrough */
+  }
+  try {
+    return String(props.renderHtml(t) || '');
+  } catch {
+    return String(t || '');
+  }
+};
 const isPendingMsg = computed<boolean>(() => {
   try {
     if (props.isPending) return !!props.isPending(props.item.msg);

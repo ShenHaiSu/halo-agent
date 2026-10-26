@@ -4,7 +4,7 @@
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
 import { haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
-import { buildTurnGroupsIncremental, buildTimelineEntries, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
+import { buildTurnGroupsIncremental, buildTimelineEntries, buildUserTurns, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
 import {
   activeSessionId,
   ensureSessionSync,
@@ -118,6 +118,30 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     return out;
   });
   const activeTimelineEntries = computed<TimelineEntry[]>(() => buildTimelineEntries(persistedOf(), visibleTurnGroups.value));
+  // need02-P2：用户轮次聚合投影（p2 on 时 useTimeline/Toc 消费此源；off 时回旧链）。
+  // 运行态按“本轮含末条 live + 全局 generating”判定（03 §3.2，不再猜末 assistant，05 A3）。
+  const activeUserTurnEntries = computed<TimelineEntry[]>(() => {
+    const msgs = persistedOf();
+    let activeAssistantId: string | null = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (String((m as unknown as { role?: unknown }).role || '').toLowerCase() === 'assistant') {
+        activeAssistantId = String((m as unknown as { id?: unknown }).id || '');
+        break;
+      }
+    }
+    let isGenerating = false;
+    let liveTotalMs: number | null = null;
+    try {
+      const t = ensureTurn(activeSessionId.value);
+      isGenerating = t ? t.isGenerating === true : false;
+      const ms = t ? t.telemetry.totalMs : null;
+      liveTotalMs = typeof ms === 'number' ? ms : null;
+    } catch {
+      /* 读不到瞬态则按静态投影 */
+    }
+    return buildUserTurns(msgs, { activeAssistantId, isGenerating, liveTotalMs }) as unknown as TimelineEntry[];
+  });
   // 兼容别名：旧 hiddenToolCallIds 引用统一走 store 内归并
 
   function bindTelemetry(): void {
@@ -129,6 +153,7 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     activeTurnGroups,
     visibleTurnGroups,
     activeTimelineEntries,
+    activeUserTurnEntries,
     hiddenToolCallIds,
     bindTelemetry,
   };

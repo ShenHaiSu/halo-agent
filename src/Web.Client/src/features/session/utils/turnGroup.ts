@@ -90,11 +90,14 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
 /** need19：时间轴条目（主时间轴与目录共用；key 即锚点 key）。 */
 export interface TimelineEntry {
   key: string;
-  kind: 'user' | 'system' | 'turn' | 'turn-run';
+  kind: 'user' | 'system' | 'turn' | 'turn-run' | 'user-turn';
   msg?: UnifiedChatMessage;
   group?: TurnGroup;
   /** need-01：无正文轮次合并体（kind === 'turn-run' 时存在；不落盘）。 */
   run?: TurnRun;
+  /** need02-P2：用户轮次聚合体（kind === 'user-turn' 时存在；不落盘，类型经 userTurn 精化）。 */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  turn?: any;
 }
 
 /**

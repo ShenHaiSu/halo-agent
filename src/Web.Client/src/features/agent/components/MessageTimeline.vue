@@ -26,10 +26,11 @@
         :show-telemetry="t.hasTelemetryGroup"
         :protocol-of="t.protocolOf"
         :cache-line-of="t.cacheLineOf"
-        :has-active-turn="t.stream.hasActiveTurn"
+        :has-active-turn="t.stream.hasActiveTurn && !t.need02Flags.p2"
         :thinking-line="`思考中… · 本轮 ${t.curIterToolCount} 个工具 · 第 ${t.curIteration} 轮`"
         :is-generating="t.transcriptRunning"
         :segs="t.displaySegs"
+        :live-segs="t.liveInclusiveSegs"
         :seg-kill-switch="t.stream.segKillSwitch"
         :stream-md-kill-switch="t.stream.streamMdKillSwitch"
         :need02-attr="t.need02Attr"
@@ -157,7 +158,8 @@ const liveTelemetry = computed(() =>
  * 避免在 TimelineView 里再加一个 emit 通道（两处 slot 模板都要跟着改）。
  */
 function onToggle(key: string): void {
-  if (key.startsWith('run-')) t.toggleRun(key);
+  // need02-P2：uturn- 与 run- 共用同一套显式展开态（runExplicit）。
+  if (key.startsWith('run-') || key.startsWith('uturn-')) t.toggleRun(key);
   else t.toggleTurn(key);
 }
 function onUserMenu(e: MouseEvent, item: TimelineEntry): void {
