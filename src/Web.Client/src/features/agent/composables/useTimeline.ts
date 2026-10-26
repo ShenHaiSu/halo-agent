@@ -11,11 +11,13 @@ import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shar
 import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
 import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import { buildUserTurns } from '@features/session/utils/userTurn';
+import { buildUserTurnsIncremental, createUserTurnsCache } from '@features/session/utils/userTurn';
+import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode, useTimelineNav } from './useTimelineNav';
 import { useSmoothText } from './useSmoothText';
 import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
-import { INITIAL_MOUNT, isNearTop, STEP, WINDOW_MIN } from '@features/session/utils/transcriptWindow';
+import { INITIAL_MOUNT, STEP, WINDOW_MIN, hiddenAboveByWeight, isNearTop } from '@features/session/utils/transcriptWindow';
 import { useTimelineMenu } from './useTimelineMenu';
 import { need02Attr as buildNeed02Attr, useNeed02Flags } from '@features/need02/utils/need02Flags';
 import { pendingPreviewOf } from '@features/session/utils/pendingUser';
@@ -100,6 +102,8 @@ export function useTimeline() {
   // need02-P2：投影分支（resolveTimelineMode 语义内联：p2 on 自动旁路 need-01 开关，无需用户手动关）。
   // - p2 on → 走 buildUserTurns（activeUserTurnEntries，用户轮次粒度，D1=B）；
   // - p2 off → 回落旧链（turnRunKillSwitch 决定是否再做 turn-run 合并）。
+  // need02-P4（p4-proj）：p2 on 且 p4-proj on 时走增量投影（指纹命中返回同一引用，只重建末轮）。
+  const userTurnsCache = createUserTurnsCache();
   const timelineItems = computed<TimelineEntry[]>(() => {
     // need02-P2 + G1: overlay（含乐观 pending）是唯一真相源——发送瞬间本地即现，不等回包/首字/防抖。
     // 运行态按“本轮含末条 live + 全局 generating”判定（03 §3.2，不猜末 assistant，05 A3）。
@@ -112,11 +116,15 @@ export function useTimeline() {
       } catch {
         /* ignore */
       }
-      return buildUserTurns(msgs, {
+      const buildOpts = {
         activeAssistantId: lastPersistedAssistantId.value,
         isGenerating: turn.activeTurn?.isGenerating === true,
         liveTotalMs,
-      }) as unknown as TimelineEntry[];
+      };
+      if (isP4SubOn('proj', null, need02Flags)) {
+        return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
+      }
+      return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
     }
     const raw = telemetry.activeTimelineEntries;
     if (turnRunKillSwitch.value) return raw;
@@ -239,8 +247,24 @@ export function useTimeline() {
   // Windowed top expansion: near-top first grows +STEP, window-covered only then loadOlder; prepend anchors via scrollTop += delta.
   const hiddenAbove = ref(0);
   const visibleHistoryEntries = computed<TimelineEntry[]>(() => historyEntries.value.slice(hiddenAbove.value));
+  /** need02-P4（p4-window）：条目权重（user-turn 按 1+steps，余按 1；见 transcriptWindow.turnWeightOf）。 */
+  function weightOfItem(e: TimelineEntry): number {
+    try {
+      const u = e as unknown as { kind?: string; turn?: { steps?: unknown[] } };
+      if (u && u.kind === 'user-turn') return 1 + (Array.isArray(u.turn?.steps) ? (u.turn as { steps: unknown[] }).steps.length : 0);
+    } catch {
+      /* fallthrough */
+    }
+    return 1;
+  }
   function ensureMountWindow(): void {
-    hiddenAbove.value = Math.max(0, timelineItems.value.length - INITIAL_MOUNT);
+    // need02-P4（p4-window）：首屏按权重预算挂载（TURN_WINDOW_WEIGHT≈15 平均轮），超高轮仍整轮挂载；
+    // off 时回条数旧链（INITIAL_MOUNT/WINDOW_MIN）。
+    if (isP4SubOn('window', null, need02Flags)) {
+      hiddenAbove.value = hiddenAboveByWeight(timelineItems.value.map((e) => ({ key: e.key, kind: String((e as unknown as { kind?: string }).kind || ''), steps: weightOfItem(e) - 1 })));
+    } else {
+      hiddenAbove.value = Math.max(0, timelineItems.value.length - INITIAL_MOUNT);
+    }
     requestAnimationFrame(() => {
       if (!follow.pinnedRef.value || !paneVisible.value) return;
       hiddenAbove.value = Math.max(0, timelineItems.value.length - WINDOW_MIN);
@@ -255,6 +279,18 @@ export function useTimeline() {
    */
   function growWindowTop(step = STEP): boolean {
     if (hiddenAbove.value <= 0) return false;
+    // need02-P4（p4-window）：按权重扩窗（向前累计权重≥step 的条数，至少 1 条）；off 时回条数旧链。
+    if (isP4SubOn('window', null, need02Flags)) {
+      const items = timelineItems.value;
+      let acc = 0;
+      let n = 0;
+      for (let i = hiddenAbove.value - 1; i >= 0 && acc < step; i--) {
+        acc += weightOfItem(items[i] as TimelineEntry);
+        n++;
+      }
+      hiddenAbove.value = Math.max(0, hiddenAbove.value - Math.max(1, n));
+      return true;
+    }
     hiddenAbove.value = Math.max(0, hiddenAbove.value - step);
     return true;
   }
@@ -375,9 +411,48 @@ export function useTimeline() {
     };
   }
   const toolKeyOf = (m: UnifiedChatMessage): string => String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
+  // need02-P4（p4-proj）：toCard 派生一次算好、模板零 find/reduce。
+  // 原实现每次 computed 重跑都要 find + 切片（长轮次打字机卡顿，01 A5）；此处按 callId+内容指纹记忆化，
+  // 有界 300（LRU 淘汰最老）。p4-proj=off 时回直算旧链。注意：只缓存纯派生，不改传入对象（05 R1）。
+  const cardCache = new Map<string, AgentToolCard>();
+  function cardCacheKey(callId: string, content: string, fnName: string): string {
+    let h = 0x811c9dc5;
+    const s = String(content || '');
+    const head = s.length > 512 ? s.slice(0, 512) : s;
+    for (let i = 0; i < head.length; i++) {
+      h ^= head.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return `${callId}|${s.length}|${(h >>> 0).toString(16)}|${fnName}`;
+  }
   function toCard(m: UnifiedChatMessage, group: TurnGroup): AgentToolCard {
     const callId = String((m as unknown as { toolCallId?: string }).toolCallId || m.id);
-    const ref = group.toolCalls.find((t) => t.id === callId);
+    const content = String(m.content || '');
+    const useCache = isP4SubOn('proj', null, need02Flags);
+    const fnName = (() => {
+      const ref = group.toolCalls.find((t) => t.id === callId);
+      return ref?.name || (m.name as string) || 'tool';
+    })();
+    if (useCache) {
+      const key = cardCacheKey(callId, content, fnName);
+      const hit = cardCache.get(key);
+      if (hit) {
+        cardCache.delete(key);
+        cardCache.set(key, hit);
+        return hit;
+      }
+    }
+    const card = toCardUncached(m, group, callId, content, fnName);
+    if (useCache) {
+      cardCache.set(cardCacheKey(callId, content, fnName), card);
+      if (cardCache.size > 300) {
+        const oldest = cardCache.keys().next();
+        if (!oldest.done) cardCache.delete(oldest.value);
+      }
+    }
+    return card;
+  }
+  function toCardUncached(m: UnifiedChatMessage, group: TurnGroup, callId: string, content: string, fnName: string): AgentToolCard {
     let argsJson = '';
     const rawAssistant = persistedMessages.value.find((x) => String(x.id) === group.assistantId);
     const rawCalls = (
@@ -395,10 +470,9 @@ export function useTimeline() {
       const hit = rawCalls.find((c) => String(c.id || c.callId) === callId);
       if (hit) argsJson = String(hit.argumentsJson || hit.function?.arguments || '');
     }
-    const content = String(m.content || '');
     return {
       callId,
-      functionName: ref?.name || (m.name as string) || 'tool',
+      functionName: fnName || (m.name as string) || 'tool',
       argsJson,
       status: content.includes('[Tool Error') ? 'error' : 'done',
       resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
@@ -462,20 +536,48 @@ export function useTimeline() {
       return thumbnailCache.value[img.imageId] || '';
     if (thumbPending.has(img.imageId)) return '';
     thumbPending.add(img.imageId);
-    void (async () => {
-      try {
-        const ws = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
-        const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
-        const res = await getHostBridge().getImageThumbnail(ws, sid, img.imageId);
-        if (res.ok && typeof res.data === 'string' && res.data) thumbnailCache.value = { ...thumbnailCache.value, [img.imageId]: res.data };
-        else lostImageIds.value = { ...lostImageIds.value, [img.imageId]: true };
-      } catch {
-        lostImageIds.value = { ...lostImageIds.value, [img.imageId]: true };
-      } finally {
-        thumbPending.delete(img.imageId);
-      }
-    })();
+    // need02-P4：缩略图合批（requestIdleCallback 闲时每批≤6，长会话图片墙不再 N 路并发打满 bridge）。
+    // p4=off 时回立即单取旧链（本项无子开关，跟 master，见 04-P4#6）。失败 lost 缓存（已有语义保持）。
+    if (need02Flags.p4) enqueueThumb(img.imageId);
+    else void fetchThumb(img.imageId);
     return '';
+  }
+  const thumbQueue: string[] = [];
+  let thumbIdleScheduled = false;
+  const THUMB_BATCH = 6;
+  function scheduleThumbIdle(): void {
+    if (thumbIdleScheduled) return;
+    thumbIdleScheduled = true;
+    const run = (): void => {
+      thumbIdleScheduled = false;
+      const batch = thumbQueue.splice(0, THUMB_BATCH);
+      for (const id of batch) void fetchThumb(id);
+      if (thumbQueue.length > 0) scheduleThumbIdle();
+    };
+    try {
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+      if (typeof ric === 'function') ric.call(window, run, { timeout: 300 });
+      else window.setTimeout(run, 0);
+    } catch {
+      window.setTimeout(run, 0);
+    }
+  }
+  function enqueueThumb(imageId: string): void {
+    if (!thumbQueue.includes(imageId)) thumbQueue.push(imageId);
+    scheduleThumbIdle();
+  }
+  async function fetchThumb(imageId: string): Promise<void> {
+    try {
+      const ws = workspaceStore.activeWorkspaceId || workspaceStore.activeWorkspace?.id || '';
+      const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+      const res = await getHostBridge().getImageThumbnail(ws, sid, imageId);
+      if (res.ok && typeof res.data === 'string' && res.data) thumbnailCache.value = { ...thumbnailCache.value, [imageId]: res.data };
+      else lostImageIds.value = { ...lostImageIds.value, [imageId]: true };
+    } catch {
+      lostImageIds.value = { ...lostImageIds.value, [imageId]: true };
+    } finally {
+      thumbPending.delete(imageId);
+    }
   }
   /** 该轮内失败的 tool 条数（单一数据源：判定口径与 hasFailedTool 完全同源）。 */
   const failedToolCount = (g: TurnGroup): number =>
@@ -766,6 +868,12 @@ export function useTimeline() {
     /** need02-P0：总开关快照 + data-need02 透传串（只读，零行为变更）。 */
     need02Flags,
     need02Attr,
+    /** need02-P3：轮末交接窗（model.liveCompleting；TimelineRow 按 isLast 门控后透给末轮 UserTurnBlock）。 */
+    liveCompleting: computed(() => turn.activeTurn?.liveCompleting === true),
+    /** need02-P3：交接动画开关（p3；false = P2 硬切，直接切换）。 */
+    handoffAnim: computed(() => need02Flags.p3),
+    /** need02-P4（P4b#6）：轮内 notice（p4&&p2；false 时回 TimelineView 全局区）。 */
+    noticeInTurn: computed(() => need02Flags.p4 && need02Flags.p2),
     isRunExpanded,
     toggleRun,
     runByKey,

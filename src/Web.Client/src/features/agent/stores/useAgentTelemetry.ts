@@ -4,7 +4,8 @@
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
 import { haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
-import { buildTurnGroupsIncremental, buildTimelineEntries, buildUserTurns, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
+import { buildTurnGroupsIncremental, buildTimelineEntries, buildUserTurns, buildUserTurnsIncremental, createUserTurnsCache, type TurnGroup, type TimelineEntry } from '@shared/utils/turnGroup';
+import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import {
   activeSessionId,
   ensureSessionSync,
@@ -120,6 +121,8 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
   const activeTimelineEntries = computed<TimelineEntry[]>(() => buildTimelineEntries(persistedOf(), visibleTurnGroups.value));
   // need02-P2：用户轮次聚合投影（p2 on 时 useTimeline/Toc 消费此源；off 时回旧链）。
   // 运行态按“本轮含末条 live + 全局 generating”判定（03 §3.2，不再猜末 assistant，05 A3）。
+  // need02-P4（p4-proj）：Toc 同源走增量投影（与 useTimeline 同一缓存语义，各自持有 cache）。
+  const userTurnsCache = createUserTurnsCache();
   const activeUserTurnEntries = computed<TimelineEntry[]>(() => {
     const msgs = persistedOf();
     let activeAssistantId: string | null = null;
@@ -140,7 +143,13 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     } catch {
       /* 读不到瞬态则按静态投影 */
     }
-    return buildUserTurns(msgs, { activeAssistantId, isGenerating, liveTotalMs }) as unknown as TimelineEntry[];
+    const buildOpts = { activeAssistantId, isGenerating, liveTotalMs };
+    try {
+      if (isP4SubOn('proj')) return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
+    } catch {
+      /* 开关读取永不阻断投影 */
+    }
+    return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
   });
   // 兼容别名：旧 hiddenToolCallIds 引用统一走 store 内归并
 

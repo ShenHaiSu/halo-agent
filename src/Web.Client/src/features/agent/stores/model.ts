@@ -85,6 +85,8 @@ export interface AgentTurnState {
   lastAttachments: AgentSendAttachment[];
   /** need02-P1：乐观 user（分桶天然隔离；null=无 pending；仅视图层 overlay，不写 jsonl） */
   pendingUser: PendingUser | null;
+  /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
+  liveCompleting: boolean;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -150,6 +152,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     lastPrompt: '',
     lastAttachments: [],
     pendingUser: null,
+    liveCompleting: false,
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
     curIteration: 0,

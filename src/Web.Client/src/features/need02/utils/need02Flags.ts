@@ -82,3 +82,25 @@ export function need02Attr(flags: Need02Flags): string {
   const on = (v: boolean): string => (v ? 'on' : 'off');
   return `p1:${on(flags.p1)},p2:${on(flags.p2)},p3:${on(flags.p3)},p4:${on(flags.p4)}`;
 }
+ 
+ /** need02-P4：子开关（`halo-need02-p4-<sub>`，默认 on；master p4=off 时全关）。 */
+ export type Need02P4Sub = 'proj' | 'md' | 'reload' | 'window';
+ 
+ export const NEED02_P4_SUB_KEYS: Record<Need02P4Sub, string> = {
+   proj: 'halo-need02-p4-proj',
+   md: 'halo-need02-p4-md',
+   reload: 'halo-need02-p4-reload',
+   window: 'halo-need02-p4-window',
+ };
+ 
+ /** P4 子项是否生效（纯函数，可注入假 storage；master 关则子项恒关）。 */
+ export function isP4SubOn(sub: Need02P4Sub, storage?: Need02StorageLike | null, flags?: Need02Flags): boolean {
+   try {
+     const f = flags || readNeed02Flags(storage);
+     if (!f.p4) return false;
+     const s = resolveStorage(storage);
+     return readFlag(s, NEED02_P4_SUB_KEYS[sub], true);
+   } catch {
+     return true;
+   }
+ }

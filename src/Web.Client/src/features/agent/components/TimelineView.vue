@@ -41,16 +41,21 @@
             :is-generating="isGenerating"
             :stream-md-kill-switch="!!streamMdKillSwitch"
             :render-stream="renderStream"
+            :is-last="false"
+            :live-completing="false"
+            :handoff-anim="handoffAnim !== false"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
             @retry-pending="(item) => emit('retry-pending', item)"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
           />
         </template>
       </TranscriptHistory>
       <TranscriptTail :entries="tailList">
-        <template #default="{ entry }">
+        <template #default="{ entry, isLast }">
           <TimelineRow
             :item="entry as TimelineEntry"
             :is-expanded="isExpanded"
@@ -76,11 +81,20 @@
             :is-generating="isGenerating"
             :stream-md-kill-switch="!!streamMdKillSwitch"
             :render-stream="renderStream"
+            :is-last="!!isLast"
+            :live-completing="!!liveCompleting"
+            :handoff-anim="handoffAnim !== false"
+            :notice-in-turn="!!noticeInTurn"
+            :turn-notice="turnNotice"
+            :last-error="lastError"
+            :show-retry="showRetry"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
             @retry-pending="(item) => emit('retry-pending', item)"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
           />
         </template>
         <template #live>
@@ -138,13 +152,13 @@
           </Transition>
         </template>
       </TranscriptTail>
-      <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">
+      <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
         {{ turnNotice }}
       </n-alert>
-      <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">
+      <n-alert v-if="lastError && !noticeInTurn" type="error" class="text-xs" data-testid="turn-error-alert">
         {{ lastError }}
       </n-alert>
-      <div v-if="showRetry" class="flex items-center gap-2">
+      <div v-if="showRetry && !noticeInTurn" class="flex items-center gap-2">
         <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')"> 重试本轮 </n-button>
         <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')"> 忽略 </n-button>
       </div>
@@ -256,6 +270,12 @@ const props = defineProps<{
   /** need02-P1：pending 判定/状态（可选，缺省时 TimelineRow 回落到 id 前缀）。 */
   isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
   pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
+  /** need02-P3：轮末交接窗（model.liveCompleting；仅末轮行透给 UserTurnBlock，见 is-last 门控）。 */
+  liveCompleting?: boolean;
+  /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省开（老调用方行为不变）。 */
+  handoffAnim?: boolean;
+  /** need02-P4（P4b#6）：轮内 notice（p4&&p2；true 时全局 alert 隐藏，notice 收进末轮底部）。 */
+  noticeInTurn?: boolean;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];

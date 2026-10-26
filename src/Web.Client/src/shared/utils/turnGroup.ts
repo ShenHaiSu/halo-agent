@@ -28,6 +28,8 @@ export type { TurnRun, BuildTurnRunsOpts } from '@features/session/utils/turnRun
 /** need02-P2：用户轮次聚合——同一 shared 入口约定（实现唯一源在 features/session/utils/userTurn）。 */
 export {
   buildUserTurns,
+  buildUserTurnsIncremental,
+  createUserTurnsCache,
   isSingleFlatTurn,
   lastStepContent,
   earlierSteps,
@@ -37,5 +39,8 @@ export {
   rememberPendingAlias,
   pendingAliasOf,
   clearPendingAlias,
+  turnMessageIds,
+  turnCopyText,
+  turnReplayAnchor,
 } from '@features/session/utils/userTurn';
-export type { UserTurn, UserTurnStep, UserTurnEntry, BuildUserTurnsOpts } from '@features/session/utils/userTurn';
+export type { UserTurn, UserTurnStep, UserTurnEntry, UserTurnsCache, BuildUserTurnsOpts } from '@features/session/utils/userTurn';

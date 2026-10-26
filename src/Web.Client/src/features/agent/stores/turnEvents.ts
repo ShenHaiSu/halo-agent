@@ -17,6 +17,7 @@ import {
 } from './model';
 import { agentRuntime } from './runtime';
 import { dropSegBuf, flushSegBufSync } from './useAgentStream';
+import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 
 /** need04-01：任何写消息路径结束时内存态秒级刷新会话卡时间（乐观+事件双通道）。 */
 function touchSessionClock(sessionId: string, iso?: string): void {
@@ -33,6 +34,19 @@ function isNeed02P2On(): boolean {
     const v = String(window.localStorage.getItem('halo-need02-p2') || '').toLowerCase();
     if (!v) return true;
     return v !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+/** need02-P4（p4-reload）：persisted 事件只刷预算、全量重拉收敛到轮末。master/子开关任一 off 即回旧链。 */
+function isNeed02P4ReloadOn(): boolean {
+  try {
+    const p4 = String(window.localStorage.getItem('halo-need02-p4') || '').toLowerCase();
+    if (p4 === 'off') return false;
+    const sub = String(window.localStorage.getItem('halo-need02-p4-reload') || '').toLowerCase();
+    if (!sub) return true;
+    return sub !== 'off';
   } catch {
     return true;
   }
@@ -81,12 +95,31 @@ async function reloadNow(sid: string): Promise<void> {
 }
 
 // need04-03：分流刷新：tool-completed 只内存更新（调用方已标脏）；persisted/finish 才拉全量对账（need23-R4 起走合并窗口）
+// need02-P4（p4-reload）：persisted 只刷预算（400ms 防抖保留在 scheduleReload 的 budget 位），
+// 全量 getSessionMessages 收敛到轮末 finish（Completed/Cancelled/Error/Truncated 经 finishTurn.reloadNow）。
+// 首 user 已有 P1 乐观覆盖，无需中途全量拉。master/子开关 off 即回旧链。
+const pendingBudget = new Map<string, number>();
+function scheduleBudgetOnly(sid: string): void {
+  const cur = pendingBudget.get(sid);
+  if (cur) window.clearTimeout(cur);
+  const timer = window.setTimeout(() => {
+    pendingBudget.delete(sid);
+    void agentRuntime()
+      .refreshBudget()
+      .catch((err) => console.error('[agent-turn] budget refresh failed:', err));
+  }, RELOAD_DEBOUNCE_MS);
+  pendingBudget.set(sid, timer);
+}
 export async function refreshAfterTool(targetSessionId?: string, reason?: string): Promise<void> {
   try {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
     if (!sid) return;
     // 后台会话只落桶、不碰当前视图：避免把 B 的消息列表刷成 A 的（切卡时 selectSession 天然对账）
     if (sid !== activeSessionId.value) return;
+    if (reason === 'persisted' && isNeed02P4ReloadOn()) {
+      scheduleBudgetOnly(sid);
+      return;
+    }
     if (reason !== 'persisted' && reason !== 'finish') {
       await agentRuntime().refreshBudget();
       return;
@@ -114,6 +147,15 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   }
   // need23-R4：先立即重拉（取消该 session 待定的防抖定时器），保证内容已在视图里，
   // 再清空流式容器 —— 避免"内容先消失、400ms 后才回来"的闪烁。
+  // need02-P3：defer 窗的 liveCompleting 必须在 reloadNow 之前立——handleTurnLifecycle 已先熄 isGenerating，
+  // 若等 reload 完成才立，中间一轮 bridge 往返里内嵌 LiveBody 无依据渲染，仍是一帧真空。
+  const deferMs = Math.max(0, Number(opts?.deferClearMs) || 0);
+  const willDefer = deferMs > 0 && !(opts?.keepOnFailure && t.lastErrorInfo?.retry);
+  if (willDefer) {
+    t.liveCompleting = true;
+    touch(t);
+    need02Debug('handoff', { requestId: t.requestId, deferMs, at: Date.now() });
+  }
   dirtyPersisted.value[sid] = false;
   await reloadNow(sid);
   try {
@@ -128,7 +170,8 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   }
   // need02-P2：终态已就位（reloadNow 先拉后清），流容器延迟 300ms 再清，供 P3 交接编排做交叉淡入淡出；
   // p2 off 时保持立即清（旧行为）。Cancel/Error 路径不延迟（调用方只在 Completed/Truncated 传 defer）。
-  const deferMs = Math.max(0, Number(opts?.deferClearMs) || 0);
+  // need02-P3：内嵌 LiveBody 在 completing 期继续渲染全量 segs（absolute 脱流淡出），与 FoldedSummary 交叉淡入。
+  // 交接埋点（DEV 限定，供 G3 量化）：handoff {requestId, liveMs, steadyMs}。
   const doClear = (): void => {
     t.toolCards = [];
     t.toolCardIndex = {};
@@ -137,13 +180,16 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     t.streamingText = '';
     t.streamingReasoning = '';
     t.streamingActive = false;
+    t.liveCompleting = false;
     dropSegBuf(sid);
     touch(t);
   };
-  if (deferMs > 0) {
-    touch(t);
+  if (willDefer) {
+    // 交接窗竞态守卫：若窗内起了新轮（sendPrompt 重置 turnStartMarks），旧定时器不得清空新轮容器。
+    const deferMark = turnStartMarks[sid] || 0;
     window.setTimeout(() => {
       try {
+        if ((turnStartMarks[sid] || 0) !== deferMark) return;
         doClear();
       } catch (e) {
         console.warn('[agent-turn] deferred clear failed:', e);

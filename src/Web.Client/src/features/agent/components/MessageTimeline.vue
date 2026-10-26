@@ -17,7 +17,7 @@
         :thumb-of="t.thumbOf"
         :has-lost="t.hasLostImage"
         :img-lost="t.isImageLost"
-        :render-html="renderMarkdown"
+        :render-html="renderHtml"
         :render-stream="renderStreamingText"
         :card-for="t.toCard"
         :tool-key="t.toolKeyOf"
@@ -26,6 +26,9 @@
         :show-telemetry="t.hasTelemetryGroup"
         :protocol-of="t.protocolOf"
         :cache-line-of="t.cacheLineOf"
+        :live-completing="!!t.liveCompleting"
+        :handoff-anim="!!t.handoffAnim"
+        :notice-in-turn="!!t.noticeInTurn"
         :has-active-turn="t.stream.hasActiveTurn && !t.need02Flags.p2"
         :thinking-line="`思考中… · 本轮 ${t.curIterToolCount} 个工具 · 第 ${t.curIteration} 轮`"
         :is-generating="t.transcriptRunning"
@@ -69,10 +72,23 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import TimelineView from './TimelineView.vue';
 import { useTimeline } from '../composables/useTimeline';
-import { renderMarkdown, renderStreamingText } from '@features/session/utils/markdownRender';
+import { renderMarkdown, renderMarkdownCached, renderStreamingText } from '@features/session/utils/markdownRender';
+import { isP4SubOn } from '@features/need02/utils/need02Flags';
+import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
+import type { UserTurn } from '@features/session/utils/userTurn';
 import { createSettleController, type SettleController } from '@features/session/utils/transcriptSettle';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+
+/** need02-P4（p4-md）：稳态渲染走 LRU 缓存；子开关 off 时回直跑（开关即时生效，无需重载，供 G6 矩阵验证）。 */
+function renderHtml(s: string): string {
+  try {
+    if (isP4SubOn('md')) return renderMarkdownCached(s);
+  } catch {
+    /* fallthrough 直跑 */
+  }
+  return renderMarkdown(s);
+}
 
 const t = reactive(useTimeline());
 // Hidden pane never follows/pages/samples; 显隐保留滚动（v-show 不重建 DOM）。
@@ -162,10 +178,55 @@ function onToggle(key: string): void {
   if (key.startsWith('run-') || key.startsWith('uturn-')) t.toggleRun(key);
   else t.toggleTurn(key);
 }
+function turnOf(item: TimelineEntry): UserTurn | null {
+  try {
+    const u = item as unknown as { kind?: string; turn?: UserTurn };
+    if (u && u.kind === 'user-turn' && u.turn) return u.turn;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 function onUserMenu(e: MouseEvent, item: TimelineEntry): void {
+  // need02-P4（P4b#5）：轮级菜单——复制整轮（user+全文展开）、重放整轮、分支、删除整轮（二次确认一次）。
+  const turn = turnOf(item);
+  if (turn) {
+    const anchor = turnReplayAnchor(turn);
+    const ids = turnMessageIds(turn);
+    t.menu.openTurnMenu(e, {
+      kind: 'user',
+      id: anchor ? anchor.id : String(turn.userId || ''),
+      text: turnCopyText(turn),
+      turnIds: ids,
+      turnLabel: `整轮（${ids.length}条）`,
+    });
+    return;
+  }
   t.menu.openMenu(e, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') });
 }
 function onAssistantMenu(e: MouseEvent, item: TimelineEntry): void {
+  // need02-P4（P4b#5）：assistant 区右键同样按轮（锚点取本轮末 assistant，重放/分支/删除整轮）。
+  const turn = turnOf(item);
+  if (turn) {
+    let assistantId = '';
+    for (let i = turn.steps.length - 1; i >= 0; i--) {
+      const sid = String(turn.steps[i]?.assistantId || '');
+      if (sid) {
+        assistantId = sid;
+        break;
+      }
+    }
+    const anchor = turnReplayAnchor(turn);
+    const ids = turnMessageIds(turn);
+    t.menu.openTurnMenu(e, {
+      kind: 'assistant',
+      id: assistantId || (anchor ? anchor.id : String(turn.userId || '')),
+      text: turnCopyText(turn),
+      turnIds: ids,
+      turnLabel: `整轮（${ids.length}条）`,
+    });
+    return;
+  }
   t.menu.openMenu(e, {
     kind: 'assistant',
     id: String(item.group?.assistantId || item.group?.key || ''),

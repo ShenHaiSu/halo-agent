@@ -91,12 +91,23 @@
       :is-generating="!!isGeneratingValue"
       :stream-md-kill-switch="!!streamMdKillSwitch"
       :pending-status="pendingStatusOfTurn"
+      :live-completing="!!liveCompleting && !!isLast"
+      :handoff-anim="handoffAnim !== false"
       @toggle="emit('toggle', $event)"
       @user-menu="(e) => emit('user-menu', e, item)"
       @assistant-menu="(e) => emit('assistant-menu', e, item)"
       @link-click="emit('link-click', $event)"
       @retry-pending="emit('retry-pending', item)"
     />
+    <!-- need02-P4（P4b#6）：轮内 notice（仅末条；p4 off 时回 TimelineView 全局 alert，见 noticeInTurn）。 -->
+    <div v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError)" class="mt-1.5 space-y-1.5" data-testid="user-turn-notice">
+      <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
+      <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
+      <div v-if="showRetry" class="flex items-center gap-2">
+        <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')">重试本轮</n-button>
+        <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')">忽略</n-button>
+      </div>
+    </div>
   </div>
   <div v-else :ref="anchorRef(item.key)">
     <TurnGroupItem
@@ -115,6 +126,15 @@
       @content-menu="emit('assistant-menu', $event, item)"
       @link-click="emit('link-click', $event)"
     />
+  </div>
+  <!-- need02-P4（P4b#6）：轮内 notice 兜底（末条非 user-turn 时，如 system 尾，挂行尾而非丢提示）。 -->
+  <div v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError) && item.kind !== 'user-turn'" class="mt-1.5 space-y-1.5" data-testid="user-turn-notice">
+    <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
+    <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
+    <div v-if="showRetry" class="flex items-center gap-2">
+      <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')">重试本轮</n-button>
+      <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')">忽略</n-button>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
@@ -158,6 +178,17 @@ const props = defineProps<{
   isGenerating?: boolean;
   streamMdKillSwitch?: boolean;
   renderStream?: (text: string) => string;
+  /** need02-P3：末条标记（TranscriptTail 透传；交接窗 liveCompleting 只对末轮生效）。 */
+  isLast?: boolean;
+  /** need02-P3：轮末交接窗（model.liveCompleting；TimelineRow 按 isLast 门控后透给 UserTurnBlock）。 */
+  liveCompleting?: boolean;
+  /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省 true（老调用方行为不变）。 */
+  handoffAnim?: boolean;
+  /** need02-P4（P4b#6）：轮内 notice 开关（p4&&p2；false 时 notice 回 TimelineView 全局区）。 */
+  noticeInTurn?: boolean;
+  turnNotice?: string;
+  lastError?: string;
+  showRetry?: boolean;
 }>();
 /** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
 function isImgLost(img: ChatImageRef): boolean {
@@ -228,6 +259,8 @@ const emit = defineEmits<{
   'link-click': [e: MouseEvent];
   'content-menu': [e: MouseEvent];
   'retry-pending': [item: TimelineEntry];
+  retry: [];
+  dismiss: [];
 }>();
 void emit;
 </script>

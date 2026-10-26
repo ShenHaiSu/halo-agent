@@ -41,60 +41,67 @@
       </div>
     </div>
 
-    <!-- 流态：全量展开（含已落盘段，标灰但仍可见，直到交接；P3 再做交叉淡入淡出） -->
-    <div v-if="turn.isRunning && !readingWindow" class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0" data-testid="user-turn-live">
-      <div v-for="(seg, i) in liveSegs" :key="seg.key" :data-testid="`user-turn-live-seg-${i}`">
-        <StreamSegItem :seg="seg" :stream-md-kill-switch="!!streamMdKillSwitch" :render-stream="renderStreamFn" :is-tail="i === liveSegs.length - 1" :is-generating="!!isGenerating" @link-click="emit('link-click', $event)" />
-      </div>
-      <div v-if="streamingText" class="app-text-body leading-relaxed text-primary break-words select-text min-w-0" style="white-space: pre-wrap" @click="emit('link-click', $event)" v-html="renderStreamFn(streamingText)" />
-      <div v-if="!liveSegs.length && !streamingText" class="flex items-center gap-2 text-xs text-secondary">
-        <Loader2 class="w-3.5 h-3.5 animate-spin" />
-        <span>Agent 推理中...</span>
-      </div>
-    </div>
-
-    <!-- 稳态单步直出：user + 正文 markdown（与今日一致，不套汇总行，05 R5） -->
-    <div v-else-if="isFlat" class="min-w-0">
-      <div
-        v-if="lastContent"
-        class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
-        data-testid="user-turn-single"
-        @click="emit('link-click', $event)"
-        @contextmenu.prevent="emit('assistant-menu', $event)"
-        v-html="renderHtmlFn(lastContent)"
-      />
-    </div>
-
-    <!-- 稳态多步：上折叠行 + 下末段直出 -->
-    <div v-else class="min-w-0 space-y-2">
-      <UserTurnSummary :turn="turn" :expanded="expanded" :reading-window="!!readingWindow" @toggle="emit('toggle', $event)" />
-      <n-collapse-transition :show="expanded">
-        <div class="px-3 pb-2 space-y-2 max-h-72 overflow-y-auto min-w-0 rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70">
-          <div v-for="(st, i) in earlier" :key="st.assistantId || `step-${i}`" class="min-w-0" :data-testid="`user-turn-step-${i + 1}`">
-            <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
-              <span class="font-mono shrink-0 opacity-70">{{ st.iteration }}</span>
-              <span class="truncate">第 {{ st.iteration }} 步</span>
-              <span v-if="st.reasoning" class="shrink-0 opacity-60">· 思考</span>
-              <span v-if="(st.toolMessages?.length || 0) > 0" class="shrink-0 font-mono opacity-60">· {{ st.toolMessages.length }} 个工具</span>
-            </div>
-            <div v-if="st.content" class="mt-1 app-text-body leading-relaxed text-primary break-words select-text min-w-0" @click="emit('link-click', $event)" v-html="renderHtmlFn(st.content)" />
-            <div v-if="st.reasoning" class="mt-1 whitespace-pre-wrap break-words select-text app-text-small text-[var(--reasoning-text)] max-h-[40vh] overflow-y-auto">
-              {{ st.reasoning }}
-            </div>
-            <div v-if="(st.toolMessages?.length || 0) > 0" class="mt-1 space-y-1.5 min-w-0">
-              <ToolCallCard v-for="t in st.toolMessages" :key="toolKeyFn(t)" :card="cardForFn(t, groupOf(st))" :default-collapsed="true" />
-            </div>
+    <!-- 流态/交接：运行中全量展开；轮末 300ms 交接窗内与终态共存交叉淡入淡出（P3 编排，UserTurnTransition）。
+         readingWindow 期 running 置 false（暂停交接动画，直接切终态，05 R11）。 -->
+    <UserTurnTransition :running="turn.isRunning && !readingWindow" :completing="completingEffective" :anim-on="handoffAnimOn">
+      <template #live>
+        <div class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0" data-testid="user-turn-live">
+          <div v-for="(seg, i) in liveSegs" :key="seg.key" :data-testid="`user-turn-live-seg-${i}`">
+            <StreamSegItem :seg="seg" :stream-md-kill-switch="!!streamMdKillSwitch" :render-stream="renderStreamFn" :is-tail="i === liveSegs.length - 1" :is-generating="!!isGenerating" @link-click="emit('link-click', $event)" />
+          </div>
+          <div v-if="streamingText" class="app-text-body leading-relaxed text-primary break-words select-text min-w-0" style="white-space: pre-wrap" @click="emit('link-click', $event)" v-html="renderStreamFn(streamingText)" />
+          <div v-if="!liveSegs.length && !streamingText" class="flex items-center gap-2 text-xs text-secondary">
+            <Loader2 class="w-3.5 h-3.5 animate-spin" />
+            <span>Agent 推理中...</span>
           </div>
         </div>
-      </n-collapse-transition>
-      <div
-        v-if="lastContent"
-        class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
-        @click="emit('link-click', $event)"
-        @contextmenu.prevent="emit('assistant-menu', $event)"
-        v-html="renderHtmlFn(lastContent)"
-      />
-    </div>
+      </template>
+      <template #default>
+        <!-- 稳态单步直出：user + 正文 markdown（与今日一致，不套汇总行，05 R5）。
+             运行中（非交接窗）不渲染稳态，避免与 LiveBody 双内容；交接窗内共存做交叉淡入。 -->
+        <div v-if="showSteady && isFlat" class="min-w-0">
+          <div
+            v-if="lastContent"
+            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+            data-testid="user-turn-single"
+            @click="emit('link-click', $event)"
+            @contextmenu.prevent="emit('assistant-menu', $event)"
+            v-html="renderHtmlFn(lastContent)"
+          />
+        </div>
+
+        <!-- 稳态多步：上折叠行 + 下末段直出 -->
+        <div v-else-if="showSteady" class="min-w-0 space-y-2">
+          <UserTurnSummary :turn="turn" :expanded="expanded" :reading-window="!!readingWindow" @toggle="emit('toggle', $event)" />
+          <n-collapse-transition :show="expanded">
+            <div class="px-3 pb-2 space-y-2 max-h-72 overflow-y-auto min-w-0 rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70">
+              <div v-for="(st, i) in earlier" :key="st.assistantId || `step-${i}`" class="min-w-0" :data-testid="`user-turn-step-${i + 1}`">
+                <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
+                  <span class="font-mono shrink-0 opacity-70">{{ st.iteration }}</span>
+                  <span class="truncate">第 {{ st.iteration }} 步</span>
+                  <span v-if="st.reasoning" class="shrink-0 opacity-60">· 思考</span>
+                  <span v-if="(st.toolMessages?.length || 0) > 0" class="shrink-0 font-mono opacity-60">· {{ st.toolMessages.length }} 个工具</span>
+                </div>
+                <div v-if="st.content" class="mt-1 app-text-body leading-relaxed text-primary break-words select-text min-w-0" @click="emit('link-click', $event)" v-html="renderHtmlFn(st.content)" />
+                <div v-if="st.reasoning" class="mt-1 whitespace-pre-wrap break-words select-text app-text-small text-[var(--reasoning-text)] max-h-[40vh] overflow-y-auto">
+                  {{ st.reasoning }}
+                </div>
+                <div v-if="(st.toolMessages?.length || 0) > 0" class="mt-1 space-y-1.5 min-w-0">
+                  <ToolCallCard v-for="t in st.toolMessages" :key="toolKeyFn(t)" :card="cardForFn(t, groupOf(st))" :default-collapsed="true" />
+                </div>
+              </div>
+            </div>
+          </n-collapse-transition>
+          <div
+            v-if="lastContent"
+            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+            @click="emit('link-click', $event)"
+            @contextmenu.prevent="emit('assistant-menu', $event)"
+            v-html="renderHtmlFn(lastContent)"
+          />
+        </div>
+      </template>
+    </UserTurnTransition>
   </div>
 </template>
 <script setup lang="ts">
@@ -111,6 +118,7 @@ import SkillPillChip from './SkillPillChip.vue';
 import ToolCallCard from './ToolCallCard.vue';
 import StreamSegItem from './StreamSegItem.vue';
 import UserTurnSummary from './UserTurnSummary.vue';
+import UserTurnTransition from './UserTurnTransition.vue';
 
 const props = defineProps<{
   turn: UserTurn;
@@ -128,6 +136,10 @@ const props = defineProps<{
   isGenerating?: boolean;
   streamMdKillSwitch?: boolean;
   pendingStatus?: string;
+  /** need02-P3：轮末交接窗（model.liveCompleting 经 TimelineRow 透传；仅末轮为 true，见 isLast 门控）。 */
+  liveCompleting?: boolean;
+  /** need02-P3：交接动画总开关（p3；false = P2 硬切，直接切换）。 */
+  handoffAnim?: boolean;
 }>();
 const emit = defineEmits<{
   toggle: [key: string];
@@ -138,6 +150,12 @@ const emit = defineEmits<{
 }>();
 
 const isFlat = computed(() => isSingleFlatTurn(props.turn));
+/** need02-P3：交接窗有效性（readingWindow 期暂停交接动画，直接切终态，05 R11）。 */
+const completingEffective = computed(() => !!props.liveCompleting && !props.readingWindow);
+/** need02-P3：动画开关（p3 off = P2 硬切；内容交接仍正确，只无淡入淡出）。 */
+const handoffAnimOn = computed(() => props.handoffAnim !== false);
+/** 稳态可见性：非运行态恒可见；运行态仅在交接窗/阅读窗内可见（与 LiveBody 共存或替代）。 */
+const showSteady = computed(() => !props.turn.isRunning || completingEffective.value || !!props.readingWindow);
 const lastContent = computed(() => lastStepContent(props.turn));
 const earlier = computed<UserTurnStep[]>(() => earlierSteps(props.turn));
 const liveSegs = computed<DisplaySeg[]>(() => (Array.isArray(props.liveSegs) ? props.liveSegs : []));

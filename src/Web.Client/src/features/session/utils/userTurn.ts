@@ -366,3 +366,138 @@ export function earlierSteps(turn: UserTurn): UserTurnStep[] {
   if (turn.steps.length <= 1) return [];
   return turn.steps.slice(0, -1);
 }
+
+// ---- need02-P4（p4-proj）：增量投影 ----
+// 指纹 = 消息条数 + 首尾 id + 聚合 opts（active/isGenerating/liveTotalMs/stopped 规模）。
+// 命中即返回上次同一引用（模板零 diff，DOM 不抖）；未命中时若新输入是旧输入的前缀追加，
+// 则复用旧 UserTurn 对象（仅重建末轮 + 新轮），否则全量重建。只读输入，不改传入对象（05 R1）。
+
+export interface UserTurnsCache {
+  fingerprint: string;
+  messages: UnifiedChatMessage[];
+  opts: BuildUserTurnsOpts;
+  result: UserTurnEntry[];
+}
+
+function fingerprintOf(messages: UnifiedChatMessage[], opts: BuildUserTurnsOpts): string {
+  const n = messages.length;
+  const first = n > 0 ? String(messages[0]?.id || '') : '';
+  const last = n > 0 ? String(messages[n - 1]?.id || '') : '';
+  // 内容信号（Σ各条 content 长度 + 末条长度）：同 id 换内容（如重载改写）不得误命中旧引用。
+  // 落盘消息 append-only，同 id 内容恒定；此处为启发式兜底 + 锁死测试语义。
+  let contentLen = 0;
+  for (let i = 0; i < n; i++) contentLen += String(messages[i]?.content || '').length;
+  const lastLen = n > 0 ? String(messages[n - 1]?.content || '').length : 0;
+  const stopped = opts.stoppedTurnKeys ? [...opts.stoppedTurnKeys].sort().join(',') : '';
+  return [n, first, last, contentLen, lastLen, String(opts.activeAssistantId || ''), opts.isGenerating === true ? '1' : '0', String(opts.liveTotalMs ?? ''), stopped].join('|');
+}
+
+function isPrefixAppend(prev: UnifiedChatMessage[], next: UnifiedChatMessage[]): boolean {
+  if (prev.length === 0 || prev.length >= next.length) return false;
+  for (let i = 0; i < prev.length; i++) {
+    if (String(prev[i]?.id || '') !== String(next[i]?.id || '')) return false;
+  }
+  return true;
+}
+
+/**
+ * 增量聚合：cache 未命中且为纯追加时，只重建“旧末轮 + 新增部分”，其余 UserTurn 沿用旧引用。
+ * 返回 { entries, reused }；reused=true 表示除末尾外全部复用（供测试断言与调试）。
+ */
+export function buildUserTurnsIncremental(
+  messages: UnifiedChatMessage[] | null | undefined,
+  opts: BuildUserTurnsOpts = {},
+  cache?: UserTurnsCache | null,
+): { entries: UserTurnEntry[]; reused: boolean } {
+  const list = Array.isArray(messages) ? messages : [];
+  const fp = fingerprintOf(list, opts);
+  if (cache && cache.fingerprint === fp) return { entries: cache.result, reused: true };
+  let entries: UserTurnEntry[];
+  let reused = false;
+  if (cache && cache.result.length > 0 && isPrefixAppend(cache.messages, list)) {
+    // 追加重建：旧结果除末条外整体复用；旧末轮可能被追加消息延续（如新 assistant 并入当前轮），故从旧末条起点重算。
+    const kept = cache.result.slice(0, -1);
+    // 找到旧末轮对应的消息起点：回退到旧结果末条所含的首条消息 id。
+    const lastEntry = cache.result[cache.result.length - 1];
+    let cutAt = cache.messages.length;
+    if (lastEntry && lastEntry.kind === 'user-turn') {
+      const t = lastEntry.turn;
+      const headId = t.userMsg ? String(t.userMsg.id || '') : '';
+      const stepHead = t.steps.length > 0 ? String(t.steps[0]?.assistantId || t.steps[0]?.toolMessages?.[0]?.id || '') : '';
+      for (let i = 0; i < list.length; i++) {
+        const id = String(list[i]?.id || '');
+        if ((headId && id === headId) || (stepHead && id === stepHead)) {
+          cutAt = i;
+          break;
+        }
+      }
+    } else if (lastEntry && lastEntry.kind === 'system') {
+      const id = String(lastEntry.msg?.id || '');
+      for (let i = 0; i < list.length; i++) {
+        if (id && String(list[i]?.id || '') === id) {
+          cutAt = i;
+          break;
+        }
+      }
+    }
+    const rebuilt = buildUserTurns(list.slice(cutAt), opts);
+    entries = [...kept, ...rebuilt];
+    reused = true;
+  } else {
+    entries = buildUserTurns(list, opts);
+  }
+  if (cache) {
+    cache.fingerprint = fp;
+    cache.messages = list.slice();
+    cache.opts = opts;
+    cache.result = entries;
+  }
+  return { entries, reused };
+}
+
+/** 新建空缓存（调用方持有，供 timeline computed 闭包复用）。 */
+export function createUserTurnsCache(): UserTurnsCache {
+  return { fingerprint: '', messages: [], opts: {}, result: [] };
+}
+
+// ---- need02-P4（P4b#5）：轮级菜单纯函数 ----
+
+/** 整轮消息 id（user + 各 step 的 assistant + tool），供整轮删除（逐条删，二次确认一次）。 */
+export function turnMessageIds(turn: UserTurn): string[] {
+  const out: string[] = [];
+  if (turn.userMsg && turn.userMsg.id) out.push(String(turn.userMsg.id));
+  for (const st of turn.steps || []) {
+    if (st.assistantId) out.push(String(st.assistantId));
+    for (const m of st.toolMessages || []) {
+      if (m && m.id) out.push(String(m.id));
+    }
+  }
+  return out;
+}
+
+/** 整轮复制文本（user 全文 + 各 step 全文 + 工具结果，阅读序）。 */
+export function turnCopyText(turn: UserTurn): string {
+  const parts: string[] = [];
+  if (turn.userMsg && String(turn.userMsg.content || '').trim()) parts.push(String(turn.userMsg.content));
+  for (const st of turn.steps || []) {
+    if (String(st.content || '').trim()) parts.push(String(st.content));
+    if (st.reasoning && String(st.reasoning).trim()) parts.push(String(st.reasoning));
+    for (const m of st.toolMessages || []) {
+      const c = String(m?.content || '').trim();
+      if (c) parts.push(`[工具 ${String((m as unknown as { name?: unknown }).name || '')}] ${c}`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+/** 整轮重放锚点（D3=A：重试另起一轮；user 锚优先，孤儿轮用末 assistant 锚）。 */
+export function turnReplayAnchor(turn: UserTurn): { kind: 'user' | 'assistant'; id: string } | null {
+  if (turn.userMsg && turn.userMsg.id && !String(turn.userMsg.id).startsWith('pending-')) {
+    return { kind: 'user', id: String(turn.userMsg.id) };
+  }
+  for (let i = turn.steps.length - 1; i >= 0; i--) {
+    const sid = String(turn.steps[i]?.assistantId || '');
+    if (sid) return { kind: 'assistant', id: sid };
+  }
+  return null;
+}

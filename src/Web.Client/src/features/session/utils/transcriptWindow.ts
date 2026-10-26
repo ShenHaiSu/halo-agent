@@ -53,3 +53,36 @@ export const NEAR_TOP_PX = 240;
 export function isNearTop(scrollTop: number, threshold = NEAR_TOP_PX): boolean {
   return Math.max(0, scrollTop) <= threshold;
 }
+
+// ---- need02-P4（p4-window）：按高度加权的窗口 ----
+// P2 一行折叠后单条高度方差更大（单步直出 vs 多步折叠 vs 长文末段直出），按“条”切窗要么首屏空白要么超高。
+// 权重 = 1 + steps（用户轮的 iteration 数；system/单条按 1）：
+//  - 挂载预算 TURN_WINDOW_WEIGHT=32（≈15 个平均轮，与旧 INITIAL_MOUNT=15 turns 同量级）；
+//  - 超高轮（单轮权重>预算）首屏仍挂该轮（只它一条，不截断轮内 user 头 + 汇总行语义）。
+// 输入为轻量指纹（key/kind/steps），不依赖 UserTurn 对象，避免 utils 循环依赖。
+
+export const TURN_WINDOW_WEIGHT = 32;
+
+export interface TurnWeightLike {
+  key: string;
+  kind: string;
+  steps?: number;
+}
+
+export function turnWeightOf(e: TurnWeightLike): number {
+  if (e && e.kind === 'user-turn') return 1 + Math.max(0, Math.trunc(e.steps || 0));
+  return 1;
+}
+
+/** 按权重预算从尾部向前收：返回应隐藏的前缀条数（hiddenAbove）。 */
+export function hiddenAboveByWeight(entries: TurnWeightLike[], budget = TURN_WINDOW_WEIGHT): number {
+  let acc = 0;
+  let i = entries.length;
+  while (i > 0) {
+    const w = turnWeightOf(entries[i - 1] as TurnWeightLike);
+    if (acc + w > budget && acc > 0) break;
+    acc += w;
+    i--;
+  }
+  return Math.max(0, i);
+}
