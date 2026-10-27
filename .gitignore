@@ -1,0 +1,3 @@
+# 屏蔽 docs，只保留架构铁律
+docs/*
+!docs/CEFSHARP_ARCHITECTURE_STANDARD.md
