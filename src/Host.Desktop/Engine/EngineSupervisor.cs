@@ -1,138 +1,144 @@
 namespace HaloAgent.Desktop.Engine;
 
+/// <summary>P3 引擎状态机：Starting → Ready ⇄ Restarting → Failed / Stopped。</summary>
+public enum EngineState { Starting, Ready, Restarting, Failed, Stopped }
+
+public sealed record EngineStatus(EngineState State, int? Pid = null, string? Reason = null);
+
 /// <summary>
-/// 引擎守护：负责启动、监控、重连引擎进程。
-///
-/// ============ 状态机 ============
-///
-///   Idle ──Start()──▶ Starting ──成功──▶ Ready
-///                        │                 │
-///                        │失败              │进程退出/连接断
-///                        ▼                 ▼
-///                     Failed ◀──────── Recovering
-///                                          │
-///                                    退避后重试
-///
-/// 退避：200 → 400 → 800 → 1600 → 3200（封顶 5000）ms，最多 10 次
-///
-/// ============ 重连后的状态恢复 ============
-///   1. 重新 state.snapshot 拿到全量状态
-///   2. 前端用快照完全重建界面
-///   3. 排队消息由宿主侧保留（不在引擎里），重连后重新 agent.queue
+/// 引擎监督者：启动、健康监控、崩溃重启、受控关闭。
+/// 自动重启上限 3 次、间隔 1s/2s/4s（确定性崩溃无限重启只会打满 CPU）。
+/// 管道就绪等待 30s 超时。关闭时先停心跳再停进程。
+/// 另保留 P1 兼容面（State/TryGetClient/RetryInBackground/排队重放/BuildPipeName）。
 /// </summary>
 public sealed class EngineSupervisor : IAsyncDisposable
 {
+    private const int MaxAutoRestarts = 3;
+
     private readonly string _dataDir;
+    private readonly string? _cwd;
+    private readonly string? _logDir;
+    private readonly string? _extraArgs;
     private readonly object _lock = new();
-    private volatile EngineClient? _client;
-    private CancellationTokenSource? _superviseCts;
-    private int _attempt;
-    private volatile SupervisedState _state = new(SupervisorPhase.Idle, null, null);
-
-    /// <summary>排队消息（宿主侧保留，重连后重放）。</summary>
     private readonly List<string> _pendingQueue = new();
+    private readonly CancellationTokenSource _cts = new();
 
-    public EngineSupervisor(string dataDir) => _dataDir = dataDir;
+    private EngineClient? _client;
+    private EngineHealthMonitor? _monitor;
+    private int _restartCount;
+    private bool _stopping;
+    private int _attemptCompat;
 
-    public EngineClient Client => _client
-        ?? throw new InvalidOperationException("引擎未就绪");
+    public EngineSupervisor(string dataDir, string? cwd = null, string? logDir = null, string? extraArgs = null)
+    {
+        _dataDir = dataDir;
+        _cwd = cwd;
+        _logDir = logDir;
+        _extraArgs = extraArgs;
+        Status = new EngineStatus(EngineState.Stopped);
+        State = new SupervisedState(SupervisorPhase.Idle, null, null);
+    }
 
-    /// <summary>未就绪时返回 null（桥接层做降级展示用，不抛异常）。</summary>
+    // ---- P3 新面 ----
+    public EngineStatus Status { get; private set; }
+    public EngineClient? Client => _client;
+    public event EventHandler<EngineStatus>? StatusChanged;
+
+    // ---- P1 兼容面 ----
+    public SupervisedState State { get; private set; }
+    public event Action<SupervisedState>? LegacyStateChanged;
     public EngineClient? TryGetClient() => _client;
+    public void RememberQueued(string text) { lock (_lock) _pendingQueue.Add(text); }
+    public void ForgetQueued(string text) { lock (_lock) _pendingQueue.Remove(text); }
 
-    public SupervisedState State => _state;
-
-    public event Action<SupervisedState>? StateChanged;
+    internal static string BuildPipeName()
+    {
+        var random = Guid.NewGuid().ToString("N")[..8];
+        return $"haloagent-{Environment.ProcessId}-{random}";
+    }
 
     // ============================================================
     //  启动
     // ============================================================
 
-    /// <summary>
-    /// 启动守护（长驻：成功后阻塞在监控里，直到取消或连续失败 10 次）。
-    /// 调用方应在后台跑它（`_ = supervisor.StartAsync()`），用 StateChanged 感知状态。
-    /// </summary>
-    public async Task StartAsync(CancellationToken ct = default)
+    public async Task StartAsync() => await StartInternalAsync().ConfigureAwait(false);
+
+    /// <summary>P1 兼容：长驻守护（退避 200→5000ms / 10 次）。保留给旧调用方；新代码用 StartAsync().</summary>
+    public async Task StartAsync(CancellationToken ct)
     {
-        lock (_lock)
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
+        _attemptCompat = 0;
+        while (!linked.Token.IsCancellationRequested)
         {
-            if (_superviseCts is not null)
-                throw new InvalidOperationException("守护已在运行");
-            _superviseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        }
-
-        await RecoverAsync(_superviseCts.Token).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// 手动重试（仅 Failed 态可用）。后台重跑恢复流程，立即返回；
-    /// 成功与否都经 StateChanged 通知。
-    /// </summary>
-    public void RetryInBackground()
-    {
-        CancellationToken token;
-        lock (_lock)
-        {
-            if (_state.Phase != SupervisorPhase.Failed)
-                throw new InvalidOperationException("引擎尚未进入失败态，无需手动重试");
-            try { _superviseCts?.Cancel(); } catch { }
-            _superviseCts?.Dispose();
-            _superviseCts = new CancellationTokenSource();
-            token = _superviseCts.Token;
-        }
-        _ = Task.Run(() => RecoverAsync(token));
-    }
-
-    // ============================================================
-    //  恢复流程
-    // ============================================================
-
-    private async Task RecoverAsync(CancellationToken ct)
-    {
-        _attempt = 0;
-        while (!ct.IsCancellationRequested)
-        {
-            SetState(new SupervisedState(SupervisorPhase.Starting, null, null));
-
+            SetBoth(new EngineStatus(EngineState.Starting), new SupervisedState(SupervisorPhase.Starting, null, null));
             try
             {
-                var client = await StartOnceAsync(ct).ConfigureAwait(false);
+                var client = await StartOnceAsync(linked.Token).ConfigureAwait(false);
                 _client = client;
-                _attempt = 0;
-
-                // 重放排队消息
+                _attemptCompat = 0;
                 await ReplayQueueAsync(client).ConfigureAwait(false);
-
-                SetState(new SupervisedState(SupervisorPhase.Ready, null, null));
+                SetBoth(new EngineStatus(EngineState.Ready, PidOf(client)), new SupervisedState(SupervisorPhase.Ready, null, null));
                 AppLog.Info("引擎就绪");
-
-                // 监控
-                await MonitorAsync(client, ct).ConfigureAwait(false);
+                await MonitorCompatAsync(client, linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 AppLog.Error("引擎启动/连接失败", ex);
-
-                _attempt++;
-                if (_attempt >= 10)
+                _attemptCompat++;
+                if (_attemptCompat >= 10)
                 {
-                    SetState(new SupervisedState(
-                        SupervisorPhase.Failed, ex.Message, WillRetry: false));
-                    AppLog.Error($"引擎连续 {_attempt} 次启动失败，放弃重连");
+                    SetBoth(new EngineStatus(EngineState.Failed, null, ex.Message),
+                        new SupervisedState(SupervisorPhase.Failed, ex.Message, WillRetry: false));
                     break;
                 }
-
-                var delay = Math.Min(200 * (1 << Math.Min(_attempt - 1, 4)), 5000);
-                SetState(new SupervisedState(
-                    SupervisorPhase.Recovering,
-                    $"第 {_attempt} 次重连失败，{delay}ms 后重试：{ex.Message}",
-                    WillRetry: true));
-                AppLog.Info($"引擎重连退避 {delay}ms（第 {_attempt} 次）");
-
-                try { await Task.Delay(delay, ct).ConfigureAwait(false); }
+                var delay = Math.Min(200 * (1 << Math.Min(_attemptCompat - 1, 4)), 5000);
+                SetBoth(new EngineStatus(EngineState.Restarting, null, ex.Message),
+                    new SupervisedState(SupervisorPhase.Recovering, $"第 {_attemptCompat} 次重连失败，{delay}ms 后重试：{ex.Message}", WillRetry: true));
+                try { await Task.Delay(delay, linked.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
             }
+        }
+    }
+
+    private async Task StartInternalAsync()
+    {
+        SetStatus(new EngineStatus(EngineState.Starting));
+        try
+        {
+            var pipeName = BuildPipeName();
+            var client = new EngineClient();
+            AppLog.Info($"引擎启动参数 dataDir={_dataDir} cwd={_cwd ?? "(默认)"} logDir={_logDir ?? "(默认)"}" + (_extraArgs is null ? "" : " extraArgs=已提供"));
+            try
+            {
+                await client.StartAsync(pipeName, _dataDir, connectTimeoutMs: 30000).ConfigureAwait(false);
+            }
+            catch
+
+            {
+                await client.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            _client = client;
+            OrphanCleaner.WriteLock(ProcId(client) ?? -1, pipeName);
+
+            _monitor = new EngineHealthMonitor(_client);
+            _monitor.Unhealthy += OnEngineUnhealthy;
+            _monitor.Start();
+
+            client.ProcessExited += OnProcessExited;
+
+            _restartCount = 0;
+            SetStatus(new EngineStatus(EngineState.Ready, ProcId(client)));
+            SetCompat(new SupervisedState(SupervisorPhase.Ready, null, null));
+            AppLog.Info("引擎就绪");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("启动引擎失败", ex);
+            SetStatus(new EngineStatus(EngineState.Failed, null, ex.Message));
+            SetCompat(new SupervisedState(SupervisorPhase.Failed, ex.Message, WillRetry: false));
         }
     }
 
@@ -152,42 +158,20 @@ public sealed class EngineSupervisor : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// 管道名：haloagent-{宿主PID}-{8位随机}
-    ///
-    /// 每次重连都重新生成：
-    ///   - 旧管道可能被残留进程占用
-    ///   - 随机后缀防猜测
-    /// </summary>
-    internal static string BuildPipeName()
-    {
-        var random = Guid.NewGuid().ToString("N")[..8];
-        return $"haloagent-{Environment.ProcessId}-{random}";
-    }
-
-    /// <summary>监控：等进程退出或连接断开。</summary>
-    private async Task MonitorAsync(EngineClient client, CancellationToken ct)
+    private async Task MonitorCompatAsync(EngineClient client, CancellationToken ct)
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-
         void OnExit(int code) => tcs.TrySetResult($"引擎进程退出，退出码 {code}");
         void OnLost(string reason) => tcs.TrySetResult($"连接断开：{reason}");
-
         client.ProcessExited += OnExit;
         client.ConnectionLost += OnLost;
-
         try
         {
-            var completed = await Task.WhenAny(
-                tcs.Task,
-                Task.Delay(Timeout.Infinite, ct)).ConfigureAwait(false);
-
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, ct)).ConfigureAwait(false);
             if (completed == tcs.Task)
             {
                 var reason = await tcs.Task.ConfigureAwait(false);
                 AppLog.Warn(reason);
-                SetState(new SupervisedState(SupervisorPhase.Recovering, reason, WillRetry: true));
-
                 await client.DisposeAsync().ConfigureAwait(false);
                 _client = null;
             }
@@ -199,31 +183,15 @@ public sealed class EngineSupervisor : IAsyncDisposable
         }
     }
 
-    // ============================================================
-    //  排队消息（宿主侧保留）
-    // ============================================================
-
-    public void RememberQueued(string text)
-    {
-        lock (_lock) _pendingQueue.Add(text);
-    }
-
-    public void ForgetQueued(string text)
-    {
-        lock (_lock) _pendingQueue.Remove(text);
-    }
-
     private async Task ReplayQueueAsync(EngineClient client)
     {
         List<string> copy;
         lock (_lock) copy = _pendingQueue.ToList();
-
         foreach (var text in copy)
         {
             try
             {
-                await client.RequestAsync<object>("agent.queue", new { text })
-                    .ConfigureAwait(false);
+                await client.RequestAsync<object>("agent.queue", new { text }).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -233,28 +201,156 @@ public sealed class EngineSupervisor : IAsyncDisposable
     }
 
     // ============================================================
-    //  状态
+    //  崩溃与重启（P3：心跳失败与 Exited 双重保护 + 3 次上限）
     // ============================================================
 
-    private void SetState(SupervisedState s)
+    private void OnProcessExited(int exitCode)
     {
-        _state = s;
-        try { StateChanged?.Invoke(s); }
-        catch (Exception ex) { AppLog.Warn("引擎状态订阅者异常: " + ex.Message); }
+        if (_stopping) return;
+        AppLog.Error($"引擎异常退出，退出码 {exitCode}");
+        _ = HandleCrashAsync($"引擎异常退出（代码 {exitCode}）");
+    }
+
+    private void OnEngineUnhealthy(object? sender, EventArgs e)
+    {
+        if (_stopping) return;
+        AppLog.Error("引擎心跳连续失败，判定为卡死");
+        _ = HandleCrashAsync("引擎无响应");
+    }
+
+    private async Task HandleCrashAsync(string reason)
+    {
+        if (_stopping) return;
+        if (Status.State == EngineState.Restarting) return;
+
+        SetStatus(new EngineStatus(EngineState.Restarting, null, reason));
+        await DisposeMonitorAndClientAsync().ConfigureAwait(false);
+
+        if (_restartCount >= MaxAutoRestarts)
+        {
+            AppLog.Error($"已自动重启 {_restartCount} 次，停止尝试");
+            SetStatus(new EngineStatus(EngineState.Failed, null, $"{reason}。已自动重启 {MaxAutoRestarts} 次仍未恢复。"));
+            SetCompat(new SupervisedState(SupervisorPhase.Failed, reason, WillRetry: false));
+            return;
+        }
+
+        _restartCount++;
+        var delay = TimeSpan.FromSeconds(1 << (_restartCount - 1)); // 1s / 2s / 4s
+        AppLog.Info($"第 {_restartCount} 次自动重启，等待 {delay.TotalSeconds}s");
+        try
+        {
+            await Task.Delay(delay, _cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { return; }
+
+        await StartInternalAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>用户手动重启（设置页“修复”按钮 / HostBridge.RestartEngine）。</summary>
+    public async Task RestartAsync()
+    {
+        _restartCount = 0;
+        if (_client is not null) _client.ProcessExited -= OnProcessExited;
+        await DisposeMonitorAndClientAsync().ConfigureAwait(false);
+        await StartInternalAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>P1 兼容：后台重试。</summary>
+    public void RetryInBackground()
+    {
+        lock (_lock)
+        {
+            if (State.Phase != SupervisorPhase.Failed)
+                throw new InvalidOperationException("引擎尚未进入失败态，无需手动重试");
+        }
+        _ = Task.Run(() => RestartAsync());
+    }
+
+    // ============================================================
+    //  关闭（先停心跳再停进程，防“关闭中被判卡死又重启”）
+    // ============================================================
+
+    public async Task StopAsync()
+    {
+        _stopping = true;
+        await StopInternalAsync().ConfigureAwait(false);
+        SetStatus(new EngineStatus(EngineState.Stopped));
+        SetCompat(new SupervisedState(SupervisorPhase.Idle, null, null));
+    }
+
+    private async Task StopInternalAsync()
+    {
+        if (_client is { IsConnected: true } c)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await c.RequestAsync<object>("system.shutdown", null, cts.Token).ConfigureAwait(false);
+            }
+            catch { /* 引擎可能先退了，正常 */ }
+        }
+
+        await DisposeMonitorAndClientAsync().ConfigureAwait(false);
+    }
+
+    private async Task DisposeMonitorAndClientAsync()
+    {
+        if (_monitor is not null)
+        {
+            _monitor.Unhealthy -= OnEngineUnhealthy;
+            await _monitor.DisposeAsync().ConfigureAwait(false);
+            _monitor = null;
+        }
+        if (_client is not null)
+        {
+            _client.ProcessExited -= OnProcessExited;
+            var pid = ProcId(_client);
+            await _client.DisposeAsync().ConfigureAwait(false);
+            if (pid is not null) OrphanCleaner.RemoveLock(pid.Value);
+            _client = null;
+        }
+    }
+
+    private static int? ProcId(EngineClient c)
+    {
+        try
+        {
+            var f = typeof(EngineClient).GetField("_proc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var p = f?.GetValue(c) as System.Diagnostics.Process;
+            return p?.Id;
+        }
+        catch { return null; }
+    }
+
+    private static int? PidOf(EngineClient c) => ProcId(c);
+
+    private void SetStatus(EngineStatus s)
+    {
+        Status = s;
+        AppLog.Info($"引擎状态 → {s.State}" + (s.Reason is null ? "" : $"（{s.Reason}）"));
+        try { StatusChanged?.Invoke(this, s); } catch (Exception ex) { AppLog.Warn("引擎状态订阅者异常: " + ex.Message); }
+    }
+
+    private void SetCompat(SupervisedState s)
+    {
+        State = s;
+        try { LegacyStateChanged?.Invoke(s); } catch (Exception ex) { AppLog.Warn("引擎状态订阅者异常: " + ex.Message); }
+    }
+
+    private void SetBoth(EngineStatus n, SupervisedState l)
+    {
+        Status = n;
+        State = l;
+        AppLog.Info($"引擎状态 → {n.State}" + (n.Reason is null ? "" : $"（{n.Reason}）"));
+        try { StatusChanged?.Invoke(this, n); } catch (Exception ex) { AppLog.Warn("引擎状态订阅者异常: " + ex.Message); }
+        try { LegacyStateChanged?.Invoke(l); } catch (Exception ex) { AppLog.Warn("引擎状态订阅者异常: " + ex.Message); }
     }
 
     public async ValueTask DisposeAsync()
     {
-        CancellationTokenSource? cts;
-        EngineClient? client;
-        lock (_lock)
-        {
-            cts = _superviseCts; _superviseCts = null;
-            client = _client; _client = null;
-        }
-        cts?.Cancel();
-        if (client is not null) await client.DisposeAsync().ConfigureAwait(false);
-        cts?.Dispose();
+        await StopAsync().ConfigureAwait(false);
+        _cts.Cancel();
+        _cts.Dispose();
     }
 }
 

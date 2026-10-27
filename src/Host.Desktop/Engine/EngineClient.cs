@@ -48,7 +48,35 @@ public sealed class EngineClient : IAsyncDisposable
     /// <summary>连接断开（对端关闭 / 读失败）。</summary>
     public event Action<string>? ConnectionLost;
 
+    private WindowsJob? _job;
     public bool IsRunning => _channel is not null && !_disposed;
+
+
+    /// <summary>P3 工厂入口：按管道名构造（供 EngineSupervisor 的 clientFactory 使用）。</summary>
+    public EngineClient(string pipeName) { PipeName = pipeName; }
+
+    public EngineClient() { }
+
+    /// <summary>构造时绑定的管道名（可为空）。</summary>
+    public string? PipeName { get; }
+
+    /// <summary>是否已连接（P3 桥接 isReady 用）。</summary>
+    public bool IsConnected => IsRunning;
+
+    /// <summary>尝试连接（已连接返回 true；P3 Supervisor 的轮询入口）。</summary>
+    public Task<bool> TryConnectAsync(CancellationToken ct = default) =>
+        Task.FromResult(IsRunning);
+
+    /// <summary>原始请求（P3 AgentBridge 用）：返回 JsonElement 结果。</summary>
+    public async Task<object?> RequestRawAsync(string method, JsonElement? prms, CancellationToken ct = default)
+        => await RequestAsync<JsonElement>(method, prms, ct).ConfigureAwait(false);
+
+    /// <summary>拉事件元组版（P3 AgentBridge 用）。</summary>
+    public (IReadOnlyList<HaloAgent.Engine.Abstractions.Frames.EventFrame> Events, long Next) DrainEvents(long sinceSeq, int max = 500)
+    {
+        var r = PollEvents(sinceSeq, max);
+        return (r.Frames, r.NextSeq);
+    }
 
     // ============================================================
     //  启动 / 停止
@@ -93,6 +121,16 @@ public sealed class EngineClient : IAsyncDisposable
 
         if (!proc.Start())
             throw new InvalidOperationException("无法启动引擎进程");
+        try
+        {
+            _job = WindowsJob.CreateKillOnClose();
+            _job.Assign(proc);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"无法把引擎加入 Job Object（宿主崩溃时可能残留引擎进程）：{ex.Message}");
+        }
+
 
         // stderr 单独读，写日志（引擎诊断信息）
         _ = Task.Run(() => PumpStderrAsync(proc));
@@ -358,6 +396,9 @@ public sealed class EngineClient : IAsyncDisposable
             proc = _proc; ch = _channel; readLoop = _readLoop; cts = _readCts;
             _proc = null; _channel = null; _readLoop = null; _readCts = null;
         }
+        WindowsJob? job;
+        lock (_lifecycleLock) { job = _job; _job = null; }
+        try { job?.Dispose(); } catch { /* 释放失败可忽略 */ }
 
         // 先尝试优雅关闭
         if (ch is not null)

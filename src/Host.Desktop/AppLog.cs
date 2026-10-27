@@ -26,7 +26,7 @@ internal static class AppLog
             _file = Path.Combine(_dir, $"desktop-{DateTime.Now:yyyyMMdd}.log");
             CleanupOldFiles();
             Info("=== 会话开始 ===");
-            Info(Diagnostics.Describe());
+            Info($"宿主版本={BuildInfo.Version} OS={Environment.OSVersion} 64位进程={Environment.Is64BitProcess}");
         }
         catch
         {
