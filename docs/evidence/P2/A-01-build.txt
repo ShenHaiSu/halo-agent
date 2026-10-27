@@ -1,0 +1,29 @@
+  正在确定要还原的项目…
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\Host.Desktop.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Cli\Engine.Cli.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\Engine.Server.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\Engine.Storage.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\Engine.Server.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Storage.Tests\Engine.Storage.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Contract.Tests\Contract.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\Engine.Core.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\Engine.Core.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\Engine.Abstractions.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  所有项目均是最新的，无法还原。
+  Engine.Abstractions -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\bin\Release\net6.0-windows\HaloAgent.Engine.Abstractions.dll
+  Engine.Storage -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\bin\Release\net6.0-windows\HaloAgent.Engine.Storage.dll
+  Contract.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Contract.Tests\bin\Release\net6.0-windows\Contract.Tests.dll
+  Engine.Core -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\bin\Release\net6.0-windows\HaloAgent.Engine.Core.dll
+  Engine.Storage.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Storage.Tests\bin\Release\net6.0-windows\Engine.Storage.Tests.dll
+  Engine.Server -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\bin\Release\net6.0-windows\HaloAgent.Engine.dll
+  Engine.Core.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\bin\Release\net6.0-windows\Engine.Core.Tests.dll
+  Host.Desktop -> E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\bin\Release\net6.0-windows\HaloAgent.dll
+  Engine.Cli -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Cli\bin\Release\net6.0-windows\HaloAgent.Cli.dll
+  Engine.Server.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\bin\Release\net6.0-windows\Engine.Server.Tests.dll
+
+已成功生成。
+    0 个警告
+    0 个错误
+
+已用时间 00:00:01.86
+build exit=0
