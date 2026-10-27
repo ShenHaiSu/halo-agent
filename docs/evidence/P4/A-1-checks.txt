@@ -1,0 +1,17 @@
+=== pins ===
+✓ 版本锁定正确
+=== colors ===
+扫描了 92 个文件
+✓ 无硬编码颜色
+=== icons ===
+✓ 无 emoji 图标
+=== tokens ===
+✓ token 一致（30 项）
+=== layering ===
+✓ 分层边界正确
+=== font-stack ===
+✓ 字体栈覆盖 Win7
+=== compat ===
+扫描 1 个 CSS、3 个 JS、1 个 HTML…
+
+✓ 兼容性检查通过（0 个警告）
