@@ -72,6 +72,12 @@ async function bootstrap(): Promise<void> {
       (window as unknown as { __transport: unknown }).__transport = m.transport;
     });
   }
+
+  // P5 验收工具：DEV 或 ?diag=1 时挂载 __p5diag。
+  // 生产包无 diag 参数时不加载（动态 import，不进首屏产物）。
+  if (import.meta.env.DEV || window.location.search.includes('diag=1')) {
+    void import('./devtools/p5diag').then((m) => m.mountP5Diag());
+  }
 }
 
 void bootstrap().catch((e) => {
@@ -84,7 +90,8 @@ function renderFatalError(e: unknown): void {
   const el = document.getElementById('app');
   if (!el) return;
   const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-  el.innerHTML = `
+  // @allow-innerhtml 启动失败兜底页（msg 已转义，无脚本注入面）
+  el.innerHTML = `<!-- @allow-innerhtml -->
     <div style="padding:32px; /* @allow-hardcoded-color fatal fallback, CSS未加载时必须可读 */font:14px/1.6 'Microsoft YaHei',sans-serif;color:#333">
       <h1 style="font-size:18px;margin:0 0 12px">HaloAgent 界面启动失败</h1>
       <p style="color:#666 /* @allow-hardcoded-color */;margin:0 0 16px">

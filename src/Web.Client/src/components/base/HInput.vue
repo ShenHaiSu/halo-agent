@@ -107,6 +107,10 @@ function onKeydown(e: KeyboardEvent) {
     emit('enter');
   }
 }
+function focus(): void {
+  inputRef.value?.focus();
+}
+defineExpose({ focus });
 </script>
 
 <template>

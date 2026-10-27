@@ -36,10 +36,10 @@ describe('applyThemeTokens 零重排', () => {
   });
 
   it('P-1b：不修改 DOM 结构', () => {
-    document.body.innerHTML = '<div id="x"><span>a</span></div>';
-    const before = document.body.innerHTML;
+    document.body.innerHTML = '<div id="x"><span>a</span></div>'; // @allow-innerhtml 测试搭建 DOM
+    const before = document.body.innerHTML; // @allow-innerhtml
     applyThemeTokens(midnightLike());
-    expect(document.body.innerHTML).toBe(before);
+    expect(document.body.innerHTML).toBe(before); // @allow-innerhtml
   });
 
   it('P-2：切换前后没有几何相关的内联属性', () => {
