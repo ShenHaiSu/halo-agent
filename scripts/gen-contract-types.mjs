@@ -99,7 +99,7 @@ function refName(ref) {
 }
 
 const lines = []
-lines.push('// ⚠️ 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。')
+lines.push('// [注意] 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。')
 lines.push(`// 来源: contract/agent.schema.json（协议版本 ${schema.contractVersion}）`)
 lines.push('')
 

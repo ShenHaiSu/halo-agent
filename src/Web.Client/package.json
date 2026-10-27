@@ -1,41 +1,56 @@
 {
-  "name": "haloagent-web-client",
+  "name": "haloagent-web",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.4.0",
   "type": "module",
-  "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build && node ../../scripts/check-css-compat.mjs",
-    "build:fast": "vite build",
-    "preview": "vite preview --port 5174",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:only": "vite build",
+    "preview": "vite preview --port 4173",
     "typecheck": "vue-tsc --noEmit",
-    "lint": "eslint src --ext .ts,.vue",
-    "gen:contract": "node ../../scripts/gen-contract-types.mjs"
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,vue,css,json}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:compat": "node scripts/check-css-compat.mjs",
+    "check:icons": "node scripts/check-no-emoji-icons.mjs",
+    "check:colors": "node scripts/check-no-hardcoded-colors.mjs",
+    "check:tokens": "node scripts/check-token-parity.mjs",
+    "check:layering": "node scripts/check-layering.mjs",
+    "check:pins": "node scripts/check-pins.mjs",
+    "check:all": "pnpm check:pins && pnpm check:compat && pnpm check:icons && pnpm check:colors && pnpm check:tokens && pnpm check:layering",
+    "gen:contract": "node scripts/gen-contract-types.mjs",
+    "gallery": "vite --open /#/__gallery"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "pinia": "^2.2.6",
-    "lucide-vue-next": "^0.460.0",
-    "markdown-it": "^14.1.0",
-    "dompurify": "^3.2.2",
-    "highlight.js": "^11.10.0",
-    "ansi_up": "^6.0.4"
+    "@vueuse/core": "~11.3.0",
+    "pinia": "~2.2.6",
+    "vue": "3.5.13",
+    "vue-router": "~4.4.5"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.1",
-    "typescript": "~5.6.3",
-    "vite": "^5.4.11",
-    "vue-tsc": "^2.1.10",
+    "@eslint/js": "~9.15.0",
+    "@vitejs/plugin-vue": "~5.2.1",
+    "@vue/test-utils": "~2.4.6",
+    "autoprefixer": "~10.4.20",
+    "eslint": "~9.15.0",
+    "eslint-plugin-vue": "~9.31.0",
+    "jsdom": "~25.0.1",
+    "postcss": "~8.4.49",
+    "postcss-import": "15.1.0",
+    "postcss-nesting": "~12.1.5",
+    "prettier": "~3.4.1",
     "tailwindcss": "3.4.16",
-    "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20",
-    "postcss-import": "^15.1.0",
-    "postcss-preset-env": "^9.6.0",
-    "cssnano": "^7.0.6",
-    "@types/markdown-it": "^14.1.2"
-  }
+    "typescript": "~5.6.3",
+    "typescript-eslint": "~8.16.0",
+    "vite": "~5.4.11",
+    "vitest": "~2.1.8",
+    "vue-tsc": "~2.1.10"
+  },
+  "packageManager": "pnpm@12.10.1"
 }

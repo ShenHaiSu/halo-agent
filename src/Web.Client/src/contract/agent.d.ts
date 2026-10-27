@@ -1,4 +1,4 @@
-// ⚠️ 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。
+// [注意] 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。
 // 来源: contract/agent.schema.json（协议版本 1）
 
 /** PermissionMode */
