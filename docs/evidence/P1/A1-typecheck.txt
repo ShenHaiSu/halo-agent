@@ -1,0 +1,4 @@
+
+> haloagent-web-client@0.0.1 typecheck E:\ProgramFiles\halo-agent\v2-develop\src\Web.Client
+> vue-tsc --noEmit
+

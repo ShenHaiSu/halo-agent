@@ -1,0 +1,5 @@
+E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\bin\Release\net6.0-windows\Engine.Server.Tests.dll (.NETCoreApp,Version=v6.0)的测试运行
+正在启动测试执行，请稍候...
+总共 1 个测试文件与指定模式相匹配。
+
+已通过! - 失败:     0，通过:     1，已跳过:     0，总计:     1，持续时间: < 1 ms - Engine.Server.Tests.dll (net6.0)

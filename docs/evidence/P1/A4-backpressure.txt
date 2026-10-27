@@ -1,0 +1,29 @@
+  正在确定要还原的项目…
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\Engine.Abstractions.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\Engine.Core.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\Engine.Core.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\Engine.Storage.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\Engine.Server.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  所有项目均是最新的，无法还原。
+  Engine.Abstractions -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\bin\Release\net6.0-windows\HaloAgent.Engine.Abstractions.dll
+  Engine.Storage -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\bin\Release\net6.0-windows\HaloAgent.Engine.Storage.dll
+  Engine.Core -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\bin\Release\net6.0-windows\HaloAgent.Engine.Core.dll
+  Engine.Server -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\bin\Release\net6.0-windows\HaloAgent.Engine.dll
+  Engine.Core.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\bin\Release\net6.0-windows\Engine.Core.Tests.dll
+E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\bin\Release\net6.0-windows\Engine.Core.Tests.dll (.NETCoreApp,Version=v6.0)的测试运行
+正在启动测试执行，请稍候...
+总共 1 个测试文件与指定模式相匹配。
+E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\bin\Release\net6.0-windows\Engine.Core.Tests.dll
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.5.6+bf9b858c26 (64-bit .NET 6.0.36)
+[xUnit.net 00:00:00.06]   Discovering: Engine.Core.Tests
+[xUnit.net 00:00:00.08]   Discovered:  Engine.Core.Tests
+[xUnit.net 00:00:00.09]   Starting:    Engine.Core.Tests
+  已通过 HaloAgent.Engine.Core.Tests.EventBusPressureTests.Deltas_are_aggregated_not_one_frame_per_token [524 ms]
+  已通过 HaloAgent.Engine.Core.Tests.EventBusPressureTests.HighFrequencyDeltas_do_not_grow_unbounded [20 s]
+[xUnit.net 00:00:24.44]   Finished:    Engine.Core.Tests
+  已通过 HaloAgent.Engine.Core.Tests.EventBusPressureTests.Dropped_deltas_are_counted [3 s]
+
+测试运行成功。
+测试总数: 3
+     通过数: 3
+总时间: 24.8686 秒
