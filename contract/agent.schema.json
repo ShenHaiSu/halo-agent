@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haloagent.local/contract/agent.schema.json",
+  "title": "HaloAgent 帧协议",
+  "description": "宿主 ↔ 引擎的 NDJSON 帧契约。P0 只定义信封与 system.* 方法。",
+  "version": "1",
+
+  "definitions": {
+    "request": {
+      "type": "object",
+      "required": ["t", "id", "m"],
+      "properties": {
+        "t": { "const": "req" },
+        "id": { "type": "integer", "minimum": 1, "description": "请求序号，单调递增" },
+        "m": { "type": "string", "description": "方法名，点分命名空间" },
+        "p": { "type": ["object", "null"], "description": "方法参数，camelCase" }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["t", "id", "ok"],
+      "properties": {
+        "t": { "const": "res" },
+        "id": { "type": "integer" },
+        "ok": { "type": "boolean" },
+        "r": { "type": ["object", "null"] },
+        "e": {
+          "type": ["object", "null"],
+          "required": ["code", "msg"],
+          "properties": {
+            "code": { "type": "string" },
+            "msg": { "type": "string" },
+            "hint": { "type": ["string", "null"] }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["t", "seq", "k"],
+      "properties": {
+        "t": { "const": "evt" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "k": { "type": "string" },
+        "p": { "type": ["object", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "oneOf": [
+        { "$ref": "#/definitions/request" },
+        { "$ref": "#/definitions/response" },
+        { "$ref": "#/definitions/event" }
+      ]
+    }
+  },
+
+  "methods": {
+    "system.ping": {
+      "direction": "host->engine",
+      "params": null,
+      "result": {
+        "type": "object",
+        "required": ["pong", "version", "protocol", "pid"],
+        "properties": {
+          "pong": { "type": "boolean" },
+          "version": { "type": "string" },
+          "protocol": { "type": "integer" },
+          "pid": { "type": "integer" },
+          "uptimeMs": { "type": "integer" },
+          "serverTimeMs": { "type": "integer" }
+        }
+      },
+      "errors": []
+    },
+    "system.info": {
+      "direction": "host->engine",
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "version": { "type": "string" },
+          "protocol": { "type": "integer" },
+          "pid": { "type": "integer" },
+          "osVersion": { "type": "string" },
+          "is64BitOs": { "type": "boolean" },
+          "is64BitProcess": { "type": "boolean" },
+          "runtime": { "type": "string" },
+          "dataDir": { "type": "string" },
+          "startedAtMs": { "type": "integer" }
+        }
+      },
+      "errors": []
+    }
+  },
+
+  "errorCodes": {
+    "method.notFound": "方法不存在",
+    "internal": "引擎内部错误",
+    "protocol.version": "协议版本不匹配"
+  }
+}
