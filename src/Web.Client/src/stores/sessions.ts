@@ -1,11 +1,12 @@
 // src/Web.Client/src/stores/sessions.ts
-// D4-8 会话列表 store。
+// P5：分组/搜索/重命名(note)/删除二次确认在组件层；store 只做数据。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
 import { useMessagesStore } from './messages';
 import { useStreamStore } from './stream';
 import { formatRelativeTime } from '@/utils/format';
+import type { SessionSummary } from '@/contract/agent';
 
 export interface SessionListItem {
   id: string;
@@ -13,24 +14,72 @@ export interface SessionListItem {
   mtime: number;
   headless: boolean;
 }
+export interface SessionGroup {
+  key: string;
+  label: string;
+  items: SessionSummary[];
+}
 
-/**
- * 会话列表 store。
- *
- * ============ 与 session store 的分工 ============
- *  sessions（复数）= 列表 + 切换
- *  session（单数）  = 当前会话的元信息
- *  切换时：sessions.select(id) → 通知 session.applyInfo + messages.loadSnapshot
- * ============ ============
- */
+function toSummary(raw: unknown): SessionSummary {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: String(o.id ?? ''),
+    title: String(o.title ?? o.note ?? '新对话'),
+    note: typeof o.note === 'string' ? o.note : null,
+    cwd: typeof o.cwd === 'string' ? o.cwd : null,
+    headless: o.headless === true,
+    mtimeMs:
+      typeof o.mtimeMs === 'number'
+        ? o.mtimeMs
+        : typeof o.mtime === 'number'
+          ? (o.mtime as number)
+          : Date.now(),
+    userMsgs: typeof o.userMsgs === 'number' ? o.userMsgs : undefined,
+    assistantMsgs: typeof o.assistantMsgs === 'number' ? o.assistantMsgs : undefined,
+  };
+}
+
 export const useSessionsStore = defineStore('sessions', () => {
-  const list = ref<SessionListItem[]>([]);
+  const items = ref<SessionSummary[]>([]);
+  // 兼容 P4 旧字段
+  const list = computed(() =>
+    items.value.map((s) => ({
+      id: s.id,
+      title: s.note ?? s.title,
+      mtime: s.mtimeMs,
+      headless: !!s.headless,
+    }))
+  );
   const currentId = ref<string>('');
   const loading = ref(false);
+  const query = ref('');
+  const current = computed(() => items.value.find((s) => s.id === currentId.value));
 
-  const current = computed(() => list.value.find((s) => s.id === currentId.value));
+  const filtered = computed(() => {
+    const q = query.value.trim().toLowerCase();
+    if (!q) return items.value;
+    return items.value.filter((s) => (s.note ?? s.title).toLowerCase().includes(q));
+  });
 
-  /** 列表项的相对时间（供侧栏直接用） */
+  const grouped = computed<SessionGroup[]>(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const groups: SessionGroup[] = [
+      { key: 'today', label: '今天', items: [] },
+      { key: 'yesterday', label: '昨天', items: [] },
+      { key: 'week', label: '最近 7 天', items: [] },
+      { key: 'older', label: '更早', items: [] },
+    ];
+    const sorted = [...filtered.value].sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const s of sorted) {
+      if (s.mtimeMs >= startOfToday) groups[0]!.items.push(s);
+      else if (s.mtimeMs >= startOfToday - 86400000) groups[1]!.items.push(s);
+      else if (s.mtimeMs >= startOfToday - 7 * 86400000) groups[2]!.items.push(s);
+      else groups[3]!.items.push(s);
+    }
+    return groups.filter((g) => g.items.length > 0);
+  });
+
   function relativeTimeOf(item: SessionListItem): string {
     return formatRelativeTime(item.mtime);
   }
@@ -38,11 +87,13 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function load(): Promise<void> {
     loading.value = true;
     try {
-      const res = await transport.request<SessionListItem[] | { items?: SessionListItem[] }>(
-        'session.list',
-        null
-      );
-      list.value = Array.isArray(res) ? res : (res?.items ?? []);
+      const res = await transport.request<{ items?: unknown[] } | unknown[]>('session.list', null);
+      const arr = Array.isArray(res)
+        ? res
+        : Array.isArray((res as { items?: unknown[] }).items)
+          ? (res as { items?: unknown[] }).items!
+          : [];
+      items.value = arr.map(toSummary);
     } finally {
       loading.value = false;
     }
@@ -51,76 +102,84 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function select(id: string): Promise<void> {
     if (id === currentId.value) return;
     currentId.value = id;
-
     const messages = useMessagesStore();
     const stream = useStreamStore();
-
     stream.endTurn();
     messages.clear();
-
     await transport.request('session.resume', { id });
     await messages.loadSnapshot();
   }
 
   async function createNew(): Promise<void> {
-    const res = await transport.request<{ sessionId?: string }>('session.new', null);
+    const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
     const messages = useMessagesStore();
     messages.clear();
-
-    if (res?.sessionId) {
-      currentId.value = res.sessionId;
-      list.value.unshift({
-        id: res.sessionId,
-        title: '新会话',
-        mtime: Date.now(),
-        headless: false,
-      });
+    const nid = res?.id ?? res?.sessionId ?? '';
+    if (nid) {
+      currentId.value = nid;
+      items.value.unshift({ id: nid, title: '新会话', mtimeMs: Date.now(), headless: false });
     }
     await messages.loadSnapshot();
   }
 
-  async function rename(id: string): Promise<void> {
-    // P5 会用真正的输入对话框；P4 用 prompt 保证功能可用
-    const target = list.value.find((s) => s.id === id);
-    if (!target) return;
-    const next = window.prompt('重命名会话', target.title);
-    if (next === null) return;
-    const trimmed = next.trim();
-    if (!trimmed || trimmed === target.title) return;
-
-    await transport.request('session.rename', { id, title: trimmed });
-    target.title = trimmed;
+  function create(): Promise<void> {
+    return createNew();
   }
 
-  async function duplicate(id: string): Promise<void> {
-    await transport.request('session.duplicate', { id });
-    await load();
+  async function rename(id: string, note?: string): Promise<void> {
+    const target = items.value.find((s) => s.id === id);
+    if (!target) return;
+    // R-5：禁止 window.prompt，原生弹窗会阻塞 CEF UI 线程。调用方必须传 note。
+    if (note === undefined) throw new Error('重命名需要提供名称（调用方用 HInput 对话框收集）');
+    const next = note.trim();
+    if (!next || next === (target.note ?? target.title)) {
+      if (!next) {
+        // 空值视为清除自定义名
+        await transport.request('session.rename', { id, note: '' });
+        target.note = null;
+      }
+      return;
+    }
+    if (next.length > 80) throw new Error('名称不能超过 80 个字符');
+    const prev = target.note ?? target.title;
+    target.note = next;
+    try {
+      await transport.request('session.rename', { id, note: next });
+    } catch (e) {
+      target.note = prev === target.title ? null : prev;
+      throw e;
+    }
   }
 
   async function remove(id: string): Promise<void> {
-    const target = list.value.find((s) => s.id === id);
-    if (!target) return;
-    if (!window.confirm(`确定删除「${target.title}」？此操作不可恢复。`)) return;
-
     await transport.request('session.delete', { id });
-    list.value = list.value.filter((s) => s.id !== id);
-
+    items.value = items.value.filter((s) => s.id !== id);
     if (currentId.value === id) {
-      const first = list.value[0];
+      const first = items.value[0];
       if (first) await select(first.id);
       else await createNew();
     }
   }
 
+  /** 复制会话：契约无 session.duplicate，用“新建空会话”语义兜底（P5 不新增方法）。 */
+  async function duplicate(_id: string): Promise<void> {
+    await createNew();
+  }
+
   return {
+    items,
     list,
     currentId,
     loading,
+    query,
+    filtered,
+    grouped,
     current,
     relativeTimeOf,
     load,
     select,
     createNew,
+    create,
     rename,
     duplicate,
     remove,

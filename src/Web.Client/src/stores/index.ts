@@ -1,10 +1,9 @@
 // src/Web.Client/src/stores/index.ts
-// D4-8 store 注册入口（main.ts 在 mount 前调用）。
+// P5 store 注册入口。
 import { createPinia, type Pinia } from 'pinia';
 
 let pinia: Pinia | null = null;
 
-/** 创建（或复用）Pinia 实例。 */
 export function createAppPinia(): Pinia {
   pinia ??= createPinia();
   return pinia;
@@ -18,5 +17,7 @@ export { useSessionStore } from './session';
 export { useMessagesStore } from './messages';
 export { useStreamStore } from './stream';
 export { usePermissionsStore } from './permissions';
+export { useQueueStore } from './queue';
+export { useUndoStore } from './undo';
 export { dispatchFrames } from './eventBridge';
 export { useEventPump } from './useEventPump';

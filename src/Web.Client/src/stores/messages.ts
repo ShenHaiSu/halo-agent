@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/messages.ts
-// D4-8 消息列表 store（最关键的一个）。
+// P5 扩展：streamingId / lastSeq / injected / truncated。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -10,55 +10,34 @@ export interface ToolCallInfo {
   id: string;
   name: string;
   arguments: string;
-  /** 执行结果 */
   result?: string;
   ok?: boolean;
-  /** 执行状态 */
-  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
-  /** 实时输出（shell 工具） */
+  status: 'pending' | 'running' | 'awaiting-user' | 'done' | 'error' | 'cancelled';
   output?: string;
-  /** 静默预警级别 0/1/2 */
   alertLevel?: number;
+  startedAt?: number;
+  durationMs?: number;
 }
 
 export interface MessageItem {
-  /** 稳定唯一 id（用于 :key 与滚动定位） */
   id: string;
   role: MessageRole;
   content: string;
-  /** 思考内容（reasoning_content） */
   reasoning?: string;
   toolCalls?: ToolCallInfo[];
-  /** tool 消息对应的调用 id */
   toolCallId?: string;
-  /** 时间戳（ms） */
   ts: number;
-  /** 是否仍在流式生成 */
   streaming?: boolean;
-  /** 被长度截断 */
   truncatedByLength?: boolean;
-  /** 被用户中断 */
   truncatedByUser?: boolean;
+  injected?: boolean;
 }
 
-/**
- * 消息列表 store。
- *
- * ============ 三条核心不变式 ============
- *  I-1：流式生成时，`assistant` 消息的 id 在整个回合内保持不变
- *       （否则每次 delta 都新建一条消息，列表会爆炸）
- *  I-2：`lastSeq` 只增不减（事件去重与断线重连的依据）
- *  I-3：`applySnapshot` 是唯一能"重置"列表的入口
- *       （其他地方只能 append / patch）
- * ============ 为什么 key 用 id 而不是 index ============
- *  用 index 做 key 时，插入一条消息会导致后面所有消息的 DOM 重建，
- *  滚动位置与输入法状态全部丢失。
- * ============ ============
- */
 export const useMessagesStore = defineStore('messages', () => {
   const items = ref<MessageItem[]>([]);
   const lastSeq = ref(0);
   const loading = ref(false);
+  const streamingId = ref<string | null>(null);
 
   let idCounter = 0;
   function nextId(prefix: string): string {
@@ -70,11 +49,18 @@ export const useMessagesStore = defineStore('messages', () => {
     [...items.value].reverse().find((m) => m.role === 'assistant')
   );
 
-  /** 从快照全量重置（唯一入口） */
-  function applySnapshot(snapshot: { seq?: number; messages?: Array<Record<string, unknown>> }) {
+  function setLastSeq(seq: number): void {
+    if (seq > lastSeq.value) lastSeq.value = seq;
+  }
+
+  function applySnapshot(snapshot: {
+    seq?: number;
+    messages?: Array<Record<string, unknown>>;
+  }): void {
     lastSeq.value = typeof snapshot.seq === 'number' ? snapshot.seq : 0;
     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
     items.value = raw.map(normalizeMessage);
+    streamingId.value = null;
   }
 
   function normalizeMessage(m: Record<string, unknown>): MessageItem {
@@ -82,8 +68,8 @@ export const useMessagesStore = defineStore('messages', () => {
     const content =
       typeof m.content === 'string'
         ? m.content
-        : typeof (m as { text?: unknown }).text === 'string'
-          ? String((m as { text?: unknown }).text)
+        : typeof m.text === 'string'
+          ? String(m.text)
           : Array.isArray(m.content)
             ? (m.content as Array<{ text?: string }>).map((p) => p.text ?? '').join('')
             : '';
@@ -98,7 +84,19 @@ export const useMessagesStore = defineStore('messages', () => {
             status: 'done' as const,
           };
         })
-      : undefined;
+      : Array.isArray(m.toolCalls)
+        ? (m.toolCalls as Array<Record<string, unknown>>).map((tc) => ({
+            id: String(tc.id ?? ''),
+            name: String(tc.name ?? ''),
+            arguments:
+              typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {}),
+            result: typeof tc.result === 'string' ? tc.result : undefined,
+            ok: typeof tc.ok === 'boolean' ? tc.ok : undefined,
+            status: String(tc.status ?? 'done') as ToolCallInfo['status'],
+            output: typeof tc.output === 'string' ? tc.output : undefined,
+            alertLevel: typeof tc.alertLevel === 'number' ? tc.alertLevel : 0,
+          }))
+        : undefined;
 
     return {
       id: typeof m.id === 'string' ? m.id : nextId(role),
@@ -107,29 +105,28 @@ export const useMessagesStore = defineStore('messages', () => {
       reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
       toolCalls,
       toolCallId: typeof m.tool_call_id === 'string' ? m.tool_call_id : undefined,
-      ts: typeof m.ts === 'number' ? m.ts : Date.now(),
+      ts:
+        typeof m.ts === 'number'
+          ? m.ts
+          : typeof m.tsMs === 'number'
+            ? (m.tsMs as number)
+            : Date.now(),
+      injected: m.injected === true,
     };
   }
 
-  /** 追加一条消息，返回其 id */
   function append(msg: Omit<MessageItem, 'id' | 'ts'> & { id?: string; ts?: number }): string {
     const id = msg.id ?? nextId(msg.role);
-    items.value.push({
-      ...msg,
-      id,
-      ts: msg.ts ?? Date.now(),
-    } as MessageItem);
+    items.value.push({ ...msg, id, ts: msg.ts ?? Date.now() } as MessageItem);
     return id;
   }
 
-  /** 按 id 局部更新 */
-  function patch(id: string, patch: Partial<MessageItem>): void {
+  function patch(id: string, p: Partial<MessageItem>): void {
     const target = items.value.find((m) => m.id === id);
     if (!target) return;
-    Object.assign(target, patch);
+    Object.assign(target, p);
   }
 
-  /** 追加流式文本（不改变 id） */
   function appendDelta(id: string, text: string): void {
     const target = items.value.find((m) => m.id === id);
     if (!target) return;
@@ -137,27 +134,37 @@ export const useMessagesStore = defineStore('messages', () => {
     target.streaming = true;
   }
 
-  /** 追加思考内容 */
   function appendReasoning(id: string, text: string): void {
     const target = items.value.find((m) => m.id === id);
     if (!target) return;
     target.reasoning = (target.reasoning ?? '') + text;
   }
 
-  /** 更新某个 toolCall 的状态 */
-  function patchToolCall(
-    messageId: string,
-    toolCallId: string,
-    patch: Partial<ToolCallInfo>
-  ): void {
+  function ensureToolCall(messageId: string, toolCallId: string, name: string, args: string): void {
+    const msg = items.value.find((m) => m.id === messageId);
+    if (!msg) return;
+    msg.toolCalls ??= [];
+    if (!msg.toolCalls.some((t) => t.id === toolCallId)) {
+      msg.toolCalls.push({
+        id: toolCallId,
+        name,
+        arguments: args,
+        status: 'running',
+        output: '',
+        alertLevel: 0,
+        startedAt: Date.now(),
+      });
+    }
+  }
+
+  function patchToolCall(messageId: string, toolCallId: string, p: Partial<ToolCallInfo>): void {
     const msg = items.value.find((m) => m.id === messageId);
     if (!msg?.toolCalls) return;
     const tc = msg.toolCalls.find((t) => t.id === toolCallId);
     if (!tc) return;
-    Object.assign(tc, patch);
+    Object.assign(tc, p);
   }
 
-  /** 加载快照 */
   async function loadSnapshot(): Promise<void> {
     loading.value = true;
     try {
@@ -171,27 +178,29 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  /** 清空（新会话） */
   function clear(): void {
     items.value = [];
     lastSeq.value = 0;
+    streamingId.value = null;
   }
 
   return {
     items,
     lastSeq,
     loading,
+    streamingId,
     isEmpty,
     lastAssistant,
-
     applySnapshot,
     append,
     patch,
     appendDelta,
     appendReasoning,
+    ensureToolCall,
     patchToolCall,
     loadSnapshot,
     clear,
     nextId,
+    setLastSeq,
   };
 });
