@@ -64,30 +64,52 @@ await using IFrameChannel channel = opts.Mode switch
     _ => throw new ArgumentOutOfRangeException(nameof(opts.Mode), "未知运行模式"),
 };
 
-// P1 新栈：路由表 + 状态 + stub 全量注册 + 事件总线 + 帧服务。
-// Stdio 与 Pipe 共用同一套（不再走旧的单方法 FrameServer），
-// 这样 --stdio 调试与生产管道的行为完全一致。
-var router = new MethodRouter();
-var state = new EngineState(opts.DataDir, router);
-var stubs = new StubMethods(state);
-StubMethods.RegisterAll(router, stubs);
+// P2 装配：真实 agent 循环 + 方法路由；失败时回落到 P1 stub（引擎仍可启动，
+// 例如尚未配置模型时，设置页仍可用）。
+AssembledEngine? asm = null;
+MethodRouter router;
+EngineState state;
+EventBus bus;
+try
+{
+    asm = EngineAssembly.BuildRouter(
+        channel,
+        opts.DataDir,
+        loggerFactory.CreateLogger("bus"),
+        loggerFactory.CreateLogger("methods"),
+        cts.Token);
+    router = asm.Router;
+    state = asm.State;
+    bus = asm.Bus;
+}
+catch (Exception ex)
+{
+    log.LogWarning(ex, "P2 装配失败，回落到 P1 stub");
+    router = new MethodRouter();
+    state = new EngineState(opts.DataDir, router);
+    var stubs = new StubMethods(state);
+    StubMethods.RegisterAll(router, stubs);
+    bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
+}
 
-await using var bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
-var server = new FrameServer(
-    channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
+await using (asm)
+{
+    var server = new FrameServer(
+        channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
 
- try
- {
-     await server.RunAsync();
- }
- catch (OperationCanceledException)
- {
-     log.LogInformation("已优雅退出");
- }
- catch (Exception ex)
- {
-     log.LogError(ex, "引擎异常退出");
-     return 1;
- }
+    try
+    {
+        await server.RunAsync();
+    }
+    catch (OperationCanceledException)
+    {
+        log.LogInformation("已优雅退出");
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "引擎异常退出");
+        return 1;
+    }
+}
 
- return 0;
+return 0;

@@ -2,200 +2,253 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
-using HaloAgent.Engine.Core.Events;
-using HaloAgent.Engine.Server;
+using HaloAgent.Engine.Abstractions.Types;
+using HaloAgent.Engine.Cli;
+using HaloAgent.Engine.Core.Agent;
 using HaloAgent.Engine.Core.Channels;
+using HaloAgent.Engine.Core.Events;
+using HaloAgent.Engine.Core.Llm;
+using HaloAgent.Engine.Core.Tools;
+using HaloAgent.Engine.Server;
 using HaloAgent.Engine.Server.Routing;
+using HaloAgent.Engine.Storage;
+using HaloAgent.Engine.Storage.Config;
+using HaloAgent.Engine.Storage.Sessions;
 using Microsoft.Extensions.Logging;
 
-// 顶层语句。无头入口（P0）：
-//   --stdio        复用 Engine.Server 的帧服务（与 HaloAgent.Engine.exe --stdio 同行为）
-//   -p <method>    单发一次请求（默认 system.ping），打印应答后退出
-//   --diagnostics  打印环境摘要后退出
+// 顶层语句。无头入口：
+//   -p <任务>        跑一轮完整 agent 循环后退出（退出码 0/1/2/3/4）
+//   --stdio          复用 Engine.Server 的帧服务（与 HaloAgent.Engine.exe --stdio 同行为）
+//   --diagnostics    打印环境摘要后退出
 
+// ============ TLS 1.2（Win7 必需，必须是第一件事）============
 System.Net.ServicePointManager.SecurityProtocol =
     System.Net.SecurityProtocolType.Tls12 | System.Net.SecurityProtocolType.Tls13;
 
 Console.OutputEncoding = Encoding.UTF8;
 Console.InputEncoding = Encoding.UTF8;
 
-var argsList = args.ToList();
-
-if (argsList.Contains("-h") || argsList.Contains("--help"))
-{
-    Console.WriteLine(CliHelp.Text);
-    return 0;
-}
-
-int pIndex = argsList.IndexOf("-p");
-
-var opts = EngineStartupOptions.Parse(argsList.Where(a => a != "-p" && !IsPromptValue(argsList, a)).ToArray());
-// stdio 模式与 -p 单发模式下 stdout 归帧/应答独占，日志只写文件
-bool canWriteConsole = opts.Mode != EngineRunMode.Stdio && pIndex < 0;
-using var loggerFactory = EngineLogging.Create(opts.LogLevel, opts.DataDir, "cli", canWriteConsole);
-var log = loggerFactory.CreateLogger("cli");
-
-if (opts.Diagnostics)
-{
-    Console.WriteLine(EngineLogging.DescribeEnvironment(opts));
-    return 0;
-}
-
-if (pIndex >= 0)
-{
-    string method = (pIndex + 1 < argsList.Count) ? argsList[pIndex + 1] : "system.ping";
-    return await OneShotPingAsync(method, opts);
-}
-
-// 默认：与引擎进程相同的帧服务（复用通道层与 FrameServer 新栈）
-using var cts = new CancellationTokenSource();
-await using IFrameChannel channel = opts.Mode switch
-{
-    EngineRunMode.Stdio => new StdioChannel(),
-    EngineRunMode.Pipe => await NamedPipeChannel.AcceptAsync(opts.PipeName ?? throw new InvalidOperationException("缺少 --pipe-name"), log, cts.Token),
-    _ => throw new ArgumentOutOfRangeException(),
-};
-var router = new MethodRouter();
-var state = new EngineState(opts.DataDir, router);
-var stubs = new StubMethods(state);
-StubMethods.RegisterAll(router, stubs);
-await using var bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
-var server = new FrameServer(channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-
+CliOptions opts;
 try
 {
-    await server.RunAsync();
-}
-catch (OperationCanceledException)
-{
-    log.LogInformation("已优雅退出");
+    opts = CliOptions.Parse(args);
 }
 catch (Exception ex)
 {
-    log.LogError(ex, "Cli 异常退出");
+    Console.Error.WriteLine("参数错误: " + ex.Message);
+    return 2;
+}
+
+if (opts.ShowHelp)
+{
+    Console.WriteLine(CliOptions.HelpText);
+    return 0;
+}
+
+// --data-dir 优先：对齐 Paths（SessionStore / Config / Undo 都从它取值）
+if (!string.IsNullOrWhiteSpace(opts.DataDir))
+    Environment.SetEnvironmentVariable("HALO_DATA_DIR", opts.DataDir.Trim());
+
+if (opts.Diagnostics)
+{
+    var diagOpts = new EngineStartupOptions() with
+    {
+        Diagnostics = true,
+        DataDir = string.IsNullOrWhiteSpace(opts.DataDir)
+            ? EngineStartupOptions.DefaultDataDir()
+            : opts.DataDir.Trim(),
+    };
+    Console.WriteLine(EngineLogging.DescribeEnvironment(diagOpts));
+    return 0;
+}
+
+// ============ 帧服务模式（--stdio / --pipe-name）：P1 行为，原样保留 ============
+if (opts.Stdio || !string.IsNullOrWhiteSpace(opts.PipeName))
+{
+    var serverOpts = new EngineStartupOptions() with
+    {
+        Mode = !string.IsNullOrWhiteSpace(opts.PipeName) ? EngineRunMode.Pipe : EngineRunMode.Stdio,
+        PipeName = opts.PipeName,
+        DataDir = string.IsNullOrWhiteSpace(opts.DataDir)
+            ? EngineStartupOptions.DefaultDataDir()
+            : opts.DataDir.Trim(),
+        LogLevel = opts.LogLevel,
+    };
+    return await RunFrameServiceAsync(serverOpts);
+}
+
+if (string.IsNullOrWhiteSpace(opts.Prompt))
+{
+    Console.Error.WriteLine("错误: 缺少 -p <任务>");
+    return 2;
+}
+
+// ============ 无头任务模式 ============
+Paths.EnsureDataDirs();
+
+ConfigModel cfg;
+try
+{
+    cfg = ConfigStore.Load();
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("读取配置失败: " + ex.Message);
+    return 3;
+}
+
+ResolvedConfig resolved;
+try
+{
+    resolved = ConfigStore.Resolve(
+        cfg,
+        cliModel: opts.Model,
+        cliBaseUrl: opts.BaseUrl,
+        cliApiKey: opts.ApiKey,
+        cliProvider: opts.Provider,
+        cliProxy: opts.Proxy,
+        noProxy: opts.NoProxy);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("配置未就绪: " + ex.Message);
+    return 3;
+}
+
+if (!PermissionModeExtensions.TryParseWire(opts.Permission, out var mode))
+{
+    Console.Error.WriteLine(
+        "未知权限模式: " + opts.Permission + "（可选: ask / acceptEdits / bypassPermissions / yolo）");
+    return 2;
+}
+
+var cwd = opts.Cwd ?? Environment.CurrentDirectory;
+if (!Directory.Exists(cwd))
+{
+    Console.Error.WriteLine("工作目录不存在: " + cwd);
+    return 2;
+}
+
+using var llm = new OpenAiCompatibleClient(new LlmConfig
+{
+    BaseUrl = resolved.BaseUrl,
+    Model = resolved.Model,
+    ApiKey = resolved.ApiKey,
+    ProxyUrl = resolved.ProxyUrl,
+    Headers = resolved.Headers,
+});
+
+var tools = ToolRegistry.CreateBuiltin();
+var store = new SessionStore();
+store.StartNew();
+
+// 无头模式没有 UI：用一个空事件总线接收事件（只为了满足依赖）。
+// Start() 必须调：否则队满会反压阻塞 agent 循环。
+var nullBus = NullEventBus.Create();
+var bus = nullBus.Adapter;
+bus.Start();
+
+await using var session = new AgentSession(
+    llm, tools, store, bus,
+    Paths.DataDir, cwd, mode, resolved.Persona,
+    maxTurns: opts.MaxTurns ?? resolved.MaxTurns,
+    retry: opts.Retry ?? resolved.Retry,
+    askInteractive: false);
+
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    cts.Cancel();
+    session.CancelTurn();
+};
+
+var sw = Stopwatch.StartNew();
+TurnResult result;
+try
+{
+    result = await session.RunTurnAsync(opts.Prompt!, cts.Token);
+}
+catch (OperationCanceledException)
+{
+    Console.Error.WriteLine("⏹ 已中断");
+    return 4;
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("任务失败: " + ex.Message);
     return 1;
 }
+sw.Stop();
 
-return 0;
-
-static bool IsPromptValue(List<string> all, string a)
+if (opts.Json)
 {
-    int i = all.IndexOf("-p");
-    return i >= 0 && i + 1 < all.Count && all[i + 1] == a;
+    var payload = new
+    {
+        ok = !result.Truncated,
+        text = result.Text,
+        toolCalls = result.ToolCalls,
+        rounds = session.BuildSnapshot().Agent.Round.Used,
+        truncated = result.Truncated,
+        usage = new { input = result.InputTokens, output = result.OutputTokens },
+        durationMs = sw.ElapsedMilliseconds,
+        sessionId = store.SessionId,
+    };
+    Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    }));
+}
+else
+{
+    Console.WriteLine(result.Text);
+    Console.WriteLine();
+    Console.WriteLine("---");
+    Console.WriteLine(
+        "用时 " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s · 工具调用 " + result.ToolCalls + " 次 · " +
+        "轮次 " + session.BuildSnapshot().Agent.Round.Used + " · " +
+        "token in " + result.InputTokens + " out " + result.OutputTokens);
+    Console.WriteLine("会话 " + store.SessionId);
 }
 
-/// <summary>
-/// 单发模式：拉起 HaloAgent.Engine.exe --stdio，发一次 system.ping（或指定方法），打印应答后退出。
-/// 证明"后端可在无 UI 进程的情况下被驱动"（A-07 的另一条手工路径）。
-/// </summary>
-static async Task<int> OneShotPingAsync(string method, EngineStartupOptions opts)
+return result.Truncated ? 1 : 0;
+
+static async Task<int> RunFrameServiceAsync(EngineStartupOptions serverOpts)
 {
-    string? dir = AppContext.BaseDirectory;
-    string exe = Path.Combine(dir, OperatingSystem.IsWindows() ? "HaloAgent.Engine.exe" : "HaloAgent.Engine");
-    if (!File.Exists(exe))
-    {
-        // 开发态：从源码布局推断（输出目录随构建方式而变，逐个试）
-        string[] probes = new[]
-        {
-            Path.GetFullPath(Path.Combine(dir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
-            Path.GetFullPath(Path.Combine(dir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "x86", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
-            Path.GetFullPath(Path.Combine(dir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "x64", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
-        };
-        foreach (var probe in probes)
-        {
-            if (File.Exists(probe)) { exe = probe; break; }
-        }
-    }
-    if (!File.Exists(exe))
-    {
-        Console.Error.WriteLine("找不到 HaloAgent.Engine.exe，请先构建 Engine.Server（Release）。");
-        return 2;
-    }
+    // ⚠️ stdio 模式下 stdout 归帧独占，绝不能写日志到 stdout（否则宿主读到的第一行是日志）。
+    bool canWriteConsole = serverOpts.Mode != EngineRunMode.Stdio;
+    using var loggerFactory = EngineLogging.Create(serverOpts.LogLevel, serverOpts.DataDir, "cli", canWriteConsole);
+    var log = loggerFactory.CreateLogger("cli");
 
-    var psi = new ProcessStartInfo(exe)
+    using var cts = new CancellationTokenSource();
+    await using IFrameChannel channel = serverOpts.Mode switch
     {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        RedirectStandardInput = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        StandardOutputEncoding = Encoding.UTF8,
-        StandardErrorEncoding = Encoding.UTF8,
-        // 必须无 BOM（见 EngineClient 同处注释）：Encoding.UTF8 会写出 EF BB BF 前导。
-        StandardInputEncoding = new UTF8Encoding(false),
-        WorkingDirectory = dir,
+        EngineRunMode.Stdio => new StdioChannel(),
+        EngineRunMode.Pipe => await NamedPipeChannel.AcceptAsync(serverOpts.PipeName ?? throw new InvalidOperationException("缺少 --pipe-name"), log, cts.Token),
+        _ => throw new ArgumentOutOfRangeException(),
     };
-    psi.ArgumentList.Add("--stdio");
-    psi.ArgumentList.Add("--data-dir");
-    psi.ArgumentList.Add(opts.DataDir);
-
-    using var proc = Process.Start(psi);
-    if (proc is null)
-    {
-        Console.Error.WriteLine("无法启动引擎进程。");
-        return 1;
-    }
+    var router = new MethodRouter();
+    var state = new EngineState(serverOpts.DataDir, router);
+    var stubs = new StubMethods(state);
+    StubMethods.RegisterAll(router, stubs);
+    await using var bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
+    var server = new FrameServer(channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
     try
     {
-        long id = 1;
-        await proc.StandardInput.WriteLineAsync($"{{\"t\":\"req\",\"id\":{id},\"m\":{JsonSerializer.Serialize(method)}}}");
-        await proc.StandardInput.FlushAsync();
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        string? line = await proc.StandardOutput.ReadLineAsync().WaitAsync(cts.Token);
-        if (string.IsNullOrEmpty(line))
-        {
-            // 无应答时把引擎的 stderr 与退出码吐出来，否则只能看到"(无应答)"，无法定位
-            string err = "";
-            try { err = await proc.StandardError.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
-            int code = -1;
-            try { code = proc.HasExited ? proc.ExitCode : -1; } catch { }
-            Console.Error.WriteLine($"引擎无应答（exe={exe}，已退出={proc.HasExited}，退出码={code}）：{err.Trim()}");
-            Console.WriteLine("(无应答)");
-            return 1;
-        }
-        Console.WriteLine(line);
-        return 0;
+        await server.RunAsync();
+    }
+    catch (OperationCanceledException)
+    {
+        log.LogInformation("已优雅退出");
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"单发请求失败: {ex.Message}");
+        log.LogError(ex, "Cli 异常退出");
         return 1;
     }
-    finally
-    {
-        try
-        {
-            if (!proc.HasExited)
-            {
-                proc.StandardInput.Close();
-                if (!proc.WaitForExit(2000)) proc.Kill(entireProcessTree: true);
-            }
-        }
-        catch { /* 退出清理不抛异常 */ }
-    }
-}
 
-static class CliHelp
-{
-    public const string Text =
-        "HaloAgent 无头入口（Cli）\n" +
-        "\n" +
-        "用法: HaloAgent.Cli.exe [选项]\n" +
-        "\n" +
-        "  --stdio                走 stdin/stdout 收发帧（与引擎进程同行为）\n" +
-        "  -p [method]            单发一次请求并打印应答（默认 system.ping），后退出\n" +
-        "  --data-dir <路径>      数据目录（默认 %USERPROFILE%\\.haloagent）\n" +
-        "  --log <级别>           trace|debug|info|warn|error（默认 info）\n" +
-        "  --diagnostics          打印环境摘要后退出\n" +
-        "  -h, --help             显示本帮助\n" +
-        "\n" +
-        "示例:\n" +
-        "  HaloAgent.Cli.exe -p system.ping\n" +
-        "  echo {\"t\":\"req\",\"id\":1,\"m\":\"system.ping\"} | HaloAgent.Cli.exe --stdio\n";
+    return 0;
 }
