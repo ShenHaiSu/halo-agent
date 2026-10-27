@@ -1,0 +1,66 @@
+namespace HaloAgent.Engine.Abstractions;
+
+/// <summary>
+/// 全部方法名（54 个）。与 contract/agent.schema.json 的 methods 键完全一致，供 Contract.Tests 校验。
+/// </summary>
+internal static class KnownMethods
+{
+    /// <summary>全部 54 个方法名。</summary>
+    internal static readonly string[] All = new[]
+    {
+        "agent.answer",
+        "agent.cancel",
+        "agent.drain",
+        "agent.prompt",
+        "agent.queue",
+        "agent.resync",
+        "agent.unqueue",
+        "asset.memory.delete",
+        "asset.memory.get",
+        "asset.memory.list",
+        "asset.memory.save",
+        "asset.personas.get",
+        "asset.personas.list",
+        "asset.personas.save",
+        "asset.skills.delete",
+        "asset.skills.get",
+        "asset.skills.list",
+        "asset.skills.run",
+        "asset.skills.save",
+        "fs.completePaths",
+        "fs.listDir",
+        "fs.validatePath",
+        "session.clear",
+        "session.compact",
+        "session.delete",
+        "session.list",
+        "session.new",
+        "session.rename",
+        "session.resume",
+        "session.setCwd",
+        "settings.get",
+        "settings.mcp.get",
+        "settings.mcp.save",
+        "settings.probeModels",
+        "settings.saveExtraHeaders",
+        "settings.saveModel",
+        "settings.saveNetwork",
+        "state.setMaxTurns",
+        "state.setMode",
+        "state.setPersona",
+        "state.setProvider",
+        "state.setRetry",
+        "state.snapshot",
+        "system.diagnostics",
+        "system.info",
+        "system.ping",
+        "system.protocol",
+        "system.shutdown",
+        "tool.list",
+        "tool.mcpStatus",
+        "tool.undoList",
+        "tool.undoRollback",
+        "update.check",
+        "update.install",
+    };
+}

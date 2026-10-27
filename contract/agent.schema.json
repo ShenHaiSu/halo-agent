@@ -1,37 +1,87 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://haloagent.local/contract/agent.schema.json",
-  "title": "HaloAgent 帧协议",
-  "description": "宿主 ↔ 引擎的 NDJSON 帧契约。P0 只定义信封与 system.* 方法。",
-  "version": "1",
-
-  "definitions": {
+  "title": "HaloAgent 通信契约",
+  "description": "宿主 ↔ 引擎的 NDJSON 帧契约。所有字段 camelCase。信封字段用短名。",
+  "contractVersion": 1,
+  "frozen": "2025-01-01",
+  "envelope": {
     "request": {
       "type": "object",
-      "required": ["t", "id", "m"],
+      "required": [
+        "t",
+        "id",
+        "m"
+      ],
       "properties": {
-        "t": { "const": "req" },
-        "id": { "type": "integer", "minimum": 1, "description": "请求序号，单调递增" },
-        "m": { "type": "string", "description": "方法名，点分命名空间" },
-        "p": { "type": ["object", "null"], "description": "方法参数，camelCase" }
+        "t": {
+          "const": "req"
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "m": {
+          "type": "string"
+        },
+        "p": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "response": {
       "type": "object",
-      "required": ["t", "id", "ok"],
+      "required": [
+        "t",
+        "id",
+        "ok"
+      ],
       "properties": {
-        "t": { "const": "res" },
-        "id": { "type": "integer" },
-        "ok": { "type": "boolean" },
-        "r": { "type": ["object", "null"] },
+        "t": {
+          "const": "res"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "r": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
         "e": {
-          "type": ["object", "null"],
-          "required": ["code", "msg"],
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "code",
+            "msg"
+          ],
           "properties": {
-            "code": { "type": "string" },
-            "msg": { "type": "string" },
-            "hint": { "type": ["string", "null"] }
+            "code": {
+              "type": "string"
+            },
+            "msg": {
+              "type": "string"
+            },
+            "hint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         }
       },
@@ -39,66 +89,2263 @@
     },
     "event": {
       "type": "object",
-      "required": ["t", "seq", "k"],
+      "required": [
+        "t",
+        "seq",
+        "k"
+      ],
       "properties": {
-        "t": { "const": "evt" },
-        "seq": { "type": "integer", "minimum": 0 },
-        "k": { "type": "string" },
-        "p": { "type": ["object", "null"] }
+        "t": {
+          "const": "evt"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "k": {
+          "type": "string"
+        },
+        "p": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
+    }
+  },
+  "types": {
+    "PermissionMode": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "acceptEdits",
+        "bypassPermissions",
+        "yolo"
+      ]
     },
-    "frame": {
-      "oneOf": [
-        { "$ref": "#/definitions/request" },
-        { "$ref": "#/definitions/response" },
-        { "$ref": "#/definitions/event" }
+    "AskKind": {
+      "type": "string",
+      "enum": [
+        "command",
+        "write",
+        "rounds"
+      ]
+    },
+    "MessageRole": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "tool",
+        "system"
+      ]
+    },
+    "ToolCallView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "args": {
+          "type": "string"
+        },
+        "ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "MessageView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/types/MessageRole"
+        },
+        "text": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/ToolCallView"
+          }
+        },
+        "injected": {
+          "type": "boolean"
+        },
+        "tsMs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "role"
+      ]
+    },
+    "SessionSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headless": {
+          "type": "boolean"
+        },
+        "mtimeMs": {
+          "type": "integer"
+        },
+        "userMsgs": {
+          "type": "integer"
+        },
+        "assistantMsgs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "mtimeMs"
+      ]
+    },
+    "SkillSummary": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "user",
+            "project"
+          ]
+        },
+        "disableModelInvocation": {
+          "type": "boolean"
+        },
+        "hasEntry": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "source"
+      ]
+    },
+    "MemorySummary": {
+      "type": "object",
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "mtype": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "project"
+          ]
+        },
+        "updatedMs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "filename",
+        "name",
+        "scope"
+      ]
+    },
+    "ToolInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "mcp",
+            "skill"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ]
+    },
+    "SnapshotInfo": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "session": {
+          "type": "string"
+        },
+        "orig": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "tsMs": {
+          "type": "integer"
+        },
+        "external": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "index",
+        "session",
+        "orig",
+        "action",
+        "tsMs"
+      ]
+    },
+    "Note": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "text"
+      ]
+    },
+    "PendingAsk": {
+      "type": "object",
+      "properties": {
+        "askId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/types/AskKind"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allowAlways": {
+          "type": "boolean"
+        },
+        "used": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "askId",
+        "kind",
+        "title",
+        "body"
+      ]
+    },
+    "HeaderPair": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "StateSnapshot": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "integer"
+        },
+        "engine": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "pid": {
+              "type": "integer"
+            },
+            "startedAtMs": {
+              "type": "integer"
+            },
+            "osVersion": {
+              "type": "string"
+            },
+            "isWin7": {
+              "type": "boolean"
+            }
+          }
+        },
+        "session": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "historyPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "agent": {
+          "type": "object",
+          "properties": {
+            "busy": {
+              "type": "boolean"
+            },
+            "turnId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mode": {
+              "$ref": "#/types/PermissionMode"
+            },
+            "modeLabel": {
+              "type": "string"
+            },
+            "persona": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "apiKeySet": {
+              "type": "boolean"
+            },
+            "contextWindow": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "maxTurns": {
+              "type": "integer"
+            },
+            "retry": {
+              "type": "integer"
+            },
+            "configured": {
+              "type": "boolean"
+            },
+            "round": {
+              "type": "object",
+              "properties": {
+                "used": {
+                  "type": "integer"
+                },
+                "limit": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "inputTotal": {
+              "type": "integer"
+            },
+            "outputTotal": {
+              "type": "integer"
+            },
+            "lastPromptTokens": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        },
+        "queue": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pendingAsk": {
+          "oneOf": [
+            {
+              "$ref": "#/types/PendingAsk"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/MessageView"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/Note"
+          }
+        },
+        "update": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "latestVersion": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "required": [
+        "protocol",
+        "engine",
+        "session",
+        "agent",
+        "usage",
+        "queue",
+        "messages"
       ]
     }
   },
-
   "methods": {
     "system.ping": {
-      "direction": "host->engine",
       "params": null,
       "result": {
         "type": "object",
-        "required": ["pong", "version", "protocol", "pid"],
         "properties": {
-          "pong": { "type": "boolean" },
-          "version": { "type": "string" },
-          "protocol": { "type": "integer" },
-          "pid": { "type": "integer" },
-          "uptimeMs": { "type": "integer" },
-          "serverTimeMs": { "type": "integer" }
-        }
-      },
-      "errors": []
+          "pong": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "uptimeMs": {
+            "type": "integer"
+          },
+          "serverTimeMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pong",
+          "version",
+          "protocol",
+          "pid"
+        ]
+      }
     },
     "system.info": {
-      "direction": "host->engine",
       "params": null,
       "result": {
         "type": "object",
         "properties": {
-          "version": { "type": "string" },
-          "protocol": { "type": "integer" },
-          "pid": { "type": "integer" },
-          "osVersion": { "type": "string" },
-          "is64BitOs": { "type": "boolean" },
-          "is64BitProcess": { "type": "boolean" },
-          "runtime": { "type": "string" },
-          "dataDir": { "type": "string" },
-          "startedAtMs": { "type": "integer" }
+          "version": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "osVersion": {
+            "type": "string"
+          },
+          "isWin7": {
+            "type": "boolean"
+          },
+          "is64BitOs": {
+            "type": "boolean"
+          },
+          "is64BitProcess": {
+            "type": "boolean"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "dataDir": {
+            "type": "string"
+          },
+          "startedAtMs": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "system.protocol": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "encoding": {
+            "type": "string"
+          },
+          "maxFrameBytes": {
+            "type": "integer"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "system.shutdown": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "graceful": {
+            "type": "boolean"
+          }
         }
       },
-      "errors": []
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "system.diagnostics": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "agent.prompt": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accepted",
+          "turnId"
+        ]
+      },
+      "errors": [
+        "state.busy",
+        "state.notConfigured"
+      ]
+    },
+    "agent.queue": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "boolean"
+          },
+          "position": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "agent.unqueue": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "agent.cancel": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "agent.answer": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "askId": {
+            "type": "string"
+          },
+          "allow": {
+            "type": "boolean"
+          },
+          "always": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "askId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "errors": [
+        "ask.stale"
+      ]
+    },
+    "agent.drain": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "agent.resync": {
+      "params": null,
+      "result": {
+        "$ref": "#/types/StateSnapshot"
+      }
+    },
+    "session.new": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "session.resume": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/MessageView"
+            }
+          }
+        }
+      },
+      "errors": [
+        "session.notFound"
+      ]
+    },
+    "session.list": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/SessionSummary"
+            }
+          }
+        }
+      }
+    },
+    "session.rename": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "note"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "session.delete": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "session.clear": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "session.compact": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "session.setCwd": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": [
+        "fs.notFound"
+      ]
+    },
+    "state.snapshot": {
+      "params": null,
+      "result": {
+        "$ref": "#/types/StateSnapshot"
+      }
+    },
+    "state.setMode": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/types/PermissionMode"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/types/PermissionMode"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.setPersona": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.setProvider": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.setMaxTurns": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "maxTurns": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "state.setRetry": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "retry": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "settings.get": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "apiKeySet": {
+            "type": "boolean"
+          },
+          "apiKeyEnv": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contextWindow": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "maxTurns": {
+            "type": "integer"
+          },
+          "retry": {
+            "type": "integer"
+          },
+          "proxy": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "direct",
+                  "manual"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/HeaderPair"
+            }
+          },
+          "extraHeadersEnabled": {
+            "type": "boolean"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "dataDir": {
+            "type": "string"
+          },
+          "configPath": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "settings.saveModel": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "baseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apiKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clearKey": {
+            "type": "boolean"
+          },
+          "contextWindow": {
+            "type": "integer"
+          },
+          "maxTurns": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "settings.saveNetwork": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "direct",
+              "manual"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "retry": {
+            "type": "integer"
+          },
+          "headersEnabled": {
+            "type": "boolean"
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/HeaderPair"
+            }
+          },
+          "providerHeaders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/HeaderPair"
+            }
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "settings.probeModels": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "baseUrl": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "baseUrl"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "errors": [
+        "llm.error",
+        "llm.timeout"
+      ]
+    },
+    "settings.saveExtraHeaders": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "settings.mcp.get": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "settings.mcp.save": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "errors": [
+        "params.invalid"
+      ]
+    },
+    "asset.skills.list": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/SkillSummary"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "asset.skills.get": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "entry": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": [
+        "asset.notFound"
+      ]
+    },
+    "asset.skills.save": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "body"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "asset.skills.delete": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "asset.skills.run": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "args": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": [
+        "state.busy",
+        "asset.notFound"
+      ]
+    },
+    "asset.personas.list": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "asset.personas.get": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": [
+        "asset.notFound"
+      ]
+    },
+    "asset.personas.save": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "body"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "asset.memory.list": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/MemorySummary"
+            }
+          }
+        }
+      }
+    },
+    "asset.memory.get": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ]
+          }
+        },
+        "required": [
+          "filename",
+          "scope"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "mtype": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "errors": [
+        "asset.notFound"
+      ]
+    },
+    "asset.memory.save": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "mtype": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ]
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "body"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "filename": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "asset.memory.delete": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "project"
+            ]
+          }
+        },
+        "required": [
+          "filename",
+          "scope"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "tool.list": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/ToolInfo"
+            }
+          }
+        }
+      }
+    },
+    "tool.undoList": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/SnapshotInfo"
+            }
+          }
+        }
+      }
+    },
+    "tool.undoRollback": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "orig": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool.mcpStatus": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "connected": {
+                  "type": "boolean"
+                },
+                "toolCount": {
+                  "type": "integer"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fs.listDir": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "isDir": {
+                  "type": "boolean"
+                },
+                "size": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        "fs.notFound",
+        "fs.escape"
+      ]
+    },
+    "fs.completePaths": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prefix"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "isDir": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fs.validatePath": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "normalized": {
+            "type": "string"
+          },
+          "isDir": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "update.check": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "latestVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "update.install": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "started": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   },
-
+  "events": {
+    "turn.started": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "turnId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "turn.finished": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "turnId": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "text.delta": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "reasoning.delta": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool.started": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "toolCallId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "args": {
+            "type": "string"
+          },
+          "idleMs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "tool.finished": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "toolCallId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool.outputDelta": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "toolCallId": {
+            "type": "string"
+          },
+          "delta": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool.silentAlert": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "toolCallId": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "round.started": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "llm.retrying": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "usage": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "integer"
+          },
+          "completion": {
+            "type": "integer"
+          },
+          "dropped": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "notice": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warn",
+              "error"
+            ]
+          }
+        }
+      }
+    },
+    "ask.permission": {
+      "payload": {
+        "$ref": "#/types/PendingAsk"
+      }
+    },
+    "ask.rounds": {
+      "payload": {
+        "$ref": "#/types/PendingAsk"
+      }
+    },
+    "session.info": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "historyPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "session.historyLoaded": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/MessageView"
+            }
+          }
+        }
+      }
+    },
+    "session.contextCleared": {
+      "payload": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "session.compactionStarted": {
+      "payload": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "session.compacted": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "kept": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/MessageView"
+            }
+          }
+        }
+      }
+    },
+    "user.injected": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.personaChanged": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.modeChanged": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/types/PermissionMode"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state.busyChanged": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "busy": {
+            "type": "boolean"
+          },
+          "queueLength": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "resync.required": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
   "errorCodes": {
     "method.notFound": "方法不存在",
+    "params.invalid": "参数不合法",
+    "protocol.version": "协议版本不匹配",
+    "state.busy": "有回合正在执行",
+    "state.notConfigured": "尚未配置模型",
+    "session.notFound": "会话不存在",
+    "asset.notFound": "技能/人格/记忆不存在",
+    "fs.notFound": "路径不存在",
+    "fs.escape": "路径越界",
+    "llm.error": "模型端点错误",
+    "llm.timeout": "模型超时",
+    "tool.failed": "工具执行失败",
+    "ask.stale": "回答了一个已过期的询问",
     "internal": "引擎内部错误",
-    "protocol.version": "协议版本不匹配"
+    "notSupported": "该功能未实现"
   }
 }

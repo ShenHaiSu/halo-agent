@@ -1,6 +1,9 @@
-using HaloAgent.Engine.Server;
-using HaloAgent.Engine.Server.Channels;
 using HaloAgent.Engine.Abstractions;
+using HaloAgent.Engine.Abstractions.Frames;
+using HaloAgent.Engine.Core.Events;
+using HaloAgent.Engine.Server;
+using HaloAgent.Engine.Core.Channels;
+using HaloAgent.Engine.Server.Routing;
 using Microsoft.Extensions.Logging;
 
 // 顶层语句（C# 9+）。引擎进程的一切都在这里起。
@@ -37,37 +40,54 @@ if (opts.Diagnostics)
     return opts.ExitCodeSuccess;
 }
 
-await using IFrameChannel channel = opts.Mode switch
+// Pipe 模式的管道名由宿主指定（随机后缀防猜测），引擎只负责监听，不自己取名。
+if (opts.Mode == EngineRunMode.Pipe && string.IsNullOrWhiteSpace(opts.PipeName))
 {
-    EngineRunMode.Stdio => new StdioChannel(),
-    // P1 补齐
-    EngineRunMode.Pipe => throw new NotSupportedException("Named Pipe 通道在 P1 实现"),
-    _ => throw new ArgumentOutOfRangeException(),
-};
-
-var server = new FrameServer(channel, loggerFactory.CreateLogger<FrameServer>());
-using var cts = new CancellationTokenSource();
-
-// Ctrl+C / 关闭 → 优雅退出
-Console.CancelKeyPress += (_, e) =>
-{
-    e.Cancel = true;
-    log.LogInformation("收到中断信号，准备退出");
-    cts.Cancel();
-};
-
-try
-{
-    await server.RunAsync(cts.Token);
-}
-catch (OperationCanceledException)
-{
-    log.LogInformation("已优雅退出");
-}
-catch (Exception ex)
-{
-    log.LogError(ex, "引擎异常退出");
+    Console.Error.WriteLine("缺少 --pipe-name（Pipe 模式下必填，由宿主生成并传入）");
     return 1;
 }
 
-return 0;
+ using var cts = new CancellationTokenSource();
+
+ // Ctrl+C / 关闭 → 优雅退出
+ Console.CancelKeyPress += (_, e) =>
+ {
+     e.Cancel = true;
+     log.LogInformation("收到中断信号，准备退出");
+     cts.Cancel();
+ };
+
+await using IFrameChannel channel = opts.Mode switch
+{
+    EngineRunMode.Stdio => new StdioChannel(),
+    EngineRunMode.Pipe => await NamedPipeChannel.AcceptAsync(opts.PipeName!, log),
+    _ => throw new ArgumentOutOfRangeException(nameof(opts.Mode), "未知运行模式"),
+};
+
+// P1 新栈：路由表 + 状态 + stub 全量注册 + 事件总线 + 帧服务。
+// Stdio 与 Pipe 共用同一套（不再走旧的单方法 FrameServer），
+// 这样 --stdio 调试与生产管道的行为完全一致。
+var router = new MethodRouter();
+var state = new EngineState(opts.DataDir, router);
+var stubs = new StubMethods(state);
+StubMethods.RegisterAll(router, stubs);
+
+await using var bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
+var server = new FrameServer(
+    channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
+
+ try
+ {
+     await server.RunAsync();
+ }
+ catch (OperationCanceledException)
+ {
+     log.LogInformation("已优雅退出");
+ }
+ catch (Exception ex)
+ {
+     log.LogError(ex, "引擎异常退出");
+     return 1;
+ }
+
+ return 0;

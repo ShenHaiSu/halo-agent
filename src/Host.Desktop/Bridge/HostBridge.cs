@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Windows.Forms;
 using CefSharp;
 using HaloAgent.Desktop.Engine;
+using HaloAgent.Engine.Abstractions.Frames;
+using HaloAgent.Engine.Abstractions.Serialization;
 
 namespace HaloAgent.Desktop.Bridge;
 
@@ -20,13 +22,28 @@ namespace HaloAgent.Desktop.Bridge;
 public sealed class HostBridge
 {
     private readonly MainForm _form;
-    private readonly EngineClient _engine;
+    private readonly EngineClient? _engine;
+    private EngineSupervisor? _supervisor;
 
+    /// <summary>P1 主入口：宿主通过守护进程持有引擎，支持重连与状态查询。</summary>
+    public HostBridge(MainForm form, EngineSupervisor supervisor)
+    {
+        _form = form;
+        _supervisor = supervisor;
+    }
+
+    /// <summary>P0 兼容入口：直连 EngineClient（无重连）。MainForm/Program 暂用它，后续切到主入口。</summary>
     public HostBridge(MainForm form, EngineClient engine)
     {
         _form = form;
         _engine = engine;
     }
+
+    /// <summary>后续接线：把守护进程交给桥（替代直连）。</summary>
+    public void SetSupervisor(EngineSupervisor supervisor) => _supervisor = supervisor;
+
+    /// <summary>当前可用的引擎客户端（守护优先，直连兜底）。</summary>
+    private EngineClient? ActiveClient => _supervisor?.TryGetClient() ?? _engine;
 
     // ---------------- 系统信息 ----------------
 
@@ -194,7 +211,8 @@ public sealed class HostBridge
         var sw = Stopwatch.StartNew();
         try
         {
-            var pong = await _engine.RequestAsync<JsonElement>("system.ping", null);
+            var client = ActiveClient ?? throw new InvalidOperationException("引擎未就绪");
+            var pong = await client.RequestAsync<JsonElement>("system.ping", (object?)null);
             sw.Stop();
             return new EnginePingResult
             {
@@ -214,6 +232,113 @@ public sealed class HostBridge
             };
         }
     }
+
+    // ---------------- 引擎透传（D1-4 宿主中转层） ----------------
+
+    /// <summary>
+    /// 通用引擎调用：前端透过宿主调任意引擎方法。
+    /// paramsJson 是 JSON 字符串（可空）；返回 {ok,result} 或 {ok:false,error} 的 JSON 字符串。
+    /// </summary>
+    public async Task<string> InvokeAsync(string method, string paramsJson)
+    {
+        try
+        {
+            var client = ActiveClient ?? throw new InvalidOperationException("引擎未就绪");
+            JsonElement? prms = string.IsNullOrWhiteSpace(paramsJson)
+                ? null
+                : JsonSerializer.Deserialize<JsonElement>(paramsJson, HaloJson.Options);
+            var result = await client.RequestAsync<JsonElement>(method, prms).ConfigureAwait(false);
+            return JsonSerializer.Serialize(new { ok = true, result }, HaloJson.Options);
+        }
+        catch (RpcException ex)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                error = new { code = ex.Code, message = ex.Message, hint = ex.Hint },
+            }, HaloJson.Options);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                error = new { code = "internal", message = ex.Message, hint = (string?)null },
+            }, HaloJson.Options);
+        }
+    }
+
+    /// <summary>
+    /// 拉取自 sinceSeq 之后（seq > sinceSeq）的事件，最多 max 条。
+    /// 返回 {frames,nextSeq,hasGap,droppedEstimate} 的 JSON 字符串；frames 用 HaloJson 序列化。
+    /// </summary>
+    public Task<string> GetEventBatchAsync(long sinceSeq, int max)
+    {
+        var client = ActiveClient;
+        if (client is null)
+            return Task.FromResult(JsonSerializer.Serialize(new
+            {
+                frames = Array.Empty<object>(),
+                nextSeq = sinceSeq,
+                hasGap = false,
+                droppedEstimate = 0L,
+            }, HaloJson.Options));
+
+        var r = client.PollEvents(sinceSeq, max <= 0 ? 500 : max);
+        return Task.FromResult(JsonSerializer.Serialize(new
+        {
+            frames = r.Frames,
+            nextSeq = r.NextSeq,
+            hasGap = r.HasGap,
+            droppedEstimate = r.DroppedEstimate,
+        }, HaloJson.Options));
+    }
+
+    /// <summary>当前引擎连接状态（前端轮询或事件驱动）。</summary>
+    public Task<EngineConnectionState> GetEngineStateAsync()
+    {
+        if (_supervisor is null)
+            return Task.FromResult(new EngineConnectionState
+            {
+                Phase = "ready",
+                WillRetry = false,
+                EngineRunning = _engine?.IsRunning ?? false,
+            });
+
+        var s = _supervisor.State;
+        return Task.FromResult(new EngineConnectionState
+        {
+            Phase = s.Phase.ToString().ToLowerInvariant(),
+            Message = s.Message,
+            WillRetry = s.WillRetry ?? false,
+            EngineRunning = _supervisor.TryGetClient()?.IsRunning ?? false,
+        });
+    }
+
+    /// <summary>手动重试（Failed 状态下用户点"重试"）。后台重跑恢复流程，立即返回。</summary>
+    public Task<bool> RetryEngineAsync()
+    {
+        if (_supervisor is null) return Task.FromResult(false);
+        try
+        {
+            _supervisor.RetryInBackground();
+            return Task.FromResult(true);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("手动重试引擎失败: " + ex.Message);
+            return Task.FromResult(false);
+        }
+    }
+}
+
+/// <summary>返回给前端的引擎连接状态（字段全部 camelCase）。</summary>
+public sealed class EngineConnectionState
+{
+    public string Phase { get; set; } = "idle";
+    public string? Message { get; set; }
+    public bool WillRetry { get; set; }
+    public bool EngineRunning { get; set; }
 }
 
 /// <summary>返回给前端的系统信息（字段全部 camelCase）。</summary>

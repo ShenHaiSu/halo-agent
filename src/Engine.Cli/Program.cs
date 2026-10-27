@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using HaloAgent.Engine.Abstractions.Frames;
+using HaloAgent.Engine.Core.Events;
 using HaloAgent.Engine.Server;
-using HaloAgent.Engine.Server.Channels;
+using HaloAgent.Engine.Core.Channels;
+using HaloAgent.Engine.Server.Routing;
 using Microsoft.Extensions.Logging;
 
 // 顶层语句。无头入口（P0）：
@@ -44,21 +47,25 @@ if (pIndex >= 0)
     return await OneShotPingAsync(method, opts);
 }
 
-// 默认：与引擎进程相同的 stdio 帧服务（复用通道层与 FrameServer）
+// 默认：与引擎进程相同的帧服务（复用通道层与 FrameServer 新栈）
+using var cts = new CancellationTokenSource();
 await using IFrameChannel channel = opts.Mode switch
 {
     EngineRunMode.Stdio => new StdioChannel(),
-    EngineRunMode.Pipe => throw new NotSupportedException("Named Pipe 通道在 P1 实现"),
+    EngineRunMode.Pipe => await NamedPipeChannel.AcceptAsync(opts.PipeName ?? throw new InvalidOperationException("缺少 --pipe-name"), log, cts.Token),
     _ => throw new ArgumentOutOfRangeException(),
 };
-
-var server = new FrameServer(channel, loggerFactory.CreateLogger<FrameServer>());
-using var cts = new CancellationTokenSource();
+var router = new MethodRouter();
+var state = new EngineState(opts.DataDir, router);
+var stubs = new StubMethods(state);
+StubMethods.RegisterAll(router, stubs);
+await using var bus = new EventBus(channel, loggerFactory.CreateLogger("bus"));
+var server = new FrameServer(channel, state, bus, loggerFactory.CreateLogger<FrameServer>(), cts.Token);
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 try
 {
-    await server.RunAsync(cts.Token);
+    await server.RunAsync();
 }
 catch (OperationCanceledException)
 {

@@ -1,10 +1,11 @@
 using System.Text.Json;
+using HaloAgent.Engine.Abstractions.Types;
 
 namespace HaloAgent.Engine.Abstractions.Serialization;
 
 /// <summary>
 /// 全项目唯一的 JSON 配置。任何地方要序列化/反序列化通信载荷都走这里，
-/// 禁止各写各的 options——那会导致"有的地方字段名 camelCase、有的是 PascalCase"。
+/// 禁止各写各的 options——那会导致“有的地方字段名 camelCase、有的是 PascalCase”。
 /// </summary>
 public static class HaloJson
 {
@@ -19,6 +20,7 @@ public static class HaloJson
         AllowTrailingCommas = true,
         WriteIndented = false,
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+        Converters = { new PermissionModeConverter() },
     };
 
     /// <summary>反序列化单个帧（宽容：未知字段忽略；坏行返回 null）。</summary>

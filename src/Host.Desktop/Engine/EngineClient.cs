@@ -1,104 +1,180 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
+using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Abstractions.Serialization;
+using HaloAgent.Engine.Core.Channels;
 
 namespace HaloAgent.Desktop.Engine;
 
 /// <summary>
-/// 引擎客户端（P0 版：通过 stdio 子进程通信；P1 换成 Named Pipe）。
+/// 引擎客户端：宿主侧唯一的引擎访问入口。
+///
 /// 职责：
-///   1. 启动/停止引擎进程
+///   1. 启动/停止引擎子进程
 ///   2. 请求-应答配对（id → TaskCompletionSource）
-///   3. 事件分发（订阅者回调）
-///   4. 异常退出检测与上报
-/// 线程模型：
-///   - 每条请求都返回 Task，绝不阻塞调用方（CEF 的 IO 线程不能被阻塞）。
-///   - 读循环跑在独立后台任务上。
+///   3. 事件接收（写入环形缓冲，供前端 poll）
+///   4. 异常检测（进程退出 / 管道断开）
+///
+/// ============ 线程模型 ============
+///   - 所有公开方法都是 async，不阻塞调用方
+///   - 读循环在独立 Task 上
+///   - 事件环形缓冲用 lock 保护（读写都在不同线程）
+///   - requestId 用 Interlocked 生成
+///
+/// ============ 超时 ============
+///   默认 30s。特殊方法（tool.* 60s、session.compact 120s、update.* 180s）
+///   通过 TimeoutFor(method) 覆盖。超时后：
+///     - TaskCompletionSource 被设为 TimeoutException
+///     - 该请求的 pending 项被移除（避免泄漏）
+///     - **不中断连接**（后续请求继续可用）
 /// </summary>
 public sealed class EngineClient : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement?>> _pending = new();
-    private long _nextId;
+    private readonly ConcurrentDictionary<long, PendingRequest> _pending = new();
+    private readonly EventRingBuffer _eventBuffer = new(capacity: 4096);
+    private readonly object _lifecycleLock = new();
+
     private Process? _proc;
+    private IFrameChannel? _channel;
+    private CancellationTokenSource? _readCts;
     private Task? _readLoop;
-    private CancellationTokenSource? _cts;
-    private volatile bool _disposing;
+    private long _nextId;
+    private volatile bool _disposed;
 
-    /// <summary>事件回调（seq, kind, payload）</summary>
-    public event Action<long, string, JsonElement?>? EventReceived;
-
-    /// <summary>引擎进程意外退出</summary>
+    /// <summary>引擎进程意外退出（含退出码）。</summary>
     public event Action<int>? ProcessExited;
 
-    public bool IsRunning => _proc is { HasExited: false };
+    /// <summary>连接断开（对端关闭 / 读失败）。</summary>
+    public event Action<string>? ConnectionLost;
 
-    public async Task StartAsync(string dataDir, CancellationToken ct = default)
+    public bool IsRunning => _channel is not null && !_disposed;
+
+    // ============================================================
+    //  启动 / 停止
+    // ============================================================
+
+    /// <summary>
+    /// 启动引擎进程并连接管道。
+    ///
+    /// 参数 pipeName 由调用方生成（格式 haloagent-{宿主PID}-{8位随机}），
+    /// 这样引擎不需要"先启动再告诉我名字"的额外握手。
+    /// </summary>
+    public async Task StartAsync(string pipeName, string dataDir, int connectTimeoutMs = 8000)
     {
+        lock (_lifecycleLock)
+        {
+            if (_channel is not null)
+                throw new InvalidOperationException("引擎已在运行");
+        }
+
         var exe = LocateEngineExe();
         var psi = new ProcessStartInfo
         {
             FileName = exe,
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            // 关键：必须用不带 BOM 的 UTF-8。Encoding.UTF8 经 StreamWriter 写出时
-            // 会带 EF BB BF 前导，引擎的帧解析会失败（HaloJson 侧虽已容忍 BOM，
-            // 但其它实现/历史版本不容忍；且首帧带 BOM 本就不合 NDJSON 约定）。
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-            StandardInputEncoding = new UTF8Encoding(false),
             WorkingDirectory = AppContext.BaseDirectory,
+            RedirectStandardError = true,
         };
-        psi.ArgumentList.Add("--stdio");
+        psi.ArgumentList.Add("--pipe-name");
+        psi.ArgumentList.Add(pipeName);
         psi.ArgumentList.Add("--data-dir");
         psi.ArgumentList.Add(dataDir);
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _proc = Process.Start(psi) ?? throw new InvalidOperationException("无法启动引擎进程");
-
-        _proc.EnableRaisingEvents = true;
-        _proc.Exited += (_, _) =>
+        var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        proc.Exited += (_, _) =>
         {
             int code = -1;
-            try { code = _proc.ExitCode; } catch { }
-            // 宿主主动释放（DisposeAsync）导致的退出不算异常；只记 Info。
-            // 只有非 0 退出码且非主动释放时才记 Error。
-            if (_disposing || code == 0) AppLog.Info($"引擎进程退出，退出码 {code}");
-            else AppLog.Error($"引擎进程异常退出，退出码 {code}");
+            try { code = proc.ExitCode; } catch { }
+            AppLog.Error($"引擎进程退出，退出码 {code}");
             ProcessExited?.Invoke(code);
         };
 
-        // stderr 单独读，写日志（不混进帧流）
-        _ = Task.Run(() => PumpStderrAsync(_proc.StandardError, _cts.Token));
+        if (!proc.Start())
+            throw new InvalidOperationException("无法启动引擎进程");
 
-        _readLoop = Task.Run(() => ReadLoopAsync(_proc.StandardOutput, _cts.Token));
+        // stderr 单独读，写日志（引擎诊断信息）
+        _ = Task.Run(() => PumpStderrAsync(proc));
 
-        // 握手：确认真的活着
-        var pong = await RequestAsync<JsonElement>("system.ping", null, ct).ConfigureAwait(false);
-        AppLog.Info($"引擎已就绪: {pong}");
+        // 连接管道（引擎可能需要几百毫秒才起监听）
+        NamedPipeChannel? ch = null;
+        var deadline = DateTime.UtcNow.AddMilliseconds(connectTimeoutMs);
+        Exception? lastError = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                ch = await NamedPipeChannel.ConnectAsync(pipeName, timeoutMs: 1500)
+                    .ConfigureAwait(false);
+                break;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                if (proc.HasExited)
+                    throw new InvalidOperationException(
+                        $"引擎进程在连接前退出（退出码 {proc.ExitCode}），无法连接管道", lastError);
+                await Task.Delay(200).ConfigureAwait(false);
+            }
+        }
+
+        if (ch is null)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            throw new TimeoutException(
+                $"连接引擎管道超时（{connectTimeoutMs}ms）。最后一次错误：{lastError?.Message}");
+        }
+
+        lock (_lifecycleLock)
+        {
+            _proc = proc;
+            _channel = ch;
+            _readCts = new CancellationTokenSource();
+            _readLoop = Task.Run(() => ReadLoopAsync(ch, _readCts.Token));
+        }
+
+        AppLog.Info($"引擎已连接，管道 {pipeName}，pid {proc.Id}");
+
+        // 握手：确认协议版本一致
+        var pong = await RequestAsync<PongPayload>("system.ping", (object?)null).ConfigureAwait(false);
+        if (pong is null || !pong.Pong)
+            throw new InvalidOperationException("引擎握手失败（system.ping 未返回 pong）");
+        AppLog.Info($"引擎版本 {pong.Version}，协议 {pong.Protocol}");
     }
 
-    public async Task<T?> RequestAsync<T>(string method, object? prms, CancellationToken ct = default)
+    /// <summary>
+    /// P0 兼容入口：只给数据目录，管道名自动生成。
+    /// Program.cs 在切到 EngineSupervisor 之前继续用它。
+    /// </summary>
+    public Task StartAsync(string dataDir, CancellationToken ct = default)
+        => StartAsync(EngineSupervisor.BuildPipeName(), dataDir);
+
+    private sealed record PongPayload(bool Pong, string Version, int Protocol);
+
+    // ============================================================
+    //  请求
+    // ============================================================
+
+    public Task<T?> RequestAsync<T>(string method, object? prms, CancellationToken ct = default)
+        => RequestAsync<T>(method, prms is null
+            ? null
+            : JsonSerializer.SerializeToElement(prms, HaloJson.Options), ct);
+
+    public async Task<T?> RequestAsync<T>(
+        string method, JsonElement? prms, CancellationToken ct = default)
     {
-        if (_proc is null || _proc.HasExited)
-            throw new InvalidOperationException("引擎未运行");
-
+        var ch = _channel ?? throw new InvalidOperationException("引擎未连接");
         long id = Interlocked.Increment(ref _nextId);
-        var tcs = new TaskCompletionSource<JsonElement?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = tcs;
 
-        var payload = prms is null
-            ? $"{{\"t\":\"req\",\"id\":{id},\"m\":{JsonSerializer.Serialize(method)}}}\n"
-            : $"{{\"t\":\"req\",\"id\":{id},\"m\":{JsonSerializer.Serialize(method)},\"p\":{JsonSerializer.Serialize(prms, HaloJson.Options)}}}\n";
+        var tcs = new TaskCompletionSource<ResponseFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var timeoutMs = TimeoutFor(method);
+        _pending[id] = new PendingRequest(id, tcs, DateTime.UtcNow.AddMilliseconds(timeoutMs));
 
         try
         {
-            await _proc.StandardInput.WriteAsync(payload).ConfigureAwait(false);
-            await _proc.StandardInput.FlushAsync().ConfigureAwait(false);
+            await ch.SendAsync(new RequestFrame { Id = id, Method = method, Params = prms }, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -106,63 +182,131 @@ public sealed class EngineClient : IAsyncDisposable
             throw new InvalidOperationException($"写入引擎失败: {ex.Message}", ex);
         }
 
-        // 给个超时兜底：引擎卡死时不能永远挂着
+        // 超时分级等待：超时只清理自己的 pending 项并抛 TimeoutException，
+        // 连接保持可用；用户取消则透出 OperationCanceledException。
         using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
-        var result = await tcs.Task.ConfigureAwait(false);
-        return result is null ? default : JsonSerializer.Deserialize<T>(result.Value.GetRawText(), HaloJson.Options);
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs, ct)).ConfigureAwait(false);
+
+        if (completed != tcs.Task)
+        {
+            _pending.TryRemove(id, out _);
+            ct.ThrowIfCancellationRequested();
+            throw new TimeoutException($"请求 {method} 超时（{timeoutMs}ms）");
+        }
+
+        var res = await tcs.Task.ConfigureAwait(false);
+        if (!res.Ok)
+        {
+            var err = res.Error;
+            throw new RpcException(
+                err?.Code ?? RpcError.Internal,
+                err?.Msg ?? "未知错误",
+                err?.Hint);
+        }
+
+        return res.Result is null
+            ? default
+            : JsonSerializer.Deserialize<T>(res.Result.Value.GetRawText(), HaloJson.Options);
     }
 
-    private async Task ReadLoopAsync(StreamReader reader, CancellationToken ct)
+    private static int TimeoutFor(string method) => method switch
+    {
+        "session.compact" => 180_000,
+        "tool.undoRollback" => 60_000,
+        "update.check" or "update.install" => 180_000,
+        "settings.probeModels" => 45_000,
+        _ => 30_000,
+    };
+
+    // ============================================================
+    //  事件
+    // ============================================================
+
+    /// <summary>
+    /// 拉取自 sinceSeq 之后的事件（最多 max 条）。
+    /// 语义：返回的所有帧的 seq 都 > sinceSeq。
+    /// 若返回的帧数与"缺口"不匹配，前端应触发 resync。
+    /// </summary>
+    public EventPollResult PollEvents(long sinceSeq, int max = 500)
+        => _eventBuffer.Poll(sinceSeq, max);
+
+    public sealed record EventPollResult(
+        IReadOnlyList<EventFrame> Frames,
+        long NextSeq,
+        bool HasGap,
+        long DroppedEstimate);
+
+    // ============================================================
+    //  内部
+    // ============================================================
+
+    private async Task ReadLoopAsync(IFrameChannel ch, CancellationToken ct)
     {
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var line = await reader.ReadLineAsync().ConfigureAwait(false);
-                if (line is null) break;
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                var dto = HaloJson.ReadFrame(line);
-                switch (dto)
+                ReceiveResult r;
+                try
                 {
-                    case FrameDto.Response res:
-                        if (_pending.TryRemove(res.Id, out var tcs))
-                        {
-                            if (res.Ok) tcs.TrySetResult(res.Result);
-                            else
-                            {
-                                var msg = res.Error?.ToString() ?? "未知错误";
-                                tcs.TrySetException(new InvalidOperationException(msg));
-                            }
-                        }
+                    r = await ch.ReceiveAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { break; }
+
+                if (r.IsClosed)
+                {
+                    AppLog.Info("引擎管道已关闭");
+                    ConnectionLost?.Invoke("引擎连接已关闭");
+                    break;
+                }
+                if (r.IsMalformed)
+                {
+                    AppLog.Warn($"收到坏帧并忽略: {r.Error}");
+                    continue;
+                }
+
+                switch (r.Frame)
+                {
+                    case ResponseFrame res:
+                        if (_pending.TryRemove(res.Id, out var p))
+                            p.Tcs.TrySetResult(res);
+                        else
+                            AppLog.Warn($"收到未知 id 的应答: {res.Id}");
                         break;
-                    case FrameDto.Event ev:
-                        try { EventReceived?.Invoke(ev.Seq, ev.Kind, ev.Payload); }
-                        catch (Exception ex) { AppLog.Warn("事件回调异常: " + ex.Message); }
+
+                    case EventFrame ev:
+                        _eventBuffer.Add(ev);
+                        break;
+
+                    case RequestFrame:
+                        AppLog.Warn("宿主收到请求帧，忽略（请求只应由宿主发出）");
                         break;
                 }
             }
         }
         catch (Exception ex)
         {
-            if (!ct.IsCancellationRequested) AppLog.Error("引擎读循环异常", ex);
+            AppLog.Error("引擎读循环异常", ex);
+            ConnectionLost?.Invoke(ex.Message);
         }
         finally
         {
-            // 所有挂起的请求都失败，避免调用方永远等待
+            // 所有挂起请求立即失败（不挂死）
             foreach (var kv in _pending)
-                if (_pending.TryRemove(kv.Key, out var tcs))
-                    tcs.TrySetException(new InvalidOperationException("引擎连接已关闭"));
+            {
+                if (_pending.TryRemove(kv.Key, out var p))
+                    p.Tcs.TrySetException(new InvalidOperationException("引擎连接已关闭"));
+            }
         }
     }
 
-    private async Task PumpStderrAsync(StreamReader reader, CancellationToken ct)
+    private static async Task PumpStderrAsync(Process proc)
     {
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (!proc.StandardError.EndOfStream)
             {
-                var line = await reader.ReadLineAsync().ConfigureAwait(false);
+                var line = await proc.StandardError.ReadLineAsync().ConfigureAwait(false);
                 if (line is null) break;
                 AppLog.Info($"[engine] {line}");
             }
@@ -175,17 +319,16 @@ public sealed class EngineClient : IAsyncDisposable
         // 优先同目录（发布态）；其次从源码布局推断（开发态）。
         // 开发态输出目录随构建方式而变（单项目构建 vs sln 按平台构建），逐个试。
         var baseDir = AppContext.BaseDirectory;
+        var devServer = Path.GetFullPath(Path.Combine(
+            baseDir, "..", "..", "..", "..", "..", "Engine.Server"));
         var candidates = new[]
         {
             Path.Combine(baseDir, "HaloAgent.Engine.exe"),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "Release", "net6.0-windows", "win-x86", "HaloAgent.Engine.exe")),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "x86", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
-            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..",
-                "Engine.Server", "bin", "x64", "Release", "net6.0-windows", "HaloAgent.Engine.exe")),
+            Path.Combine(devServer, "bin", "Debug", "net6.0-windows", "HaloAgent.Engine.exe"),
+            Path.Combine(devServer, "bin", "Release", "net6.0-windows", "HaloAgent.Engine.exe"),
+            Path.Combine(devServer, "bin", "Release", "net6.0-windows", "win-x86", "HaloAgent.Engine.exe"),
+            Path.Combine(devServer, "bin", "x86", "Release", "net6.0-windows", "HaloAgent.Engine.exe"),
+            Path.Combine(devServer, "bin", "x64", "Release", "net6.0-windows", "HaloAgent.Engine.exe"),
         };
         foreach (var c in candidates)
             if (File.Exists(c)) return c;
@@ -193,28 +336,59 @@ public sealed class EngineClient : IAsyncDisposable
             "找不到 HaloAgent.Engine.exe。请确认发布目录完整，或先构建 Engine.Server。");
     }
 
+    private sealed record PendingRequest(
+        long Id, TaskCompletionSource<ResponseFrame> Tcs, DateTime Deadline);
+
+    // ============================================================
+    //  释放
+    // ============================================================
+
     public async ValueTask DisposeAsync()
     {
-        _disposing = true;
-        try
+        if (_disposed) return;
+        _disposed = true;
+
+        Process? proc;
+        IFrameChannel? ch;
+        Task? readLoop;
+        CancellationTokenSource? cts;
+
+        lock (_lifecycleLock)
         {
-            _cts?.Cancel();
-            if (_proc is { HasExited: false })
+            proc = _proc; ch = _channel; readLoop = _readLoop; cts = _readCts;
+            _proc = null; _channel = null; _readLoop = null; _readCts = null;
+        }
+
+        // 先尝试优雅关闭
+        if (ch is not null)
+        {
+            try
             {
-                try
+                using var shutdownCts = new CancellationTokenSource(2000);
+                await ch.SendAsync(new RequestFrame
                 {
-                    _proc.StandardInput.Close();
-                    if (!_proc.WaitForExit(2000)) _proc.Kill(entireProcessTree: true);
-                }
-                catch { }
+                    Id = Interlocked.Increment(ref _nextId),
+                    Method = "system.shutdown",
+                }, shutdownCts.Token).ConfigureAwait(false);
             }
-            _proc?.Dispose();
-            if (_readLoop is not null) await Task.WhenAny(_readLoop, Task.Delay(1000)).ConfigureAwait(false);
+            catch { }
         }
-        catch { }
-        finally
+
+        cts?.Cancel();
+        if (ch is not null) await ch.DisposeAsync().ConfigureAwait(false);
+        if (readLoop is not null)
+            await Task.WhenAny(readLoop, Task.Delay(1500)).ConfigureAwait(false);
+
+        if (proc is not null)
         {
-            _cts?.Dispose();
+            try
+            {
+                if (!proc.WaitForExit(3000)) proc.Kill(entireProcessTree: true);
+            }
+            catch { }
+            proc.Dispose();
         }
+        cts?.Dispose();
+        AppLog.Info("EngineClient 已释放");
     }
 }
