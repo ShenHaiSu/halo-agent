@@ -1,0 +1,2 @@
+=== R-5: native dialogs (expect none) ===
+exit=1 (1=clean)

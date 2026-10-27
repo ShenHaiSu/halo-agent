@@ -1,0 +1,18 @@
+ [32m✓[39m src/components/settings/validators.test.ts [2m([22m[2m28 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m src/components/icons/icons.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/theme/validate.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 14[2mms[22m[39m
+ [32m✓[39m src/components/common/fuzzy.test.ts [2m([22m[2m17 tests[22m[2m)[22m[90m 18[2mms[22m[39m
+ [32m✓[39m src/components/chat/MarkdownRenderer.test.ts [2m([22m[2m49 tests[22m[2m)[22m[90m 52[2mms[22m[39m
+ [32m✓[39m src/theme/apply.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m src/theme/themes.test.ts [2m([22m[2m14 tests[22m[2m)[22m[90m 18[2mms[22m[39m
+ [32m✓[39m src/theme/useTheme.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1362[2mms[22m[39m
+   [33m[2m✓[22m[39m useTheme 模式[2m > [22m默认是 light [33m792[2mms[22m[39m
+   [33m[2m✓[22m[39m useTheme 模式[2m > [22msystem + 系统深色 → 解析为 dark [33m414[2mms[22m[39m
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 46[2mms[22m[39m
+ [32m✓[39m src/components/base/HButton.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 151[2mms[22m[39m
+ [32m✓[39m src/components/base/HDialog.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 189[2mms[22m[39m
+ [32m✓[39m src/components/sidebar/virtualize.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 48[2mms[22m[39m
+ [32m✓[39m src/theme/themeFallback.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 204[2mms[22m[39m
+ [32m✓[39m src/composables/useComposition.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 36[2mms[22m[39m
+[2m Test Files [22m [1m[32m14 passed[39m[22m[90m (14)[39m
+[2m      Tests [22m [1m[32m180 passed[39m[22m[90m (180)[39m

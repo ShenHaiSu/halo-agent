@@ -1,0 +1,2 @@
+禁用大库检查（highlight.js/shiki/prismjs/moment/dayjs/lodash/marked/markdown-it/dompurify/katex/monaco-editor）：
+✓ 无禁用大库

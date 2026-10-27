@@ -1,0 +1,73 @@
+# P5 五条红线反证（证明检查脚本不是摆设）
+
+> 方法：故意构造违反红线的样本，确认每条检查能抓到；再确认当前代码干净。
+> 日期：2026-10-27　环境：Win10/11 + Node 22 + pnpm 12（验证环境为源码全量拷贝 + 全新安装依赖）
+
+## R-1 渲染层零 v-html / innerHTML
+
+反证样本（临时文件，验证后删除）：
+
+```vue
+<!-- 样本 A --><div v-html="userInput" />
+```
+
+```ts
+// 样本 B
+el.innerHTML = modelOutput;
+```
+
+检查命令：
+
+```powershell
+Select-String -Path src\**\*.vue,src\**\*.ts -Pattern 'v-html','innerHTML','insertAdjacentHTML','outerHTML'
+```
+
+- 样本 A/B 均被命中（检查有效）。
+- 当前代码 `A-1-no-vhtml.txt`：0 命中（仅 `@allow-innerhtml` 标注行：main.ts 启动兜底页 1 处、测试 DOM 搭建 4 处，均转义/测试用途）。
+
+结论：R-1 通过。
+
+## R-2 24 事件全有归宿
+
+反证：删除 `eventBridge.ts` 中 `case 'resync.required'` 后重跑：
+
+```powershell
+# 期望事件数 24，实际 case 数 23 → 脚本报 "✗ 缺少 case：resync.required"，退出码 1
+```
+
+- 当前代码 `A-2-events-24.txt`：24/24 case 齐全，`default` 含 `console.debug`，`setLastSeq` 在 switch 之外。
+
+结论：R-2 通过。
+
+## R-3 IME 不误发
+
+反证：把 `useComposition.ts` 的 `END_DELAY_MS` 改为 0 后重跑 `useComposition.test.ts`：
+
+- `坑2：compositionend 与 keydown 同帧时不误判` 失败（检查有效）。
+
+当前代码：4/4 通过（见单测输出）。
+
+结论：R-3 通过。
+
+## R-4 危险询问两强制行为
+
+反证：把 `PermissionCard.vue` 的 `canAlways` 改为 `allowAlways === true`（去掉 `!hasWarning`）后：
+
+- 有 warning 时仍显示"总是允许"（与 P2 二次降级冲突，人工 + `askWarning` 断言可抓到）。
+
+当前代码：`canAlways = allowAlways === true && !hasWarning`，`focusTarget = hasWarning ? 'deny' : 'allow'`。
+
+结论：R-4 通过（代码审查 + 接线确认）。
+
+## R-5 零原生弹窗
+
+反证样本：
+
+```ts
+window.confirm('确定删除吗？');
+```
+
+检查命令命中该行（检查有效）。当前代码 `A-0-no-native-dialog.txt`：0 命中。
+`sessions.rename` 缺 note 时抛错（要求调用方用 HDialog 收集），不再回退 `window.prompt`。
+
+结论：R-5 通过。

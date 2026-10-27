@@ -1,0 +1,7 @@
+JS:  341.0 KB (3 files: index + vue vendor + p5diag lazy chunk)
+  - index-B0qkO9mA.js   234.3 KB (app, 含全部 P5 组件)
+  - vue-Dx1BjjOT.js      82.1 KB (vue + pinia vendor)
+  - p5diag-BcAdiUSS.js   24.9 KB (?diag=1 时才懒加载，不进首屏)
+  首屏 JS（index + vue）：316.4 KB
+CSS: 90.4 KB (1 file)
+阈值 800KB（gzip 前 JS）：PASS

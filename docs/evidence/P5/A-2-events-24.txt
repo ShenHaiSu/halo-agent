@@ -1,0 +1,29 @@
+=== R-2: 24 events ===
+24
+case 'ask.permission'
+case 'ask.rounds'
+case 'llm.retrying'
+case 'notice'
+case 'reasoning.delta'
+case 'resync.required'
+case 'round.started'
+case 'session.compacted'
+case 'session.compactionStarted'
+case 'session.contextCleared'
+case 'session.historyLoaded'
+case 'session.info'
+case 'state.busyChanged'
+case 'state.modeChanged'
+case 'state.personaChanged'
+case 'text.delta'
+case 'tool.finished'
+case 'tool.outputDelta'
+case 'tool.silentAlert'
+case 'tool.started'
+case 'turn.finished'
+case 'turn.started'
+case 'usage'
+case 'user.injected'
+        default: {
+          console.debug('[evt] 未处理的事件类型', f.k, f.p);
+        }

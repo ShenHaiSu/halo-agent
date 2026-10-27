@@ -1,0 +1,16 @@
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22m语言注册[2m > [22m11 种语言全部注册
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22m语言注册[2m > [22m别名正确解析
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22m语言注册[2m > [22m未知语言返回 null（不抛错）
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22m字符串里的关键字不被高亮
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22m注释里的关键字不被高亮
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22m未闭合字符串不吞掉后面全部内容
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22mC# 逐字字符串（可跨行）
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22mPowerShell here-string
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22m相邻同类型 token 被合并（减少 span）
+ [32m✓[39m src/components/chat/highlight/highlight.test.ts[2m > [22mTokenizer[2m > [22m1000 行 TS 高亮 < 30ms
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 22:54:11
+[2m   Duration [22m 2.82s[2m (transform 94ms, setup 28ms, collect 99ms, tests 31ms, environment 1.14s, prepare 763ms)[22m
+

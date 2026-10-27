@@ -1,0 +1,12 @@
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22m① 顶端 scrollTop=0 → start=0
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22m② 底部 scrollTop=max → end=rows.length
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22m③ 单行比视口高
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22mfindStartRow 单调性（1000 次随机 y）
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22mfindStartRow 返回值一定包含 y
+ [32m✓[39m src/components/sidebar/virtualize.test.ts[2m > [22mvirtualize[2m > [22m空列表不崩
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 22:54:15
+[2m   Duration [22m 2.88s[2m (transform 48ms, setup 30ms, collect 24ms, tests 44ms, environment 1.21s, prepare 793ms)[22m
+
