@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HaloAgent 宿主诊断（P3 验收工具）</title>
+<style>
+body { font: 13px/1.6 Consolas, "Microsoft YaHei", monospace; background: #1e1e22; color: #ddd; padding: 20px; }
+h1 { font-size: 16px; color: #9cf; }
+h2 { font-size: 14px; color: #fc9; margin-top: 20px; border-bottom: 1px solid #444; padding-bottom: 4px; }
+.ok { color: #6c6; } .fail { color: #f66; } .info { color: #99c; }
+button { background: #2d2d33; color: #ddd; border: 1px solid #555; padding: 4px 10px; margin: 2px; cursor: pointer; }
+button:hover { background: #3a3a42; }
+pre { background: #14141a; padding: 8px; overflow: auto; max-height: 400px; }
+textarea { width: 100%; height: 60px; background: #14141a; color: #ddd; border: 1px solid #555; }
+</style>
+</head>
+<body>
+<h1>HaloAgent 宿主诊断</h1>
+<p class="info">P3 验收工具。点“全部运行”后把输出复制到 <code>docs/evidence/P3/diag-result.txt</code>。
+仅验收构建使用，发布前从 wwwroot 移除。</p>
+<button onclick="runAll()">▶ 全部运行</button>
+<button onclick="document.getElementById('out').textContent=''">清空</button>
+<h2>A-3 资源加载</h2>
+<button onclick="a31()">A-3.1 四标志</button>
+<button onclick="a32()">A-3.2 ES Module</button>
+<button onclick="a33()">A-3.3 SPA 兜底</button>
+<button onclick="a35()">A-3.5 目录穿越</button>
+<h2>A-7 桥接</h2>
+<button onclick="a71()">A-7.1 接口清单</button>
+<button onclick="a72()">A-7.2 方法可用性</button>
+<button onclick="a73()">A-7.3 线程安全压测</button>
+<button onclick="a75()">A-7.5 openExternal 校验</button>
+<button onclick="a76()">A-7.6 事件通道</button>
+<h2>A-9 / A-10</h2>
+<button onclick="a91()">A-9.1 全部方法探测</button>
+<button onclick="a104()">A-10.4 无 file://</button>
+<h2>A-3.6 HTML5 拖放（人工）</h2>
+<p class="info">选中下面 pre 里的一段文字，拖到文本框：能插入 = HTML5 拖放可用。</p>
+<textarea id="dropzone" placeholder="拖一段文字到这里"></textarea>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById('out');
+function log(level, text) {
+  const line = `[${new Date().toLocaleTimeString()}] ${level.toUpperCase().padEnd(4)} ${text}`;
+  out.textContent += line + '\n'; out.scrollTop = out.scrollHeight;
+  (level === 'fail' ? console.error : console.log)(line);
+}
+const ok = (t) => { log('ok', t); return true; };
+const fail = (t) => { log('fail', t); return false; };
+
+async function bridge() {
+  for (let i = 0; i < 100; i++) {
+    if (window.haloHost && window.haloAgent) {
+      try {
+        await window.CefSharp.BindObjectAsync('haloHost', 'haloAgent');
+        if (window.haloHost && window.haloAgent) return true;
+      } catch (e) { /* 继续等 */ }
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
+async function a31() {
+  log('info', '--- A-3.1 app:// 四标志 ---');
+  location.protocol === 'app:' ? ok('location.protocol === "app:"') : fail(`protocol = ${location.protocol}`);
+  window.isSecureContext ? ok('isSecureContext === true') : fail('isSecureContext === false（IsSecure 未设）');
+  (typeof crypto.subtle === 'object' && crypto.subtle !== null) ? ok('crypto.subtle 可用') : fail('crypto.subtle 不可用');
+  location.host === 'local' ? ok('host === "local"') : fail(`host = ${location.host}`);
+  try {
+    const r = await fetch('index.html');
+    r.ok ? ok(`fetch('index.html') → ${r.status}`) : fail(`fetch 状态 ${r.status}`);
+  } catch (e) { fail(`fetch 抛异常：${e.message}`); }
+}
+
+async function a32() {
+  log('info', '--- A-3.2 ES Module ---');
+  const scripts = [...document.querySelectorAll('script[type="module"]')];
+  scripts.length > 0 ? ok(`页面含 ${scripts.length} 个 type="module" 脚本`) : log('info', '页面无 type="module" 脚本（占位页可能不需要）');
+  try {
+    const r = await fetch('index.html');
+    const ct = r.headers.get('content-type') || '';
+    ct.includes('text/html') ? ok(`index.html Content-Type = ${ct}`) : fail(`Content-Type = ${ct}`);
+  } catch (e) { fail(`fetch 失败：${e.message}`); }
+}
+
+async function a33() {
+  log('info', '--- A-3.3 SPA 兜底 ---');
+  const cases = [
+    ['app://local/some-vue-route', 200, '无扩展名 → 应回退 index.html'],
+    ['app://local/', 200, '根路径 → 200'],
+    ['app://local/missing.js', 404, '缺失 .js → 应 404'],
+    ['app://local/missing.css', 404, '缺失 .css → 应 404'],
+  ];
+  for (const [url, expect, desc] of cases) {
+    try {
+      const r = await fetch(url);
+      r.status === expect ? ok(`${desc}（${r.status}）`) : fail(`${desc}，实际 ${r.status}（期望 ${expect}）`);
+    } catch (e) { fail(`${desc} 抛异常：${e.message}`); }
+  }
+}
+
+async function a35() {
+  log('info', '--- A-3.5 目录穿越 ---');
+  const attacks = [
+    'app://local/../../../windows/win.ini',
+    'app://local/..%2f..%2f..%2fwindows%2fwin.ini',
+    'app://local/....//....//windows/win.ini',
+    'app://evil/index.html',
+  ];
+  for (const url of attacks) {
+    try {
+      const r = await fetch(url);
+      if (r.status === 403 || r.status === 404) { ok(`${url} → ${r.status}（已拒）`); }
+      else {
+        const body = await r.text();
+        const leaked = body.includes('[fonts]') || body.includes('for 16-bit app support');
+        leaked ? fail(`${url} 泄漏了 win.ini 内容！`) : ok(`${url} → ${r.status}（内容非 win.ini）`);
+      }
+    } catch (e) { ok(`${url} 被拒（${e.message}）`); }
+  }
+}
+
+const HOST_METHODS = ['windowMinimize','windowMaximizeOrRestore','windowClose','windowState','systemInfo','openExternal','showItemInFolder','copyText','readClipboardImage','toggleDevTools','restartEngine'];
+const AGENT_METHODS = ['request','pollEvents','isReady'];
+
+async function a71() {
+  log('info', '--- A-7.1 接口清单 ---');
+  if (!await bridge()) { fail('桥接未就绪'); return; }
+  const hostKeys = Object.getOwnPropertyNames(window.haloHost).filter(k => typeof window.haloHost[k] === 'function');
+  const agentKeys = Object.getOwnPropertyNames(window.haloAgent).filter(k => typeof window.haloAgent[k] === 'function');
+  log('info', `haloHost 方法数 = ${hostKeys.length}（应 11）`);
+  log('info', `haloAgent 方法数 = ${agentKeys.length}（应 3）`);
+  const hm = HOST_METHODS.filter(k => !hostKeys.includes(k));
+  const he = hostKeys.filter(k => !HOST_METHODS.includes(k));
+  const am = AGENT_METHODS.filter(k => !agentKeys.includes(k));
+  const ae = agentKeys.filter(k => !AGENT_METHODS.includes(k));
+  hm.length === 0 ? ok('haloHost 无缺失') : fail(`haloHost 缺：${hm.join(', ')}`);
+  he.length === 0 ? ok('haloHost 无多余') : fail(`haloHost 多：${he.join(', ')}（违反 R-4）`);
+  am.length === 0 ? ok('haloAgent 无缺失') : fail(`haloAgent 缺：${am.join(', ')}`);
+  ae.length === 0 ? ok('haloAgent 无多余') : fail(`haloAgent 多：${ae.join(', ')}（违反 R-4）`);
+}
+
+async function a72() {
+  log('info', '--- A-7.2 方法可用性 ---');
+  if (!await bridge()) { fail('桥接未就绪'); return; }
+  try {
+    const st = await window.haloHost.windowState();
+    (typeof st?.Width === 'number' && typeof st?.Height === 'number' && typeof st?.Maximized === 'boolean' && typeof st?.Dpi === 'number')
+      ? ok(`windowState → ${JSON.stringify(st)}`) : fail(`windowState 结构不对：${JSON.stringify(st)}`);
+  } catch (e) { fail(`windowState 异常：${e.message}`); }
+  try {
+    const si = await window.haloHost.systemInfo();
+    const need = ['OsDescription','Is64BitOs','CefVersion','HostVersion','Dpi','IsDev','IsFirstRun','DataDir','GpuMode','Screens'];
+    const missing = need.filter(k => !(k in (si || {})));
+    missing.length === 0 ? ok(`systemInfo → cef=${si.CefVersion} dpi=${si.Dpi} gpu=${si.GpuMode} screens=${si.Screens?.length}`)
+      : fail(`systemInfo 缺字段：${missing.join(', ')}`);
+  } catch (e) { fail(`systemInfo 异常：${e.message}`); }
+  try { await window.haloHost.copyText('HaloAgent 剪贴板测试 中文'); ok('copyText 成功'); }
+  catch (e) { fail(`copyText 异常：${e.message}`); }
+  try {
+    const img = await window.haloHost.readClipboardImage();
+    ok(`readClipboardImage → ${img === null ? 'null（无图）' : img.length + ' 字符 base64'}`);
+  } catch (e) { fail(`readClipboardImage 异常：${e.message}`); }
+  try {
+    await window.haloHost.showItemInFolder('C:\\__not_exist__\\x.txt');
+    fail('showItemInFolder 对不存在路径未抛异常');
+  } catch (e) { ok(`showItemInFolder 正确抛异常：${String(e).slice(0, 60)}`); }
+  try {
+    const ready = await window.haloAgent.isReady();
+    ready ? ok('haloAgent.isReady → true') : fail('isReady → false（引擎未就绪）');
+  } catch (e) { fail(`isReady 异常：${e.message}`); }
+  try {
+    const poll = await window.haloAgent.pollEvents(0);
+    (Array.isArray(poll?.Events) && typeof poll?.NextSeq === 'number')
+      ? ok(`pollEvents → ${poll.Events.length} 条，nextSeq=${poll.NextSeq}`)
+      : fail(`pollEvents 结构不对`);
+  } catch (e) { fail(`pollEvents 异常：${e.message}`); }
+  try {
+    const snap = await window.haloAgent.request('state.snapshot', null);
+    (snap && typeof snap === 'object')
+      ? ok(`request('state.snapshot') → 有 seq: ${snap.seq !== undefined}` + (snap.seq === undefined ? '（★ 缺 seq）' : ''))
+      : fail('state.snapshot 返回非对象');
+  } catch (e) { fail(`request 异常：${e.message}`); }
+  log('info', '注：windowMinimize/windowClose/openExternal/toggleDevTools/restartEngine 需人工验证');
+}
+
+async function a73() {
+  log('info', '--- A-7.3 压测（500 次 windowState）---');
+  if (!await bridge()) { fail('桥接未就绪'); return; }
+  const t0 = performance.now(); let errors = 0; const N = 500;
+  for (let i = 0; i < N; i++) {
+    try { await window.haloHost.windowState(); }
+    catch (e) { errors++; if (errors <= 3) fail(`第 ${i} 次失败：${e.message}`); }
+  }
+  const dt = performance.now() - t0;
+  errors === 0 ? ok(`${N} 次全成功，总耗时 ${dt.toFixed(0)}ms，单次 ${(dt / N * 1000).toFixed(1)}µs`)
+    : fail(`${errors}/${N} 次失败`);
+  log('info', '压测期间请拖动窗口，确认界面不卡死');
+}
+
+async function a75() {
+  log('info', '--- A-7.5 openExternal 校验 ---');
+  if (!await bridge()) { fail('桥接未就绪'); return; }
+  for (const u of ['file:///C:/windows/win.ini', 'javascript:alert(1)', '', 'not a url', 'ftp://example.com']) {
+    try { await window.haloHost.openExternal(u); fail(`"${u}" 未被拒绝（安全漏洞）`); }
+    catch (e) { ok(`"${u}" 被拒：${String(e).slice(0, 60)}`); }
+  }
+  log('info', 'http/https 正例需人工验证（会打开浏览器）');
+}
+
+async function a76() {
+  log('info', '--- A-7.6 事件通道 ---');
+  (typeof window.__haloHostEvent === 'function') ? ok('__haloHostEvent 已注册') : fail('__haloHostEvent 未注册');
+  const got = [];
+  const orig = window.__haloHostEvent;
+  window.__haloHostEvent = (kind, payload) => { got.push(kind); orig?.(kind, payload); };
+  try {
+    await window.haloHost.windowMaximizeOrRestore();
+    await new Promise(r => setTimeout(r, 250));
+    await window.haloHost.windowMaximizeOrRestore();
+    await new Promise(r => setTimeout(r, 250));
+    got.includes('host.windowState') ? ok(`收到 host.windowState（${got.join(', ')}）`) : fail(`未收到（${got.join(', ') || '无'}）`);
+  } finally { window.__haloHostEvent = orig; }
+}
+
+async function a91() {
+  log('info', '--- A-9.1 方法覆盖探测 ---');
+  if (!await bridge()) { fail('桥接未就绪'); return; }
+  let schema;
+  try { schema = await (await fetch('__contract.json')).json(); }
+  catch (e) { fail('无法加载 __contract.json（请拷 contract/agent.schema.json 为 wwwroot/__contract.json）'); return; }
+  const methods = Object.keys(schema.methods || {});
+  log('info', `schema 中 ${methods.length} 个方法`);
+  let notImpl = 0, okCount = 0, skipped = 0;
+  for (const m of methods) {
+    if (m.startsWith('fs.') || m === 'agent.prompt' || m === 'system.shutdown' || m.startsWith('update.') || m === 'session.delete' || m === 'agent.answer' || m === 'agent.cancel') {
+      skipped++; log('info', `跳过 ${m}（需人工或有副作用）`); continue;
+    }
+    try {
+      const r = await window.haloAgent.request(m, null);
+      okCount++; log('info', `✓ ${m} → ${JSON.stringify(r)?.slice(0, 80)}`);
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes('notImplemented') || msg.includes('未实现')) { notImpl++; fail(`${m} → NotImplemented`); }
+      else { log('info', `${m} → 抛错但方法存在：${msg.slice(0, 80)}`); okCount++; }
+    }
+  }
+  log('info', `结果：成功 ${okCount} / 跳过 ${skipped} / 未实现 ${notImpl}`);
+  notImpl === 0 ? ok('无 NotImplemented') : fail(`${notImpl} 个方法未实现`);
+}
+
+async function a104() {
+  log('info', '--- A-10.4 无 file:// 入口 ---');
+  location.protocol === 'app:' ? ok('当前协议 app://（生产态正确）') : log('info', `当前协议 ${location.protocol}（dev 态属正常）`);
+  const hits = (document.documentElement.outerHTML.match(/file:\/\//g) || []).length;
+  hits === 0 ? ok('HTML 中无 file:// 引用') : fail(`HTML 中有 ${hits} 处 file:// 引用`);
+}
+
+async function runAll() {
+  out.textContent = '';
+  log('info', `UA: ${navigator.userAgent}`);
+  log('info', `location: ${location.href}`);
+  await a31(); await a32(); await a33(); await a35();
+  await a71(); await a72(); await a73(); await a75(); await a76();
+  await a91(); await a104();
+  log('info', '===== 全部完成。请复制本页内容到 docs/evidence/P3/diag-result.txt =====');
+}
+window.runAll = runAll; window.a31 = a31; window.a32 = a32; window.a33 = a33; window.a35 = a35;
+window.a71 = a71; window.a72 = a72; window.a73 = a73; window.a75 = a75; window.a76 = a76;
+window.a91 = a91; window.a104 = a104;
+</script>
+</body>
+</html>

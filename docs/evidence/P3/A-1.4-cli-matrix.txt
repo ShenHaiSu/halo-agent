@@ -1,0 +1,7 @@
+A-1.4-badflag exit=2
+A-1.4-novalue exit=2
+A-1.5-nodev exit=2
+A-1.4-reset exit=0
+A-1.4-datadir (--data-dir /tmp/halo-diag-1): 诊断输出数据目录=halo-diag-1
+A-1.4-env (HALO_DATA_DIR=/tmp/halo-diag-2): 诊断输出数据目录=halo-diag-2
+A-1.4-override (env=halo-diag-2 + param=halo-diag-3): 诊断输出数据目录=halo-diag-3（参数优先）

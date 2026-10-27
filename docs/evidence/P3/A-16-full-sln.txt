@@ -1,0 +1,5 @@
+已通过! - 失败:     0，通过:    17，已跳过:     0，总计:    17，持续时间: 51 ms - Contract.Tests.dll (net6.0)
+已通过! - 失败:     0，通过:    31，已跳过:     0，总计:    31，持续时间: 27 ms - Host.Tests.dll (net6.0)
+已通过! - 失败:     0，通过:    19，已跳过:     0，总计:    19，持续时间: 1 s - Engine.Storage.Tests.dll (net6.0)
+已通过! - 失败:     0，通过:    33，已跳过:     0，总计:    33，持续时间: 3 s - Engine.Server.Tests.dll (net6.0)
+已通过! - 失败:     0，通过:   193，已跳过:     0，总计:   193，持续时间: 24 s - Engine.Core.Tests.dll (net6.0)

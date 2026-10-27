@@ -1,0 +1,17 @@
+﻿  正在确定要还原的项目…
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\Engine.Core.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\Engine.Abstractions.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\tests\Host.Tests\Host.Tests.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\Engine.Storage.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  项目 E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\Host.Desktop.csproj 正在使用 CentralPackageVersionManagement，这是一个 NuGet 预览功能。
+  所有项目均是最新的，无法还原。
+  Engine.Abstractions -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\bin\Release\net6.0-windows\HaloAgent.Engine.Abstractions.dll
+  Engine.Storage -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\bin\Release\net6.0-windows\HaloAgent.Engine.Storage.dll
+  Engine.Core -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\bin\Release\net6.0-windows\HaloAgent.Engine.Core.dll
+  Host.Desktop -> E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\bin\Release\net6.0-windows\HaloAgent.dll
+  Host.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Host.Tests\bin\Release\net6.0-windows\Host.Tests.dll
+E:\ProgramFiles\halo-agent\v2-develop\tests\Host.Tests\bin\Release\net6.0-windows\Host.Tests.dll (.NETCoreApp,Version=v6.0)的测试运行
+正在启动测试执行，请稍候...
+总共 1 个测试文件与指定模式相匹配。
+
+已通过! - 失败:     0，通过:     3，已跳过:     0，总计:     3，持续时间: 3 ms - Host.Tests.dll (net6.0)

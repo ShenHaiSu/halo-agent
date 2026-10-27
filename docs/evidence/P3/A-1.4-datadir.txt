@@ -1,0 +1,53 @@
+=========== HaloAgent 诊断 ===========
+
+---------- 程序 ----------
+版本              : 0.0.1
+构建时间            : 2026-10-27 17:17
+进程位数            : 64 位
+运行模式            : 生产
+允许 dev          : 否
+程序目录            : E:\ProgramFiles\halo-agent\v2-develop\publish\p3-verify-x64\
+
+---------- 系统 ----------
+OS 版本           : Microsoft Windows NT 10.0.19045.0
+系统位数            : 64 位
+是否 Win7         : 否
+计算机名            : BK_2801AD2A
+用户名             : Administrator
+处理器数            : 16
+
+---------- 浏览器内核 ----------
+Chromium        : 109.0.5414.87
+CefSharp        : 109.1.110.0
+libcef.dll      : 存在 (185.9 MB, 64 位 (x64))
+子进程             : 存在 (172.5 KB)
+icudtl.dat      : 存在 (10.0 MB)
+resources.pak 数 : 3
+
+---------- 显示 / GPU ----------
+GPU 决策          : Enabled
+显卡              : Intel(R) UHD Graphics 730
+驱动提供者           : Intel Corporation
+驱动版本            : 31.0.101.4575
+虚拟化             : 否
+flag 文件         : 无
+主显示器            : \\.\DISPLAY1 1920×1080 @0,0 (工作区 1920×1050)
+系统 DPI          : 96 (100%)
+
+---------- 依赖 ----------
+vcruntime140.dll: 可用
+vcruntime140_1.dll: 可用
+msvcp140.dll    : 可用
+KB2533623       : 不适用
+
+---------- 路径 ----------
+数据目录            : C:\Users\Administrator\AppData\Local\Temp\halo-diag-1
+日志目录            : C:\Users\Administrator\AppData\Local\Temp\halo-diag-1\logs
+工作目录            : E:\ProgramFiles\halo-agent\v2-develop
+
+---------- 上次运行 ----------
+状态              : 正常退出（或首次运行）
+
+=========== 诊断结束 ===========
+
+诊断信息已保存到：C:\Users\Administrator\AppData\Local\Temp\halo-diag-1\logs\diagnostics-20261027-171713.txt
