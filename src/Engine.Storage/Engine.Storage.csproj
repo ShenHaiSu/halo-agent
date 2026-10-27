@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 存储层：配置 / 会话 JSONL / 记忆 / undo 快照 / 索引。
+       铁律：不认识 agent，不引用 Engine.Core。 -->
+  <PropertyGroup>
+    <RootNamespace>HaloAgent.Engine.Storage</RootNamespace>
+    <AssemblyName>HaloAgent.Engine.Storage</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine.Abstractions\Engine.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 引擎内核：agent 循环 / 工具 / 权限 / LLM / MCP / 技能 / 人格。
+       铁律：不引用 WinForms / CefSharp / 任何 UI 库。 -->
+  <PropertyGroup>
+    <RootNamespace>HaloAgent.Engine.Core</RootNamespace>
+    <AssemblyName>HaloAgent.Engine.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine.Abstractions\Engine.Abstractions.csproj" />
+    <ProjectReference Include="..\Engine.Storage\Engine.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    纯契约层：DTO / 帧格式 / 枚举 / 错误码。
+    铁律：不允许任何 PackageReference。它必须能被任何项目零成本引用。
+  -->
+  <PropertyGroup>
+    <RootNamespace>HaloAgent.Engine.Abstractions</RootNamespace>
+    <AssemblyName>HaloAgent.Engine.Abstractions</AssemblyName>
+  </PropertyGroup>
+</Project>

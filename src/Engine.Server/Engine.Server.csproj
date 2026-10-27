@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 引擎进程宿主：Named Pipe 帧服务 + 生命周期 + 单实例。
+       同时也提供 IFrameChannel 的三种实现（stdio / pipe / inproc），供 Cli 复用。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>HaloAgent.Engine.Server</RootNamespace>
+    <AssemblyName>HaloAgent.Engine</AssemblyName>
+    <!-- 控制台程序：Win7 上从 explorer 双击会闪一个黑框，
+         但我们正常情况下由宿主用 CreateNoWindow 启动，不会闪。
+         若需完全无窗口，把这行改成 WinExe（但会失去 stdio 的 stdout）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine.Abstractions\Engine.Abstractions.csproj" />
+    <ProjectReference Include="..\Engine.Core\Engine.Core.csproj" />
+    <ProjectReference Include="..\Engine.Storage\Engine.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+</Project>

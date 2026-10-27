@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 无头模式（-p）+ stdio 通道。是"后端可独立测试"的主力入口。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>HaloAgent.Engine.Cli</RootNamespace>
+    <AssemblyName>HaloAgent.Cli</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine.Server\Engine.Server.csproj" />
+  </ItemGroup>
+</Project>
