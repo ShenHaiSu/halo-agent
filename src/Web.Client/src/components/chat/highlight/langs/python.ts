@@ -1,0 +1,58 @@
+// src/Web.Client/src/components/chat/highlight/langs/python.ts
+import type { LangDef } from '../tokenizer';
+
+const KEYWORDS = [
+  'False',
+  'None',
+  'True',
+  'and',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'break',
+  'class',
+  'continue',
+  'def',
+  'del',
+  'elif',
+  'else',
+  'except',
+  'finally',
+  'for',
+  'from',
+  'global',
+  'if',
+  'import',
+  'in',
+  'is',
+  'lambda',
+  'nonlocal',
+  'not',
+  'or',
+  'pass',
+  'raise',
+  'return',
+  'try',
+  'while',
+  'with',
+  'yield',
+  'match',
+  'case',
+  'self',
+  'cls',
+];
+
+export const python: LangDef = {
+  name: 'python',
+  comments: [/#[^\n]*/y],
+  strings: [
+    // 三引号（必须在前）
+    /[rbfuRBFU]{0,2}"""[\s\S]*?"""/y,
+    /[rbfuRBFU]{0,2}'''[\s\S]*?'''/y,
+    /[rbfuRBFU]{0,2}"(?:\\[\s\S]|[^"\\\n])*"/y,
+    /[rbfuRBFU]{0,2}'(?:\\[\s\S]|[^'\\\n])*'/y,
+  ],
+  keywords: new RegExp(`^(?:${KEYWORDS.join('|')})$`),
+  numbers: /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?j?)$/,
+};

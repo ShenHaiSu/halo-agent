@@ -1,0 +1,84 @@
+/* src/Web.Client/src/styles/chat.css
+ * P5 D5-3/D5-4 聊天区样式基座：放在 @tailwind utilities 之后引入（@import './chat.css'）。
+ * 各组件已有 scoped 样式，这里只补全局滚动条行为、表格横滚与长内容断行基线。
+ * 全部用 hsl(var(--...)) tokens，无硬编码颜色。
+ */
+
+/* ============ 聊天区容器 ============ */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: hsl(var(--bg));
+}
+
+/* ============ 消息区滚动 ============ */
+.msg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain; /* 防止滚动穿透到父级 */
+  scroll-padding-bottom: 24px;
+}
+
+/* ============ 消息正文的排版基线 ============ */
+.msg-inner {
+  /* 最重要的一条：任何层都不许被内容撑破 */
+  min-width: 0;
+}
+.msg-inner > * {
+  min-width: 0;
+}
+
+/* ============ 代码块横向滚动 ============ */
+.code-pre {
+  overscroll-behavior-x: contain;
+  /* Win7 高 DPI 下 1px 边框会变 2px，用 outline 更稳 */
+  outline: 1px solid transparent;
+}
+
+/* ============ 长单词 / URL 断行 ============ */
+.md-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  /* 禁止 hyphens（Win7 上 hyphenation 字典不全，会出现奇怪的断点） */
+  hyphens: none;
+}
+
+/* ============ 表格横向滚动但不撑破 ============ */
+.md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* ============ 用户消息气泡的最大宽度 ============ */
+.role-user .md-body {
+  max-width: min(100%, 560px);
+}
+
+/* ============ 流式半行：等宽 + 保留空白 ============ */
+.md-pending {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ============ 工具卡片密集区：降低视觉噪声 ============ */
+.msg-tools > * + * {
+  margin-top: var(--space-2);
+}
+
+/* ============ Win7 软光栅优化 ============ */
+html[data-no-blur='true'] .msg-inner * {
+  /* 禁用一切 backdrop-filter（已在 utilities.css 全局处理，这里再保险一次） */
+  backdrop-filter: none !important;
+}
+
+/* ============ 减少动效偏好 ============ */
+@media (prefers-reduced-motion: reduce) {
+  .dot,
+  .spin {
+    animation: none !important;
+  }
+}
