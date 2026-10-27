@@ -642,7 +642,8 @@
           "protocol",
           "pid"
         ]
-      }
+      },
+      "implementedIn": "engine"
     },
     "system.info": {
       "params": null,
@@ -680,7 +681,8 @@
             "type": "integer"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "system.protocol": {
       "params": null,
@@ -709,7 +711,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "system.shutdown": {
       "params": {
@@ -727,14 +730,16 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "system.diagnostics": {
       "params": null,
       "result": {
         "type": "object",
         "properties": {}
-      }
+      },
+      "implementedIn": "engine"
     },
     "agent.prompt": {
       "params": {
@@ -766,7 +771,8 @@
       "errors": [
         "state.busy",
         "state.notConfigured"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "agent.queue": {
       "params": {
@@ -790,7 +796,8 @@
             "type": "integer"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "agent.unqueue": {
       "params": {
@@ -811,7 +818,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "agent.cancel": {
       "params": {
@@ -832,7 +840,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "agent.answer": {
       "params": {
@@ -868,7 +877,8 @@
       },
       "errors": [
         "ask.stale"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "agent.drain": {
       "params": null,
@@ -882,13 +892,15 @@
             ]
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "agent.resync": {
       "params": null,
       "result": {
         "$ref": "#/types/StateSnapshot"
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.new": {
       "params": null,
@@ -899,7 +911,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.resume": {
       "params": {
@@ -929,7 +942,8 @@
       },
       "errors": [
         "session.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "session.list": {
       "params": {
@@ -950,7 +964,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.rename": {
       "params": {
@@ -975,7 +990,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.delete": {
       "params": {
@@ -996,7 +1012,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.clear": {
       "params": null,
@@ -1007,7 +1024,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.compact": {
       "params": null,
@@ -1021,7 +1039,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "session.setCwd": {
       "params": {
@@ -1045,13 +1064,15 @@
       },
       "errors": [
         "fs.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "state.snapshot": {
       "params": null,
       "result": {
         "$ref": "#/types/StateSnapshot"
-      }
+      },
+      "implementedIn": "engine"
     },
     "state.setMode": {
       "params": {
@@ -1075,7 +1096,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "state.setPersona": {
       "params": {
@@ -1096,7 +1118,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "state.setProvider": {
       "params": {
@@ -1123,7 +1146,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "state.setMaxTurns": {
       "params": {
@@ -1144,7 +1168,8 @@
             "type": "integer"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "state.setRetry": {
       "params": {
@@ -1165,7 +1190,8 @@
             "type": "integer"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.get": {
       "params": null,
@@ -1254,7 +1280,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.saveModel": {
       "params": {
@@ -1311,7 +1338,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.saveNetwork": {
       "params": {
@@ -1361,7 +1389,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.probeModels": {
       "params": {
@@ -1395,7 +1424,8 @@
       "errors": [
         "llm.error",
         "llm.timeout"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "settings.saveExtraHeaders": {
       "params": {
@@ -1416,7 +1446,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.mcp.get": {
       "params": null,
@@ -1430,7 +1461,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "settings.mcp.save": {
       "params": {
@@ -1460,7 +1492,8 @@
       },
       "errors": [
         "params.invalid"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "asset.skills.list": {
       "params": null,
@@ -1480,7 +1513,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.skills.get": {
       "params": {
@@ -1516,7 +1550,8 @@
       },
       "errors": [
         "asset.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "asset.skills.save": {
       "params": {
@@ -1541,7 +1576,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.skills.delete": {
       "params": {
@@ -1562,7 +1598,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.skills.run": {
       "params": {
@@ -1590,7 +1627,8 @@
       "errors": [
         "state.busy",
         "asset.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "asset.personas.list": {
       "params": null,
@@ -1604,7 +1642,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.personas.get": {
       "params": {
@@ -1631,7 +1670,8 @@
       },
       "errors": [
         "asset.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "asset.personas.save": {
       "params": {
@@ -1656,7 +1696,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.memory.list": {
       "params": null,
@@ -1670,7 +1711,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.memory.get": {
       "params": {
@@ -1714,7 +1756,8 @@
       },
       "errors": [
         "asset.notFound"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "asset.memory.save": {
       "params": {
@@ -1762,7 +1805,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "asset.memory.delete": {
       "params": {
@@ -1791,7 +1835,8 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "tool.list": {
       "params": null,
@@ -1805,7 +1850,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "tool.undoList": {
       "params": null,
@@ -1819,7 +1865,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "tool.undoRollback": {
       "params": {
@@ -1843,7 +1890,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "tool.mcpStatus": {
       "params": null,
@@ -1874,7 +1922,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "fs.listDir": {
       "params": {
@@ -1913,7 +1962,8 @@
       "errors": [
         "fs.notFound",
         "fs.escape"
-      ]
+      ],
+      "implementedIn": "engine"
     },
     "fs.completePaths": {
       "params": {
@@ -1945,7 +1995,8 @@
             }
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "fs.validatePath": {
       "params": {
@@ -1978,7 +2029,8 @@
             ]
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "update.check": {
       "params": null,
@@ -2001,7 +2053,8 @@
             ]
           }
         }
-      }
+      },
+      "implementedIn": "engine"
     },
     "update.install": {
       "params": null,
@@ -2012,7 +2065,127 @@
             "type": "boolean"
           }
         }
-      }
+      },
+      "implementedIn": "engine"
+    },
+    "fs.browse": {
+      "params": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "initialDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "result": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "implementedIn": "host"
+    },
+    "fs.pickFiles": {
+      "params": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "initialDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filter": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "multiple": {
+            "type": "boolean"
+          }
+        }
+      },
+      "result": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        }
+      },
+      "implementedIn": "host"
+    },
+    "fs.pickSavePath": {
+      "params": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "initialDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaultName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filter": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "result": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "implementedIn": "host"
+    },
+    "fs.readImageAsBase64": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "result": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "implementedIn": "host"
     }
   },
   "events": {

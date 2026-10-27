@@ -565,6 +565,27 @@ export interface HaloMethods {
   'update.install': { params: void; result: {
   started?: boolean
 } }
+  /** fs.browse */
+  'fs.browse': { params: {
+  initialDir?: string | null
+  title?: string | null
+} | null; result: string | null }
+  /** fs.pickFiles */
+  'fs.pickFiles': { params: {
+  initialDir?: string | null
+  filter?: string | null
+  multiple?: boolean
+} | null; result: string[] | null }
+  /** fs.pickSavePath */
+  'fs.pickSavePath': { params: {
+  initialDir?: string | null
+  defaultName?: string | null
+  filter?: string | null
+} | null; result: string | null }
+  /** fs.readImageAsBase64 */
+  'fs.readImageAsBase64': { params: {
+  path: string
+}; result: string | null }
 }
 
 /** 事件载荷表：kind → payload。ask.* 的 payload 即 PendingAsk。 */
@@ -762,6 +783,10 @@ export const METHODS = [
   'fs.validatePath',
   'update.check',
   'update.install',
+  'fs.browse',
+  'fs.pickFiles',
+  'fs.pickSavePath',
+  'fs.readImageAsBase64',
 ] as const
 
 /** 全部事件 kind（与 schema.events 的键集合一致）。 */

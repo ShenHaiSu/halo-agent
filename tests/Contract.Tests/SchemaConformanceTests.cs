@@ -204,6 +204,7 @@ internal static class KnownMethods
         "tool.list", "tool.undoList", "tool.undoRollback", "tool.mcpStatus",
         // fs
         "fs.listDir", "fs.completePaths", "fs.validatePath",
+        "fs.browse", "fs.pickFiles", "fs.pickSavePath", "fs.readImageAsBase64",
         // update
         "update.check", "update.install",
     };
