@@ -1,0 +1,51 @@
+<Project>
+  <!--
+    全局编译属性。所有子项目自动继承。
+    改动这里的任何一项都会影响全仓——请先想清楚。
+  -->
+  <PropertyGroup>
+    <!-- ===== 铁律 1：TFM 锁死 ===== -->
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <!-- 若某项目需要更宽的 API（如 WinForms），由项目自己加 UseWindowsForms -->
+
+    <!-- ===== 铁律 2：架构锁死，禁止 AnyCPU ===== -->
+    <Platforms>x86;x64</Platforms>
+    <!-- 注意：PlatformTarget 不在这里给默认值，而是由 build 参数或项目显式指定。
+         给默认值会掩盖"忘了指定平台"的问题。 -->
+    <Prefer32Bit>false</Prefer32Bit>
+
+    <!-- ===== 铁律 3：禁止单文件发布 ===== -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
+
+    <!-- ===== 代码质量 ===== -->
+    <LangVersion>10.0</LangVersion>     <!-- .NET 6 支持到 C# 10 -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>CS1591</WarningsNotAsErrors> <!-- 缺 XML 注释不算错 -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- ===== 版本信息（集中一处，别散落） ===== -->
+    <Version>0.0.1</Version>
+    <Company>HaloAgent</Company>
+    <Product>HaloAgent</Product>
+    <Copyright>Copyright © HaloAgent</Copyright>
+
+    <!-- ===== 确定性构建 ===== -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- ===== 语言资源裁剪：只留中文，减小自包含产物体积 ===== -->
+    <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- 所有测试项目加 xunit 公共包（按项目名后缀匹配） -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,26 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ===== 铁律：CefSharp 109.1.110，永不升级 ===== -->
+    <!-- Chromium 109 是支持 Windows 7 的最后版本；110+ 在 Win7 上启动即崩。 -->
+    <PackageVersion Include="CefSharp.Common.NETCore" Version="109.1.110" />
+    <PackageVersion Include="CefSharp.WinForms.NETCore" Version="109.1.110" />
+
+    <!-- ===== 后端 ===== -->
+    <!-- System.Text.Json 由 BCL 自带（6.0.x），不显式引用，避免版本错配 -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="6.0.36" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.4" />
+
+    <!-- ===== 测试 ===== -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageVersion Include="xunit" Version="2.6.6" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.6" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
+  </ItemGroup>
+</Project>
