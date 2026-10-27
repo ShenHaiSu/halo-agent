@@ -1,0 +1,41 @@
+{
+  "name": "haloagent-web-client",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && node ../../scripts/check-css-compat.mjs",
+    "build:fast": "vite build",
+    "preview": "vite preview --port 5174",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint src --ext .ts,.vue",
+    "gen:contract": "node ../../scripts/gen-contract-types.mjs"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "pinia": "^2.2.6",
+    "lucide-vue-next": "^0.460.0",
+    "markdown-it": "^14.1.0",
+    "dompurify": "^3.2.2",
+    "highlight.js": "^11.10.0",
+    "ansi_up": "^6.0.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.11",
+    "vue-tsc": "^2.1.10",
+    "tailwindcss": "3.4.16",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20",
+    "postcss-import": "^15.1.0",
+    "postcss-preset-env": "^9.6.0",
+    "cssnano": "^7.0.6",
+    "@types/markdown-it": "^14.1.2"
+  }
+}

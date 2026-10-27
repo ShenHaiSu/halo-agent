@@ -1,0 +1,160 @@
+/* ============================================================
+   HaloAgent 主题变量。
+   ------------------------------------------------------------
+   规则：
+   1. 所有颜色写成 "R G B" 三个数字，用 rgb(var(--x) / a) 消费。
+      这样 Tailwind 的 /50 透明度修饰符才能工作。
+   2. 不要在组件里写死颜色；一切走变量。
+   3. 换主题 = 改 <html> 上的 data-theme 属性 + 一组变量覆盖。
+   ============================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* 默认主题：午夜（深色） */
+  :root {
+    --bg-canvas: 14 17 22;
+    --bg-surface: 20 25 32;
+    --bg-elevated: 23 29 38;
+    --bg-overlay: 9 11 15;
+
+    --fg-primary: 231 235 242;
+    --fg-muted: 150 160 176;
+    --fg-faint: 104 114 130;
+
+    --border-subtle: 35 42 53;
+    --border-strong: 52 62 78;
+
+    --accent: 91 140 255;
+    --accent-fg: 255 255 255;
+    --accent-weak: 91 140 255;
+
+    --ok: 69 192 138;
+    --warn: 224 163 62;
+    --danger: 239 107 107;
+    --info: 57 192 208;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 320ms;
+
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0, 0, 1.2);
+
+    /* Win7 没有 Microsoft YaHei UI，必须回退到 Microsoft YaHei */
+    --font-ui: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC',
+               'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Liberation Mono',
+                 'Microsoft YaHei', monospace;
+
+    color-scheme: dark;
+  }
+
+  /* 极光（浅色） */
+  [data-theme='aurora'] {
+    --bg-canvas: 251 252 253;
+    --bg-surface: 243 245 248;
+    --bg-elevated: 255 255 255;
+    --bg-overlay: 235 238 244;
+
+    --fg-primary: 26 31 38;
+    --fg-muted: 95 107 124;
+    --fg-faint: 140 150 165;
+
+    --border-subtle: 226 230 236;
+    --border-strong: 205 212 222;
+
+    --accent: 47 107 240;
+    --accent-fg: 255 255 255;
+    --accent-weak: 47 107 240;
+
+    --ok: 30 155 100;
+    --warn: 186 120 20;
+    --danger: 205 60 60;
+    --info: 20 140 160;
+
+    color-scheme: light;
+  }
+
+  /* 减弱动效：应用内开关，不依赖系统设置（Win7 无此 API） */
+  [data-motion='reduced'] {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: rgb(var(--bg-canvas));
+    color: rgb(var(--fg-primary));
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.66;
+    /* Win7 上 subpixel 渲染更清晰；现代系统上 antialiased 更细腻 */
+    -webkit-font-smoothing: antialiased;
+    /* 防止长按选中导致的意外拖拽 */
+    user-select: none;
+  }
+
+  /* 可交互文本才允许选中 */
+  .selectable,
+  input,
+  textarea,
+  pre,
+  code {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--border-strong));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--fg-faint));
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent) / 0.6);
+    outline-offset: 2px;
+  }
+}
+
+/* 动效降级：redueced motion 时禁用所有过渡与动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+[data-motion='reduced'] *,
+[data-motion='reduced'] *::before,
+[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
