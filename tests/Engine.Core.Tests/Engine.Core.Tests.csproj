@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>HaloAgent.Engine.Core.Tests</RootNamespace>
+    <DefineConstants>$(DefineConstants);P1_BACKEND_EVENTBUS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -10,7 +11,6 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\..\src\Engine.Core\Engine.Core.csproj" />
   </ItemGroup>

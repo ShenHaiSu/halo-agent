@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>HaloAgent.Engine.Server.Tests</RootNamespace>
+    <DefineConstants>$(DefineConstants);P1_BACKEND_ROUTING</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
