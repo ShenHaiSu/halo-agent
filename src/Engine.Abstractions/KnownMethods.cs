@@ -1,11 +1,10 @@
 namespace HaloAgent.Engine.Abstractions;
 
-/// <summary>
-/// 全部方法名（58 个）。与 contract/agent.schema.json 的 methods 键完全一致，供 Contract.Tests 校验。
+/// 全部方法名（60 个：56 engine + 4 host）。与 contract/agent.schema.json 的 methods 键完全一致，供 Contract.Tests 校验。
 /// </summary>
 internal static class KnownMethods
 {
-    /// <summary>全部 58 个方法名。</summary>
+    /// <summary>全部 60 个方法名（56 engine + 4 host）。</summary>
     internal static readonly string[] All = new[]
     {
         "agent.answer",
@@ -27,6 +26,8 @@ internal static class KnownMethods
         "asset.skills.list",
         "asset.skills.run",
         "asset.skills.save",
+        "asset.themes.get",
+        "asset.themes.list",
         "fs.browse",
         "fs.completePaths",
         "fs.listDir",

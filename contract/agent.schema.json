@@ -609,6 +609,65 @@
         "queue",
         "messages"
       ]
+    },
+    "ThemeSummary": {
+      "type": "object",
+      "description": "主题摘要（只含元信息，不含 tokens）",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "basedOn": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "user"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source"
+      ]
+    },
+    "ThemeFile": {
+      "type": "object",
+      "description": "主题文件（完整 token 集）",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "basedOn": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "tokens"
+      ]
     }
   },
   "methods": {
@@ -1278,6 +1337,46 @@
           },
           "configPath": {
             "type": "string"
+          },
+          "network": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "direct",
+                  "manual"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "retry": {
+                "type": "integer"
+              },
+              "headers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/types/HeaderPair"
+                }
+              },
+              "headersEnabled": {
+                "type": "boolean"
+              },
+              "providerHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/types/HeaderPair"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -1369,9 +1468,12 @@
             }
           },
           "providerHeaders": {
-            "type": "array",
-            "items": {
-              "$ref": "#/types/HeaderPair"
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/types/HeaderPair"
+              }
             }
           }
         }
@@ -1444,6 +1546,12 @@
         "properties": {
           "ok": {
             "type": "boolean"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -1626,6 +1734,45 @@
       },
       "errors": [
         "state.busy",
+        "asset.notFound"
+      ],
+      "implementedIn": "engine"
+    },
+    "asset.themes.list": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/ThemeSummary"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "implementedIn": "engine"
+    },
+    "asset.themes.get": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "result": {
+        "$ref": "#/types/ThemeFile"
+      },
+      "errors": [
+        "params.invalid",
         "asset.notFound"
       ],
       "implementedIn": "engine"

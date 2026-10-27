@@ -150,6 +150,22 @@ export interface StateSnapshot {
 }
 }
 
+/** 主题摘要（只含元信息，不含 tokens） */
+export interface ThemeSummary {
+  id: string
+  name: string
+  basedOn?: string | null
+  source: "builtin" | "user"
+}
+
+/** 主题文件（完整 token 集） */
+export interface ThemeFile {
+  id: string
+  name: string
+  basedOn?: string | null
+  tokens: Record<string, unknown>
+}
+
 /** 帧信封：request */
 export interface RequestFrame {
   t: "req"
@@ -366,6 +382,14 @@ export interface HaloMethods {
 }[]
   dataDir?: string
   configPath?: string
+  network?: {
+  mode?: "auto" | "direct" | "manual"
+  url?: string | null
+  retry?: number
+  headers?: HeaderPair[]
+  headersEnabled?: boolean
+  providerHeaders?: Record<string, unknown>
+}
 } }
   /** settings.saveModel */
   'settings.saveModel': { params: {
@@ -387,7 +411,7 @@ export interface HaloMethods {
   retry?: number
   headersEnabled?: boolean
   headers?: HeaderPair[]
-  providerHeaders?: HeaderPair[]
+  providerHeaders?: Record<string, unknown>
 }; result: {
   ok?: boolean
   notes?: string[]
@@ -404,6 +428,7 @@ export interface HaloMethods {
   enabled: boolean
 }; result: {
   ok?: boolean
+  notes?: string[]
 } }
   /** settings.mcp.get */
   'settings.mcp.get': { params: void; result: {
@@ -451,6 +476,14 @@ export interface HaloMethods {
 }; result: {
   accepted?: boolean
 } }
+  /** asset.themes.list */
+  'asset.themes.list': { params: void; result: {
+  items: ThemeSummary[]
+} }
+  /** asset.themes.get */
+  'asset.themes.get': { params: {
+  id: string
+}; result: ThemeFile }
   /** asset.personas.list */
   'asset.personas.list': { params: void; result: {
   items?: string[]
@@ -767,6 +800,8 @@ export const METHODS = [
   'asset.skills.save',
   'asset.skills.delete',
   'asset.skills.run',
+  'asset.themes.list',
+  'asset.themes.get',
   'asset.personas.list',
   'asset.personas.get',
   'asset.personas.save',

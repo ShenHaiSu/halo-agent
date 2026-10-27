@@ -10,6 +10,8 @@ import ErrorBoundary from './components/common/ErrorBoundary.vue';
 import HToast from './components/base/HToast.vue';
 import { transport } from '@/transport';
 import { useEventPump } from '@/stores/useEventPump';
+import { useToast } from '@/composables/useToast';
+import MockWarningBar from './components/common/MockWarningBar.vue';
 import { useHostStore } from '@/stores/host';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
@@ -52,6 +54,15 @@ const themeStore = useThemeStore();
 void themeStore;
 
 const composing = useComposition();
+const toast = useToast();
+
+async function cancelTurn(): Promise<void> {
+  try {
+    await transport.request('agent.cancel', {});
+  } catch (e) {
+    toast.error(`取消失败：${(e as Error).message}`);
+  }
+}
 
 // 事件拉取循环（挂载时启动，卸载时停止）
 useEventPump();
@@ -66,7 +77,7 @@ useShortcuts({
   showShortcutHelp: () => openShortcutHelp(),
   newSession: () => void sessions.createNew(),
   isBusy: () => stream.busy,
-  cancelTurn: () => void transport.request('agent.cancel', null),
+  cancelTurn: () => void cancelTurn(),
 });
 
 onMounted(() => {
@@ -100,5 +111,6 @@ onBeforeUnmount(() => undefined);
     <CommandPalette />
     <ShortcutHelp />
     <HToast />
+    <MockWarningBar />
   </ErrorBoundary>
 </template>

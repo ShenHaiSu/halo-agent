@@ -14,9 +14,11 @@ namespace HaloAgent.Engine.Server.Routing;
 ///   - P2 逐个把这些 stub 替换为真实实现时，前端完全不用改——
 ///     因为契约（schema）没有变。
 ///
-/// 注意：stub 必须返回**结构正确**的数据（类型、字段名都符合 schema），
-///       否则前端的类型检查与渲染逻辑会被"假数据"误导。
-/// </summary>
+/// 注意：
+///   1. stub 必须返回**结构正确**的数据（类型、字段名都符合 schema）。
+///   2. ★ 架构红线 R-1：stub 不得用于生产路由表。EngineAssembly 只能挂 real.*，
+///      无法实现时用 NotConfigured 明确报错，绝不用 EmptyOk 假装成功。
+///   3. 本类只服务于 P2 装配失败时的回落路径（Program.cs）。
 public sealed class StubMethods
 {
     private readonly EngineState _state;
@@ -37,7 +39,7 @@ public sealed class StubMethods
             ("system.info", stub.SystemInfo),
             ("system.protocol", stub.SystemProtocol),
             ("system.shutdown", stub.SystemShutdown),
-            ("system.diagnostics", stub.EmptyOk),
+            ("system.diagnostics", stub.EmptyObject),
 
             // ---- agent 7 ----
             ("agent.prompt", stub.AgentPrompt),
@@ -61,10 +63,10 @@ public sealed class StubMethods
             // ---- state 6 ----
             ("state.snapshot", stub.StateSnapshot),
             ("state.setMode", stub.StateSetMode),
-            ("state.setPersona", stub.EmptyOk),
-            ("state.setProvider", stub.EmptyOk),
-            ("state.setMaxTurns", stub.EmptyOk),
-            ("state.setRetry", stub.EmptyOk),
+            ("state.setPersona", stub.StateSetPersona),
+            ("state.setProvider", stub.StateSetProvider),
+            ("state.setMaxTurns", stub.StateSetMaxTurns),
+            ("state.setRetry", stub.StateSetRetry),
 
             // ---- settings 7 ----
             ("settings.get", stub.NotImplemented),
@@ -73,10 +75,10 @@ public sealed class StubMethods
             ("settings.probeModels", stub.NotImplemented),
             ("settings.saveExtraHeaders", stub.EmptyOk),
             ("settings.mcp.get", stub.NotImplemented),
-            ("settings.mcp.save", stub.EmptyOk),
+            ("settings.mcp.save", stub.SettingsMcpSave),
 
             // ---- asset 12 ----
-            ("asset.skills.list", stub.EmptyList),
+            ("asset.skills.list", stub.AssetSkillsList),
             ("asset.skills.get", stub.NotImplemented),
             ("asset.skills.save", stub.EmptyOk),
             ("asset.skills.delete", stub.EmptyOk),
@@ -254,9 +256,63 @@ public sealed class StubMethods
     public Task<object?> EmptyList(JsonElement? _, CancellationToken ct) =>
         Task.FromResult<object?>(new { items = Array.Empty<object>() });
 
+    public Task<object?> EmptyObject(JsonElement? _, CancellationToken ct) =>
+        Task.FromResult<object?>(new { });
+
+
+    /// <summary>
+    /// 明确「未配置」降级：返回 state.notConfigured 错误而非假成功。
+    /// ★ 架构红线 R-1：宁可报错，不可假成功。
+    /// </summary>
+    public Task<object?> NotConfigured(JsonElement? _, CancellationToken ct) =>
+        throw RpcException.NotConfigured();
+
     public Task<object?> NotImplemented(JsonElement? _, CancellationToken ct) =>
         throw new RpcException(RpcError.NotSupported,
             "该功能在 P1 阶段未实现（stub）", "P2 阶段会实现");
+
+    /// <summary>state.setProvider 回落形状（与契约一致；生产表已由 RealMethods 接管）。</summary>
+    public Task<object?> StateSetProvider(JsonElement? p, CancellationToken ct)
+    {
+        var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() ?? "" : "";
+        return Task.FromResult<object?>(new
+        {
+            provider = string.IsNullOrWhiteSpace(name) ? _state.Provider : name,
+            model = _state.Model,
+            baseUrl = _state.BaseUrl,
+        });
+    }
+
+    /// <summary>state.setPersona 回落形状（与契约一致）。</summary>
+    public Task<object?> StateSetPersona(JsonElement? p, CancellationToken ct)
+    {
+        var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() ?? "" : "";
+        return Task.FromResult<object?>(new { name });
+    }
+
+    /// <summary>state.setMaxTurns 回落形状（与契约一致）。</summary>
+    public Task<object?> StateSetMaxTurns(JsonElement? p, CancellationToken ct)
+    {
+        var v = p?.TryGetProperty("value", out var el) == true && el.ValueKind == JsonValueKind.Number
+            ? el.GetInt32() : 200;
+        return Task.FromResult<object?>(new { maxTurns = v });
+    }
+
+    /// <summary>state.setRetry 回落形状（与契约一致）。</summary>
+    public Task<object?> StateSetRetry(JsonElement? p, CancellationToken ct)
+    {
+        var v = p?.TryGetProperty("value", out var el) == true && el.ValueKind == JsonValueKind.Number
+            ? el.GetInt32() : 0;
+        return Task.FromResult<object?>(new { retry = v });
+    }
+
+    /// <summary>settings.mcp.save 回落形状（含 notes，与契约一致）。</summary>
+    public Task<object?> SettingsMcpSave(JsonElement? _, CancellationToken ct) =>
+        Task.FromResult<object?>(new { ok = true, notes = Array.Empty<string>() });
+
+    /// <summary>asset.skills.list 回落形状（含 warnings，与契约一致）。</summary>
+    public Task<object?> AssetSkillsList(JsonElement? _, CancellationToken ct) =>
+        Task.FromResult<object?>(new { items = Array.Empty<object>(), warnings = Array.Empty<string>() });
 
     private static bool IsWin7()
     {

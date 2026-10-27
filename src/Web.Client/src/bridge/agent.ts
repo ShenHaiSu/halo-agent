@@ -42,17 +42,11 @@ export const agentBridge = {
   },
 
   async pollEvents(sinceSeq: number): Promise<PollResult> {
-    if (!hasAgent()) return { events: [], nextSeq: sinceSeq };
-    try {
-      const r = await requireAgent().pollEvents(sinceSeq);
-      // 防御：桥接返回 undefined 时给一个安全默认
-      if (!r || !Array.isArray(r.events)) return { events: [], nextSeq: sinceSeq };
-      return r;
-    } catch (e) {
-      // 拉事件失败不应抛到上层（pump 会重试）
-      console.warn('[agent] pollEvents 失败', describeError(e));
-      return { events: [], nextSeq: sinceSeq };
-    }
+    if (!hasAgent()) throw new Error('引擎桥接不可用（window.haloAgent 不存在）');
+    const r = await requireAgent().pollEvents(sinceSeq);
+    // 防御：桥接返回 undefined 时给一个安全默认
+    if (!r || !Array.isArray(r.events)) return { events: [], nextSeq: sinceSeq };
+    return r;
   },
 
   async isReady(): Promise<boolean> {

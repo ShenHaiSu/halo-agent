@@ -83,23 +83,47 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function setPersona(name: string): Promise<void> {
+    const prev = persona.value;
     persona.value = name;
-    await transport.request('state.setPersona', { name });
+    try {
+      await transport.request('state.setPersona', { name });
+    } catch (e) {
+      persona.value = prev;
+      throw e;
+    }
   }
 
   async function setMaxTurns(n: number): Promise<void> {
+    const prev = maxTurns.value;
     maxTurns.value = n;
-    await transport.request('state.setMaxTurns', { value: n });
+    try {
+      await transport.request('state.setMaxTurns', { value: n });
+    } catch (e) {
+      maxTurns.value = prev;
+      throw e;
+    }
   }
 
   async function setRetry(n: number): Promise<void> {
+    const prev = retry.value;
     retry.value = n;
-    await transport.request('state.setRetry', { value: n });
+    try {
+      await transport.request('state.setRetry', { value: n });
+    } catch (e) {
+      retry.value = prev;
+      throw e;
+    }
   }
 
   async function setCwd(path: string): Promise<void> {
+    const prev = cwd.value;
     cwd.value = path;
-    await transport.request('session.setCwd', { path });
+    try {
+      await transport.request('session.setCwd', { path });
+    } catch (e) {
+      cwd.value = prev;
+      throw e;
+    }
   }
 
   function restoreMode(): void {

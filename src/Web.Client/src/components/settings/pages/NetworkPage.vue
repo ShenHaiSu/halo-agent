@@ -17,7 +17,7 @@ import { validateNetworkForm } from '../validators';
 
 const toast = useToast();
 
-type ProxyMode = 'direct' | 'system' | 'custom';
+type ProxyMode = 'auto' | 'direct' | 'manual';
 
 interface NetworkSnapshot {
   mode: ProxyMode;
@@ -31,7 +31,7 @@ const loading = ref(true);
 const saving = ref(false);
 const loadError = ref<string | null>(null);
 
-const mode = ref<ProxyMode>('direct');
+const mode = ref<ProxyMode>('auto');
 const url = ref('');
 const retry = ref(3);
 const headers = ref<HeaderRow[]>([]);
@@ -42,7 +42,7 @@ const notes = ref<string[]>([]);
 const fieldErrors = ref<Record<string, string>>({});
 
 const original = ref<NetworkSnapshot>({
-  mode: 'direct',
+  mode: 'auto',
   url: '',
   retry: 3,
   headers: [],
@@ -76,7 +76,34 @@ function markDirty(): void {
 }
 
 function normalizeMode(m: unknown): ProxyMode {
-  return m === 'system' || m === 'custom' ? m : 'direct';
+  const s = String(m ?? 'auto').toLowerCase();
+  if (s === 'custom' || s === 'manual') return 'manual';
+  if (s === 'system' || s === 'auto') return 'auto';
+  if (s === 'direct') return 'direct';
+  return 'auto';
+}
+
+function toHeaderRows(raw: unknown): HeaderRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: HeaderRow[] = [];
+  for (const e of raw) {
+    const o = (e ?? {}) as Record<string, unknown>;
+    const key = typeof o.key === 'string' ? o.key : typeof o.name === 'string' ? o.name : '';
+    const value = typeof o.value === 'string' ? o.value : '';
+    if (!key && !value) continue;
+    out.push({ key, value });
+  }
+  return out;
+}
+
+function toProviderMap(raw: unknown): Record<string, HeaderRow[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  if (Array.isArray(raw)) return {};
+  const out: Record<string, HeaderRow[]> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    out[k] = toHeaderRows(v);
+  }
+  return out;
 }
 
 async function load(): Promise<void> {
@@ -87,20 +114,20 @@ async function load(): Promise<void> {
     const s = (await transport.request('settings.get', null)) as {
       network?: {
         mode?: string;
-        url?: string;
+        url?: string | null;
         retry?: number;
-        headers?: HeaderRow[];
-        providerHeaders?: Record<string, HeaderRow[]>;
+        headers?: unknown;
+        headersEnabled?: boolean;
+        providerHeaders?: unknown;
       };
       providers?: Array<{ name?: string }>;
     };
     const n = s.network ?? {};
-    mode.value = normalizeMode(n.mode);
-    url.value = typeof n.url === 'string' ? n.url : '';
-    retry.value = typeof n.retry === 'number' ? n.retry : 3;
-    headers.value = Array.isArray(n.headers) ? n.headers : [];
-    providerHeaders.value =
-      n.providerHeaders && typeof n.providerHeaders === 'object' ? n.providerHeaders : {};
+    mode.value = normalizeMode((n as { mode?: unknown }).mode);
+    url.value = typeof (n as { url?: unknown }).url === 'string' ? ((n as { url?: string }).url as string) : '';
+    retry.value = typeof (n as { retry?: unknown }).retry === 'number' ? ((n as { retry?: number }).retry as number) : 3;
+    headers.value = toHeaderRows((n as { headers?: unknown }).headers);
+    providerHeaders.value = toProviderMap((n as { providerHeaders?: unknown }).providerHeaders);
     providerNames.value = (s.providers ?? []).map((p) => p?.name ?? '').filter((x) => x !== '');
     const keys = Object.keys(providerHeaders.value);
     activeProvider.value = providerNames.value[0] ?? keys[0] ?? '';
@@ -140,7 +167,7 @@ async function save(): Promise<void> {
   try {
     const r = (await transport.request('settings.saveNetwork', {
       mode: mode.value,
-      url: mode.value === 'custom' ? url.value : undefined,
+      url: mode.value === 'manual' ? url.value : undefined,
       retry: retry.value,
       headers: headers.value.filter((h) => h.key.trim() !== ''),
       providerHeaders: providerHeaders.value,
@@ -196,19 +223,19 @@ onMounted(() => void load());
           direction="horizontal"
           @update:model-value="
             (v: string | number) => {
-              mode = v === 'system' ? 'system' : v === 'custom' ? 'custom' : 'direct';
+              mode = v === 'auto' ? 'auto' : v === 'manual' ? 'manual' : 'direct';
               markDirty();
             }
           "
         >
           <HRadio value="direct" label="直连" />
-          <HRadio value="system" label="系统代理" />
-          <HRadio value="custom" label="自定义" />
+          <HRadio value="auto" label="系统代理" />
+          <HRadio value="manual" label="自定义" />
         </HRadioGroup>
       </SettingRow>
 
       <SettingRow
-        v-if="mode === 'custom'"
+        v-if="mode === 'manual'"
         label="代理地址"
         desc="仅自定义模式需要，http(s):// 开头"
         required

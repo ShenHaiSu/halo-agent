@@ -1,7 +1,7 @@
 // src/Web.Client/src/bridge/mock/mockAgent.ts
-// D4-7 无宿主时的假引擎（按 P1 契约返回假数据）。
+// D4-7 无宿主时的假引擎（P07 已改为行为表驱动，见 behaviors.ts）。
 import type { HaloFrame, PollResult } from '../types';
-
+import { BEHAVIORS } from './behaviors';
 /**
  * 无宿主时的假引擎。
  *
@@ -94,192 +94,28 @@ function chunkText(s: string, size: number): string[] {
   return out;
 }
 
-const MOCK_SESSIONS_LIST = [
-  {
-    id: 's-mock-1',
-    title: '整理 Downloads 里的安装包',
-    mtime: Date.now() - 1000 * 60 * 30,
-    headless: false,
-  },
-  {
-    id: 's-mock-2',
-    title: '排查 build 失败原因',
-    mtime: Date.now() - 1000 * 60 * 60 * 5,
-    headless: false,
-  },
-  {
-    id: 's-mock-3',
-    title: '生成项目 README',
-    mtime: Date.now() - 1000 * 60 * 60 * 26,
-    headless: true,
-  },
-];
-
 export function createMockAgent() {
   return {
     async request(method: string, params: unknown): Promise<unknown> {
-      switch (method) {
-        case 'system.ping':
-          return { pong: true, uptimeMs: 12345 };
-
-        case 'system.info':
-          return {
-            engineVersion: '0.4.0-mock',
-            protocolVersion: 1,
-            platform: 'mock',
-          };
-
-        case 'system.protocol':
-          return { version: 1, methods: [], events: [], errorCodes: [] };
-
-        case 'agent.prompt': {
-          const p = params as { text?: string } | null;
-          runMockTurn(p?.text ?? '(空)');
-          return { accepted: true, turnId: `mock-turn-${Date.now()}` };
-        }
-
-        case 'agent.queue':
-          return { queued: true };
-
-        case 'agent.unqueue':
-          return { removed: true };
-
-        case 'agent.cancel':
-          emit('turn.finished', { turnId: 'mock', text: '', truncated: true, byUser: true });
-          busy = false;
-          return { cancelled: true };
-
-        case 'agent.answer':
-          return { ok: true };
-
-        case 'agent.drain':
-          return { drained: 0 };
-
-        case 'agent.resync':
-        case 'state.snapshot':
-          return {
-            seq: seqCounter,
-            sessionId: MOCK_SESSIONS_LIST[currentSession]?.id ?? 's-mock-1',
-            messages: sessions[currentSession]!.messages,
-            cwd: '(mock) C:\\work',
-            mode: 'ask',
-            persona: '',
-            maxTurns: 200,
-            retry: 0,
-            busy,
-            usage: { input: 0, output: 0 },
-          };
-
-        case 'session.new':
-          sessions.push({ messages: [] });
-          currentSession = sessions.length - 1;
-          return { sessionId: `s-mock-${Date.now()}` };
-
-        case 'session.resume':
-          return { ok: true };
-
-        case 'session.list':
-          return MOCK_SESSIONS_LIST;
-
-        case 'session.rename':
-          return { ok: true };
-
-        case 'session.delete':
-          return { ok: true };
-
-        case 'session.clear':
-          sessions[currentSession]!.messages.length = 0;
-          return { ok: true };
-
-        case 'session.compact':
-          return { removed: 0, summary: '' };
-
-        case 'session.setCwd':
-          return { cwd: (params as { path?: string } | null)?.path ?? '' };
-
-        case 'state.setMode':
-          return { mode: (params as { mode?: string } | null)?.mode ?? 'ask' };
-
-        case 'state.setPersona':
-          return { persona: (params as { name?: string } | null)?.name ?? '' };
-
-        case 'state.setMaxTurns':
-          return { maxTurns: (params as { value?: number } | null)?.value ?? 0 };
-
-        case 'state.setRetry':
-          return { retry: (params as { value?: number } | null)?.value ?? 0 };
-
-        case 'tool.list':
-          return [
-            { name: 'list_directory', category: 'read' },
-            { name: 'read_file', category: 'read' },
-            { name: 'write_file', category: 'write' },
-            { name: 'edit', category: 'write' },
-            { name: 'glob', category: 'read' },
-            { name: 'grep_search', category: 'read' },
-            { name: 'run_shell_command', category: 'command' },
-            { name: 'memory_write', category: 'read' },
-            { name: 'memory_read', category: 'read' },
-            { name: 'web_fetch', category: 'read' },
-          ];
-
-        case 'tool.undoList':
-          return [];
-
-        case 'tool.undoRollback':
-          return { ok: true };
-
-        case 'settings.get':
-          return {
-            provider: 'deepseek',
-            providers: {},
-            maxTurns: 200,
-            persona: '',
-            proxy: { mode: 'auto' },
-            retry: 0,
-          };
-
-        case 'settings.set':
-          return { ok: true };
-
-        case 'settings.testProvider':
-          return { ok: true, models: ['deepseek-chat', 'deepseek-reasoner'] };
-
-        case 'settings.listProviders':
-          return [
-            { name: 'ollama', displayName: 'Ollama（本地）' },
-            { name: 'dashscope', displayName: '阿里云百炼' },
-            { name: 'deepseek', displayName: 'DeepSeek' },
-            { name: 'openrouter', displayName: 'OpenRouter' },
-            { name: 'zai', displayName: 'Z.AI' },
-          ];
-
-        case 'asset.listThemes':
-          return [];
-
-        case 'asset.readTheme':
-          throw new Error('Mock 环境无用户主题');
-
-        case 'asset.listSkills':
-          return [];
-
-        case 'asset.listPersonas':
-          return [];
-
-        case 'update.check':
-          return { configured: false, message: '未配置更新源' };
-
-        case 'update.download':
-          return { configured: false };
-
-        case 'update.apply':
-          return { configured: false };
-
-        default:
-          // 未知方法返回一个空对象而不是抛错（便于前端开发时先走通）
-          console.warn(`[mockAgent] 未实现的方法：${method}`);
-          return {};
+      // agent.prompt 保留流式副作用
+      if (method === 'agent.prompt') {
+        const p = params as { text?: string } | null;
+        runMockTurn(p?.text ?? '(空)');
       }
+      if (method === 'agent.cancel') {
+        emit('turn.finished', { turnId: 'mock', text: '', truncated: true, byUser: true });
+        busy = false;
+      }
+      const b = BEHAVIORS[method];
+      if (!b) {
+        throw Object.assign(new Error(`method.notFound: 未知方法 ${method}（Mock 与契约不同步）`), {
+          code: 'method.notFound',
+        });
+      }
+      if (b.kind === 'throws') {
+        throw Object.assign(new Error(b.message), { code: b.code });
+      }
+      return b.run(params);
     },
 
     async pollEvents(sinceSeq: number): Promise<PollResult> {

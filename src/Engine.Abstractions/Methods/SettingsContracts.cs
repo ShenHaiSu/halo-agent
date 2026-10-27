@@ -25,7 +25,7 @@ public sealed record SettingsGetResult
     public int Retry { get; init; }
     /// <summary>代理设置。</summary>
     public ProxySettings? Proxy { get; init; }
-    /// <summary>请求头。</summary>
+    /// <summary>请求头（原始模板值，未展开；与 Network.Headers 一致）。</summary>
     public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
     /// <summary>是否启用扩展头。</summary>
     public bool ExtraHeadersEnabled { get; init; }
@@ -35,6 +35,26 @@ public sealed record SettingsGetResult
     public string DataDir { get; init; } = "";
     /// <summary>配置文件路径。</summary>
     public string ConfigPath { get; init; } = "";
+    /// <summary>网络分组（D-13 增补：与顶层 proxy/headers 含义一致，便于 NetworkPage 直接消费；缺省为 null）。</summary>
+    public SettingsGetNetwork? Network { get; init; }
+}
+
+/// <summary>settings.get 的 network 子对象（与 saveNetwork 参数语义对应）。</summary>
+public sealed record SettingsGetNetwork
+{
+    /// <summary>“auto” | “direct” | “manual”。</summary>
+    public string Mode { get; init; } = "auto";
+    /// <summary>代理地址（可为空）。</summary>
+    public string? Url { get; init; }
+    /// <summary>重试次数。</summary>
+    public int Retry { get; init; }
+    /// <summary>顶层请求头（原始模板值，未展开）。</summary>
+    public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
+    /// <summary>是否启用扩展头。</summary>
+    public bool HeadersEnabled { get; init; } = true;
+    /// <summary>分服务商请求头（原始模板值）。</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<HeaderPair>> ProviderHeaders { get; init; }
+        = new Dictionary<string, IReadOnlyList<HeaderPair>>();
 }
 
 /// <summary>代理设置。</summary>
@@ -102,8 +122,8 @@ public sealed record SettingsSaveNetworkParams
     public bool? HeadersEnabled { get; init; }
     /// <summary>请求头（可为空）。</summary>
     public IReadOnlyList<HeaderPair>? Headers { get; init; }
-    /// <summary>服务商级请求头（可为空）。</summary>
-    public IReadOnlyList<HeaderPair>? ProviderHeaders { get; init; }
+    /// <summary>分服务商请求头（可为空；键为服务商名，值为该服务商的头列表）。</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<HeaderPair>>? ProviderHeaders { get; init; }
 }
 
 /// <summary>settings.saveNetwork 结果。</summary>
@@ -147,6 +167,8 @@ public sealed record SettingsSaveExtraHeadersResult
 {
     /// <summary>是否成功。</summary>
     public bool Ok { get; init; }
+    /// <summary>备注。</summary>
+    public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
 // ============================ settings.mcp.get ============================

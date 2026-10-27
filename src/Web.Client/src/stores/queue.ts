@@ -20,26 +20,18 @@ export const useQueueStore = defineStore('queue', () => {
 
   async function push(text: string): Promise<boolean> {
     if (full.value) return false;
-    try {
-      const r = await transport.request<{ queued?: boolean }>('agent.queue', { text });
-      if (!r.queued && r.queued !== undefined) return false;
-      items.value.push(text);
-      return true;
-    } catch {
-      return false;
-    }
+    const r = await transport.request<{ queued?: boolean }>('agent.queue', { text });
+    if (!r.queued && r.queued !== undefined) return false;
+    items.value.push(text);
+    return true;
   }
 
   async function remove(index: number): Promise<boolean> {
     const t = items.value[index];
     if (t === undefined) return false;
-    try {
-      const r = await transport.request<{ removed?: boolean }>('agent.unqueue', { text: t });
-      if (r.removed ?? true) items.value.splice(index, 1);
-      return true;
-    } catch {
-      return false;
-    }
+    const r = await transport.request<{ removed?: boolean }>('agent.unqueue', { text: t });
+    if (r.removed ?? true) items.value.splice(index, 1);
+    return true;
   }
 
   function clear(): void {

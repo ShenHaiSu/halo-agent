@@ -1,17 +1,14 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
-using HaloAgent.Engine.Abstractions.Serialization;
-using HaloAgent.Engine.Core.Channels;
-using Xunit;
-
-#if P1_BACKEND_ROUTING
 using HaloAgent.Engine.Abstractions.Methods;
+using HaloAgent.Engine.Abstractions.Serialization;
 using HaloAgent.Engine.Abstractions.Types;
+using HaloAgent.Engine.Core.Channels;
 using HaloAgent.Engine.Core.Events;
 using HaloAgent.Engine.Server.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
-#endif
+using Xunit;
 
 namespace HaloAgent.Engine.Server.Tests;
 
@@ -160,7 +157,6 @@ public class EngineServerTests
     // （或直接删掉本文件的 #if / #endif），即可启用。
     // ============================================================
 
-#if P1_BACKEND_ROUTING
     [Fact]
     public async Task Concurrent_100_requests_correctly_paired()
     {
@@ -298,5 +294,4 @@ public class EngineServerTests
         cts.Cancel();
         await Task.WhenAny(serverTask, Task.Delay(3000));
     }
-#endif
 }

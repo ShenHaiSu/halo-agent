@@ -28,6 +28,16 @@ export default [
         },
         { object: 'Array', property: 'fromAsync', message: 'Array.fromAsync 需 Chrome 121+。' },
         { object: 'navigator', property: 'gpu', message: 'WebGPU 需 Chrome 113+ 且 Win7 不支持。' },
+        {
+          object: 'window',
+          property: 'haloAgent',
+          message: '禁止直接访问 window.haloAgent —— 请使用 @/transport 的 transport.request（见 P07 ADR-005）',
+        },
+        {
+          object: 'window',
+          property: 'haloHost',
+          message: '禁止直接访问 window.haloHost —— 请使用 transport.host（见 P07 ADR-005）',
+        },
       ],
       'no-restricted-syntax': [
         'error',
@@ -87,7 +97,7 @@ export default [
       '*.config.ts',
       '*.config.mjs',
     ],
-    rules: { 'no-restricted-syntax': 'off' },
+    rules: { 'no-restricted-syntax': 'off', 'no-restricted-properties': 'off' },
   },
   {
     files: ['scripts/**'],

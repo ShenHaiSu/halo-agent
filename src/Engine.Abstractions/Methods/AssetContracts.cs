@@ -212,3 +212,47 @@ public sealed record AssetMemoryDeleteResult
     /// <summary>是否成功。</summary>
     public bool Ok { get; init; }
 }
+// ============================ asset.themes.list ============================
+
+/// <summary>asset.themes.list 结果。</summary>
+public sealed record AssetThemesListResult
+{
+    /// <summary>主题摘要列表（只含元信息，不含 tokens）。</summary>
+    public IReadOnlyList<ThemeSummary> Items { get; init; } = Array.Empty<ThemeSummary>();
+}
+
+/// <summary>主题摘要。</summary>
+public sealed record ThemeSummary
+{
+    /// <summary>主题 id（= 文件名去扩展名）。</summary>
+    public string Id { get; init; } = "";
+    /// <summary>显示名。</summary>
+    public string Name { get; init; } = "";
+    /// <summary>基于哪个内置主题（可为空）。</summary>
+    public string? BasedOn { get; init; }
+    /// <summary>来源：“builtin” | “user”。</summary>
+    public string Source { get; init; } = "user";
+}
+
+// ============================ asset.themes.get ============================
+
+/// <summary>asset.themes.get 参数。</summary>
+public sealed record AssetThemesGetParams
+{
+    /// <summary>主题 id。</summary>
+    public string Id { get; init; } = "";
+}
+
+/// <summary>asset.themes.get 结果。</summary>
+public sealed record AssetThemesGetResult
+{
+    /// <summary>主题 id。</summary>
+    public string Id { get; init; } = "";
+    /// <summary>显示名。</summary>
+    public string Name { get; init; } = "";
+    /// <summary>基于哪个内置主题（可为空）。</summary>
+    public string? BasedOn { get; init; }
+    /// <summary>token 集合（变量名 → CSS 值）。</summary>
+    public IReadOnlyDictionary<string, string> Tokens { get; init; }
+        = new Dictionary<string, string>();
+}

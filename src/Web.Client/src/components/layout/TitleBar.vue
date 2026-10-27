@@ -19,7 +19,7 @@ import { useSessionStore } from '@/stores/session';
  *  - 拖拽由宿主 WM_NCHITTEST 处理（标 app-region-drag 只是给
  *    Chromium 的 -webkit-app-region，让页面内拖拽区也能用）
  *  - 按钮必须标 app-region-no-drag，否则点按钮会变成拖窗口
- *  - 按钮调用 window.haloHost.* 而不是自己改窗体
+ *  - 按钮经由 @/bridge/host 调用宿主窗口能力，而不是自己改窗体
  * ============ 有意例外说明 ============
  *  这里直接 import `@/bridge/host` 的 hostBridge 是有意的例外：
  *  标题栏窗口按钮（最小化/最大化/关闭）必须直调宿主桥，

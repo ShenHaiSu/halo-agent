@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `agent.schema.json` — 帧信封 + 54 方法 + 24 事件 + 15 错误码
+- `agent.schema.json` — 帧信封 + 60 方法（56 engine + 4 host）+ 24 事件 + 15 错误码
 - `CHANGELOG.md` — 版本历史（破坏性变更必须记）
 - `README.md` — 本文件
 

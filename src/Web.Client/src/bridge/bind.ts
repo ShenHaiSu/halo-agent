@@ -76,15 +76,22 @@ export function forceMock(): boolean {
     if (q.get('mock') === '1') return true;
     if (localStorage.getItem('haloagent.forceMock') === '1') return true;
   } catch {
-    /* 忽略（SSR/隐私模式） */
+    /* ignore（SSR/隐私模式） */
   }
   return false;
 }
 
-/** 是否走 Mock：强制 Mock，或缺宿主/引擎任一。 */
+/** 是否走 Mock：生产包永不 mock；开发态需显式 ?mock=1。 */
 export function isMock(): boolean {
-  if (forceMock()) return true;
-  return !hasAgent() || !hasHost();
+  try {
+    const proto = location.protocol;
+    const isPackaged =
+      proto === 'app:' || proto === 'file:' || proto === 'chrome-extension:';
+    if (isPackaged) return false;
+  } catch {
+    return false;
+  }
+  return forceMock();
 }
 
 /** 仅测试用：重置绑定状态 */

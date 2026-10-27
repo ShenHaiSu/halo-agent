@@ -198,6 +198,8 @@ internal static class KnownMethods
         // asset
         "asset.skills.list", "asset.skills.get", "asset.skills.save",
         "asset.skills.delete", "asset.skills.run",
+        "asset.themes.list", "asset.themes.get",
+        "asset.themes.list", "asset.themes.get",
         "asset.personas.list", "asset.personas.get", "asset.personas.save",
         "asset.memory.list", "asset.memory.get", "asset.memory.save", "asset.memory.delete",
         // tool

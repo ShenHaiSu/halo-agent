@@ -36,6 +36,7 @@ const cwd = computed(() => session.cwd || host.systemInfo?.cwd || '（未知）'
       <span class="cvalue">{{ session.persona }}</span>
     </div>
     <p class="chint">上下文不足时可用 /compact 压缩，或在“模型”页调大上下文长度。</p>
+    <p class="chint">最大轮数 / 人格仅本次会话生效，重启后恢复默认。如需永久修改，请到“设置 → 模型”。</p>
   </div>
 </template>
 

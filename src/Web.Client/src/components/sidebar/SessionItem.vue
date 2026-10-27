@@ -59,7 +59,7 @@ async function commitRename(): Promise<void> {
     return;
   }
   try {
-    await transport.request('session.rename', { id: props.session.id, title: next });
+    await transport.request('session.rename', { id: props.session.id, note: next });
     await sessions.load();
   } catch (e) {
     toast.error(`重命名失败：${(e as Error).message}`);

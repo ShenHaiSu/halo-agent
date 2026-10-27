@@ -48,11 +48,11 @@ public sealed class FrameServer
         "session.clear", "session.compact", "session.setCwd",
         "state.setMode", "state.setPersona", "state.setProvider",
         "state.setMaxTurns", "state.setRetry",
-        "settings.saveModel", "settings.saveNetwork", "settings.saveExtraChannels",
+        "settings.saveModel", "settings.saveNetwork", "settings.saveExtraHeaders",
         "settings.mcp.save",
         "asset.skills.save", "asset.skills.delete", "asset.skills.run",
         "asset.personas.save", "asset.memory.save", "asset.memory.delete",
-        "tool.undoRollback", "system.shutdown",
+        "tool.undoRollback", "system.shutdown", "update.install",
     };
 
     public FrameServer(IFrameChannel channel, EngineState state, EventBus bus,

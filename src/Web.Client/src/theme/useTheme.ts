@@ -2,8 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import { applyThemeTokens, clearInlineThemeTokens } from './apply';
 import { validateThemeTokens } from './validate';
-import type { ThemeFile } from './types';
+import type { ThemeFile, ThemeSummary } from '@/contract/agent.d';
 import { builtinThemes } from './builtin';
+import { transport } from '@/transport';
 
 export type ThemeMode = 'light' | 'dark' | 'system' | string;
 
@@ -14,7 +15,7 @@ const STORAGE_KEY = 'haloagent.theme';
  */
 const currentMode = ref<ThemeMode>('light');
 const currentThemeId = ref<string>('light');
-const currentTheme = ref<ThemeFile>(builtinThemes.light!);
+const currentTheme = ref<ThemeFile>(builtinThemes.light! as unknown as ThemeFile);
 const loading = ref(false);
 const lastError = ref<string | null>(null);
 
@@ -84,8 +85,8 @@ async function applyResolved(): Promise<void> {
 
     // * 关键：清除旧的内联覆盖，再应用新主题
     clearInlineThemeTokens();
-    if (theme.tokens && Object.keys(theme.tokens).length > 0) {
-      const result = validateThemeTokens(theme.tokens);
+    if (theme.tokens && Object.keys(theme.tokens as Record<string, unknown>).length > 0) {
+      const result = validateThemeTokens(theme.tokens as Record<string, string>);
       if (!result.ok) {
         lastError.value = result.errors.join('；');
       }
@@ -102,10 +103,10 @@ async function applyResolved(): Promise<void> {
     lastError.value = e instanceof Error ? e.message : String(e);
     // 失败时回退到内置 light：清掉旧覆盖并把 light 的值写成内联，
     // 保证界面仍可读（绝不出现白底白字），themeId 保持为 light。
-    currentTheme.value = builtinThemes.light!;
+    currentTheme.value = builtinThemes.light! as unknown as ThemeFile;
     currentThemeId.value = 'light';
     clearInlineThemeTokens();
-    applyThemeTokens(builtinThemes.light!.tokens);
+    applyThemeTokens((builtinThemes.light as unknown as { tokens: Record<string, string> }).tokens);
   } finally {
     loading.value = false;
   }
@@ -122,24 +123,19 @@ function isDark(id: string): boolean {
   }
   return id === 'dark' || id.includes('dark') || id.includes('midnight');
 }
-
 async function loadTheme(id: string): Promise<ThemeFile> {
-  // 内置主题直接从 bundle 里拿
-  if (builtinThemes[id]) return builtinThemes[id]!;
+  const local = (builtinThemes as Record<string, ThemeFile | undefined>)[id];
+  if (local) return { ...local, tokens: { ...(local.tokens as Record<string, string>) } };
 
-  // 用户主题：通过引擎读文件（P3 已有 asset.readTheme）
-  const raw = (await window.haloAgent?.request('asset.readTheme', { id })) as unknown;
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error(`主题 ${id} 读取失败`);
-  }
-  const file = raw as ThemeFile;
-  const check = validateThemeTokens(file.tokens);
+  // 用户主题：经 transport 走引擎（P07：契约 asset.themes.get）
+  const file = await transport.request<ThemeFile>('asset.themes.get', { id });
+  const tokens = (file.tokens ?? {}) as Record<string, string>;
+  const check = validateThemeTokens(tokens);
   if (!check.ok) {
     throw new Error(`主题 ${id} 校验失败：${check.errors.join('；')}`);
   }
-  return file;
+  return { ...file, tokens };
 }
-
 export function useTheme() {
   return {
     mode: currentMode,
@@ -151,11 +147,20 @@ export function useTheme() {
     setMode(m: ThemeMode) {
       currentMode.value = m;
     },
-    /** 列出所有可用主题（内置 + 用户） */
-    async listThemes(): Promise<ThemeFile[]> {
-      const res = (await window.haloAgent?.request('asset.listThemes', null)) as unknown;
-      const userThemes = Array.isArray(res) ? (res as ThemeFile[]) : [];
-      return [...Object.values(builtinThemes), ...userThemes];
+    /** 列出所有可用主题（内置 + 用户元信息） */
+    async listThemes(): Promise<ThemeSummary[]> {
+      const builtin = Object.entries(builtinThemes).map(([id, t]) => ({
+        id,
+        name: (t as ThemeFile).name ?? id,
+        basedOn: ((t as ThemeFile).basedOn as string | undefined) ?? null,
+        source: 'builtin' as const,
+      }));
+      try {
+        const res = await transport.request<{ items?: ThemeSummary[] }>('asset.themes.list', null);
+        return [...builtin, ...(res.items ?? [])];
+      } catch {
+        return [...builtin];
+      }
     },
   };
 }

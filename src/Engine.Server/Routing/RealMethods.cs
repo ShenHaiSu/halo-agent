@@ -16,11 +16,12 @@ namespace HaloAgent.Engine.Server.Routing;
 /// agent.prompt 的关键语义：立即返回 {accepted, turnId}，回合在后台跑，进度走事件流。
 /// 这是 P1 契约的硬要求 —— 如果这里 await 回合，前端会卡在"发送中"直到整轮跑完（可能几分钟）。
 /// </summary>
-public sealed class RealMethods
+public sealed partial class RealMethods
 {
     private readonly AgentSession _session;
     private readonly SessionStore _store;
     private readonly ToolRegistry _tools;
+    private readonly string _dataDir;
     private readonly ILogger _log;
     private readonly CancellationToken _shutdownCt;
 
@@ -30,10 +31,22 @@ public sealed class RealMethods
         ToolRegistry tools,
         ILogger log,
         CancellationToken shutdownCt)
+        : this(session, store, tools, Paths.DataDir, log, shutdownCt)
+    {
+    }
+
+    public RealMethods(
+        AgentSession session,
+        SessionStore store,
+        ToolRegistry tools,
+        string dataDir,
+        ILogger log,
+        CancellationToken shutdownCt)
     {
         _session = session;
         _store = store;
         _tools = tools;
+        _dataDir = dataDir;
         _log = log;
         _shutdownCt = shutdownCt;
     }

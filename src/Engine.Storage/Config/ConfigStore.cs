@@ -243,7 +243,7 @@ public static class ConfigStore
         "content-encoding", "transfer-encoding", "connection",
     };
 
-    private static bool IsReservedHeader(string name) => ReservedHeaders.Contains(name);
+    public static bool IsReservedHeader(string name) => ReservedHeaders.Contains(name);
 
     /// <summary>展开 ${VAR} / $VAR；未设置的环境变量原样保留。</summary>
     private static (string value, List<string> missing) ExpandEnvVars(string value)

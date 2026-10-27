@@ -50,7 +50,7 @@ public static class Paths
     public static bool EnsureDataDirs()
     {
         var first = !Directory.Exists(DataDir);
-        foreach (var dir in new[] { DataDir, SessionsDir, MemoriesDir, SkillsDir, PersonasDir, UndoDir })
+        foreach (var dir in new[] { DataDir, SessionsDir, MemoriesDir, SkillsDir, PersonasDir, ThemesDir, UndoDir })
         {
             try { Directory.CreateDirectory(dir); } catch { }
         }

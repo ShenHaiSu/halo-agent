@@ -108,14 +108,15 @@ public static class EngineAssembly
         };
 
         // 6) 注册路由（P1 stub → P2 真实，见 §7.3 清单）
-        var real = new RealMethods(session, store, tools, methodsLogger, shutdownCt);
+        // 6) 注册路由（P1 stub → P2 真实，见 §7.3 清单；P07 已全部 real 化，零 stub）
+        var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt);
         var stub = new StubMethods(state);
         router.RegisterAll(
             ("system.ping", stub.SystemPing),
             ("system.info", stub.SystemInfo),
             ("system.protocol", stub.SystemProtocol),
             ("system.shutdown", stub.SystemShutdown),
-            ("system.diagnostics", stub.EmptyOk),
+            ("system.diagnostics", real.SystemDiagnosticsAsync),
 
             ("agent.prompt", real.AgentPromptAsync),
             ("agent.queue", real.AgentQueueAsync),
@@ -137,42 +138,44 @@ public static class EngineAssembly
             ("state.snapshot", real.StateSnapshotAsync),
             ("state.setMode", real.StateSetModeAsync),
             ("state.setPersona", real.StateSetPersonaAsync),
-            ("state.setProvider", stub.EmptyOk),
+            ("state.setProvider", real.StateSetProviderAsync),
             ("state.setMaxTurns", real.StateSetMaxTurnsAsync),
             ("state.setRetry", real.StateSetRetryAsync),
 
-            ("settings.get", stub.NotImplemented),
-            ("settings.saveModel", stub.EmptyOk),
-            ("settings.saveNetwork", stub.EmptyOk),
-            ("settings.probeModels", stub.NotImplemented),
-            ("settings.saveExtraHeaders", stub.EmptyOk),
-            ("settings.mcp.get", stub.NotImplemented),
-            ("settings.mcp.save", stub.EmptyOk),
+            ("settings.get", real.SettingsGetAsync),
+            ("settings.saveModel", real.SettingsSaveModelAsync),
+            ("settings.saveNetwork", real.SettingsSaveNetworkAsync),
+            ("settings.probeModels", real.SettingsProbeModelsAsync),
+            ("settings.saveExtraHeaders", real.SettingsSaveExtraHeadersAsync),
+            ("settings.mcp.get", real.SettingsMcpGetAsync),
+            ("settings.mcp.save", real.SettingsMcpSaveAsync),
 
-            ("asset.skills.list", stub.EmptyList),
-            ("asset.skills.get", stub.NotImplemented),
-            ("asset.skills.save", stub.EmptyOk),
-            ("asset.skills.delete", stub.EmptyOk),
-            ("asset.skills.run", stub.NotImplemented),
-            ("asset.personas.list", stub.EmptyList),
-            ("asset.personas.get", stub.NotImplemented),
-            ("asset.personas.save", stub.EmptyOk),
-            ("asset.memory.list", stub.EmptyList),
-            ("asset.memory.get", stub.NotImplemented),
-            ("asset.memory.save", stub.EmptyOk),
-            ("asset.memory.delete", stub.EmptyOk),
+            ("asset.skills.list", real.AssetSkillsListAsync),
+            ("asset.skills.get", real.AssetSkillsGetAsync),
+            ("asset.skills.save", real.AssetSkillsSaveAsync),
+            ("asset.skills.delete", real.AssetSkillsDeleteAsync),
+            ("asset.skills.run", real.AssetSkillsRunAsync),
+            ("asset.themes.list", real.AssetThemesListAsync),
+            ("asset.themes.get", real.AssetThemesGetAsync),
+            ("asset.personas.list", real.AssetPersonasListAsync),
+            ("asset.personas.get", real.AssetPersonasGetAsync),
+            ("asset.personas.save", real.AssetPersonasSaveAsync),
+            ("asset.memory.list", real.AssetMemoryListAsync),
+            ("asset.memory.get", real.AssetMemoryGetAsync),
+            ("asset.memory.save", real.AssetMemorySaveAsync),
+            ("asset.memory.delete", real.AssetMemoryDeleteAsync),
 
             ("tool.list", real.ToolListAsync),
             ("tool.undoList", real.ToolUndoListAsync),
             ("tool.undoRollback", real.ToolUndoRollbackAsync),
-            ("tool.mcpStatus", stub.NotImplemented),
+            ("tool.mcpStatus", real.ToolMcpStatusAsync),
 
-            ("fs.listDir", stub.EmptyList),
-            ("fs.completePaths", stub.EmptyList),
-            ("fs.validatePath", stub.NotImplemented),
+            ("fs.listDir", real.FsListDirAsync),
+            ("fs.completePaths", real.FsCompletePathsAsync),
+            ("fs.validatePath", real.FsValidatePathAsync),
 
-            ("update.check", stub.NotImplemented),
-            ("update.install", stub.NotImplemented));
+            ("update.check", real.UpdateCheckAsync),
+            ("update.install", real.UpdateInstallAsync));
 
         return new AssembledEngine(router, state, bus, session, store, tools);
     }
