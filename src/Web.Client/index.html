@@ -1,14 +1,49 @@
-<!doctype html>
-<html lang="zh-CN" data-theme="midnight">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- 明确声明深色，避免 Chromium 在加载瞬间闪白 -->
-    <meta name="color-scheme" content="dark light" />
-    <title>HaloAgent</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<!-- src/Web.Client/index.html -->
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HaloAgent</title>
+
+  <!--
+    ★★★ 防闪白脚本：必须在任何样式与内容之前执行。
+    它做三件事：
+      ① 从 localStorage 读用户的主题选择
+      ② 如果是深色系，立刻给 <html> 加上 data-theme="dark"
+         并设置最小的内联背景色，避免白闪
+      ③ 把 body 的初始背景直接写死为对应色（用 CSS 变量无法在样式表加载前生效）
+  -->
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('haloagent.theme') || 'light';
+        var isDark;
+        if (mode === 'system') {
+          isDark = window.matchMedia &&
+                   window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } else {
+          isDark = /dark|midnight|night|black/i.test(mode);
+        }
+        if (isDark) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          // @allow-hardcoded-color: 首帧必须立即有背景色，不能等 CSS（与 dark 主题 bg 一致）
+          document.documentElement.style.backgroundColor = '#16161c';
+          document.documentElement.style.colorScheme = 'dark';
+        } else {
+          // @allow-hardcoded-color: 首帧必须立即有背景色，不能等 CSS
+          document.documentElement.style.backgroundColor = '#ffffff';
+        }
+      } catch (e) {
+        /* localStorage 不可用时忽略，用默认浅色 */
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="/src/styles/index.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>

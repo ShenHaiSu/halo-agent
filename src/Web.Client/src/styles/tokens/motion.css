@@ -1,0 +1,48 @@
+/* src/Web.Client/src/styles/tokens/motion.css */
+:root {
+  --duration-instant: 60ms;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 420ms;
+
+  --ease-linear: linear;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ============================================================
+   尊重"减少动效"（Win10/11 有；Win7 无 matchMedia，恒为 false）
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --duration-slower: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   通用过渡组合（Tailwind 无法表达"两属性不同缓动"的场景）
+   ============================================================ */
+:root {
+  --transition-colors: color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+  --transition-shadow: box-shadow var(--duration-fast) var(--ease-out);
+  --transition-transform: transform var(--duration-base) var(--ease-out);
+  --transition-opacity: opacity var(--duration-base) var(--ease-out);
+}

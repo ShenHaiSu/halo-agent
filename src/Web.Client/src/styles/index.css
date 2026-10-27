@@ -1,0 +1,33 @@
+/* src/Web.Client/src/styles/index.css */
+
+/* ============================================================
+   顺序不能改（CSS 规范：@import 必须在所有其他语句之前）：
+   Tailwind base → 设计 token → Tailwind components
+   → 自家 base → Tailwind utilities → 自家 utilities（最后覆盖）
+   Tailwind 必须用 @import 形式引入，不能用 @tailwind 指令
+   （@tailwind 会被当成前置语句，导致后续 @import 全部报
+   "@import must precede all other statements"）。
+   ============================================================ */
+@import 'tailwindcss/base.css';
+
+/* ② Token（变量定义） */
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/radius.css';
+@import './tokens/layout.css';
+@import './tokens/motion.css';
+
+@import 'tailwindcss/components.css';
+
+/* ③ Base（使用变量） */
+@import './base/reset.css';
+@import './base/typography.css';
+@import './base/focus.css';
+@import './base/scrollbar.css';
+@import './base/selection.css';
+
+@import 'tailwindcss/utilities.css';
+
+/* ④ 自定义 utility（最后，才能覆盖 Tailwind 的 utility） */
+@import './utilities.css';

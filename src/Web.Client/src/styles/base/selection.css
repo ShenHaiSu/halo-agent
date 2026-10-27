@@ -1,0 +1,11 @@
+/* src/Web.Client/src/styles/base/selection.css */
+::selection {
+  background-color: hsl(var(--accent) / 0.24);
+  color: inherit;
+}
+
+/* Firefox/Win 上的另一套（虽然 CEF 用不上，但保留） */
+::-moz-selection {
+  background-color: hsl(var(--accent) / 0.24);
+  color: inherit;
+}

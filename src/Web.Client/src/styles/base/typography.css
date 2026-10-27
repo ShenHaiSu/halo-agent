@@ -1,0 +1,173 @@
+/* src/Web.Client/src/styles/base/typography.css */
+/**
+ * 全局排版默认值。
+ *
+ * ============ 为什么要在 base 里定义标题样式 ============
+ *  Tailwind Preflight 把 h1-h6 的字号/字重都清成 inherit，
+ *  所以如果不定义，<h1> 和 <p> 长得一样。
+ *  我们在 base 里给一套合理默认，页面直接用标签就好看；
+ *  需要特例时再用 utility 覆盖。
+ * ============ ============
+ */
+
+h1 {
+  font-size: var(--text-2xl);
+  line-height: var(--leading-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: hsl(var(--fg));
+}
+
+h2 {
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+  font-weight: var(--weight-semibold);
+  color: hsl(var(--fg));
+}
+
+h3 {
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
+  color: hsl(var(--fg));
+}
+
+h4 {
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  font-weight: var(--weight-semibold);
+  color: hsl(var(--fg));
+}
+
+h5,
+h6 {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+  color: hsl(var(--fg-muted));
+}
+
+p {
+  margin-block: 0;
+  color: hsl(var(--fg));
+}
+
+p + p {
+  margin-block-start: var(--space-3);
+}
+
+a {
+  color: hsl(var(--accent));
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: hsl(var(--accent-hover));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:visited {
+  /* 不用紫色：在深色主题下很丑 */
+  color: hsl(var(--accent));
+}
+
+/* 行内代码 */
+code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  background-color: hsl(var(--bg-muted));
+  color: hsl(var(--fg));
+  font-size: 0.92em;
+  /* 中英文混排时避免代码背景紧贴文字 */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* 代码块 */
+pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: hsl(var(--bg-muted));
+  color: hsl(var(--fg));
+  overflow-x: auto;
+  /* 让 <pre> 内的 code 不重复背景与 padding */
+  tab-size: 2;
+}
+
+pre code {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+/* 引用 */
+blockquote {
+  margin: 0;
+  padding-inline-start: var(--space-3);
+  border-inline-start: 3px solid hsl(var(--border-strong));
+  color: hsl(var(--fg-muted));
+}
+
+/* 分隔线 */
+hr {
+  border: none;
+  border-block-start: 1px solid hsl(var(--border));
+  margin-block: var(--space-4);
+}
+
+/* 列表（Tailwind Preflight 清掉了 list-style，这里恢复内容区的列表） */
+.prose ul {
+  list-style: disc;
+  padding-inline-start: var(--space-5);
+}
+
+.prose ol {
+  list-style: decimal;
+  padding-inline-start: var(--space-5);
+}
+
+.prose li {
+  margin-block: var(--space-1);
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin-block: var(--space-1);
+}
+
+/* 表格（Markdown 内容里的表格） */
+.prose table {
+  width: 100%;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.prose th,
+.prose td {
+  padding: var(--space-2) var(--space-3);
+  border-block-end: 1px solid hsl(var(--border));
+  text-align: start;
+  vertical-align: top;
+}
+
+.prose th {
+  background-color: hsl(var(--bg-subtle));
+  font-weight: var(--weight-semibold);
+}
+
+.prose tr:last-child td {
+  border-block-end: none;
+}
+
+/* 首行缩进禁用（中文内容不要缩进） */
+.prose p {
+  text-indent: 0;
+}

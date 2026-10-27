@@ -9,47 +9,46 @@
  */
 
 export interface ScenarioStep {
-  afterMs: number
-  kind: string
-  payload: unknown
+  afterMs: number;
+  kind: string;
+  payload: unknown;
 }
 
 export interface Scenario {
-  steps: ScenarioStep[]
+  steps: ScenarioStep[];
   /** 权限询问被允许后继续回放什么 */
-  onAllow?: Scenario
+  onAllow?: Scenario;
   /** 权限询问被拒绝后继续回放什么 */
-  onDeny?: Scenario
+  onDeny?: Scenario;
 }
 
 // ---------- 场景一：简单对话（无工具） ----------
 
-const SIMPLE_ANSWER =
-  '好的，我来看看。首先需要确认 ~/Downloads 目录下有哪些压缩包。'
+const SIMPLE_ANSWER = '好的，我来看看。首先需要确认 ~/Downloads 目录下有哪些压缩包。';
 
 function streamText(text: string, perChunkMs = 30): ScenarioStep[] {
-  const steps: ScenarioStep[] = []
+  const steps: ScenarioStep[] = [];
   // 每 3 个字符一块，模拟模型的增量输出
   for (let i = 0; i < text.length; i += 3) {
     steps.push({
       afterMs: i === 0 ? 200 : perChunkMs,
       kind: 'reasoning.delta',
       payload: { text: i === 0 ? '用户要求归档压缩包，先列目录看清楚。' : '' },
-    })
+    });
   }
-  return steps.filter((s) => (s.payload as { text: string }).text !== '')
+  return steps.filter((s) => (s.payload as { text: string }).text !== '');
 }
 
 function streamBody(text: string, perChunkMs = 25): ScenarioStep[] {
-  const steps: ScenarioStep[] = []
+  const steps: ScenarioStep[] = [];
   for (let i = 0; i < text.length; i += 4) {
     steps.push({
       afterMs: i === 0 ? 400 : perChunkMs,
       kind: 'text.delta',
       payload: { text: text.slice(i, i + 4) },
-    })
+    });
   }
-  return steps
+  return steps;
 }
 
 const simpleScenario: Scenario = {
@@ -64,7 +63,7 @@ const simpleScenario: Scenario = {
     },
     { afterMs: 50, kind: 'usage', payload: { prompt: 1200, completion: 80 } },
   ],
-}
+};
 
 // ---------- 场景二：带工具调用 ----------
 
@@ -82,12 +81,17 @@ const toolScenario: Scenario = {
         idleMs: null,
       },
     },
-    { afterMs: 350, kind: 'tool.finished', payload: {
-      toolCallId: 'call_1',
-      name: 'list_directory',
-      ok: true,
-      output: '目录 C:\\Users\\me\\Downloads:\narchive-2024.zip\nreport.zip\n截图.png\nnotes.txt\n',
-    }},
+    {
+      afterMs: 350,
+      kind: 'tool.finished',
+      payload: {
+        toolCallId: 'call_1',
+        name: 'list_directory',
+        ok: true,
+        output:
+          '目录 C:\\Users\\me\\Downloads:\narchive-2024.zip\nreport.zip\n截图.png\nnotes.txt\n',
+      },
+    },
     { afterMs: 300, kind: 'round.started', payload: { used: 2, limit: 200 } },
     ...streamBody('找到两个压缩包：archive-2024.zip 和 report.zip。我按日期归档。'),
     {
@@ -101,14 +105,22 @@ const toolScenario: Scenario = {
       },
     },
     // 模拟命令实时输出
-    { afterMs: 300, kind: 'tool.outputDelta', payload: { toolCallId: 'call_2', delta: 'moving...' } },
+    {
+      afterMs: 300,
+      kind: 'tool.outputDelta',
+      payload: { toolCallId: 'call_2', delta: 'moving...' },
+    },
     { afterMs: 300, kind: 'tool.outputDelta', payload: { toolCallId: 'call_2', delta: ' done\n' } },
-    { afterMs: 200, kind: 'tool.finished', payload: {
-      toolCallId: 'call_2',
-      name: 'run_shell_command',
-      ok: true,
-      output: 'moving... done\n(命令退出码 0)\n',
-    }},
+    {
+      afterMs: 200,
+      kind: 'tool.finished',
+      payload: {
+        toolCallId: 'call_2',
+        name: 'run_shell_command',
+        ok: true,
+        output: 'moving... done\n(命令退出码 0)\n',
+      },
+    },
     ...streamBody('归档完成。archive-2024.zip → archives/2024/。'),
     {
       afterMs: 500,
@@ -117,7 +129,7 @@ const toolScenario: Scenario = {
     },
     { afterMs: 50, kind: 'usage', payload: { prompt: 2400, completion: 210 } },
   ],
-}
+};
 
 // ---------- 场景三：危险命令（权限询问） ----------
 
@@ -140,39 +152,63 @@ const permissionScenario: Scenario = {
   ],
   onAllow: {
     steps: [
-      { afterMs: 200, kind: 'tool.started', payload: {
-        toolCallId: 'call_p1',
-        name: 'run_shell_command',
-        args: '{"command":"rm -rf /tmp/old-build"}',
-        idleMs: null,
-      }},
-      { afterMs: 400, kind: 'tool.finished', payload: {
-        toolCallId: 'call_p1',
-        name: 'run_shell_command',
-        ok: true,
-        output: '(命令退出码 0)\n',
-      }},
+      {
+        afterMs: 200,
+        kind: 'tool.started',
+        payload: {
+          toolCallId: 'call_p1',
+          name: 'run_shell_command',
+          args: '{"command":"rm -rf /tmp/old-build"}',
+          idleMs: null,
+        },
+      },
+      {
+        afterMs: 400,
+        kind: 'tool.finished',
+        payload: {
+          toolCallId: 'call_p1',
+          name: 'run_shell_command',
+          ok: true,
+          output: '(命令退出码 0)\n',
+        },
+      },
       ...streamBody('清理完成。'),
-      { afterMs: 300, kind: 'turn.finished', payload: {
-        turnId: 'mock-turn-1', text: '清理完成。', truncated: false },
+      {
+        afterMs: 300,
+        kind: 'turn.finished',
+        payload: {
+          turnId: 'mock-turn-1',
+          text: '清理完成。',
+          truncated: false,
+        },
       },
     ],
   },
   onDeny: {
     steps: [
-      { afterMs: 200, kind: 'tool.finished', payload: {
-        toolCallId: 'call_p1',
-        name: 'run_shell_command',
-        ok: false,
-        output: '操作未执行: 用户拒绝了该操作',
-      }},
+      {
+        afterMs: 200,
+        kind: 'tool.finished',
+        payload: {
+          toolCallId: 'call_p1',
+          name: 'run_shell_command',
+          ok: false,
+          output: '操作未执行: 用户拒绝了该操作',
+        },
+      },
       ...streamBody('好的，我不执行这条命令。需要我做别的吗？'),
-      { afterMs: 300, kind: 'turn.finished', payload: {
-        turnId: 'mock-turn-1', text: '已取消。', truncated: false },
+      {
+        afterMs: 300,
+        kind: 'turn.finished',
+        payload: {
+          turnId: 'mock-turn-1',
+          text: '已取消。',
+          truncated: false,
+        },
       },
     ],
   },
-}
+};
 
 // ---------- 场景四：高危命令（红色警告） ----------
 
@@ -194,24 +230,44 @@ const dangerScenario: Scenario = {
   ],
   onAllow: {
     steps: [
-      { afterMs: 200, kind: 'notice', payload: {
-        text: '这只是一次演示：真实的 HaloAgent 不会真的执行这条命令。',
-        level: 'warn',
-      }},
-      { afterMs: 200, kind: 'turn.finished', payload: {
-        turnId: 'mock-turn-1', text: '', truncated: false },
+      {
+        afterMs: 200,
+        kind: 'notice',
+        payload: {
+          text: '这只是一次演示：真实的 HaloAgent 不会真的执行这条命令。',
+          level: 'warn',
+        },
+      },
+      {
+        afterMs: 200,
+        kind: 'turn.finished',
+        payload: {
+          turnId: 'mock-turn-1',
+          text: '',
+          truncated: false,
+        },
       },
     ],
   },
   onDeny: {
     steps: [
-      { afterMs: 200, kind: 'notice', payload: { text: '已拒绝，这是正确的选择。', level: 'info' } },
-      { afterMs: 200, kind: 'turn.finished', payload: {
-        turnId: 'mock-turn-1', text: '', truncated: false },
+      {
+        afterMs: 200,
+        kind: 'notice',
+        payload: { text: '已拒绝，这是正确的选择。', level: 'info' },
+      },
+      {
+        afterMs: 200,
+        kind: 'turn.finished',
+        payload: {
+          turnId: 'mock-turn-1',
+          text: '',
+          truncated: false,
+        },
       },
     ],
   },
-}
+};
 
 // ---------- 场景五：轮次预算用尽 ----------
 
@@ -235,30 +291,36 @@ const roundsScenario: Scenario = {
     steps: [
       { afterMs: 200, kind: 'round.started', payload: { used: 1, limit: 200 } },
       ...streamBody('继续处理…'),
-      { afterMs: 300, kind: 'turn.finished', payload: {
-        turnId: 'mock-turn-1', text: '完成。', truncated: false },
+      {
+        afterMs: 300,
+        kind: 'turn.finished',
+        payload: {
+          turnId: 'mock-turn-1',
+          text: '完成。',
+          truncated: false,
+        },
       },
     ],
   },
-}
+};
 
 // ---------- 场景选择 ----------
 
 export function getScenario(userText: string): Scenario {
-  const t = userText.toLowerCase()
+  const t = userText.toLowerCase();
 
   // 用关键字触发不同场景，便于手动验证
   if (t.includes('危险') || t.includes('danger') || t.includes('rm -rf /')) {
-    return dangerScenario
+    return dangerScenario;
   }
   if (t.includes('权限') || t.includes('permission') || t.includes('归档')) {
-    return permissionScenario
+    return permissionScenario;
   }
   if (t.includes('轮次') || t.includes('rounds')) {
-    return roundsScenario
+    return roundsScenario;
   }
   if (t.includes('工具') || t.includes('tool') || t.includes('zip')) {
-    return toolScenario
+    return toolScenario;
   }
-  return simpleScenario
+  return simpleScenario;
 }

@@ -1,4 +1,4 @@
-import type { StateSnapshot } from '@/contract/agent'
+import type { StateSnapshot } from '@/contract/agent';
 
 /**
  * 空快照（Mock 的初始状态）。
@@ -47,5 +47,5 @@ export function buildEmptySnapshot(): StateSnapshot {
     messages: [],
     notes: [],
     update: { available: false, latestVersion: null },
-  }
+  };
 }

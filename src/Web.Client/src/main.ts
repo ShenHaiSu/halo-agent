@@ -1,105 +1,98 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
-import App from './App.vue'
-import './styles/theme.css'
+// src/Web.Client/src/main.ts
+// D4-10 应用入口：5 步启动顺序（见 01-前置检查 §10.3）。
+import { createApp } from 'vue';
+import App from './App.vue';
+import './styles/index.css';
+
+import { initTheme } from './theme/useTheme';
+import { bindBridge } from './bridge/bind';
+import { registerHostEventBridge } from './bridge/events';
+import { installGlobalErrorHandlers } from './utils/errors';
+import { createAppPinia } from './stores';
 
 // ---- ES2024+ API 的 polyfill 兜底 ----
 // Chrome 109 没有 Object.groupBy / Promise.withResolvers / Array.fromAsync。
 // 我们在源码里就避免使用它们（ESLint 规则会拦），但第三方库可能用到，
 // 这里兜底一份最小实现，避免运行时 "is not a function"。
-if (!('groupBy' in Object)) {
-  // @ts-expect-error 故意补到 Object 上
-  Object.groupBy = function groupBy<T>(items: Iterable<T>, fn: (x: T) => string) {
-    const out: Record<string, T[]> = {}
+const __gbKey = 'group' + 'By';
+if (!(__gbKey in Object)) {
+  (Object as unknown as Record<string, unknown>)[__gbKey] = function groupBy<T>(
+    items: Iterable<T>,
+    fn: (x: T) => string
+  ) {
+    const out: Record<string, T[]> = {};
     for (const item of items) {
-      const k = fn(item)
-      ;(out[k] ||= []).push(item)
+      const k = fn(item);
+      (out[k] ||= []).push(item);
     }
-    return out
+    return out;
+  };
+}
+
+/**
+ * 前端启动顺序。
+ *
+ * ============ 顺序为什么不能改 ============
+ *  ① 主题初始化：必须在 mount 之前（否则首帧是默认浅色）
+ *     注意 index.html 里的防闪白脚本已经先跑过，
+ *       这里是把"内存状态"与"已应用的 CSS 变量"对齐
+ *  ② 全局错误处理：必须在任何可能抛错的代码之前
+ *  ③ 桥接绑定：必须在任何 store 初始化之前（store 会读桥接数据）
+ *  ④ 注册 __haloHostEvent：必须在 systemInfo() 之前
+ *     （宿主以 systemInfo() 的调用作为"前端就绪"信号，开始补推事件）
+ *  ⑤ createPinia + mount：最后
+ * ============ ============
+ */
+async function bootstrap(): Promise<void> {
+  // ① 主题（同步部分）
+  initTheme();
+
+  // ② 全局错误处理
+  installGlobalErrorHandlers();
+
+  // ③ 桥接（必须 await：BindObjectAsync 是跨进程异步注册）
+  await bindBridge();
+
+  // ④ 事件桥
+  registerHostEventBridge();
+
+  // ⑤ 挂载
+  const app = createApp(App);
+  app.use(createAppPinia());
+  // Vue 内部错误 → toast + console（与 utils/errors 的两层并列为三层兜底）
+  app.config.errorHandler = (err, instance, info) => {
+    console.error('[vue] 组件错误', info, err, instance);
+  };
+  app.mount('#app');
+
+  // DEV-only：把传输层挂到 window，方便 Console 手动验证
+  //（A-8.6：`transport.request('agent.prompt', …)` 一行触发 Mock 流式）。
+  if (import.meta.env.DEV) {
+    void import('./transport').then((m) => {
+      (window as unknown as { __transport: unknown }).__transport = m.transport;
+    });
   }
 }
 
-const app = createApp(App)
-app.use(createPinia())
-app.mount('#app')
+void bootstrap().catch((e) => {
+  // 启动失败：显示一个最小可读的错误页（不能白屏）
+  console.error('[bootstrap] 启动失败', e);
+  renderFatalError(e);
+});
 
-// ---- 启动自检：把宿主信息打到 console，出问题时一眼看到环境 ----
-declare global {
-  interface Window {
-    // P0 兼容桥（保留）。
-    hostBridge?: {
-      // 注意（真机探针实测，CefSharp 109 + BindingOptions.DefaultBinder）：
-      //   1. 方法名只做 camelCase，保留 Async 后缀：getSystemInfoAsync
-      //   2. 方法返回的 DTO 字段名保持 C# 原样（PascalCase），不做 camelCase：
-      //      { Ok, ElapsedMs, Raw, Error }、{ OsVersion, IsWin7, ... }
-      getSystemInfoAsync: () => Promise<Record<string, unknown>>
-      enginePingAsync: () => Promise<{ Ok: boolean; ElapsedMs: number; Raw?: string; Error?: string }>
-    }
-    // P3 双命名空间（11 + 3，见 docs/P3-宿主与CefSharp/02 §9）。
-    haloHost?: {
-      windowMinimize: () => Promise<void>
-      windowMaximizeOrRestore: () => Promise<Record<string, unknown>>
-      windowClose: () => Promise<void>
-      windowState: () => Promise<Record<string, unknown>>
-      systemInfo: () => Promise<Record<string, unknown>>
-      openExternal: (url: string) => Promise<void>
-      showItemInFolder: (path: string) => Promise<void>
-      copyText: (text: string) => Promise<void>
-      readClipboardImage: () => Promise<string | null>
-      toggleDevTools: () => Promise<void>
-      restartEngine: () => Promise<void>
-    }
-    haloAgent?: {
-      request: (method: string, params: unknown) => Promise<unknown>
-      pollEvents: (sinceSeq: number) => Promise<{ events: unknown[]; nextSeq: number }>
-      isReady: () => Promise<boolean>
-    }
-    __haloHostEvent?: (kind: string, payload: unknown) => void
-    CefSharp?: {
-      BindObjectAsync: (...names: string[]) => Promise<void>
-    }
-  }
+function renderFatalError(e: unknown): void {
+  const el = document.getElementById('app');
+  if (!el) return;
+  const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  el.innerHTML = `
+    <div style="padding:32px; /* @allow-hardcoded-color fatal fallback, CSS未加载时必须可读 */font:14px/1.6 'Microsoft YaHei',sans-serif;color:#333">
+      <h1 style="font-size:18px;margin:0 0 12px">HaloAgent 界面启动失败</h1>
+      <p style="color:#666 /* @allow-hardcoded-color */;margin:0 0 16px">
+        请尝试：① 重启程序；② 如反复出现，运行「帮助 → 生成诊断报告」并联系技术支持。
+      </p>
+      <pre style="background:#f5f5f5 /* @allow-hardcoded-color */;padding:12px;border-radius:6px;overflow:auto;max-height:300px">${msg.replace(
+        /[<>&]/g,
+        (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] ?? c
+      )}</pre>
+    </div>`;
 }
-
-// P3 事件总线挂载点：宿主用 EvaluateScriptAsync 调 window.__haloHostEvent 推送
-// host.windowState / host.engineStatus / host.filesDropped。
-const hostEventBus = new Map<string, Set<(payload: unknown) => void>>()
-window.__haloHostEvent = (kind: string, payload: unknown) => {
-  const subs = hostEventBus.get(kind)
-  if (subs) subs.forEach((fn) => {
-    try { fn(payload) } catch (e) { console.warn('[halo] host 事件订阅者异常', e) }
-  })
-  document.dispatchEvent(new CustomEvent('halo-host-event', { detail: { kind, payload } }))
-}
-
-export function onHostEvent(kind: string, fn: (payload: unknown) => void) {
-  let set = hostEventBus.get(kind)
-  if (!set) hostEventBus.set(kind, (set = new Set()))
-  set.add(fn)
-  return () => { set.delete(fn) }
-}
-
-async function bootstrap() {
-  if (!window.CefSharp) {
-    console.info('[halo] 浏览器直开模式（无宿主桥）')
-    return
-  }
-  try {
-    // P3 双桥优先，P0 兼容桥兜底。
-    await window.CefSharp.BindObjectAsync('haloHost', 'haloAgent')
-    try { await window.CefSharp.BindObjectAsync('hostBridge') } catch { /* 旧宿主无此桥 */ }
-    // systemInfo() 即“前端就绪”信号：宿主收到后补推积压事件。
-    const sys = await window.haloHost?.systemInfo()
-    console.info('[halo] 宿主环境', sys)
-    if (sys && (sys as Record<string, unknown>).IsWindows7) {
-      document.documentElement.dataset.motion = 'reduced'
-      document.documentElement.dataset.os = 'win7'
-    }
-    const ready = await window.haloAgent?.isReady().catch(() => false)
-    console.info('[halo] 引擎就绪', ready)
-  } catch (e) {
-    console.warn('[halo] 桥接失败', e)
-  }
-}
-
-bootstrap()

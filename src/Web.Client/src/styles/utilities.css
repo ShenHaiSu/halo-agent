@@ -1,0 +1,75 @@
+/* src/Web.Client/src/styles/utilities.css */
+/**
+ * 少量自定义 utility。
+ *
+ * ============ 为什么只有这几个 ============
+ *  Tailwind 已经覆盖 99% 的需求。自定义 utility 越多，
+ *  样式越不可控（没人记得有哪些）。这些都是 Tailwind 无法表达的：
+ * ============ ============
+ */
+
+/* ① 单行截断（Tailwind 的 line-clamp 需要插件，这里手写最常用的一行版） */
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0; /* ★ flex 子项必须有它才能截断 */
+}
+
+/* ② 多行截断（用 -webkit- 前缀版，Chrome 109 支持） */
+.u-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  /* 修复多行截断在 flex 容器里的高度问题 */
+  overflow-wrap: anywhere;
+}
+
+.u-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* ③ 滚动容器（带 overscroll 抑制） */
+.u-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* ★ 关键：flex 子项里的滚动容器必须有 min-height: 0 */
+  min-height: 0;
+}
+
+.u-scroll-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+
+/* ④ 全屏绝对填充（用于 overlay / 骨架层） */
+.u-fill {
+  position: absolute;
+  inset: 0;
+}
+
+/* ⑤ 视觉上隐藏但可被读屏与聚焦（无障碍必备） */
+.u-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* 辅助：主题切换时避免过渡（见 theme/apply.ts 的使用） */
+.u-no-transition,
+.u-no-transition * {
+  transition: none !important;
+}

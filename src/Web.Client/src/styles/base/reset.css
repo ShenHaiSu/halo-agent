@@ -1,0 +1,125 @@
+/* src/Web.Client/src/styles/base/reset.css */
+/**
+ * 最小 reset。
+ *
+ * ============ 为什么不用 normalize.css ============
+ *  ① normalize 有 400+ 行，大部分与 Tailwind Preflight 重复
+ *  ② Tailwind Preflight 已处理 box-sizing / margin / 表单元素基础样式
+ *  ③ 我们只需要补 Preflight 没做的事
+ * ============ Tailwind Preflight 已经做了的（不要再做） ============
+ *  ✓ *,::before,::after { box-sizing: border-box }
+ *  ✓ 所有元素 margin: 0 / padding: 0
+ *  ✓ h1-h6 { font-size: inherit; font-weight: inherit }
+ *  ✓ ul,ol { list-style: none }
+ *  ✓ img,svg,video { display: block; max-width: 100% }
+ *  ✓ button,input,select,textarea { font: inherit; color: inherit }
+ *  ✓ button { background: transparent }
+ * ============ ============
+ */
+
+html {
+  /* 防止 iOS/Win 上横屏时的字体自动放大（虽然桌面端影响小） */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+
+  /* 全局字体平滑（Win7 上 ClearType 仍生效，这里只是让 WebKit 用灰度抗锯齿） */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* ★ 关键：让 root 的字体基准正确 */
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  color: hsl(var(--fg));
+  background-color: hsl(var(--bg));
+
+  /* 主题切换时不要有过渡（否则切换瞬间会看到渐变过程） */
+  transition: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  /* ★ Win7 上 overflow: hidden 会让滚动条消失，我们要显式控制 */
+  overflow: hidden;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+  /* ★ 关键：flex 根容器，让子元素能正确填充 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 表单元素：去掉浏览器默认外观，但保留可访问性 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  /* 注意：不要写 outline: none（焦点样式在 focus.css 里统一处理） */
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+textarea {
+  background: none;
+  border: none;
+}
+
+/* 图片与 SVG 默认 block，避免基线间隙 */
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+/* 表格 */
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+/* 代码 */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-size: 1em;
+}
+
+/* 拖动时禁止选中 */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 窗口标题栏拖拽区（配合宿主 NCHITTEST） */
+.app-region-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.app-region-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}

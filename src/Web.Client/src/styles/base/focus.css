@@ -1,0 +1,38 @@
+/* src/Web.Client/src/styles/base/focus.css */
+/**
+ * 全局焦点样式。
+ *
+ * ============ 为什么必须自定义 ============
+ *  ① Chrome 的默认焦点环（:focus-visible）在 Win7 上可能不可见
+ *  ② 我们的可聚焦元素多（按钮、列表项、消息、输入框），需要统一
+ *  ③ 键盘用户必须能看清当前焦点在哪（无障碍底线）
+ * ============ ============
+ */
+
+/* 移除默认 outline，用 box-shadow 代替（可跟随圆角） */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: inherit;
+}
+
+/* 鼠标点击不显示焦点环（Chrome 的 :focus-visible 已处理，这里只兜底） */
+button:focus:not(:focus-visible),
+[role='button']:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
+/* 输入框：用边框色变化代替外环（更贴近系统原生风格） */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable='true']:focus-visible {
+  box-shadow: none;
+  border-color: hsl(var(--accent));
+  outline: 2px solid hsl(var(--accent) / 0.25);
+  outline-offset: -1px;
+}

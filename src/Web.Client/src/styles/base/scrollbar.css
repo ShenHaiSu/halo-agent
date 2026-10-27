@@ -1,0 +1,54 @@
+/* src/Web.Client/src/styles/base/scrollbar.css */
+/**
+ * 自定义滚动条。
+ *
+ * ============ 为什么用 ::-webkit-scrollbar ============
+ *  `scrollbar-width` / `scrollbar-color` 是 Chrome 121+，
+ *  109 上不支持（我们的检查脚本会拦）。
+ *  `::-webkit-scrollbar` 是唯一可用方案，且在 Chrome 109 上完整支持。
+ * ============ Win7 注意 ============
+ *  Win7 的 Aero 主题下，非客户端滚动条不存在，
+ *  ::-webkit-scrollbar 会覆盖默认样式，表现一致。
+ * ============ ============
+ * 注意：本文件禁用 scrollbar-width / scrollbar-color（Chrome 109 不支持）。
+ */
+
+/* 全局：细滚动条，hover 时加宽视觉提示 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--fg-subtle) / 0.35);
+  border-radius: var(--radius-full);
+  /* 用 border + background-clip 做出"内缩"效果 */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--fg-subtle) / 0.6);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: hsl(var(--fg-muted) / 0.7);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 需要"完全无滚动条但仍可滚"的容器 */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* 需要"始终显示滚动条"的容器（长列表） */
+.scrollbar-always::-webkit-scrollbar {
+  display: block;
+}

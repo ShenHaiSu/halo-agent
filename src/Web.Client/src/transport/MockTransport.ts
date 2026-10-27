@@ -1,8 +1,8 @@
-import type { HaloMethod, HaloParams, HaloResult, EventFrame } from '@/contract/agent'
-import type { StateSnapshot } from '@/contract/agent'
-import { TransportError, type ConnState, type PollResult, type Transport } from './types'
-import { getScenario, type Scenario } from './mock/scenarios'
-import { buildEmptySnapshot } from './mock/snapshot'
+import type { HaloMethod, HaloParams, HaloResult, EventFrame } from '@/contract/agent';
+import type { StateSnapshot } from '@/contract/agent';
+import { TransportError, type ConnState, type PollResult, type Transport } from './types';
+import { getScenario, type Scenario } from './mock/scenarios';
+import { buildEmptySnapshot } from './mock/snapshot';
 
 /**
  * Mock 传输：模拟引擎行为，用于前端独立开发。
@@ -15,99 +15,100 @@ import { buildEmptySnapshot } from './mock/snapshot'
  * 场景由 fixtures/turn-*.ndjson 定义（每行一个 EventFrame JSON）。
  */
 export class MockTransport implements Transport {
-  readonly kind = 'mock' as const
+  readonly kind = 'mock' as const;
 
-  private snapshot: StateSnapshot = buildEmptySnapshot()
-  private frames: EventFrame[] = []
-  private seq = 0
-  private connState: ConnState = { kind: 'ready', version: 'mock-0.1.0' }
-  private listeners = new Set<(s: ConnState) => void>()
-  private disposed = false
-  private replayTimers: number[] = []
-  private pendingAskResolve: ((allow: boolean, always: boolean) => void) | null = null
+  private snapshot: StateSnapshot = buildEmptySnapshot();
+  private frames: EventFrame[] = [];
+  private seq = 0;
+  private connState: ConnState = { kind: 'ready', version: 'mock-0.1.0' };
+  private listeners = new Set<(s: ConnState) => void>();
+  private disposed = false;
+  private replayTimers: number[] = [];
+  private pendingAskResolve: ((allow: boolean, always: boolean) => void) | null = null;
 
   constructor(private readonly opts: { speed?: number } = {}) {}
 
-  async invoke<M extends HaloMethod>(
-    method: M,
-    params?: HaloParams<M>,
-  ): Promise<HaloResult<M>> {
-    if (this.disposed) throw new TransportError('disposed', '传输已销毁')
-    await delay(30)   // 模拟一点网络延迟，让 loading 状态可见
+  async invoke<M extends HaloMethod>(method: M, params?: HaloParams<M>): Promise<HaloResult<M>> {
+    if (this.disposed) throw new TransportError('disposed', '传输已销毁');
+    await delay(30); // 模拟一点网络延迟，让 loading 状态可见
 
     switch (method) {
       case 'system.ping':
-        return { pong: true, version: 'mock', protocol: 1, pid: 9999 } as HaloResult<M>
+        return { pong: true, version: 'mock', protocol: 1, pid: 9999 } as HaloResult<M>;
 
       case 'state.snapshot':
       case 'agent.resync':
-        return this.snapshot as unknown as HaloResult<M>
+        return this.snapshot as unknown as HaloResult<M>;
 
       case 'agent.prompt': {
-        const p = params as unknown as { text: string }
-        this.startReplay(p.text)
-        return { accepted: true, turnId: 'mock-turn-1' } as unknown as HaloResult<M>
+        const p = params as unknown as { text: string };
+        this.startReplay(p.text);
+        return { accepted: true, turnId: 'mock-turn-1' } as unknown as HaloResult<M>;
       }
 
       case 'agent.answer': {
-        const p = params as unknown as { askId: string; allow: boolean; always: boolean }
+        const p = params as unknown as { askId: string; allow: boolean; always: boolean };
         if (!this.pendingAskResolve) {
-          return { accepted: false, reason: 'no-pending' } as unknown as HaloResult<M>
+          return { accepted: false, reason: 'no-pending' } as unknown as HaloResult<M>;
         }
-        const resolve = this.pendingAskResolve
-        this.pendingAskResolve = null
-        resolve(p.allow, p.always)
-        return { accepted: true, reason: null } as unknown as HaloResult<M>
+        const resolve = this.pendingAskResolve;
+        this.pendingAskResolve = null;
+        resolve(p.allow, p.always);
+        return { accepted: true, reason: null } as unknown as HaloResult<M>;
       }
 
       case 'agent.cancel':
-        this.stopReplay()
-        return { cancelled: true } as unknown as HaloResult<M>
+        this.stopReplay();
+        return { cancelled: true } as unknown as HaloResult<M>;
 
       case 'state.setMode': {
-        const p = params as unknown as { mode: NonNullable<StateSnapshot['agent']>['mode'] }
+        const p = params as unknown as { mode: NonNullable<StateSnapshot['agent']>['mode'] };
         const labels: Record<string, string> = {
           ask: '询问',
           acceptEdits: '编辑放行',
           bypassPermissions: '全自动',
           yolo: '超级',
-        }
-        const mode = p.mode ?? 'ask'
+        };
+        const mode = p.mode ?? 'ask';
         if (this.snapshot.agent) {
-          this.snapshot.agent.mode = mode
-          this.snapshot.agent.modeLabel = labels[mode] ?? '询问'
+          this.snapshot.agent.mode = mode;
+          this.snapshot.agent.modeLabel = labels[mode] ?? '询问';
         }
-        return { mode, label: this.snapshot.agent?.modeLabel ?? '询问' } as unknown as HaloResult<M>
+        return {
+          mode,
+          label: this.snapshot.agent?.modeLabel ?? '询问',
+        } as unknown as HaloResult<M>;
       }
 
       case 'session.list':
-        return { items: MOCK_SESSIONS } as unknown as HaloResult<M>
+        return { items: MOCK_SESSIONS } as unknown as HaloResult<M>;
 
       case 'tool.list':
-        return { items: MOCK_TOOLS } as unknown as HaloResult<M>
+        return { items: MOCK_TOOLS } as unknown as HaloResult<M>;
 
       default:
         // 其余方法返回最小可用 stub，避免前端开发被阻断
-        return {} as unknown as HaloResult<M>
+        return {} as unknown as HaloResult<M>;
     }
   }
 
   async pollEvents(sinceSeq: number, max = 500): Promise<PollResult> {
-    const frames = this.frames.filter((f) => f.seq > sinceSeq).slice(0, max)
-    const nextSeq = frames.length > 0 ? frames[frames.length - 1].seq + 1 : sinceSeq
-    return { frames, nextSeq, hasGap: false, droppedEstimate: 0 }
+    const frames = this.frames.filter((f) => f.seq > sinceSeq).slice(0, max);
+    const last = frames.length > 0 ? frames[frames.length - 1]!.seq : sinceSeq - 1;
+    const nextSeq = last + 1;
+    return { frames, nextSeq, hasGap: false, droppedEstimate: 0 };
   }
 
   onConnectionChange(cb: (s: ConnState) => void): () => void {
-    this.listeners.add(cb)
-    cb(this.connState)
-    return () => this.listeners.delete(cb)
+    this.listeners.add(cb);
+    cb(this.connState);
+    return () => this.listeners.delete(cb);
   }
 
   // ---------------- 回放 ----------------
 
   private startReplay(userText: string) {
-    this.stopReplay()
+    this.stopReplay();
 
     // 把用户消息写进快照
     if (this.snapshot.messages) {
@@ -116,52 +117,52 @@ export class MockTransport implements Transport {
         role: 'user',
         text: userText,
         tsMs: Date.now(),
-      })
+      });
     }
-    if (this.snapshot.agent) this.snapshot.agent.busy = true
-    this.pushEvent('turn.started', { turnId: 'mock-turn-1' })
-    this.pushEvent('state.busyChanged', { busy: true, queueLength: 0 })
+    if (this.snapshot.agent) this.snapshot.agent.busy = true;
+    this.pushEvent('turn.started', { turnId: 'mock-turn-1' });
+    this.pushEvent('state.busyChanged', { busy: true, queueLength: 0 });
 
-    const scenario = getScenario(userText)
-    this.scheduleScenario(scenario)
+    const scenario = getScenario(userText);
+    this.scheduleScenario(scenario);
   }
 
   private scheduleScenario(s: Scenario) {
-    let acc = 0
-    const speed = this.opts.speed ?? 1
+    let acc = 0;
+    const speed = this.opts.speed ?? 1;
     for (const step of s.steps) {
-      acc += step.afterMs / speed
+      acc += step.afterMs / speed;
       const timer = window.setTimeout(() => {
-        if (this.disposed) return
-        this.pushEvent(step.kind, step.payload)
+        if (this.disposed) return;
+        this.pushEvent(step.kind, step.payload);
 
         if (step.kind === 'ask.permission') {
           // 暂停回放，等用户回答
           this.pendingAskResolve = (allow) => {
-            this.snapshot.pendingAsk = null
+            this.snapshot.pendingAsk = null;
             if (allow) {
-              this.pushEvent('notice', { text: '✔ 已允许', level: 'info' })
-              this.scheduleScenario(s.onAllow ?? { steps: [] })
+              this.pushEvent('notice', { text: '已允许', level: 'info' });
+              this.scheduleScenario(s.onAllow ?? { steps: [] });
             } else {
-              this.pushEvent('notice', { text: '✘ 已拒绝', level: 'warn' })
-              this.scheduleScenario(s.onDeny ?? { steps: [] })
+              this.pushEvent('notice', { text: '已拒绝', level: 'warn' });
+              this.scheduleScenario(s.onDeny ?? { steps: [] });
             }
-          }
+          };
         }
 
         if (step.kind === 'turn.finished') {
-          if (this.snapshot.agent) this.snapshot.agent.busy = false
-          this.pushEvent('state.busyChanged', { busy: false, queueLength: 0 })
+          if (this.snapshot.agent) this.snapshot.agent.busy = false;
+          this.pushEvent('state.busyChanged', { busy: false, queueLength: 0 });
         }
-      }, acc)
-      this.replayTimers.push(timer)
+      }, acc);
+      this.replayTimers.push(timer);
     }
   }
 
   private stopReplay() {
-    for (const t of this.replayTimers) clearTimeout(t)
-    this.replayTimers = []
-    this.pendingAskResolve = null
+    for (const t of this.replayTimers) clearTimeout(t);
+    this.replayTimers = [];
+    this.pendingAskResolve = null;
   }
 
   private pushEvent(kind: string, payload: unknown) {
@@ -170,53 +171,55 @@ export class MockTransport implements Transport {
       seq: this.seq++,
       k: kind,
       p: payload as Record<string, unknown>,
-    }
-    this.frames.push(frame)
+    };
+    this.frames.push(frame);
 
     // 同步更新快照（Mock 也需要"状态一致"）
-    this.applyToSnapshot(kind, payload)
+    this.applyToSnapshot(kind, payload);
   }
 
   private applyToSnapshot(kind: string, payload: unknown) {
-    const p = payload as Record<string, unknown>
+    const p = payload as Record<string, unknown>;
     switch (kind) {
       case 'turn.finished':
-        if (this.snapshot.agent) this.snapshot.agent.busy = false
-        break
+        if (this.snapshot.agent) this.snapshot.agent.busy = false;
+        break;
       case 'ask.permission':
       case 'ask.rounds':
-        this.snapshot.pendingAsk = p as unknown as StateSnapshot['pendingAsk']
-        break
+        this.snapshot.pendingAsk = p as unknown as StateSnapshot['pendingAsk'];
+        break;
       case 'usage':
         if (this.snapshot.usage) {
-          this.snapshot.usage.inputTotal = (this.snapshot.usage.inputTotal ?? 0) + Number(p.prompt ?? 0)
-          this.snapshot.usage.outputTotal = (this.snapshot.usage.outputTotal ?? 0) + Number(p.completion ?? 0)
-          this.snapshot.usage.lastPromptTokens = Number(p.prompt ?? 0)
+          this.snapshot.usage.inputTotal =
+            (this.snapshot.usage.inputTotal ?? 0) + Number(p.prompt ?? 0);
+          this.snapshot.usage.outputTotal =
+            (this.snapshot.usage.outputTotal ?? 0) + Number(p.completion ?? 0);
+          this.snapshot.usage.lastPromptTokens = Number(p.prompt ?? 0);
         }
-        break
+        break;
       case 'round.started':
         if (this.snapshot.agent) {
           this.snapshot.agent.round = {
             used: Number(p.used ?? 0),
             limit: Number(p.limit ?? 0),
-          }
+          };
         }
-        break
+        break;
       case 'state.personaChanged':
-        if (this.snapshot.agent) this.snapshot.agent.persona = String(p.name ?? '')
-        break
+        if (this.snapshot.agent) this.snapshot.agent.persona = String(p.name ?? '');
+        break;
     }
   }
 
   dispose(): void {
-    this.disposed = true
-    this.stopReplay()
-    this.listeners.clear()
+    this.disposed = true;
+    this.stopReplay();
+    this.listeners.clear();
   }
 }
 
 function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 const MOCK_SESSIONS = [
@@ -240,7 +243,7 @@ const MOCK_SESSIONS = [
     userMsgs: 8,
     assistantMsgs: 9,
   },
-]
+];
 
 const MOCK_TOOLS = [
   { name: 'list_directory', description: '列出目录下的条目', source: 'builtin' },
@@ -253,4 +256,4 @@ const MOCK_TOOLS = [
   { name: 'memory_write', description: '写入长期记忆', source: 'builtin' },
   { name: 'memory_read', description: '读取长期记忆', source: 'builtin' },
   { name: 'web_fetch', description: '抓取网页并转为文本', source: 'builtin' },
-]
+];

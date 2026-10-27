@@ -1,0 +1,41 @@
+/* src/Web.Client/src/styles/tokens/layout.css */
+:root {
+  /* ---- 标题栏（必须与 P3 的 ChromeForm.TitleBarHeight 一致） ---- */
+  --layout-titlebar-height: 40px;
+
+  /* ---- 三栏宽度 ---- */
+  --layout-sidebar-width: 260px;
+  --layout-sidebar-width-min: 200px;
+  --layout-sidebar-width-max: 480px;
+  --layout-detail-width: 380px;
+  --layout-detail-width-min: 280px;
+  --layout-detail-width-max: 640px;
+
+  /* ---- 内容区 ---- */
+  --layout-composer-min-height: 88px;
+  --layout-composer-max-height: 320px;
+  --layout-message-max-width: 820px;
+  --layout-content-max-width: 1200px;
+
+  /* ---- z-index（只有 7 档，不要新增） ---- */
+  --z-base: 0;
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-overlay: 1030;
+  --z-modal: 1040;
+  --z-popover: 1050;
+  --z-toast: 1060;
+  --z-tooltip: 1070;
+}
+
+/* ============================================================
+   窗口尺寸断点（容器查询用不到的地方用媒体查询）
+
+   注意：这些断点是"窗口宽度"，不是"内容区宽度"。
+   因为我们是单窗口桌面应用，窗口宽度就是最重要的断点。
+   ============================================================ */
+:root {
+  --bp-compact: 900px; /* 窄：自动折叠侧栏 */
+  --bp-narrow: 700px; /* 极窄：强制关闭右栏 */
+  --bp-wide: 1440px; /* 宽：可以同时开侧栏与右栏 */
+}

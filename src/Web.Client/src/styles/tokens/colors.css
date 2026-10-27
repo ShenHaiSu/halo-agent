@@ -1,0 +1,54 @@
+/* src/Web.Client/src/styles/tokens/colors.css */
+/**
+ * 颜色 token 的默认值（= light 主题）。
+ *
+ * ============ 为什么这里要与 theme/builtin/light.ts 重复 ============
+ *  ① CSS 在 JS 之前加载，必须有一份默认值，否则首帧无色
+ *  ② 如果只靠 JS 注入，用户会看到一帧"无样式"的白底黑字
+ *  ③ 这份值必须与 light.ts 完全一致，否则"首次启动"与"切回浅色"会有细微色差
+ *  ★ 验收项：check-token-parity 脚本会比对两处
+ * ============ 改值时两边都要改 ============
+ */
+:root {
+  /* 背景 */
+  --bg: 0 0% 100%;
+  --bg-subtle: 220 14% 98%;
+  --bg-muted: 220 14% 96%;
+  --bg-elevated: 0 0% 100%;
+  --bg-overlay: 220 20% 10% / 0.42;
+
+  /* 前景 */
+  --fg: 222 15% 16%;
+  --fg-muted: 220 9% 46%;
+  --fg-subtle: 220 8% 62%;
+  --fg-inverse: 0 0% 100%;
+
+  /* 边框 */
+  --border: 220 13% 90%;
+  --border-strong: 220 12% 78%;
+  --border-subtle: 220 14% 95%;
+
+  /* 强调色 */
+  --accent: 212 92% 48%;
+  --accent-hover: 212 92% 43%;
+  --accent-fg: 0 0% 100%;
+  --accent-subtle: 212 92% 96%;
+
+  /* 语义色 */
+  --success: 152 62% 38%;
+  --success-subtle: 152 60% 95%;
+  --warning: 35 92% 48%;
+  --warning-subtle: 35 92% 95%;
+  --danger: 0 72% 50%;
+  --danger-subtle: 0 72% 96%;
+  --info: 198 85% 44%;
+  --info-subtle: 198 85% 95%;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px hsl(220 20% 20% / 0.06);
+  --shadow-base: 0 1px 3px hsl(220 20% 20% / 0.1), 0 1px 2px hsl(220 20% 20% / 0.05);
+  --shadow-md: 0 4px 10px hsl(220 20% 20% / 0.1), 0 2px 4px hsl(220 20% 20% / 0.05);
+  --shadow-lg: 0 12px 28px hsl(220 20% 20% / 0.12), 0 4px 8px hsl(220 20% 20% / 0.06);
+  --shadow-xl: 0 24px 52px hsl(220 20% 20% / 0.16), 0 8px 16px hsl(220 20% 20% / 0.08);
+  --shadow-focus: 0 0 0 3px hsl(212 92% 48% / 0.3);
+}
