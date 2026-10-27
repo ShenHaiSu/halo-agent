@@ -1,0 +1,17 @@
+12:17:49.369 info: engine[0] 寮曟搸鍚姩 v0.0.1 pid=13940 mode=Pipe data=C:\Users\Administrator\.haloagent os=Microsoft Windows NT 10.0.19045.0
+=== HaloAgent 寮曟搸鐜璇婃柇 ===
+寮曟搸鐗堟湰      : 0.0.1
+鍗忚鐗堟湰      : 1
+杩涚▼ ID       : 13940
+鎿嶄綔绯荤粺      : Microsoft Windows NT 10.0.19045.0
+鏄?Win7       : False
+64 浣嶇郴缁?    : True
+64 浣嶈繘绋?    : False
+.NET 杩愯鏃?  : 6.0.36
+鏁版嵁鐩綍      : C:\Users\Administrator\.haloagent
+鏃ュ織鐩綍      : C:\Users\Administrator\.haloagent\logs
+杩愯妯″紡      : Pipe
+宸ヤ綔鐩綍      : E:\ProgramFiles\halo-agent\v2-develop
+澶勭悊鍣ㄦ暟      : 16
+绯荤粺鍐呭瓨(MB)  : 2047
+

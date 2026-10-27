@@ -1,0 +1,8 @@
+=== 构建机环境 ===
+日期: '+ (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '
+系统: '+ [System.Environment]::OSVersion.VersionString + '
+dotnet SDKs:
+'+ ((dotnet --list-sdks) -join "`n") + '
+node: '+ (node -v) + '
+pnpm: '+ (pnpm -v) + '
+git HEAD: '+ (git rev-parse HEAD) + '

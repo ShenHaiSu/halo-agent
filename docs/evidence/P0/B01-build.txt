@@ -1,0 +1,28 @@
+  ����ȷ��Ҫ��ԭ����Ŀ��
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Storage.Tests\Engine.Storage.Tests.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\tests\Contract.Tests\Contract.Tests.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Cli\Engine.Cli.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\Engine.Server.Tests.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\Engine.Core.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\Engine.Storage.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\Engine.Abstractions.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\Engine.Core.Tests.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\Engine.Server.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ��Ŀ E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\Host.Desktop.csproj ����ʹ�� CentralPackageVersionManagement������һ�� NuGet Ԥ�����ܡ�
+  ������Ŀ�������µģ��޷���ԭ��
+  Engine.Abstractions -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\bin\x86\Release\net6.0-windows\HaloAgent.Engine.Abstractions.dll
+  Engine.Storage -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\bin\x86\Release\net6.0-windows\HaloAgent.Engine.Storage.dll
+  Host.Desktop -> E:\ProgramFiles\halo-agent\v2-develop\src\Host.Desktop\bin\x86\Release\net6.0-windows\HaloAgent.dll
+  Contract.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Contract.Tests\bin\x86\Release\net6.0-windows\Contract.Tests.dll
+  Engine.Core -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\bin\x86\Release\net6.0-windows\HaloAgent.Engine.Core.dll
+  Engine.Storage.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Storage.Tests\bin\x86\Release\net6.0-windows\Engine.Storage.Tests.dll
+  Engine.Server -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\bin\x86\Release\net6.0-windows\HaloAgent.Engine.dll
+  Engine.Core.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Core.Tests\bin\x86\Release\net6.0-windows\Engine.Core.Tests.dll
+  Engine.Cli -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Cli\bin\x86\Release\net6.0-windows\HaloAgent.Cli.dll
+  Engine.Server.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\bin\x86\Release\net6.0-windows\Engine.Server.Tests.dll
+
+�ѳɹ����ɡ�
+    0 ������
+    0 ������
+
+����ʱ�� 00:00:01.76

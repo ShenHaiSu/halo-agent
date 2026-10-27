@@ -1,0 +1,2 @@
+   > CefSharp.Common.NETCore              109.1.110
+   > CefSharp.WinForms.NETCore            109.1.110

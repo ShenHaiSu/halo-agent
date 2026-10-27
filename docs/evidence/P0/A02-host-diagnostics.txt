@@ -1,0 +1,19 @@
+=== HaloAgent 桌面宿主环境 ===
+应用版本      : 0.0.1.0
+进程 ID       : 21972
+操作系统      : Microsoft Windows NT 10.0.19045.0
+OS 内核       : 10.0.19045.0
+是 Win7       : False
+64 位系统     : True
+64 位进程     : False
+运行时        : 6.0.36
+CEF 版本      : r109.1.11+g6d4fdb2+chromium-109.0.5414.87
+Chromium 版本 : 109.0.5414.87
+基础目录      : E:\ProgramFiles\halo-agent\v2-develop\publish\win-x86\
+数据目录      : C:\Users\Administrator\.haloagent
+日志文件      : C:\Users\Administrator\AppData\Local\HaloAgent\logs\desktop-20261027.log
+DPI 缩放      : 96x96 (1x)
+屏幕数        : 1
+  - \\.\DISPLAY1 {X=0,Y=0,Width=1920,Height=1080} 主屏=True
+wwwroot 存在  : True
+

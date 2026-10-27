@@ -1,0 +1,17 @@
+  姝ｅ湪纭畾瑕佽繕鍘熺殑椤圭洰鈥?
+  椤圭洰 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\Engine.Server.csproj 姝ｅ湪浣跨敤 CentralPackageVersionManagement锛岃繖鏄竴涓?NuGet 棰勮鍔熻兘銆?
+  椤圭洰 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\Engine.Storage.csproj 姝ｅ湪浣跨敤 CentralPackageVersionManagement锛岃繖鏄竴涓?NuGet 棰勮鍔熻兘銆?
+  椤圭洰 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\Engine.Abstractions.csproj 姝ｅ湪浣跨敤 CentralPackageVersionManagement锛岃繖鏄竴涓?NuGet 棰勮鍔熻兘銆?
+  椤圭洰 E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\Engine.Server.Tests.csproj 姝ｅ湪浣跨敤 CentralPackageVersionManagement锛岃繖鏄竴涓?NuGet 棰勮鍔熻兘銆?
+  椤圭洰 E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\Engine.Core.csproj 姝ｅ湪浣跨敤 CentralPackageVersionManagement锛岃繖鏄竴涓?NuGet 棰勮鍔熻兘銆?
+  鎵€鏈夐」鐩潎鏄渶鏂扮殑锛屾棤娉曡繕鍘熴€?
+  Engine.Abstractions -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Abstractions\bin\Release\net6.0-windows\HaloAgent.Engine.Abstractions.dll
+  Engine.Storage -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Storage\bin\Release\net6.0-windows\HaloAgent.Engine.Storage.dll
+  Engine.Core -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Core\bin\Release\net6.0-windows\HaloAgent.Engine.Core.dll
+  Engine.Server -> E:\ProgramFiles\halo-agent\v2-develop\src\Engine.Server\bin\Release\net6.0-windows\HaloAgent.Engine.dll
+  Engine.Server.Tests -> E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\bin\Release\net6.0-windows\Engine.Server.Tests.dll
+E:\ProgramFiles\halo-agent\v2-develop\tests\Engine.Server.Tests\bin\Release\net6.0-windows\Engine.Server.Tests.dll (.NETCoreApp,Version=v6.0)鐨勬祴璇曡繍琛?
+姝ｅ湪鍚姩娴嬭瘯鎵ц锛岃绋嶅€?..
+鎬诲叡 1 涓祴璇曟枃浠朵笌鎸囧畾妯″紡鐩稿尮閰嶃€?
+
+宸查€氳繃! - 澶辫触:     0锛岄€氳繃:     3锛屽凡璺宠繃:     0锛屾€昏:     3锛屾寔缁椂闂? 252 ms - Engine.Server.Tests.dll (net6.0)
