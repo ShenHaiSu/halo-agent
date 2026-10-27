@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- WinForms + CefSharp 宿主。铁律：只用 WinForms，禁止 WPF。 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>HaloAgent.Desktop</RootNamespace>
+    <AssemblyName>HaloAgent</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 高分屏：由 Program.cs 的 SetHighDpiMode 接管，这里必须先关掉清单里的自动缩放 -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Win7 上 PerMonitorV2 不被支持，Program.cs 会降级到 SystemAware -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine.Abstractions\Engine.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CefSharp.Common.NETCore" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" />
+  </ItemGroup>
+
+  <!-- 前端产物拷进输出目录。前端没构建时允许为空（不阻断 C# 编译） -->
+  <ItemGroup>
+    <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" Condition="Exists('wwwroot')" />
+  </ItemGroup>
+</Project>

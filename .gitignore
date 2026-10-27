@@ -21,7 +21,7 @@ pnpm-debug.log*
 .vite/
 
 # 宿主里拷进来的前端产物（由 build 脚本生成，不入库）
-src/Host.Desktop/wwwroot/
+src/Host.Desktop/wwwroot/*
 !src/Host.Desktop/wwwroot/.gitkeep
 
 # 测试与运行时
