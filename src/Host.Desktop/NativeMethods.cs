@@ -2,9 +2,20 @@ using System.Runtime.InteropServices;
 
 namespace HaloAgent.Desktop;
 
-/// <summary>集中 P/Invoke（KB2533623 探测 / 前台激活 / DLL 可加载探测 / OLE）。</summary>
+/// <summary>集中 P/Invoke（窗口拖拽 / 前台激活 / OLE / DLL 可加载探测）。</summary>
 internal static class NativeMethods
 {
+    // ---------- 窗口拖拽（自绘标题栏 B 方案：前端 mousedown → haloHost.windowDragStart） ----------
+    internal const int WM_NCLBUTTONDOWN = 0x00A1;
+    internal const int HTCAPTION = 2;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr AddDllDirectory(string newDirectory);
 

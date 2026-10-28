@@ -121,7 +121,7 @@ async function a35() {
   }
 }
 
-const HOST_METHODS = ['windowMinimize','windowMaximizeOrRestore','windowClose','windowState','systemInfo','openExternal','showItemInFolder','copyText','readClipboardImage','toggleDevTools','restartEngine'];
+const HOST_METHODS = ['windowMinimize','windowDragStart','windowMaximizeOrRestore','windowClose','windowState','systemInfo','openExternal','showItemInFolder','copyText','readClipboardImage','toggleDevTools','restartEngine'];
 const AGENT_METHODS = ['request','pollEvents','isReady'];
 
 async function a71() {
@@ -129,7 +129,7 @@ async function a71() {
   if (!await bridge()) { fail('桥接未就绪'); return; }
   const hostKeys = Object.getOwnPropertyNames(window.haloHost).filter(k => typeof window.haloHost[k] === 'function');
   const agentKeys = Object.getOwnPropertyNames(window.haloAgent).filter(k => typeof window.haloAgent[k] === 'function');
-  log('info', `haloHost 方法数 = ${hostKeys.length}（应 11）`);
+  log('info', `haloHost 方法数 = ${hostKeys.length}（应 12）`);
   log('info', `haloAgent 方法数 = ${agentKeys.length}（应 3）`);
   const hm = HOST_METHODS.filter(k => !hostKeys.includes(k));
   const he = hostKeys.filter(k => !HOST_METHODS.includes(k));

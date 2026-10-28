@@ -20,6 +20,7 @@ function stubCefHost(opts: { request?: unknown; pollEvents?: unknown; systemInfo
     windowState: async () =>
       '{"maximized":false,"minimized":false,"width":1,"height":1,"dpi":96,"titleBarHeight":40}',
     windowMinimize: async () => undefined,
+    windowDragStart: async () => undefined,
     windowMaximizeOrRestore: async () => '{}',
     windowClose: async () => undefined,
     openExternal: async () => undefined,

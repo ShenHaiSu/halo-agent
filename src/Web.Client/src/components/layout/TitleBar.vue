@@ -15,14 +15,18 @@ import { useSessionStore } from '@/stores/session';
  *  中：当前会话标题（可点击重命名）
  *  右：右栏开关 + 最小化/最大化/关闭
  *
- *  ============ 与 P3 宿主的分工 ============
- *  - 拖拽由宿主 WM_NCHITTEST 处理（标 app-region-drag 只是给
- *    Chromium 的 -webkit-app-region，让页面内拖拽区也能用）
- *  - 按钮必须标 app-region-no-drag，否则点按钮会变成拖窗口
- *  - 按钮经由 @/bridge/host 调用宿主窗口能力，而不是自己改窗体
+ * ============ 与 P3 宿主的分工（B 方案：显式拖拽） ============
+ *  - CEF 铺满客户区后 WM_NCHITTEST 到不了窗体，宿主无法靠 hit-test 识别标题栏，
+ *    因此拖拽由前端 mousedown 显式发起：调 haloHost.windowDragStart，
+ *    宿主 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/HTCAPTION) 交给系统
+ *    （移动 / 双击 / Aero Snap / Win+方向键与原生标题栏一致）。
+ *  - header 上的 app-region-drag 仅保留给 Chromium 的 -webkit-app-region
+ *   （页面内行为），真正的窗体移动不依赖它。
+ *  - 按钮区标 app-region-no-drag 且 mousedown 时跳过，确保点按钮不变拖窗口。
+ *  - 按钮经由 @/bridge/host 调用宿主窗口能力，而不是自己改窗体。
  * ============ 有意例外说明 ============
  *  这里直接 import `@/bridge/host` 的 hostBridge 是有意的例外：
- *  标题栏窗口按钮（最小化/最大化/关闭）必须直调宿主桥，
+ *  标题栏窗口按钮（最小化/最大化/关闭/拖拽）必须直调宿主桥，
  *  不经过 store。base 组件仍禁止触碰 bridge（见 check-layering）。
  * ============ ============
  */
@@ -57,11 +61,37 @@ async function onMaximize() {
 async function onClose() {
   await hostBridge.windowClose();
 }
+
+/**
+ * 标题栏拖拽（B 方案显式入口）。
+ *
+ * 为何不用 await：宿主 SendMessage(WM_NCLBUTTONDOWN) 必须在左键仍按住时执行，
+ * mousedown 处理器里同步直调、不等待，桥的 IPC 延迟才追得上按住窗口期。
+ * 为何过滤：右键/中键不拖；双击（detail>1）留给 dblclick 走最大化；
+ * 最大化下不拖（原生行为）；落在 .app-region-no-drag（按钮区）的不拖。
+ */
+function onTitleBarMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return;
+  if (e.detail > 1) return;
+  if (windowState.value) return;
+  const t = e.target as HTMLElement | null;
+  if (t?.closest?.('.app-region-no-drag')) return;
+  void hostBridge.windowDragStart();
+}
+
+/** 原生标题栏行为：双击空白区切换最大化/还原（按钮区除外）。 */
+function onTitleBarDblClick(e: MouseEvent) {
+  const t = e.target as HTMLElement | null;
+  if (t?.closest?.('.app-region-no-drag')) return;
+  void onMaximize();
+}
 </script>
 
 <template>
   <header
     class="app-region-drag flex h-titlebar-h shrink-0 items-center gap-1 border-b border-border bg-bg-subtle px-2 select-none"
+    @mousedown="onTitleBarMouseDown"
+    @dblclick="onTitleBarDblClick"
   >
     <!-- 左：侧栏开关 -->
     <div class="app-region-no-drag flex shrink-0 items-center gap-1">

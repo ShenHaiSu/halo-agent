@@ -173,4 +173,26 @@ public sealed class HostContractTests
          Assert.Equal("ready", doc.RootElement.GetProperty("state").GetString());
          Assert.Equal(123, doc.RootElement.GetProperty("pid").GetInt32());
      }
+
+     [Fact]
+     public void HaloHost_exposes_exactly_twelve_bridge_methods()
+     {
+         // 与 scripts/p3-diag.html 的 HOST_METHODS / 前端 HaloHost 接口保持一致。
+         // windowDragStart 是自绘标题栏 B 方案的显式拖拽入口（CEF 铺满客户区后
+         // WM_NCHITTEST 到不了窗体，前端 mousedown 直调，宿主做 ReleaseCapture+SendMessage）。
+         var expected = new[]
+         {
+             "WindowMinimize", "WindowDragStart", "WindowMaximizeOrRestore", "WindowClose",
+             "WindowState", "SystemInfo", "OpenExternal", "ShowItemInFolder",
+             "CopyText", "ReadClipboardImage", "ToggleDevTools", "RestartEngine",
+         };
+         var actual = typeof(HaloHostBridge)
+             .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+             .Where(m => !m.IsSpecialName && m.DeclaringType == typeof(HaloHostBridge))
+             .Select(m => m.Name)
+             .Where(n => !n.StartsWith("Emit", StringComparison.Ordinal))
+             .OrderBy(n => n)
+             .ToArray();
+         Assert.Equal(expected.OrderBy(n => n).ToArray(), actual);
+     }
  }

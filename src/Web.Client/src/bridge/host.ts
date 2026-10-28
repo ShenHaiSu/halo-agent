@@ -1,5 +1,5 @@
 // src/Web.Client/src/bridge/host.ts
-// D4-7 window.haloHost 的安全封装（11 方法，无宿主/调用失败时安全降级，不抛）。
+// D4-7 window.haloHost 的安全封装（12 方法，无宿主/调用失败时安全降级，不抛）。
 import type { WindowState, HostSystemInfo } from './types';
 import { hasHost, forceMock } from './bind';
 import { createMockHost, type MockHost } from './mock/mockHost';
@@ -9,7 +9,7 @@ import { createMockHost, type MockHost } from './mock/mockHost';
  *
  * ============ 三层保护 ============
  *  ① 无宿主 / 强制 Mock 时走 Mock（不抛错）
- *  ② 真环境调用失败时降级到 Mock 的合理默认值（A-7.3：14 方法全不抛）
+ *  ② 真环境调用失败时降级到 Mock 的合理默认值（A-7.3：15 方法全不抛）
  *  ③ 方法缺失时给出清晰的中文日志（而不是 "undefined is not a function"）
  * ============ 为什么每个方法都单独写而不是 Proxy ============
  *  Proxy 会让类型推断失效，且错误信息指向 Proxy 内部。
@@ -78,6 +78,13 @@ export const hostBridge = {
       'windowMinimize',
       () => requireMethod('windowMinimize')(),
       () => getMock().windowMinimize()
+    );
+  },
+  async windowDragStart(): Promise<void> {
+    return callOrMock(
+      'windowDragStart',
+      () => requireMethod('windowDragStart')(),
+      () => getMock().windowDragStart()
     );
   },
 
