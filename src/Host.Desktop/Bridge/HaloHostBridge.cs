@@ -8,13 +8,19 @@ using HaloAgent.Desktop.Shell;
 
 namespace HaloAgent.Desktop.Bridge;
 
-/// <summary>
-/// 宿主业务桥接（window.haloHost，恰好 11 方法 + 3 事件）。
-/// 铁律：①全返回 Task ②UI 操作切 UI 线程（BeginInvoke+TCS，不用 Invoke 防死锁）
-/// ③只做宿主能力 ④非法参数抛 ArgumentException。
-/// 事件走 EvaluateScriptAsync 调 window.__haloHostEvent；页面未就绪时积压 20 条，
-/// 前端首次调 SystemInfo() 即视为就绪并补推。
-/// </summary>
+ /// <summary>
+ /// 宿主业务桥接（window.haloHost，恰好 11 方法 + 3 事件）。
+ /// 铁律：①全返回 Task ②UI 操作切 UI 线程（BeginInvoke+TCS，不用 Invoke 防死锁）
+ /// ③只做宿主能力 ④非法参数抛 ArgumentException。
+ /// 事件走 EvaluateScriptAsync 调 window.__haloHostEvent；页面未就绪时积压 20 条，
+ /// 前端首次调 SystemInfo() 即视为就绪并补推。
+ /// </summary>
+ /// <remarks>
+ /// 铁律（dist 骨架屏根因修复）：凡返回 DTO 的方法一律返回 JSON 字符串
+ ///（BridgeJson.Options 序列化，camelCase），前端 JSON.parse。
+ /// DTO 绝不能直接过 CefSharp 桥（按 C# 原名返回，前端读不到）。
+ /// 事件推送（Emit*）本就走 JSON 文本，不受影响。
+ /// </remarks>
 public sealed class HaloHostBridge
 {
     private readonly Func<ChromeForm> _formAccessor;
@@ -52,9 +58,10 @@ public sealed class HaloHostBridge
         return Task.CompletedTask;
     }
 
-    public Task<WindowStateDto> WindowMaximizeOrRestore()
+    /// <summary>返回 WindowStateDto 的 JSON 字符串（camelCase）。</summary>
+    public Task<string> WindowMaximizeOrRestore()
     {
-        var tcs = new TaskCompletionSource<WindowStateDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var f = _formAccessor();
         f.BeginInvoke(() =>
         {
@@ -62,7 +69,7 @@ public sealed class HaloHostBridge
             {
                 f.WindowState = f.WindowState == FormWindowState.Maximized
                     ? FormWindowState.Normal : FormWindowState.Maximized;
-                tcs.TrySetResult(ReadWindowState(f));
+                 tcs.TrySetResult(JsonSerializer.Serialize(ReadWindowState(f), BridgeJson.Options));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });
@@ -76,13 +83,14 @@ public sealed class HaloHostBridge
         return Task.CompletedTask;
     }
 
-    public Task<WindowStateDto> WindowState()
+    /// <summary>返回 WindowStateDto 的 JSON 字符串（camelCase）。</summary>
+    public Task<string> WindowState()
     {
-        var tcs = new TaskCompletionSource<WindowStateDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var f = _formAccessor();
         f.BeginInvoke(() =>
         {
-            try { tcs.TrySetResult(ReadWindowState(f)); }
+             try { tcs.TrySetResult(JsonSerializer.Serialize(ReadWindowState(f), BridgeJson.Options)); }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });
         return tcs.Task;
@@ -90,10 +98,11 @@ public sealed class HaloHostBridge
 
     // ---------- 系统信息（1） ----------
 
-    public Task<HostSystemInfo> SystemInfo()
+    /// <summary>返回 HostSystemInfo 的 JSON 字符串（camelCase）。</summary>
+    public Task<string> SystemInfo()
     {
         MarkFrontendReady();
-        var tcs = new TaskCompletionSource<HostSystemInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var f = _formAccessor();
         f.BeginInvoke(() =>
         {
@@ -101,7 +110,7 @@ public sealed class HaloHostBridge
             {
                 int dpi = 96;
                 try { using var g = f.CreateGraphics(); dpi = (int)g.DpiX; } catch { /* GDI 失败时用 96 */ }
-                tcs.TrySetResult(new HostSystemInfo
+                 tcs.TrySetResult(JsonSerializer.Serialize(new HostSystemInfo
                 {
                     OsDescription = Environment.OSVersion.ToString(),
                     Is64BitOs = Environment.Is64BitOperatingSystem,
@@ -121,7 +130,7 @@ public sealed class HaloHostBridge
                         Bounds = new[] { s.Bounds.X, s.Bounds.Y, s.Bounds.Width, s.Bounds.Height },
                         Primary = s.Primary,
                     }).ToArray(),
-                });
+                 }, BridgeJson.Options));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });

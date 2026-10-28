@@ -3,27 +3,39 @@
 //
 // 分层：bridge 只定义类型，不依赖任何业务模块。
 
-/** window.haloHost（宿主业务接口，11 个方法） */
-export interface HaloHost {
-  windowMinimize(): Promise<void>;
-  windowMaximizeOrRestore(): Promise<WindowState>;
-  windowClose(): Promise<void>;
-  windowState(): Promise<WindowState>;
-  systemInfo(): Promise<HostSystemInfo>;
-  openExternal(url: string): Promise<void>;
-  showItemInFolder(path: string): Promise<void>;
-  copyText(text: string): Promise<void>;
-  readClipboardImage(): Promise<string | null>;
-  toggleDevTools(): Promise<void>;
-  restartEngine(): Promise<void>;
-}
+ /** window.haloHost（宿主业务接口，11 个方法）。
+  *
+  * 桥契约（dist 骨架屏根因修复）：凡返回 DTO 的方法（windowMaximizeOrRestore /
+  * windowState / systemInfo），C# 侧返回 JSON 字符串（camelCase），调用方负责 parse。
+  * 绝不能假设桥直接返回对象（CefSharp 对复杂返回值的编组不稳定且按 C# 原名返回）。
+  */
+ export interface HaloHost {
+   windowMinimize(): Promise<void>;
+   /** 返回 WindowState 的 JSON 字符串。 */
+   windowMaximizeOrRestore(): Promise<string>;
+   windowClose(): Promise<void>;
+   /** 返回 WindowState 的 JSON 字符串。 */
+   windowState(): Promise<string>;
+   /** 返回 HostSystemInfo 的 JSON 字符串。 */
+   systemInfo(): Promise<string>;
+   openExternal(url: string): Promise<void>;
+   showItemInFolder(path: string): Promise<void>;
+   copyText(text: string): Promise<void>;
+   readClipboardImage(): Promise<string | null>;
+   toggleDevTools(): Promise<void>;
+   restartEngine(): Promise<void>;
+ }
 
-/** window.haloAgent（引擎传输，3 个方法） */
-export interface HaloAgent {
-  request(method: string, params: unknown): Promise<unknown>;
-  pollEvents(sinceSeq: number): Promise<PollResult>;
-  isReady(): Promise<boolean>;
-}
+ /** window.haloAgent（引擎传输，3 个方法）。
+  *
+  * 桥契约（dist 骨架屏根因修复）：request / pollEvents 返回 JSON 字符串，
+  * 调用方（agent.ts）负责 JSON.parse。isReady 返回布尔，不变。
+  */
+ export interface HaloAgent {
+   request(method: string, params: unknown): Promise<string>;
+   pollEvents(sinceSeq: number): Promise<string>;
+   isReady(): Promise<boolean>;
+ }
 
 export interface WindowState {
   maximized: boolean;

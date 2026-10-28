@@ -1,6 +1,6 @@
 namespace HaloAgent.Desktop.Bridge;
 
-/// <summary>P3 桥接 DTO（CefSharp 按 C# 原名返回，前端按原名消费）。</summary>
+ /// <summary>P3 桥接 DTO。铁律：DTO 不直接过 CefSharp 桥，一律经 BridgeJson.Options 序列化为 JSON 字符串，前端 JSON.parse（camelCase）。直接返回 DTO 会按 C# 原名（PascalCase）到达前端，导致数据静默全空。</summary>
 public sealed class WindowStateDto
 {
     public bool Maximized { get; set; }

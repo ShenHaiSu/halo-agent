@@ -256,7 +256,7 @@ async function resync(): Promise<void> {
 
   const calls: string[] = [];
   const agent = (
-    window as unknown as { haloAgent?: { request: (k: string, p: unknown) => Promise<unknown> } }
+    window as unknown as { haloAgent?: { request: (k: string, p: unknown) => Promise<string> } }
   ).haloAgent;
   const { dispatchFrames } = await import('@/stores/eventBridge');
   const p = dispatchFrames([

@@ -97,27 +97,80 @@ public sealed class HostContractTests
             File.Delete(tmp);
         }
     }
+     private static HashSet<string> SchemaHostMethods()
+     {
+         var dir = new DirectoryInfo(AppContext.BaseDirectory);
+         while (dir is not null)
+         {
+             var p = Path.Combine(dir.FullName, "contract", "agent.schema.json");
+             if (File.Exists(p))
+             {
+                 using var doc = JsonDocument.Parse(File.ReadAllText(p));
+                 var set = new HashSet<string>();
+                 foreach (var m in doc.RootElement.GetProperty("methods").EnumerateObject())
+                 {
+                     if (m.Value.TryGetProperty("implementedIn", out var v) &&
+                         v.GetString() == "host")
+                         set.Add(m.Name);
+                 }
+                 return set;
+             }
+             dir = dir.Parent;
+         }
+         throw new FileNotFoundException("找不到 contract/agent.schema.json");
+     }
 
-    private static HashSet<string> SchemaHostMethods()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var p = Path.Combine(dir.FullName, "contract", "agent.schema.json");
-            if (File.Exists(p))
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(p));
-                var set = new HashSet<string>();
-                foreach (var m in doc.RootElement.GetProperty("methods").EnumerateObject())
-                {
-                    if (m.Value.TryGetProperty("implementedIn", out var v) &&
-                        v.GetString() == "host")
-                        set.Add(m.Name);
-                }
-                return set;
-            }
-            dir = dir.Parent;
-        }
-        throw new FileNotFoundException("找不到 contract/agent.schema.json");
-    }
-}
+     // ============================================================
+     //  桥契约（dist 骨架屏根因修复）：DTO/事件批一律序列化为 JSON 字符串过桥，
+     //  且键必须为 camelCase（前端按 camelCase 消费，无归一化层）。
+     //  若这里失败，说明有人又把 DTO/POCO 直接返回给了 CefSharp。
+     // ============================================================
+
+     [Fact]
+     public void Bridge_poll_result_serializes_to_camelCase_json()
+     {
+         var batch = new PollResult { Events = Array.Empty<object>(), NextSeq = 7 };
+         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(batch, BridgeJson.Options));
+         Assert.True(doc.RootElement.TryGetProperty("events", out _));
+         Assert.True(doc.RootElement.TryGetProperty("nextSeq", out _));
+         Assert.False(doc.RootElement.TryGetProperty("Events", out _));
+         Assert.False(doc.RootElement.TryGetProperty("NextSeq", out _));
+     }
+
+     [Fact]
+     public void Bridge_window_state_serializes_to_camelCase_json()
+     {
+         var ws = new WindowStateDto
+         {
+             Maximized = true, Minimized = false, Width = 1280, Height = 820, Dpi = 96, TitleBarHeight = 40,
+         };
+         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(ws, BridgeJson.Options));
+         Assert.True(doc.RootElement.TryGetProperty("maximized", out _));
+         Assert.True(doc.RootElement.TryGetProperty("titleBarHeight", out _));
+         Assert.False(doc.RootElement.TryGetProperty("Maximized", out _));
+     }
+
+     [Fact]
+     public void Bridge_host_info_serializes_to_camelCase_json()
+     {
+         var info = new HostSystemInfo
+         {
+             OsDescription = "os", DataDir = "d", Cwd = "c", GpuMode = "g",
+             Screens = Array.Empty<ScreenDto>(),
+         };
+         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(info, BridgeJson.Options));
+         foreach (var key in new[] { "osDescription", "isWindows7", "dataDir", "cwd", "gpuMode", "screens" })
+             Assert.True(doc.RootElement.TryGetProperty(key, out _), $"缺少键 {key}");
+         Assert.False(doc.RootElement.TryGetProperty("OsDescription", out _));
+     }
+
+     [Fact]
+     public void Bridge_engine_status_event_payload_is_camelCase_json()
+     {
+         // 与 HaloHostBridge.EmitEngineStatusAsync 的推送形状一致（前端按 state/pid 消费）。
+         var payload = new EngineStatusDto { State = "ready", Pid = 123 };
+         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.Options));
+         Assert.Equal("ready", doc.RootElement.GetProperty("state").GetString());
+         Assert.Equal(123, doc.RootElement.GetProperty("pid").GetInt32());
+     }
+ }

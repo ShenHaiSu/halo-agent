@@ -34,20 +34,33 @@ function describeError(e: unknown): string {
   return String(e);
 }
 
-/** 真环境调用，失败时记日志并降级到 fallback（不抛）。 */
-async function callOrMock<T>(
-  name: string,
-  real: () => Promise<T>,
-  fallback: () => Promise<T>
-): Promise<T> {
-  if (useMock()) return fallback();
-  try {
-    return await real();
-  } catch (e) {
-    console.warn(`[host] ${name} 失败，已降级到 Mock：${describeError(e)}`);
-    return fallback();
-  }
-}
+ /** 真环境调用，失败时记日志并降级到 Mock（不抛）。
+  *
+  * 桥契约（dist 骨架屏根因修复）：C# 侧返回 DTO 的方法（systemInfo / windowState /
+  * windowMaximizeOrRestore）一律返回 JSON 字符串，这里统一 JSON.parse；
+  * 若桥直接返回值对象则兼容直传。解析失败视为调用失败，走 Mock 降级并记 warn。
+  */
+ async function callOrMock<T>(
+   name: string,
+   real: () => Promise<unknown>,
+   fallback: () => Promise<T>
+ ): Promise<T> {
+   if (useMock()) return fallback();
+   try {
+     const r = await real();
+     if (typeof r === 'string') {
+       try {
+         return JSON.parse(r) as T;
+       } catch (e) {
+         throw new Error(`宿主桥 ${name} 返回了无法解析的应答：${describeError(e)}`);
+       }
+     }
+     return r as T;
+   } catch (e) {
+     console.warn(`[host] ${name} 失败，已降级到 Mock：${describeError(e)}`);
+     return fallback();
+   }
+ }
 
 function requireMethod<K extends keyof NonNullable<Window['haloHost']>>(
   name: K
