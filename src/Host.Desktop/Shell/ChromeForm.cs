@@ -62,23 +62,33 @@ public class ChromeForm : Form
 
         if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero)
         {
-            if (WindowState == FormWindowState.Maximized)
+            // 注意：此处绝不能读 Form.WindowState —— WM_NCCALCSIZE 先于 WM_SIZE 到达，
+            // 还原瞬间 WindowState 仍为 Maximized，会把最大化 inset 误套到普通矩形上
+            //（顶部黑条的直接成因）。IsZoomed 查的是实时窗口样式，时序安全。
+            if (IsZoomed(Handle))
             {
-                var screen = Screen.FromHandle(Handle);
+                var p = Marshal.PtrToStructure<NCCALCSIZE_PARAMS>(m.LParam);
+                // 按提议矩形选屏：还原/跨屏途中 Handle 所在屏可能已过时。
+                var proposed = new Rectangle(
+                    p.rgrc0.Left, p.rgrc0.Top,
+                    p.rgrc0.Right - p.rgrc0.Left, p.rgrc0.Bottom - p.rgrc0.Top);
+                var screen = Screen.FromRectangle(proposed);
                 var b = screen.Bounds;
                 var w = screen.WorkingArea;
                 int left = Math.Abs(w.Left - b.Left);
                 int top = Math.Abs(w.Top - b.Top);
                 int right = Math.Abs(b.Right - w.Right);
                 int bottom = Math.Abs(b.Bottom - w.Bottom);
-                var p = Marshal.PtrToStructure<NCCALCSIZE_PARAMS>(m.LParam);
                 p.rgrc0.Left += left;
                 p.rgrc0.Top += top;
                 p.rgrc0.Right -= right;
                 p.rgrc0.Bottom -= bottom;
                 Marshal.StructureToPtr(p, m.LParam, false);
+                m.Result = IntPtr.Zero;
+                return;
             }
-            m.Result = IntPtr.Zero;
+            // 普通状态：交还 DefWindowProc，让 DWM 重算 frame，否则还原后残留非客户区黑条。
+            base.WndProc(ref m);
             return;
         }
 
@@ -162,6 +172,10 @@ public class ChromeForm : Form
         public RECT rgrc0, rgrc1, rgrc2;
         public IntPtr lppos;
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsZoomed(IntPtr hWnd);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(
