@@ -18,7 +18,7 @@ function pick(key: SessionMenuKey): void {
 </script>
 
 <template>
-  <HMenu :open="open" @update:open="$emit('update:open', $event)">
+   <HMenu :open="open" align="end" @update:open="$emit('update:open', $event)">
     <template #trigger>
       <slot name="trigger" />
     </template>

@@ -138,12 +138,13 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
 
     <SessionContextMenu :open="menuOpen" @update:open="menuOpen = $event" @select="onMenuSelect">
       <template #trigger>
-        <button
-          class="sess-more"
-          type="button"
-          aria-label="会话操作"
-          @click.stop="menuOpen = !menuOpen"
-        >
+         <button
+           class="sess-more"
+           type="button"
+           aria-label="会话操作"
+           aria-haspopup="menu"
+           :aria-expanded="menuOpen ? 'true' : 'false'"
+         >
           <HaloIcon name="more-horizontal" :size="14" />
         </button>
       </template>

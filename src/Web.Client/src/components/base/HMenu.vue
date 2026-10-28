@@ -34,8 +34,9 @@ const props = withDefaults(
 
 const emit = defineEmits<{ 'update:open': [boolean] }>();
 
-const triggerRef = ref<HTMLElement | null>(null);
-const menuRef = ref<HTMLElement | null>(null);
+ const triggerRef = ref<HTMLElement | null>(null);
+ const menuRef = ref<HTMLElement | null>(null);
+ const pos = ref({ x: 0, y: 0 });
 
 function items(): HTMLElement[] {
   const menu = menuRef.value;
@@ -62,10 +63,30 @@ function close(restoreFocus = true) {
   emit('update:open', false);
   if (restoreFocus) triggerRef.value?.focus();
 }
-
-function toggle() {
-  emit('update:open', !props.open);
-}
+ function toggle(): void {
+   emit('update:open', !props.open);
+ }
+ function computePosition(): void {
+   const trigger = triggerRef.value;
+   const menu = menuRef.value;
+   if (!trigger || !menu) return;
+   const r = trigger.getBoundingClientRect();
+   const pr = menu.getBoundingClientRect();
+   const gap = 4;
+   const vw = window.innerWidth;
+   const vh = window.innerHeight;
+   // 垂直: 默认放触发器下方, 放不下翻到上方
+   let y = r.bottom + gap;
+   if (y + pr.height > vh - 4) y = r.top - gap - pr.height;
+   // 水平: align=start 左对齐, end 右对齐
+   let x = props.align === 'end' ? r.right - pr.width : r.left;
+   // 夹进 viewport
+   if (x + pr.width > vw - 4) x = vw - pr.width - 4;
+   if (x < 4) x = 4;
+   if (y + pr.height > vh - 4) y = Math.max(4, vh - pr.height - 4);
+   if (y < 4) y = 4;
+   pos.value = { x, y };
+ }
 
 function onMenuKeydown(e: KeyboardEvent) {
   const idx = currentIndex();
@@ -122,16 +143,29 @@ function onMenuKeydown(e: KeyboardEvent) {
   }
 }
 
-/** 打开时聚焦第一项 */
-watch(
-  () => props.open,
-  async (v) => {
-    if (v) {
-      await nextTick();
-      requestAnimationFrame(() => focusItem(0));
-    }
-  }
-);
+ /** 打开时定位 + 聚焦第一项; 打开期间跟随滚动/窗口变化重算 */
+ function onViewportChange(): void {
+   if (props.open) computePosition();
+ }
+ watch(
+   () => props.open,
+   async (v) => {
+     if (v) {
+       await nextTick();
+       computePosition();
+       // 渲染完尺寸稳定后再修正一次
+       requestAnimationFrame(() => {
+         computePosition();
+         focusItem(0);
+       });
+       window.addEventListener('resize', onViewportChange);
+       window.addEventListener('scroll', onViewportChange, true);
+     } else {
+       window.removeEventListener('resize', onViewportChange);
+       window.removeEventListener('scroll', onViewportChange, true);
+     }
+   },
+ )
 
 onClickOutside(
   menuRef,
@@ -141,14 +175,15 @@ onClickOutside(
   { ignore: [triggerRef] }
 );
 
-onBeforeUnmount(() => {
-  /* 已清理 */
-});
+ onBeforeUnmount(() => {
+   window.removeEventListener('resize', onViewportChange);
+   window.removeEventListener('scroll', onViewportChange, true);
+ });
 </script>
 
 <template>
   <div class="inline-flex">
-    <div ref="triggerRef" class="inline-flex" @click="toggle">
+     <div ref="triggerRef" class="inline-flex" @click.stop="toggle">
       <slot name="trigger" />
     </div>
 
@@ -160,7 +195,7 @@ onBeforeUnmount(() => {
           role="menu"
           tabindex="-1"
           class="fixed z-dropdown rounded-lg border border-border bg-bg-elevated py-1 shadow-lg"
-          :style="{ minWidth: `${minWidth}px` }"
+           :style="{ left: `${pos.x}px`, top: `${pos.y}px`, minWidth: `${minWidth}px` }"
           @keydown="onMenuKeydown"
         >
           <slot />
