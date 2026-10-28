@@ -12,18 +12,18 @@ import HInput from '@/components/base/HInput.vue';
 import HSlider from '@/components/base/HSlider.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
-import { validateModelForm } from '../validators';
-
-const toast = useToast();
-
-interface ProviderInfo {
-  name: string;
-  baseUrl: string;
-  models: string[];
-}
-
-const loading = ref(true);
-const saving = ref(false);
+ import { validateModelForm } from '../validators';
+ import {
+   defaultModelOf,
+   normalizeProviders,
+   resolveProviderSwitch,
+   type ProviderInfo,
+ } from '../modelProviders';
+ 
+ const toast = useToast();
+ 
+ const loading = ref(true);
+ const saving = ref(false);
 const loadError = ref<string | null>(null);
 
 const form = ref({ provider: '', model: '', baseUrl: '', contextWindow: 128000, maxTurns: 200 });
@@ -44,13 +44,13 @@ const dirty = computed(
     newKey.value.length > 0
 );
 
-const modelOptions = computed(() => {
-  const p = providers.value.find((x) => x.name === form.value.provider);
-  const base = p?.models ?? [];
-  const merged = new Set([...base, ...probedModels.value]);
-  if (form.value.model.trim()) merged.add(form.value.model.trim());
-  return [...merged];
-});
+ const modelOptions = computed(() => {
+   const p = providers.value.find((x) => x.name === form.value.provider);
+   const base = p ? [defaultModelOf(p)] : [];
+   const merged = new Set([...base.filter((m) => !!m), ...probedModels.value]);
+   if (form.value.model.trim()) merged.add(form.value.model.trim());
+   return [...merged];
+ });
 
 function markDirty(): void {
   fieldErrors.value = {};
@@ -60,16 +60,16 @@ async function load(): Promise<void> {
   loading.value = true;
   loadError.value = null;
   try {
-    const s = (await transport.request('settings.get', null)) as {
-      provider?: string;
-      model?: string;
-      baseUrl?: string;
-      apiKeySet?: boolean;
-      contextWindow?: number;
-      maxTurns?: number;
-      providers?: ProviderInfo[];
-    };
-    providers.value = Array.isArray(s.providers) ? s.providers : [];
+     const s = (await transport.request('settings.get', null)) as {
+       provider?: string;
+       model?: string;
+       baseUrl?: string;
+       apiKeySet?: boolean;
+       contextWindow?: number;
+       maxTurns?: number;
+       providers?: unknown;
+     };
+     providers.value = normalizeProviders(s.providers);
     form.value = {
       provider: s.provider ?? '',
       model: s.model ?? '',
@@ -81,22 +81,24 @@ async function load(): Promise<void> {
     apiKeySet.value = s.apiKeySet === true;
     newKey.value = '';
     fieldErrors.value = {};
-  } catch (e) {
-    loadError.value = (e as Error).message;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function onProviderChange(name: string): void {
-  form.value.provider = name;
-  const p = providers.value.find((x) => x.name === name);
-  if (p) {
-    form.value.baseUrl = p.baseUrl;
-    if (p.models[0] !== undefined && !form.value.model) form.value.model = p.models[0];
-  }
-  markDirty();
-}
+   } catch (e) {
+     loadError.value = (e as Error).message;
+   } finally {
+     loading.value = false;
+   }
+ }
+ 
+ function onProviderChange(name: string): void {
+   const prevName = form.value.provider;
+   form.value.provider = name;
+   const r = resolveProviderSwitch(providers.value, prevName, name, form.value.model);
+   if (r) {
+     form.value.baseUrl = r.baseUrl;
+     // r.model 已按“跟随但尊重手填”算好（含保持原值的情况），直接写入
+     form.value.model = r.model;
+   }
+   markDirty();
+ }
 
 function onProbe(models: string[]): void {
   probedModels.value = models;
