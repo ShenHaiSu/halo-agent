@@ -7,6 +7,7 @@ namespace HaloAgent.Engine.Server;
 ///
 /// P2 会把这一份状态搬进 Engine.Core 的 AgentSession，
 /// 但协议面的形状不变 —— 这就是"先定契约、后填实现"的好处。
+/// P10：stub/未配置态同样使用新 AgentState 形状。
 /// </summary>
 public sealed class EngineState
 {
@@ -31,11 +32,19 @@ public sealed class EngineState
 
     public PermissionMode Mode { get; set; } = PermissionMode.Ask;
     public string Persona { get; set; } = "";
-    public string Model { get; set; } = "(未配置)";
-    public string Provider { get; set; } = "ollama";
-    public string BaseUrl { get; set; } = "http://localhost:11434/v1";
+    public string Provider { get; set; } = "";
+    public string ProviderDisplay { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string ModelDisplay { get; set; } = "";
+    public string Protocol { get; set; } = "chat";
+    public string BaseUrl { get; set; } = "";
     public bool ApiKeySet { get; set; }
     public int? ContextWindow { get; set; }
+    public int? MaxTokens { get; set; }
+    public bool AcceptsImages { get; set; }
+    public bool IncludeReasoning { get; set; } = true;
+    public bool ProxyInUse { get; set; }
+    public bool Configured { get; set; }
     public int MaxTurns { get; set; } = 200;
     public int Retry { get; set; }
 
@@ -200,14 +209,21 @@ public sealed class EngineState
                     Mode = Mode,
                     ModeLabel = Mode.ToLabel(),
                     Persona = Persona,
-                    Model = Model,
                     Provider = Provider,
+                    ProviderDisplay = ProviderDisplay,
+                    Model = Model,
+                    ModelDisplay = ModelDisplay,
+                    Protocol = Protocol,
                     BaseUrl = BaseUrl,
                     ApiKeySet = ApiKeySet,
                     ContextWindow = ContextWindow,
+                    MaxTokens = MaxTokens,
+                    AcceptsImages = AcceptsImages,
+                    IncludeReasoning = IncludeReasoning,
+                    ProxyInUse = ProxyInUse,
                     MaxTurns = MaxTurns,
                     Retry = Retry,
-                    Configured = false,
+                    Configured = Configured,
                     Round = new RoundState { Used = RoundUsed, Limit = RoundLimit },
                 },
                 Usage = new UsageState

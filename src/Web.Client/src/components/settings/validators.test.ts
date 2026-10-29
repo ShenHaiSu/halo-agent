@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/settings/validators.test.ts
-// 设置页字段级校验测试（P5 A-6.2：17 条规则正反例）。
+// P10 字段级校验（网络瘦身：mode/url/retry 0~8）。
 import { describe, expect, it } from 'vitest';
 import {
   isValidHttpUrl,
@@ -7,8 +7,8 @@ import {
   SKILL_NAME_RE,
   validateHeaderName,
   validateJson,
-  validateModelForm,
   validateNetworkForm,
+  PROVIDER_ID_RE,
 } from './validators';
 
 describe('isValidHttpUrl', () => {
@@ -20,9 +20,9 @@ describe('isValidHttpUrl', () => {
 });
 
 describe('isIntInRange', () => {
-  it('下界通过', () => expect(isIntInRange(8000, 8000, 1000000)).toBe(true));
-  it('上界通过', () => expect(isIntInRange(1000000, 8000, 1000000)).toBe(true));
-  it('低于下界拒绝', () => expect(isIntInRange(7999, 8000, 1000000)).toBe(false));
+  it('下界通过', () => expect(isIntInRange(1000, 1000, 2000000)).toBe(true));
+  it('上界通过', () => expect(isIntInRange(2000000, 1000, 2000000)).toBe(true));
+  it('低于下界拒绝', () => expect(isIntInRange(999, 1000, 2000000)).toBe(false));
   it('小数拒绝', () => expect(isIntInRange(1.5, 0, 10)).toBe(false));
 });
 
@@ -49,55 +49,25 @@ describe('validateJson', () => {
   });
 });
 
-describe('validateModelForm', () => {
-  const good = {
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    baseUrl: 'https://api.deepseek.com/v1',
-    contextWindow: 128000,
-    maxTurns: 200,
-  };
-  it('合法无错', () => expect(validateModelForm(good)).toEqual([]));
-  it('缺服务商', () =>
-    expect(validateModelForm({ ...good, provider: '' }).some((e) => e.field === 'provider')).toBe(
-      true
-    ));
-  it('baseUrl 无协议', () =>
-    expect(
-      validateModelForm({ ...good, baseUrl: 'api.deepseek.com' }).some((e) => e.field === 'baseUrl')
-    ).toBe(true));
-  it('上下文越界', () =>
-    expect(
-      validateModelForm({ ...good, contextWindow: 100 }).some((e) => e.field === 'contextWindow')
-    ).toBe(true));
-  it('轮数越界', () =>
-    expect(validateModelForm({ ...good, maxTurns: 0 }).some((e) => e.field === 'maxTurns')).toBe(
-      true
-    ));
+describe('PROVIDER_ID_RE', () => {
+  it('合法通过', () => expect(PROVIDER_ID_RE.test('deepseek')).toBe(true));
+  it('大写拒绝', () => expect(PROVIDER_ID_RE.test('DeepSeek')).toBe(false));
+  it('空拒绝', () => expect(PROVIDER_ID_RE.test('')).toBe(false));
 });
 
 describe('validateNetworkForm', () => {
   it('直连合法', () =>
-    expect(validateNetworkForm({ mode: 'direct', url: '', retry: 3, headers: [] })).toEqual([]));
+    expect(validateNetworkForm({ mode: 'direct', url: '', retry: 3 })).toEqual([]));
   it('manual 无地址拒绝', () =>
     expect(
-      validateNetworkForm({ mode: 'manual', url: '', retry: 3, headers: [] }).some(
+      validateNetworkForm({ mode: 'manual', url: '', retry: 3 }).some(
         (e) => e.field === 'url'
       )
     ).toBe(true));
-  it('重试越界拒绝', () =>
+  it('重试越界拒绝（0~8）', () =>
     expect(
-      validateNetworkForm({ mode: 'direct', url: '', retry: 99, headers: [] }).some(
+      validateNetworkForm({ mode: 'direct', url: '', retry: 99 }).some(
         (e) => e.field === 'retry'
       )
-    ).toBe(true));
-  it('请求头非法拒绝', () =>
-    expect(
-      validateNetworkForm({
-        mode: 'direct',
-        url: '',
-        retry: 3,
-        headers: [{ key: '坏 键', value: 'v' }],
-      }).some((e) => e.field.startsWith('headers'))
     ).toBe(true));
 });

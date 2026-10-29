@@ -60,22 +60,22 @@ public sealed class StubMethods
             ("session.compact", stub.NotImplemented),
             ("session.setCwd", stub.NotImplemented),
 
-            // ---- state 6 ----
+            // ---- state ----
             ("state.snapshot", stub.StateSnapshot),
             ("state.setMode", stub.StateSetMode),
             ("state.setPersona", stub.StateSetPersona),
-            ("state.setProvider", stub.StateSetProvider),
             ("state.setMaxTurns", stub.StateSetMaxTurns),
             ("state.setRetry", stub.StateSetRetry),
 
-            // ---- settings 7 ----
+            // ---- settings ----
             ("settings.get", stub.NotImplemented),
-            ("settings.saveModel", stub.EmptyOk),
+            ("settings.saveProviders", stub.NotImplemented),
+            ("settings.setActive", stub.NotImplemented),
             ("settings.saveNetwork", stub.EmptyOk),
             ("settings.probeModels", stub.NotImplemented),
-            ("settings.saveExtraHeaders", stub.EmptyOk),
             ("settings.mcp.get", stub.NotImplemented),
             ("settings.mcp.save", stub.SettingsMcpSave),
+
 
             // ---- asset 12 ----
             ("asset.skills.list", stub.AssetSkillsList),
@@ -271,17 +271,8 @@ public sealed class StubMethods
         throw new RpcException(RpcError.NotSupported,
             "该功能在 P1 阶段未实现（stub）", "P2 阶段会实现");
 
-    /// <summary>state.setProvider 回落形状（与契约一致；生产表已由 RealMethods 接管）。</summary>
-    public Task<object?> StateSetProvider(JsonElement? p, CancellationToken ct)
-    {
-        var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() ?? "" : "";
-        return Task.FromResult<object?>(new
-        {
-            provider = string.IsNullOrWhiteSpace(name) ? _state.Provider : name,
-            model = _state.Model,
-            baseUrl = _state.BaseUrl,
-        });
-    }
+    /// <summary>P10：state.setProvider 已删除。</summary>
+
 
     /// <summary>state.setPersona 回落形状（与契约一致）。</summary>
     public Task<object?> StateSetPersona(JsonElement? p, CancellationToken ct)

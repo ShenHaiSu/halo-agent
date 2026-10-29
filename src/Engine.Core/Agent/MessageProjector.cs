@@ -35,10 +35,13 @@ public static class MessageProjector
             {
                 Id = "m-" + Guid.NewGuid().ToString("N")[..8],
                 Role = m.RoleWire,
-                Text = m.Content ?? string.Empty,
+                Text = m.ContentParts is { Count: > 0 } ? string.Join("\n", m.ContentParts.Where(p => p.Type == "text").Select(p => p.Text ?? "")) : (m.Content ?? string.Empty),
                 Reasoning = m.ReasoningContent,
+                HasImages = m.HasImages,
+                AttachmentCount = m.ContentParts is null ? 0 : m.ContentParts.Count(p => p.Type == "image_url"),
                 TsMs = 0,
             };
+
 
             if (m.ToolCalls is { Count: > 0 })
             {
@@ -96,8 +99,11 @@ public static class MessageProjector
     {
         Id = "m-" + Guid.NewGuid().ToString("N")[..8],
         Role = m.RoleWire,
-        Text = m.Content ?? string.Empty,
+        Text = m.ContentParts is { Count: > 0 } ? string.Join("\n", m.ContentParts.Where(p => p.Type == "text").Select(p => p.Text ?? "")) : (m.Content ?? string.Empty),
         Reasoning = m.ReasoningContent,
+        HasImages = m.HasImages,
+        AttachmentCount = m.ContentParts is null ? 0 : m.ContentParts.Count(p => p.Type == "image_url"),
         TsMs = 0,
     };
 }
+

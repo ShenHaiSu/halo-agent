@@ -1,137 +1,54 @@
 <!-- src/Web.Client/src/components/settings/pages/NetworkPage.vue -->
-<!-- 网络分页：代理模式三选一 / 代理地址 / 重试 0~10 / 自定义请求头 / 分服务商请求头。 -->
+<!-- P10 瘦身：网络页只剩代理模式三选一 + 代理地址 + 重试 + 各 provider 是否走代理一览（只读跳转）。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import SettingRow from '../fields/SettingRow.vue';
-import HeadersEditor, { type HeaderRow } from '../fields/HeadersEditor.vue';
 import HInput from '@/components/base/HInput.vue';
 import HSlider from '@/components/base/HSlider.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
-import HSelect from '@/components/base/HSelect.vue';
 import HRadioGroup from '@/components/base/HRadioGroup.vue';
 import HRadio from '@/components/base/HRadio.vue';
 import { validateNetworkForm } from '../validators';
 
 const toast = useToast();
-
 type ProxyMode = 'auto' | 'direct' | 'manual';
-
-interface NetworkSnapshot {
-  mode: ProxyMode;
-  url: string;
-  retry: number;
-  headers: HeaderRow[];
-  providerHeaders: Record<string, HeaderRow[]>;
-}
-
 const loading = ref(true);
 const saving = ref(false);
 const loadError = ref<string | null>(null);
-
 const mode = ref<ProxyMode>('auto');
 const url = ref('');
-const retry = ref(3);
-const headers = ref<HeaderRow[]>([]);
-const providerHeaders = ref<Record<string, HeaderRow[]>>({});
-const providerNames = ref<string[]>([]);
-const activeProvider = ref('');
-const notes = ref<string[]>([]);
+const retry = ref(0);
+const providers = ref<Array<{ id: string; displayName: string; useProxy: boolean; baseUrl: string }>>([]);
+const original = ref({ mode: 'auto' as ProxyMode, url: '', retry: 0 });
 const fieldErrors = ref<Record<string, string>>({});
 
-const original = ref<NetworkSnapshot>({
-  mode: 'auto',
-  url: '',
-  retry: 3,
-  headers: [],
-  providerHeaders: {},
-});
+const dirty = computed(() => mode.value !== original.value.mode || url.value !== original.value.url || retry.value !== original.value.retry);
 
-function snapshot(): NetworkSnapshot {
-  return {
-    mode: mode.value,
-    url: url.value,
-    retry: retry.value,
-    headers: headers.value.map((h) => ({ ...h })),
-    providerHeaders: Object.fromEntries(
-      Object.entries(providerHeaders.value).map(([k, v]) => [k, v.map((h) => ({ ...h }))])
-    ),
-  };
-}
-
-const dirty = computed(() => JSON.stringify(snapshot()) !== JSON.stringify(original.value));
-
-const activeProviderHeaders = computed<HeaderRow[]>({
-  get: () => (activeProvider.value ? (providerHeaders.value[activeProvider.value] ?? []) : []),
-  set: (v) => {
-    if (activeProvider.value)
-      providerHeaders.value = { ...providerHeaders.value, [activeProvider.value]: v };
-  },
-});
-
-function markDirty(): void {
-  fieldErrors.value = {};
-}
-
-function normalizeMode(m: unknown): ProxyMode {
-  const s = String(m ?? 'auto').toLowerCase();
-  if (s === 'custom' || s === 'manual') return 'manual';
-  if (s === 'system' || s === 'auto') return 'auto';
-  if (s === 'direct') return 'direct';
-  return 'auto';
-}
-
-function toHeaderRows(raw: unknown): HeaderRow[] {
-  if (!Array.isArray(raw)) return [];
-  const out: HeaderRow[] = [];
-  for (const e of raw) {
-    const o = (e ?? {}) as Record<string, unknown>;
-    const key = typeof o.key === 'string' ? o.key : typeof o.name === 'string' ? o.name : '';
-    const value = typeof o.value === 'string' ? o.value : '';
-    if (!key && !value) continue;
-    out.push({ key, value });
-  }
-  return out;
-}
-
-function toProviderMap(raw: unknown): Record<string, HeaderRow[]> {
-  if (!raw || typeof raw !== 'object') return {};
-  if (Array.isArray(raw)) return {};
-  const out: Record<string, HeaderRow[]> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    out[k] = toHeaderRows(v);
-  }
-  return out;
-}
+function markDirty(): void { fieldErrors.value = {}; }
 
 async function load(): Promise<void> {
   loading.value = true;
   loadError.value = null;
-  notes.value = [];
   try {
     const s = (await transport.request('settings.get', null)) as {
-      network?: {
-        mode?: string;
-        url?: string | null;
-        retry?: number;
-        headers?: unknown;
-        headersEnabled?: boolean;
-        providerHeaders?: unknown;
-      };
-      providers?: Array<{ name?: string }>;
+      proxy?: { mode?: string; url?: string | null };
+      retry?: number;
+      providers?: Array<{ id?: string; displayName?: string; useProxy?: boolean; baseUrl?: string }>;
     };
-    const n = s.network ?? {};
-    mode.value = normalizeMode((n as { mode?: unknown }).mode);
-    url.value = typeof (n as { url?: unknown }).url === 'string' ? ((n as { url?: string }).url as string) : '';
-    retry.value = typeof (n as { retry?: unknown }).retry === 'number' ? ((n as { retry?: number }).retry as number) : 3;
-    headers.value = toHeaderRows((n as { headers?: unknown }).headers);
-    providerHeaders.value = toProviderMap((n as { providerHeaders?: unknown }).providerHeaders);
-    providerNames.value = (s.providers ?? []).map((p) => p?.name ?? '').filter((x) => x !== '');
-    const keys = Object.keys(providerHeaders.value);
-    activeProvider.value = providerNames.value[0] ?? keys[0] ?? '';
-    original.value = snapshot();
+    const m = String(s.proxy?.mode ?? 'auto').toLowerCase();
+    mode.value = m === 'manual' ? 'manual' : m === 'direct' ? 'direct' : 'auto';
+    url.value = typeof s.proxy?.url === 'string' ? s.proxy.url : '';
+    retry.value = typeof s.retry === 'number' ? s.retry : 0;
+    providers.value = (s.providers ?? []).map((p) => ({
+      id: p.id ?? '',
+      displayName: p.displayName ?? p.id ?? '',
+      useProxy: p.useProxy !== false,
+      baseUrl: p.baseUrl ?? '',
+    })).filter((p) => p.id);
+    original.value = { mode: mode.value, url: url.value, retry: retry.value };
     fieldErrors.value = {};
   } catch (e) {
     loadError.value = (e as Error).message;
@@ -141,43 +58,23 @@ async function load(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (saving.value || loading.value) return;
-  const errs = validateNetworkForm({
-    mode: mode.value,
-    url: url.value,
-    retry: retry.value,
-    headers: headers.value,
-  });
+  if (saving.value) return;
+  const errs = validateNetworkForm({ mode: mode.value, url: url.value, retry: retry.value });
   const map: Record<string, string> = {};
   for (const e of errs) map[e.field] = e.message;
-  // 分服务商头的 key 校验
-  for (const [p, list] of Object.entries(providerHeaders.value)) {
-    list.forEach((h, i) => {
-      if (h.key.trim() && /[\s:]/.test(h.key)) {
-        map[`providerHeaders.${p}[${i}]`] = `服务商「${p}」第 ${i + 1} 行请求头名称不合法`;
-      }
-    });
-  }
   fieldErrors.value = map;
-  if (Object.keys(map).length > 0) {
+  if (errs.length > 0) {
     toast.warning('请先修正表单中的错误');
     return;
   }
   saving.value = true;
   try {
-    const r = (await transport.request('settings.saveNetwork', {
+    await transport.request('settings.saveNetwork', {
       mode: mode.value,
       url: mode.value === 'manual' ? url.value : undefined,
       retry: retry.value,
-      headers: headers.value.filter((h) => h.key.trim() !== ''),
-      providerHeaders: providerHeaders.value,
-    })) as { ok?: boolean; notes?: string[] };
-    if (r.ok === false) {
-      toast.error('保存失败（输入已保留）');
-      return;
-    }
-    notes.value = r.notes ?? [];
-    original.value = snapshot();
+    });
+    original.value = { mode: mode.value, url: url.value, retry: retry.value };
     toast.success('已保存');
   } catch (e) {
     toast.error(`保存失败：${(e as Error).message}（输入已保留）`);
@@ -186,138 +83,49 @@ async function save(): Promise<void> {
   }
 }
 
-function isDirty(): boolean {
-  return dirty.value;
-}
+function isDirty(): boolean { return dirty.value; }
 function resetToSaved(): void {
-  const o = original.value;
-  mode.value = o.mode;
-  url.value = o.url;
-  retry.value = o.retry;
-  headers.value = o.headers.map((h) => ({ ...h }));
-  providerHeaders.value = Object.fromEntries(
-    Object.entries(o.providerHeaders).map(([k, v]) => [k, v.map((h) => ({ ...h }))])
-  );
+  mode.value = original.value.mode;
+  url.value = original.value.url;
+  retry.value = original.value.retry;
   fieldErrors.value = {};
 }
 defineExpose({ isDirty, resetToSaved });
-
 onMounted(() => void load());
 </script>
 
 <template>
   <div class="page">
     <h2 class="page-title">网络</h2>
-
     <div v-if="loading" class="page-state"><HSpinner size="sm" /><span>加载中…</span></div>
     <div v-else-if="loadError" class="page-state err" role="alert">
       <span>读取设置失败：{{ loadError }}</span>
       <HButton size="sm" variant="secondary" @click="load">重试</HButton>
     </div>
-
     <template v-else>
-      <SettingRow label="代理模式" desc="直连 / 使用系统代理 / 自定义代理地址">
-        <HRadioGroup
-          :model-value="mode"
-          name="proxy-mode"
-          direction="horizontal"
-          @update:model-value="
-            (v: string | number) => {
-              mode = v === 'auto' ? 'auto' : v === 'manual' ? 'manual' : 'direct';
-              markDirty();
-            }
-          "
-        >
+      <SettingRow label="代理模式" desc="全局代理服务器（供探活/下载/抓网页复用）；模型是否走代理看各 Provider 的 useProxy">
+        <HRadioGroup :model-value="mode" name="proxy-mode" direction="horizontal" @update:model-value="(v: string | number) => { mode = v === 'manual' ? 'manual' : v === 'direct' ? 'direct' : 'auto'; markDirty(); }">
           <HRadio value="direct" label="直连" />
-          <HRadio value="auto" label="系统代理" />
+          <HRadio value="auto" label="直连（auto 钉死）" />
           <HRadio value="manual" label="自定义" />
         </HRadioGroup>
       </SettingRow>
-
-      <SettingRow
-        v-if="mode === 'manual'"
-        label="代理地址"
-        desc="仅自定义模式需要，http(s):// 开头"
-        required
-        :error="fieldErrors['url'] ?? null"
-      >
-        <HInput
-          :model-value="url"
-          placeholder="http://127.0.0.1:7890"
-          :error="!!fieldErrors['url']"
-          @update:model-value="
-            (v: string) => {
-              url = v;
-              markDirty();
-            }
-          "
-        />
+      <SettingRow v-if="mode === 'manual'" label="代理地址" desc="仅自定义模式需要，http(s):// 开头" required :error="fieldErrors['url'] ?? null">
+        <HInput :model-value="url" placeholder="http://127.0.0.1:7890" :error="!!fieldErrors['url']" @update:model-value="(v: string) => { url = v; markDirty(); }" />
       </SettingRow>
-
-      <SettingRow
-        label="重试次数"
-        desc="请求失败时最多重试次数，0 ~ 10"
-        :error="fieldErrors['retry'] ?? null"
-      >
-        <HSlider
-          :model-value="retry"
-          :min="0"
-          :max="10"
-          :step="1"
-          show-value
-          label="重试次数"
-          @update:model-value="
-            (v: number) => {
-              retry = v;
-              markDirty();
-            }
-          "
-        />
+      <SettingRow label="重试次数" desc="请求失败时最多重试次数，0 ~ 8" :error="fieldErrors['retry'] ?? null">
+        <HSlider :model-value="retry" :min="0" :max="8" :step="1" show-value label="重试次数" @update:model-value="(v: number) => { retry = v; markDirty(); }" />
       </SettingRow>
-
-      <SettingRow label="自定义请求头" desc="附加到所有模型请求的请求头（headers）">
-        <HeadersEditor
-          :model-value="headers"
-          @update:model-value="
-            (v: HeaderRow[]) => {
-              headers = v;
-              markDirty();
-            }
-          "
-        />
-      </SettingRow>
-
-      <SettingRow label="分服务商请求头" desc="只附加到指定服务商请求的请求头（providerHeaders）">
+      <SettingRow label="各 Provider 是否走代理" desc="只读一览（去模型页修改 useProxy）">
         <div class="prov">
-          <HSelect
-            :model-value="activeProvider"
-            placeholder="选择服务商"
-            @update:model-value="
-              (v: string) => {
-                activeProvider = v;
-              }
-            "
-          >
-            <option v-for="p in providerNames" :key="p" :value="p">{{ p }}</option>
-          </HSelect>
-          <HeadersEditor
-            v-if="activeProvider"
-            :model-value="activeProviderHeaders"
-            @update:model-value="
-              (v: HeaderRow[]) => {
-                activeProviderHeaders = v;
-                markDirty();
-              }
-            "
-          />
-          <p v-else class="prov-empty">还没有可用的服务商（先在“模型”页配置服务商）。</p>
+          <p v-for="p in providers" :key="p.id" class="prov-row">
+            <span>{{ p.displayName }}</span>
+            <span class="prov-sub">{{ p.id }}</span>
+            <span class="tag">{{ p.useProxy ? (mode === 'direct' ? 'useProxy=true（全局 direct 下直连）' : '走代理') : '直连' }}</span>
+          </p>
+          <p v-if="providers.length === 0" class="prov-empty">还没有 Provider（先在“模型”页配置）。</p>
         </div>
       </SettingRow>
-
-      <div v-if="notes.length" class="notes" role="status">
-        <p v-for="(n, i) in notes" :key="i" class="note">{{ n }}</p>
-      </div>
-
       <div class="page-actions">
         <HButton variant="primary" :disabled="!dirty" :loading="saving" @click="save">保存</HButton>
         <span v-if="dirty" class="dirty-hint" role="status">有未保存的改动</span>
@@ -327,61 +135,15 @@ onMounted(() => void load());
 </template>
 
 <style scoped>
-.page {
-  max-width: 760px;
-}
-.page-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0 0 var(--space-4);
-}
-.page-state {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: hsl(var(--fg-muted));
-  font-size: var(--text-sm);
-  padding: var(--space-4) 0;
-}
-.page-state.err {
-  color: hsl(var(--danger));
-  flex-direction: column;
-  align-items: flex-start;
-}
-.prov {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.prov-empty {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: hsl(var(--fg-subtle));
-}
-.notes {
-  margin-top: var(--space-2);
-}
-.note {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: hsl(var(--warning-subtle));
-  color: hsl(var(--warning));
-}
-.page-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  position: sticky;
-  bottom: 0;
-  background: hsl(var(--bg));
-  border-top: 1px solid hsl(var(--border-subtle));
-}
-.dirty-hint {
-  font-size: var(--text-xs);
-  color: hsl(var(--warning));
-}
+.page { max-width: 760px; }
+.page-title { font-size: var(--text-lg); font-weight: 600; margin: 0 0 var(--space-4); }
+.page-state { display: flex; align-items: center; gap: var(--space-2); color: hsl(var(--fg-muted)); font-size: var(--text-sm); padding: var(--space-4) 0; }
+.page-state.err { color: hsl(var(--danger)); flex-direction: column; align-items: flex-start; }
+.prov { display: flex; flex-direction: column; gap: var(--space-1); }
+.prov-row { display: flex; gap: var(--space-2); align-items: center; font-size: var(--text-sm); }
+.prov-sub { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
+.tag { font-size: var(--text-xs); background: hsl(var(--bg-muted)); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+.prov-empty { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
+.page-actions { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; position: sticky; bottom: 0; background: hsl(var(--bg)); border-top: 1px solid hsl(var(--border-subtle)); }
+.dirty-hint { font-size: var(--text-xs); color: hsl(var(--warning)); }
 </style>

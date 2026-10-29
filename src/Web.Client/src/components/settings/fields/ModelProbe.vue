@@ -1,14 +1,18 @@
 <!-- src/Web.Client/src/components/settings/fields/ModelProbe.vue -->
-<!-- 模型探测（01 §9.4）：loading + 计时（2s 后提示仍在探测）+ 超时 10s + 成功 Toast + 失败保留手填。 -->
+<!-- 模型探测：loading + 计时 + 超时 10s + 成功 Toast + 失败保留手填。P10：带头、走对代理；含会话模板的头跳过。 -->
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import HButton from '@/components/base/HButton.vue';
+import type { HeaderRow } from './HeadersEditor.vue';
 
 const props = defineProps<{
   baseUrl: string;
   apiKey?: string;
+  providerId?: string;
+  headers?: HeaderRow[];
+  useProxy?: boolean;
 }>();
 
 const emit = defineEmits<{ 'probe-models': [models: string[]] }>();
@@ -46,6 +50,9 @@ async function probe(): Promise<void> {
     const r = (await transport.request('settings.probeModels', {
       baseUrl: props.baseUrl,
       apiKey: props.apiKey || undefined,
+      providerId: props.providerId,
+      headers: props.headers,
+      useProxy: props.useProxy,
     })) as { models?: string[] };
     if (timedOut) return;
     const models = Array.isArray(r.models) ? r.models : [];

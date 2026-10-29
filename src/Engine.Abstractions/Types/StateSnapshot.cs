@@ -55,7 +55,7 @@ public sealed record SessionState
     public string? HistoryPath { get; init; }
 }
 
-/// <summary>智能体状态。</summary>
+/// <summary>智能体状态（P10：active 指针 + 模型能力位）。</summary>
 public sealed record AgentState
 {
     /// <summary>是否有回合正在执行。</summary>
@@ -68,16 +68,30 @@ public sealed record AgentState
     public string ModeLabel { get; init; } = "询问";
     /// <summary>人格名。</summary>
     public string Persona { get; init; } = "";
-    /// <summary>模型名。</summary>
-    public string Model { get; init; } = "";
-    /// <summary>服务商名。</summary>
+    /// <summary>服务商注册名（provider id）。</summary>
     public string Provider { get; init; } = "";
+    /// <summary>服务商别称（回落 id）。</summary>
+    public string ProviderDisplay { get; init; } = "";
+    /// <summary>模型实际请求名。</summary>
+    public string Model { get; init; } = "";
+    /// <summary>模型别称（回落 id）。</summary>
+    public string ModelDisplay { get; init; } = "";
+    /// <summary>协议：chat 可用，responses 预留。</summary>
+    public string Protocol { get; init; } = "chat";
     /// <summary>服务地址。</summary>
     public string BaseUrl { get; init; } = "";
     /// <summary>是否已配置 API Key。</summary>
     public bool ApiKeySet { get; init; }
-    /// <summary>上下文窗口（可为空）。</summary>
+    /// <summary>上下文窗口（可为空=未知）。</summary>
     public int? ContextWindow { get; init; }
+    /// <summary>输出 token 最大值（可为空=不限制）。</summary>
+    public int? MaxTokens { get; init; }
+    /// <summary>是否接受图片。</summary>
+    public bool AcceptsImages { get; init; }
+    /// <summary>回放历史是否携带 reasoning_content。</summary>
+    public bool IncludeReasoning { get; init; } = true;
+    /// <summary>本次模型请求是否走代理（脱敏 bool）。</summary>
+    public bool ProxyInUse { get; init; }
     /// <summary>最大轮数。</summary>
     public int MaxTurns { get; init; }
     /// <summary>重试次数上限。</summary>

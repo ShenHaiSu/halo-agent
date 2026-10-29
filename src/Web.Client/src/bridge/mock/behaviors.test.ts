@@ -40,13 +40,15 @@ describe('Mock 行为表与契约一致性', () => {
     }
   });
 
-  it('settings.get Mock 含 network', () => {
+  it('settings.get Mock 含 providers 整树 + proxy', () => {
     const b = BEHAVIORS['settings.get'];
     expect(b?.kind).toBe('ok');
     if (b?.kind === 'ok') {
-      const s = b.run(null) as { network?: { mode?: string } };
-      expect(s.network).toBeDefined();
-      expect(s.network?.mode).toBe('auto');
+      const s = b.run(null) as { providers?: unknown[]; proxy?: { mode?: string }; activeProvider?: string };
+      expect(s.providers).toBeDefined();
+      expect(Array.isArray(s.providers)).toBe(true);
+      expect(s.proxy?.mode).toBe('auto');
+      expect(typeof s.activeProvider).toBe('string');
     }
   });
 

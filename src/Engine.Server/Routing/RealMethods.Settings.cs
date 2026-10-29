@@ -14,137 +14,280 @@ public sealed partial class RealMethods
     {
         var cfg = ConfigStore.Load();
 
-        ResolvedConfig resolved;
-        try { resolved = ConfigStore.Resolve(cfg); }
-        catch (InvalidOperationException)
-        {
-            resolved = new ResolvedConfig
-            {
-                Model = cfg.Model ?? "",
-                BaseUrl = cfg.BaseUrl ?? "",
-                ProviderName = cfg.Provider ?? "ollama",
-                ApiKey = cfg.ApiKey,
-                ContextWindow = cfg.ContextWindow,
-                MaxTurns = cfg.MaxTurns ?? 200,
-                Retry = cfg.Retry ?? 0,
-            };
-        }
-
-        var providers = ConfigStore.AllProviders(cfg)
-            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => new ProviderEntry
-            {
-                Name = kv.Key,
-                Model = kv.Value.Model ?? "",
-                BaseUrl = kv.Value.BaseUrl ?? "",
-            })
-            .ToList();
-
-        var headers = (cfg.ExtraHeaders ?? new Dictionary<string, string>())
-            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kv => new HeaderPair { Name = kv.Key, Value = kv.Value })
-            .ToList();
+        // 旧形状嗅探：空新模型 + migrationRequired=true（Load 已备份一次）
+        bool migrationRequired = IsOldShapeOnDisk();
 
         var mode = (cfg.Proxy.Mode ?? "auto").ToLowerInvariant();
         if (mode is not ("auto" or "direct" or "manual")) mode = "auto";
 
-        var network = new SettingsGetNetwork
-        {
-            Mode = mode,
-            Url = cfg.Proxy.Url,
-            Retry = cfg.Retry ?? 0,
-            HeadersEnabled = cfg.ExtraHeadersEnabled ?? true,
-            Headers = headers,
-            ProviderHeaders = (cfg.Providers ?? new Dictionary<string, ProviderDef>())
-                .Where(kv => kv.Value.ExtraHeaders.Count > 0)
-                .ToDictionary(
-                    kv => kv.Key,
-                    kv => (IReadOnlyList<HeaderPair>)kv.Value.ExtraHeaders
-                        .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
-                        .Select(h => new HeaderPair { Name = h.Key, Value = h.Value })
-                        .ToList()),
-        };
+        var providers = cfg.Providers
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => new ProviderView
+            {
+                Id = kv.Key,
+                DisplayName = string.IsNullOrWhiteSpace(kv.Value.DisplayName) ? kv.Key : kv.Value.DisplayName!.Trim(),
+                BaseUrl = kv.Value.BaseUrl ?? "",
+                ApiKeySet = !string.IsNullOrEmpty(kv.Value.ApiKey),
+                HeadersEnabled = kv.Value.HeadersEnabled,
+                Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
+                    .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
+                UseProxy = kv.Value.UseProxy,
+                ModelCount = kv.Value.Models.Count,
+                Models = kv.Value.Models.Select(m => new ModelView
+                {
+                    Id = m.Id,
+                    DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id : m.DisplayName!.Trim(),
+                    Protocol = (m.Protocol ?? "chat").ToLowerInvariant(),
+                    ContextWindow = m.ContextWindow,
+                    MaxTokens = m.MaxTokens,
+                    AcceptsImages = m.AcceptsImages,
+                    IncludeReasoningHistory = m.IncludeReasoningHistory,
+                }).ToList(),
+            })
+            .ToList();
 
         return Task.FromResult<object?>(new SettingsGetResult
         {
-            Model = resolved.Model,
-            Provider = resolved.ProviderName,
-            BaseUrl = resolved.BaseUrl,
-            ApiKeySet = !string.IsNullOrWhiteSpace(resolved.ApiKey),
-            ApiKeyEnv = null,
-            ContextWindow = resolved.ContextWindow,
-            MaxTurns = resolved.MaxTurns,
-            Retry = resolved.Retry,
-            Proxy = new ProxySettings
-            {
-                Mode = mode,
-                Url = cfg.Proxy.Url,
-            },
-            Headers = headers,
-            ExtraHeadersEnabled = cfg.ExtraHeadersEnabled ?? true,
+            ActiveProvider = cfg.ActiveProvider ?? "",
+            ActiveModel = cfg.ActiveModel ?? "",
+            MigrationRequired = migrationRequired,
             Providers = providers,
+            Proxy = new ProxySettings { Mode = mode, Url = cfg.Proxy.Url },
+            Retry = cfg.Retry ?? 0,
+            MaxTurns = cfg.MaxTurns ?? 200,
+            Persona = cfg.Persona ?? "",
             DataDir = _dataDir,
             ConfigPath = Path.Combine(_dataDir, "config.json"),
-            Network = network,
         });
     }
 
-    public Task<object?> SettingsSaveModelAsync(JsonElement? p, CancellationToken ct)
+    private bool IsOldShapeOnDisk()
     {
-        var provider = p?.TryGetProperty("provider", out var pv) == true ? pv.GetString() : null;
-        if (string.IsNullOrWhiteSpace(provider))
-            throw RpcException.ParamsInvalid("provider 不能为空");
+        try
+        {
+            var path = Paths.ConfigFile;
+            if (!File.Exists(path)) return false;
+            var text = File.ReadAllText(path);
+            return !ConfigStore.IsNewShapeJson(text) && text.TrimStart().StartsWith("{");
+        }
+        catch { return false; }
+    }
 
-        var notes = new List<string>();
+    public Task<object?> SettingsSaveProvidersAsync(JsonElement? p, CancellationToken ct)
+    {
+        if (p is null || !p.Value.TryGetProperty("providers", out var pv) || pv.ValueKind != JsonValueKind.Object)
+            throw RpcException.ParamsInvalid("providers（对象映射，键为 provider id）必填");
+
+        // 方案A：migrationRequired 两步确认后前端传 force=true，才允许覆盖旧结构/损坏配置。
+        bool force = p.Value.TryGetProperty("force", out var forceEl) && forceEl.ValueKind == JsonValueKind.True;
+
+        var warnings = new List<string>();
+        ConfigModel cfg;
+        try { cfg = ConfigStore.LoadForWrite(force); }
+        catch (InvalidOperationException ex)
+        {
+            throw new RpcException(RpcError.Internal,
+                "配置文件损坏或为旧结构，已拒绝保存以免覆盖：" + ex.Message);
+        }
+        if (force)
+            warnings.Add("已按二次确认覆盖旧结构或损坏的配置（原文件已自动备份为 .bak.*）");
+
+        var next = new ConfigModel
+        {
+            ActiveProvider = cfg.ActiveProvider,
+            ActiveModel = cfg.ActiveModel,
+            MaxTurns = cfg.MaxTurns,
+            Persona = cfg.Persona,
+            Retry = cfg.Retry,
+            Proxy = cfg.Proxy,
+        };
+
+        // apiKey 缺席或空 = 不改；clearKey=true 清除（与 apiKey 同传时 clear 优先 + warning）
+        foreach (var prop in pv.EnumerateObject())
+        {
+            var pid = prop.Name.Trim();
+            var entry = ParseProviderEntry(prop.Value);
+            cfg.Providers.TryGetValue(pid, out var existing);
+
+            var pcfg = new ProviderConfig
+            {
+                DisplayName = entry.DisplayName ?? existing?.DisplayName,
+                BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
+                ApiKey = existing?.ApiKey,
+                HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
+                Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
+                UseProxy = entry.UseProxy ?? existing?.UseProxy ?? true,
+                Models = entry.Models?.Select(m => new ModelConfig
+                {
+                    Id = m.Id.Trim(),
+                    DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? null : m.DisplayName!.Trim(),
+                    Protocol = ((m.Protocol ?? "chat").Trim().ToLowerInvariant()),
+                    ContextWindow = m.ContextWindow,
+                    MaxTokens = m.MaxTokens,
+                    AcceptsImages = m.AcceptsImages ?? false,
+                    IncludeReasoningHistory = m.IncludeReasoningHistory ?? true,
+                }).ToList() ?? new List<ModelConfig>(),
+            };
+
+            if (entry.ClearKey)
+            {
+                pcfg.ApiKey = null;
+                if (entry.ApiKey is not null)
+                    warnings.Add($"服务商「{pid}」clearKey 优先于 apiKey（已清除）");
+            }
+            else if (!string.IsNullOrWhiteSpace(entry.ApiKey))
+            {
+                pcfg.ApiKey = entry.ApiKey!.Trim();
+            }
+
+            next.Providers[pid] = pcfg;
+        }
+
+        // 删除语义：整包替换——params 里没有的 provider 视为删除。若要保留，必须整树下发。
+        // 为避免误删，这里要求调用方下发全量；缺席即删（按契约整树保存）。
+        var errs = ConfigValidation.ValidateTree(next);
+        if (errs.Count > 0)
+        {
+            // 整包拒绝：落盘无变化
+            throw new RpcException(RpcError.ParamsInvalid,
+                "整树校验失败（已拒绝保存，落盘无变化）: " +
+                string.Join("；", errs.Select(e => $"[{e.Provider}/{e.Model ?? "-"}.{e.Field}] {e.Message}")));
+        }
+        warnings.AddRange(ConfigValidation.Warnings(next));
+
+        ConfigStore.Save(next);
+
+        return Task.FromResult<object?>(new SettingsSaveProvidersResult
+        {
+            Ok = true,
+            Notes = Array.Empty<string>(),
+            Warnings = warnings,
+            Errors = Array.Empty<SettingsFieldError>(),
+        });
+    }
+
+    private sealed record ParsedProvider(
+        string? DisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
+        bool? HeadersEnabled, Dictionary<string, string>? Headers, bool? UseProxy,
+        List<ModelSaveEntry>? Models);
+
+    private static ParsedProvider ParseProviderEntry(JsonElement el)
+    {
+        string? displayName = el.TryGetProperty("displayName", out var dn) ? dn.GetString() : null;
+        string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
+        string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
+        bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
+        bool? headersEnabled = el.TryGetProperty("headersEnabled", out var he)
+            ? (he.ValueKind == JsonValueKind.True ? true : he.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+        Dictionary<string, string>? headers = null;
+        if (el.TryGetProperty("headers", out var hv) && hv.ValueKind == JsonValueKind.Array)
+        {
+            headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in hv.EnumerateArray())
+            {
+                if (h.ValueKind != JsonValueKind.Object) continue;
+                var key = h.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
+                    : h.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
+                var val = h.TryGetProperty("value", out var v) ? v.GetString() : null;
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                if (val is null) continue;
+                headers[key!] = val;
+            }
+        }
+        bool? useProxy = el.TryGetProperty("useProxy", out var up)
+            ? (up.ValueKind == JsonValueKind.True ? true : up.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+        List<ModelSaveEntry>? models = null;
+        if (el.TryGetProperty("models", out var mv) && mv.ValueKind == JsonValueKind.Array)
+        {
+            models = new List<ModelSaveEntry>();
+            foreach (var m in mv.EnumerateArray())
+            {
+                if (m.ValueKind != JsonValueKind.Object) continue;
+                models.Add(new ModelSaveEntry
+                {
+                    Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    DisplayName = m.TryGetProperty("displayName", out var mdn) ? mdn.GetString() : null,
+                    Protocol = m.TryGetProperty("protocol", out var pr) ? pr.GetString() : null,
+                    ContextWindow = m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : null,
+                    MaxTokens = m.TryGetProperty("maxTokens", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : null,
+                    AcceptsImages = m.TryGetProperty("acceptsImages", out var ai)
+                        ? (ai.ValueKind == JsonValueKind.True ? true : ai.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                    IncludeReasoningHistory = m.TryGetProperty("includeReasoningHistory", out var ir)
+                        ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                });
+            }
+        }
+        return new ParsedProvider(displayName, baseUrl, apiKey, clearKey, headersEnabled, headers, useProxy, models);
+    }
+
+    public Task<object?> SettingsSetActiveAsync(JsonElement? p, CancellationToken ct)
+    {
+        var providerId = p?.TryGetProperty("providerId", out var pv) == true ? pv.GetString()
+            ?? (p?.TryGetProperty("provider", out var pv2) == true ? pv2.GetString() : null) : null;
+        var modelId = p?.TryGetProperty("modelId", out var mv) == true ? mv.GetString()
+            ?? (p?.TryGetProperty("model", out var mv2) == true ? mv2.GetString() : null) : null;
+        if (string.IsNullOrWhiteSpace(providerId) || string.IsNullOrWhiteSpace(modelId))
+            throw RpcException.ParamsInvalid("providerId 与 modelId 必填");
+
+        if (_session.IsBusy)
+            throw new RpcException(RpcError.StateBusy, "有回合正在执行，切换被拒绝");
+
+        providerId = providerId!.Trim();
+        modelId = modelId!.Trim();
 
         ConfigModel cfg;
         try { cfg = ConfigStore.LoadForWrite(); }
         catch (InvalidOperationException ex)
         {
-            throw new RpcException(RpcError.Internal,
-                "配置文件损坏，已拒绝保存以免覆盖：" + ex.Message,
-                "请先修复或删除 " + Path.Combine(_dataDir, "config.json"));
+            throw new RpcException(RpcError.Internal, "配置文件损坏或为旧结构，已拒绝切换：" + ex.Message);
         }
 
-        cfg.Provider = provider.Trim();
+        if (!cfg.Providers.TryGetValue(providerId, out var pdef))
+            throw RpcException.ParamsInvalid("未知服务商: " + providerId);
+        var mdef = pdef.Models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.Ordinal));
+        if (mdef is null)
+            throw RpcException.ParamsInvalid($"服务商「{providerId}」下未知模型: {modelId}");
+        if (string.Equals((mdef.Protocol ?? "chat").ToLowerInvariant(), "responses", StringComparison.Ordinal))
+            throw new RpcException(RpcError.NotSupported, "Responses 协议尚未支持（当前仅 chat 可用）。");
 
-        if (p?.TryGetProperty("model", out var me) == true)
-            cfg.Model = NullIfBlank(me.GetString());
-        if (p?.TryGetProperty("baseUrl", out var be) == true)
-            cfg.BaseUrl = NullIfBlank(be.GetString());
-        if (p?.TryGetProperty("contextWindow", out var cw) == true && cw.ValueKind == JsonValueKind.Number)
-            cfg.ContextWindow = cw.GetInt32();
-        if (p?.TryGetProperty("maxTurns", out var mt) == true && mt.ValueKind == JsonValueKind.Number)
-            cfg.MaxTurns = mt.GetInt32();
-
-        var clearKey = p?.TryGetProperty("clearKey", out var ck) == true && ck.ValueKind == JsonValueKind.True;
-        var apiKey = p?.TryGetProperty("apiKey", out var ak) == true ? ak.GetString() : null;
-
-        if (clearKey)
-        {
-            cfg.ApiKey = null;
-            if (cfg.Providers.TryGetValue(cfg.Provider, out var pdef))
-                pdef.ApiKey = null;
-            notes.Add("已清除 API Key");
-        }
-        else if (!string.IsNullOrWhiteSpace(apiKey))
-        {
-            if (!cfg.Providers.TryGetValue(cfg.Provider, out var def))
-            {
-                def = new ProviderDef();
-                cfg.Providers[cfg.Provider] = def;
-            }
-            def.ApiKey = apiKey.Trim();
-            notes.Add("API Key 已保存到 provider「" + cfg.Provider + "」");
-        }
+        cfg.ActiveProvider = providerId;
+        cfg.ActiveModel = modelId;
+        var errs = ConfigValidation.ValidateTree(cfg);
+        if (errs.Count > 0)
+            throw RpcException.ParamsInvalid("active 校验失败: " +
+                string.Join("；", errs.Select(e => $"[{e.Provider}/{e.Model ?? "-"}.{e.Field}] {e.Message}")));
 
         ConfigStore.Save(cfg);
 
-        return Task.FromResult<object?>(new SettingsSaveModelResult
+        // 热切：Resolve + Reconfigure（proxy 变化重建 HttpClient）
+        ResolvedActiveModel resolved;
+        try { resolved = ConfigStore.Resolve(cfg); }
+        catch (Exception ex)
         {
-            Ok = true,
-            Notes = notes,
-        });
+            throw new RpcException(RpcError.Internal, "切换后解析失败：" + ex.Message);
+        }
+        try
+        {
+            _session.ReconfigureActive(resolved);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new RpcException(RpcError.NotSupported, ex.Message);
+        }
+        _ = PublishSnapshotAsync();
+
+        return Task.FromResult<object?>(new SettingsSetActiveResult { Ok = true });
+    }
+
+    private Task PublishSnapshotAsync()
+    {
+        try
+        {
+            var snap = _session.BuildSnapshot();
+            return Task.CompletedTask;
+        }
+        catch { return Task.CompletedTask; }
     }
 
     public Task<object?> SettingsSaveNetworkAsync(JsonElement? p, CancellationToken ct)
@@ -179,43 +322,11 @@ public sealed partial class RealMethods
         if (p?.TryGetProperty("retry", out var rv) == true && rv.ValueKind == JsonValueKind.Number)
             cfg.Retry = Math.Clamp(rv.GetInt32(), 0, 8);
 
-        if (p?.TryGetProperty("headersEnabled", out var he) == true)
-            cfg.ExtraHeadersEnabled = he.ValueKind == JsonValueKind.True;
-
-        if (p?.TryGetProperty("headers", out var hv) == true && hv.ValueKind == JsonValueKind.Array)
-        {
-            var (dict, skipped) = ToHeaderDict(hv);
-            cfg.ExtraHeaders = dict;
-            if (skipped.Count > 0)
-                notes.Add("已忽略保留头：" + string.Join("、", skipped));
-        }
-
-        if (p?.TryGetProperty("providerHeaders", out var phv) == true)
-        {
-            if (phv.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var prop in phv.EnumerateObject())
-                {
-                    if (!cfg.Providers.TryGetValue(prop.Name, out var def))
-                    {
-                        def = new ProviderDef();
-                        cfg.Providers[prop.Name] = def;
-                    }
-                    if (prop.Value.ValueKind == JsonValueKind.Array)
-                    {
-                        var (dict, skipped) = ToHeaderDict(prop.Value);
-                        def.ExtraHeaders = dict;
-                        if (skipped.Count > 0)
-                            notes.Add("服务商「" + prop.Name + "」已忽略保留头：" + string.Join("、", skipped));
-                    }
-                }
-            }
-            // 兼容旧的数组写法：忽略（无服务商归属，无法落盘），并提示
-            else if (phv.ValueKind == JsonValueKind.Array)
-            {
-                notes.Add("providerHeaders 为数组已忽略（应为对象映射）");
-            }
-        }
+        // 瘦身：headers/headersEnabled/providerHeaders 已删除；收到则直接拒绝（破坏性口径）
+        if (p?.TryGetProperty("headers", out _) == true ||
+            p?.TryGetProperty("headersEnabled", out _) == true ||
+            p?.TryGetProperty("providerHeaders", out _) == true)
+            throw RpcException.ParamsInvalid("saveNetwork 已瘦身：仅支持 mode/url/retry，请求头请走 saveProviders");
 
         ConfigStore.Save(cfg);
 
@@ -233,13 +344,48 @@ public sealed partial class RealMethods
             throw RpcException.ParamsInvalid("baseUrl 必须是合法绝对地址");
 
         var apiKey = p?.TryGetProperty("apiKey", out var kv) == true ? kv.GetString() : null;
+        var providerId = p?.TryGetProperty("providerId", out var piv) == true ? piv.GetString() : null;
+
+        List<KeyValuePair<string, string>> headers = new();
+        if (p?.TryGetProperty("headers", out var hv) == true && hv.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in hv.EnumerateArray())
+            {
+                if (el.ValueKind != JsonValueKind.Object) continue;
+                var key = el.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
+                    : el.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
+                var val = el.TryGetProperty("value", out var v) ? v.GetString() : null;
+                if (string.IsNullOrWhiteSpace(key) || val is null) continue;
+                headers.Add(new(key!, val));
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(providerId))
+        {
+            try
+            {
+                var cfgProbe = ConfigStore.Load();
+                if (cfgProbe.Providers.TryGetValue(providerId!.Trim(), out var pd))
+                    headers = pd.Headers.Select(kv2 => new KeyValuePair<string, string>(kv2.Key, kv2.Value)).ToList();
+            }
+            catch { }
+        }
+
+        // 代理：表单试算值优先（useProxy），否则读库折叠
+        string? proxyUrl = null;
+        bool? useProxyParam = p?.TryGetProperty("useProxy", out var upv) == true
+            ? (upv.ValueKind == JsonValueKind.True ? true : upv.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+        try
+        {
+            var cfgForProxy = ConfigStore.Load();
+            var (avail, gurl) = ConfigStore.GlobalProxy(cfgForProxy);
+            bool useProxy = useProxyParam
+                ?? (providerId is not null && cfgForProxy.Providers.TryGetValue(providerId.Trim(), out var ppd) ? ppd.UseProxy : true);
+            proxyUrl = (avail && useProxy) ? gurl : null;
+        }
+        catch { }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-        string? proxyUrl = null;
-        try { proxyUrl = ConfigStore.Resolve(ConfigStore.Load()).ProxyUrl; }
-        catch { }
 
         var client = new OpenAiCompatibleClient(new LlmConfig
         {
@@ -247,6 +393,7 @@ public sealed partial class RealMethods
             Model = "",
             ApiKey = apiKey,
             ProxyUrl = proxyUrl,
+            Headers = headers,
         });
 
         try
@@ -268,29 +415,6 @@ public sealed partial class RealMethods
         {
             client.Dispose();
         }
-    }
-
-    public Task<object?> SettingsSaveExtraHeadersAsync(JsonElement? p, CancellationToken ct)
-    {
-        if (p?.TryGetProperty("enabled", out var ev) != true)
-            throw RpcException.ParamsInvalid("enabled 必填");
-
-        ConfigModel cfg;
-        try { cfg = ConfigStore.LoadForWrite(); }
-        catch (InvalidOperationException ex)
-        {
-            throw new RpcException(RpcError.Internal,
-                "配置文件损坏，已拒绝保存以免覆盖：" + ex.Message);
-        }
-
-        cfg.ExtraHeadersEnabled = ev.ValueKind == JsonValueKind.True;
-        ConfigStore.Save(cfg);
-
-        return Task.FromResult<object?>(new SettingsSaveExtraHeadersResult
-        {
-            Ok = true,
-            Notes = new[] { cfg.ExtraHeadersEnabled == true ? "扩展请求头已启用" : "扩展请求头已全部停用" },
-        });
     }
 
     public Task<object?> SettingsMcpGetAsync(JsonElement? p, CancellationToken ct)
@@ -346,30 +470,4 @@ public sealed partial class RealMethods
 
     private static string? NullIfBlank(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();
-
-    private static (Dictionary<string, string> dict, List<string> skipped)
-        ToHeaderDict(JsonElement arr)
-    {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var skipped = new List<string>();
-
-        foreach (var el in arr.EnumerateArray())
-        {
-            if (el.ValueKind != JsonValueKind.Object) continue;
-            // 前端 HeaderRow 用 {key,value}，契约 HeaderPair 用 {name,value}：两者都接受
-            var key = el.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
-                : el.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
-            var val = el.TryGetProperty("value", out var v) ? v.GetString() : null;
-            if (string.IsNullOrWhiteSpace(key)) continue;
-            if (val is null) continue;
-
-            if (ConfigStore.IsReservedHeader(key))
-            {
-                skipped.Add(key);
-                continue;
-            }
-            dict[key] = val;
-        }
-        return (dict, skipped);
-    }
 }

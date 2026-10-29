@@ -48,7 +48,7 @@ namespace HaloAgent.Desktop.Shell;
              true);
          DoubleBuffered = true;
          Padding = Padding.Empty;
-         MinimumSize = new Size(880, 560);
+         MinimumSize = new Size(900, 560);
      }
      /// <summary>P07-Enhance 04：补 WS_THICKFRAME 让 DWM 保留隐形缩放边（无边框下仍可缩放）。Win7 下若出现黑边/闪烁可回退删此重写。</summary>
      protected override CreateParams CreateParams

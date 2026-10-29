@@ -1,34 +1,42 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HaloAgent.Engine.Core.Llm;
 
 public enum Role { System, User, Assistant, Tool }
 
+public enum LlmProtocol { Chat, Responses }
+
+/// <summary>图片/文本内容块（P10：ChatMessage 发送格式升级）。</summary>
+public sealed record ChatContentPart
+{
+    [JsonPropertyName("type")] public string Type { get; init; } = "text"; // text | image_url
+    [JsonPropertyName("text")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; init; }
+    [JsonPropertyName("image_url")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ChatImageUrl? ImageUrl { get; init; }
+
+    public static ChatContentPart TextPart(string text) => new() { Type = "text", Text = text };
+    public static ChatContentPart ImagePart(string url) => new() { Type = "image_url", ImageUrl = new ChatImageUrl { Url = url } };
+}
+
+public sealed record ChatImageUrl
+{
+    [JsonPropertyName("url")] public string Url { get; init; } = "";
+}
+
 /// <summary>
 /// 对话消息（OpenAI 兼容格式）。
-///
-/// 注意：这是**给模型看的**格式，与 P1 契约里的 MessageView（渲染友好）不同。
-/// 转换在 MessageProjector 里做。
+/// Content 纯文本快车道保留；有图时使用 ContentParts（序列化为 content 数组）。
 /// </summary>
+[JsonConverter(typeof(ChatMessageJsonConverter))]
 public sealed record ChatMessage
 {
-    [JsonPropertyName("role")]
     public string RoleWire { get; init; } = "user";
-
-    [JsonPropertyName("content")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Content { get; init; }
-
-    [JsonPropertyName("tool_calls")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ChatContentPart>? ContentParts { get; init; }
     public List<ToolCall>? ToolCalls { get; init; }
-
-    [JsonPropertyName("tool_call_id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ToolCallId { get; init; }
-
-    [JsonPropertyName("reasoning_content")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ReasoningContent { get; init; }
 
     public static ChatMessage System(string content) =>
@@ -36,6 +44,9 @@ public sealed record ChatMessage
 
     public static ChatMessage User(string content) =>
         new() { RoleWire = "user", Content = content };
+
+    public static ChatMessage UserWithParts(List<ChatContentPart> parts) =>
+        new() { RoleWire = "user", ContentParts = parts };
 
     public static ChatMessage Assistant(string content) =>
         new() { RoleWire = "assistant", Content = content };
@@ -54,6 +65,67 @@ public sealed record ChatMessage
         "tool" => Role.Tool,
         _ => Role.User,
     };
+
+    public bool HasImages => ContentParts is { Count: > 0 } &&
+        ContentParts.Any(p => p.Type == "image_url" && p.ImageUrl is not null);
+}
+
+public sealed class ChatMessageJsonConverter : JsonConverter<ChatMessage>
+{
+    public override ChatMessage Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+        string role = root.TryGetProperty("role", out var r) && r.ValueKind == JsonValueKind.String
+            ? r.GetString() ?? "user" : "user";
+        string? toolCallId = root.TryGetProperty("tool_call_id", out var tcid) && tcid.ValueKind == JsonValueKind.String
+            ? tcid.GetString() : null;
+        string? reasoning = root.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == JsonValueKind.String
+            ? rc.GetString() : null;
+        List<ToolCall>? calls = null;
+        if (root.TryGetProperty("tool_calls", out var tcs) && tcs.ValueKind == JsonValueKind.Array)
+            calls = JsonSerializer.Deserialize<List<ToolCall>>(tcs.GetRawText(), options);
+
+        string? content = null;
+        List<ChatContentPart>? parts = null;
+        if (root.TryGetProperty("content", out var c))
+        {
+            if (c.ValueKind == JsonValueKind.String) content = c.GetString();
+            else if (c.ValueKind == JsonValueKind.Array)
+                parts = JsonSerializer.Deserialize<List<ChatContentPart>>(c.GetRawText(), options);
+            else if (c.ValueKind == JsonValueKind.Null) content = null;
+        }
+        // parts 回落：若数组全是 text，可拼回 Content？保留 parts 原样即可
+        return new ChatMessage
+        {
+            RoleWire = role, Content = content, ContentParts = parts,
+            ToolCalls = calls, ToolCallId = toolCallId, ReasoningContent = reasoning,
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, ChatMessage value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("role", value.RoleWire);
+        if (value.ContentParts is { Count: > 0 })
+        {
+            writer.WritePropertyName("content");
+            JsonSerializer.Serialize(writer, value.ContentParts, options);
+        }
+        else
+        {
+            if (value.Content is not null) writer.WriteString("content", value.Content);
+            else writer.WriteNull("content");
+        }
+        if (value.ToolCalls is not null)
+        {
+            writer.WritePropertyName("tool_calls");
+            JsonSerializer.Serialize(writer, value.ToolCalls, options);
+        }
+        if (value.ToolCallId is not null) writer.WriteString("tool_call_id", value.ToolCallId);
+        if (value.ReasoningContent is not null) writer.WriteString("reasoning_content", value.ReasoningContent);
+        writer.WriteEndObject();
+    }
 }
 
 public sealed record ToolCall
@@ -144,6 +216,10 @@ public sealed record LlmConfig
     /// <summary>请求头模板原文（含 `{{session_id}}` / `{{session_hash}}`）；请求时由 HeaderTemplate 展开。</summary>
     public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
         = Array.Empty<KeyValuePair<string, string>>();
+    public LlmProtocol Protocol { get; init; } = LlmProtocol.Chat;
+    public int? MaxTokens { get; init; }
+    public bool AcceptsImages { get; init; }
+    public bool IncludeReasoningHistory { get; init; } = true;
 }
 
 /// <summary>发给模型的工具定义（OpenAI tools 格式）。</summary>

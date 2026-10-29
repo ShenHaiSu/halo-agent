@@ -13,25 +13,8 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-    // ---------- state.setProvider（真实形状；会话级切换，不写盘） ----------
-    public Task<object?> StateSetProviderAsync(JsonElement? p, CancellationToken ct)
-    {
-        var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() : null;
-        if (string.IsNullOrWhiteSpace(name))
-            throw RpcException.ParamsInvalid("name 不能为空");
+    // P10：state.setProvider 已删除，改调 settings.setActive（持久化+热切）。
 
-        var cfg = ConfigStore.Load();
-        var providers = ConfigStore.AllProviders(cfg);
-        if (!providers.TryGetValue(name.Trim(), out var def))
-            throw RpcException.ParamsInvalid("未知服务商: " + name);
-
-        return Task.FromResult<object?>(new StateSetProviderResult
-        {
-            Provider = name.Trim(),
-            Model = def.Model ?? cfg.Model ?? "",
-            BaseUrl = def.BaseUrl ?? cfg.BaseUrl ?? "",
-        });
-    }
 
     // ---------- asset.skills.list ----------
     public Task<object?> AssetSkillsListAsync(JsonElement? p, CancellationToken ct)

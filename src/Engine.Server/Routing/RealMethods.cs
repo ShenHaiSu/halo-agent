@@ -57,10 +57,14 @@ public sealed partial class RealMethods
         if (string.IsNullOrWhiteSpace(text))
             throw RpcException.ParamsInvalid("text 不能为空");
 
+        if (!_session.BuildSnapshot().Agent.Configured)
+            throw new RpcException(RpcError.StateNotConfigured, "模型未配置：请去模型设置页选择 active provider/model 后再试。");
+
         if (_session.IsBusy)
             throw RpcException.Busy("有回合正在执行");
 
         var turnId = _session.NewTurnId();
+
 
         // 关键：不 await，只启动
         _ = Task.Run(async () =>

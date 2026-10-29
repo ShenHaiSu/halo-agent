@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/session.ts
-// P5 扩展：configured / provider / model / contextWindow / compactionSummary / modeLabel。
+// P10 扩展：provider/providerDisplay/model/modelDisplay/protocol/baseUrl/contextWindow/maxTokens/acceptsImages/includeReasoning/proxyInUse/configured。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -21,9 +21,16 @@ export const useSessionStore = defineStore('session', () => {
   const windowMaximized = ref(false);
   const configured = ref(false);
   const provider = ref('');
+  const providerDisplay = ref('');
   const model = ref('');
+  const modelDisplay = ref('');
+  const protocol = ref('chat');
   const baseUrl = ref('');
-  const contextWindow = ref(128000);
+  const contextWindow = ref<number | null>(null);
+  const maxTokens = ref<number | null>(null);
+  const acceptsImages = ref(false);
+  const includeReasoning = ref(true);
+  const proxyInUse = ref(false);
   const compactionSummary = ref<string | null>(null);
 
   const isYolo = computed(() => mode.value === 'yolo');
@@ -53,17 +60,23 @@ export const useSessionStore = defineStore('session', () => {
     if (typeof p.maxTurns === 'number') maxTurns.value = p.maxTurns;
     if (typeof p.retry === 'number') retry.value = p.retry;
     if (typeof p.provider === 'string') provider.value = p.provider;
+    if (typeof p.providerDisplay === 'string') providerDisplay.value = p.providerDisplay;
     if (typeof p.model === 'string') model.value = p.model;
+    if (typeof p.modelDisplay === 'string') modelDisplay.value = p.modelDisplay;
+    if (typeof p.protocol === 'string') protocol.value = p.protocol;
     if (typeof p.baseUrl === 'string') baseUrl.value = p.baseUrl;
-    if (typeof p.contextWindow === 'number') contextWindow.value = p.contextWindow;
+    if (typeof p.contextWindow === 'number' || p.contextWindow === null) contextWindow.value = p.contextWindow as number | null;
+    if (typeof p.maxTokens === 'number' || p.maxTokens === null) maxTokens.value = p.maxTokens as number | null;
+    if (typeof p.acceptsImages === 'boolean') acceptsImages.value = p.acceptsImages;
+    if (typeof p.includeReasoning === 'boolean') includeReasoning.value = p.includeReasoning;
+    if (typeof p.proxyInUse === 'boolean') proxyInUse.value = p.proxyInUse;
     if (typeof p.configured === 'boolean') configured.value = p.configured;
     const u = p.usage as { input?: number; output?: number } | undefined;
     if (u) usage.value = { input: u.input ?? 0, output: u.output ?? 0 };
   }
 
-  function addUsage(input: number, output: number): void {
-    usage.value.input += input;
-    usage.value.output += output;
+  function applySnapshotAgent(a: Record<string, unknown>): void {
+    applyInfo(a);
   }
 
   async function setMode(m: PermissionMode): Promise<void> {
@@ -154,12 +167,23 @@ export const useSessionStore = defineStore('session', () => {
     modeLabel,
     configured,
     provider,
+    providerDisplay,
     model,
+    modelDisplay,
+    protocol,
     baseUrl,
     contextWindow,
+    maxTokens,
+    acceptsImages,
+    includeReasoning,
+    proxyInUse,
     compactionSummary,
     applyInfo,
-    addUsage,
+    applySnapshotAgent,
+    addUsage: (input: number, output: number): void => {
+      usage.value.input += input;
+      usage.value.output += output;
+    },
     setMode,
     setPersona,
     setMaxTurns,

@@ -43,8 +43,8 @@ public static class WindowPlacementStore
     public static Rectangle ClampToVisibleScreen(Rectangle saved)
     {
         // 尺寸兜底（防手改荒谬值）。
-        int w = Math.Max(720, Math.Min(saved.Width, 8000));
-        int h = Math.Max(520, Math.Min(saved.Height, 8000));
+        int w = Math.Max(900, Math.Min(saved.Width, 8000));
+        int h = Math.Max(560, Math.Min(saved.Height, 8000));
         var candidate = new Rectangle(saved.Left, saved.Top, w, h);
 
         foreach (var screen in Screen.AllScreens)

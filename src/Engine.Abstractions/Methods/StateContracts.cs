@@ -39,26 +39,6 @@ public sealed record StateSetPersonaResult
     public string Name { get; init; } = "";
 }
 
-// ============================ state.setProvider ============================
-
-/// <summary>state.setProvider 参数。</summary>
-public sealed record StateSetProviderParams
-{
-    /// <summary>服务商名。</summary>
-    public string Name { get; init; } = "";
-}
-
-/// <summary>state.setProvider 结果。</summary>
-public sealed record StateSetProviderResult
-{
-    /// <summary>服务商名。</summary>
-    public string Provider { get; init; } = "";
-    /// <summary>模型名。</summary>
-    public string Model { get; init; } = "";
-    /// <summary>服务地址。</summary>
-    public string BaseUrl { get; init; } = "";
-}
-
 // ============================ state.setMaxTurns ============================
 
 /// <summary>state.setMaxTurns 参数。</summary>

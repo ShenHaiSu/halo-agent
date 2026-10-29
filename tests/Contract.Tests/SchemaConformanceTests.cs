@@ -189,11 +189,11 @@ internal static class KnownMethods
         "session.new", "session.resume", "session.list", "session.rename",
         "session.delete", "session.clear", "session.compact", "session.setCwd",
         // state
-        "state.snapshot", "state.setMode", "state.setPersona", "state.setProvider",
+        "state.snapshot", "state.setMode", "state.setPersona",
         "state.setMaxTurns", "state.setRetry",
         // settings
-        "settings.get", "settings.saveModel", "settings.saveNetwork",
-        "settings.probeModels", "settings.saveExtraHeaders",
+        "settings.get", "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
+        "settings.probeModels",
         "settings.mcp.get", "settings.mcp.save",
         // asset
         "asset.skills.list", "asset.skills.get", "asset.skills.save",

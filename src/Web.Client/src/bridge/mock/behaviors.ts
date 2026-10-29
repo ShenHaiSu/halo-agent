@@ -1,5 +1,5 @@
 // src/Web.Client/src/bridge/mock/behaviors.ts
-// P07 Mock 行为表：必须与 EngineAssembly 注册表保持方法名集合与成功/失败语义一致。
+// P10 Mock 行为表：必须与 EngineAssembly 注册表保持方法名集合与成功/失败语义一致。
 
 export type MockBehavior =
   | { kind: 'ok'; run: (params: unknown) => unknown }
@@ -92,7 +92,7 @@ function mockSummary(s: MockSessionData): unknown {
 }
 
 function mockMessageViews(s: MockSessionData): unknown[] {
-  return s.messages.map((m) => ({ id: m.id, role: m.role, text: m.text, tsMs: m.tsMs }));
+  return s.messages.map((m) => ({ id: m.id, role: m.role, text: m.text, tsMs: m.tsMs, hasImages: false, attachmentCount: 0 }));
 }
 
 /** Mock 用户发言 / 回放落盘：追加进当前会话，切走切回仍在。 */
@@ -117,14 +117,21 @@ function mockSnapshot(sessionId?: string): unknown {
       mode: 'ask',
       modeLabel: '询问模式',
       persona: '',
-      model: 'mock-model',
-      provider: 'mock',
-      baseUrl: 'https://mock.local/v1',
-      apiKeySet: false,
-      contextWindow: 128000,
+      provider: 'deepseek',
+      providerDisplay: 'DeepSeek',
+      model: 'deepseek-chat',
+      modelDisplay: 'deepseek-chat',
+      protocol: 'chat',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKeySet: true,
+      contextWindow: 65536,
+      maxTokens: null,
+      acceptsImages: false,
+      includeReasoning: true,
+      proxyInUse: false,
       maxTurns: 200,
       retry: 0,
-      configured: false,
+      configured: true,
       round: { used: 0, limit: 200 },
     },
     usage: { input: 0, output: 0 },
@@ -135,28 +142,38 @@ function mockSnapshot(sessionId?: string): unknown {
 
 function mockSettings(): unknown {
   return {
-    provider: 'ollama',
-    model: 'llama3',
-    baseUrl: 'http://localhost:11434/v1',
-    apiKeySet: false,
-    apiKeyEnv: null,
-    contextWindow: 128000,
-    maxTurns: 200,
-    retry: 0,
+    activeProvider: 'deepseek',
+    activeModel: 'deepseek-chat',
+    migrationRequired: false,
+    providers: [
+      {
+        id: 'deepseek',
+        displayName: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKeySet: true,
+        headersEnabled: true,
+        headers: [],
+        useProxy: true,
+        modelCount: 1,
+        models: [
+          {
+            id: 'deepseek-chat',
+            displayName: 'deepseek-chat',
+            protocol: 'chat',
+            contextWindow: 65536,
+            maxTokens: null,
+            acceptsImages: false,
+            includeReasoningHistory: true,
+          },
+        ],
+      },
+    ],
     proxy: { mode: 'auto', url: null },
-    headers: [],
-    extraHeadersEnabled: true,
-    providers: [{ name: 'ollama', model: 'llama3', baseUrl: 'http://localhost:11434/v1' }],
+    retry: 0,
+    maxTurns: 200,
+    persona: '',
     dataDir: '(mock)',
     configPath: '(mock)/config.json',
-    network: {
-      mode: 'auto',
-      url: null,
-      retry: 0,
-      headers: [],
-      headersEnabled: true,
-      providerHeaders: {},
-    },
   };
 }
 
@@ -239,15 +256,14 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'state.snapshot': { kind: 'ok', run: () => mockSnapshot() },
   'state.setMode': { kind: 'ok', run: (p) => ({ mode: (p as { mode?: string } | null)?.mode ?? 'ask', label: 'Mock' }) },
   'state.setPersona': { kind: 'ok', run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '' }) },
-  'state.setProvider': { kind: 'ok', run: (p) => ({ provider: (p as { name?: string } | null)?.name ?? 'mock', model: 'mock-model', baseUrl: 'https://mock.local/v1' }) },
   'state.setMaxTurns': { kind: 'ok', run: (p) => ({ maxTurns: (p as { value?: number } | null)?.value ?? 200 }) },
   'state.setRetry': { kind: 'ok', run: (p) => ({ retry: (p as { value?: number } | null)?.value ?? 0 }) },
 
   'settings.get': { kind: 'ok', run: () => mockSettings() },
-  'settings.saveModel': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
+  'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
+  'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
   'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
   'settings.probeModels': { kind: 'ok', run: () => ({ models: ['mock-model'] }) },
-  'settings.saveExtraHeaders': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
   'settings.mcp.get': { kind: 'ok', run: () => ({ path: '(mock)/mcp.json', text: '{"mcpServers":{}}' }) },
   'settings.mcp.save': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
 

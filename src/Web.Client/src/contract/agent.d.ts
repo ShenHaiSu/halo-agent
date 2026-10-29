@@ -1,5 +1,5 @@
 // [注意] 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。
-// 来源: contract/agent.schema.json（协议版本 1）
+// 来源: contract/agent.schema.json（协议版本 2）
 
 /** PermissionMode */
 export type PermissionMode = "ask" | "acceptEdits" | "bypassPermissions" | "yolo"
@@ -28,6 +28,8 @@ export interface MessageView {
   toolCalls?: ToolCallView[]
   injected?: boolean
   tsMs?: number
+  hasImages?: boolean
+  attachmentCount?: number
 }
 
 /** SessionSummary */
@@ -134,6 +136,13 @@ export interface StateSnapshot {
   used?: number
   limit?: number
 }
+  providerDisplay?: string
+  modelDisplay?: string
+  protocol?: "chat" | "responses"
+  maxTokens?: number | null
+  acceptsImages?: boolean
+  includeReasoning?: boolean
+  proxyInUse?: boolean
 }
   usage: {
   inputTotal?: number
@@ -339,14 +348,6 @@ export interface HaloMethods {
 }; result: {
   name?: string
 } }
-  /** state.setProvider */
-  'state.setProvider': { params: {
-  name: string
-}; result: {
-  provider?: string
-  model?: string
-  baseUrl?: string
-} }
   /** state.setMaxTurns */
   'state.setMaxTurns': { params: {
   value: number
@@ -361,74 +362,56 @@ export interface HaloMethods {
 } }
   /** settings.get */
   'settings.get': { params: void; result: {
-  model?: string
-  provider?: string
+  activeProvider?: string
+  activeModel?: string
+  migrationRequired?: boolean
+  providers?: {
+  id?: string
+  displayName?: string
   baseUrl?: string
   apiKeySet?: boolean
-  apiKeyEnv?: string | null
+  headersEnabled?: boolean
+  headers?: HeaderPair[]
+  useProxy?: boolean
+  modelCount?: number
+  models?: {
+  id?: string
+  displayName?: string
+  protocol?: "chat" | "responses"
   contextWindow?: number | null
-  maxTurns?: number
-  retry?: number
+  maxTokens?: number | null
+  acceptsImages?: boolean
+  includeReasoningHistory?: boolean
+}[]
+}[]
   proxy?: {
   mode?: "auto" | "direct" | "manual"
   url?: string | null
 }
-  headers?: HeaderPair[]
-  extraHeadersEnabled?: boolean
-  providers?: {
-  name?: string
-  model?: string
-  baseUrl?: string
-}[]
+  retry?: number
+  maxTurns?: number
+  persona?: string
   dataDir?: string
   configPath?: string
-  network?: {
-  mode?: "auto" | "direct" | "manual"
-  url?: string | null
-  retry?: number
-  headers?: HeaderPair[]
-  headersEnabled?: boolean
-  providerHeaders?: Record<string, unknown>
-}
-} }
-  /** settings.saveModel */
-  'settings.saveModel': { params: {
-  provider: string
-  model?: string | null
-  baseUrl?: string | null
-  apiKey?: string | null
-  clearKey?: boolean
-  contextWindow?: number
-  maxTurns?: number | null
-}; result: {
-  ok?: boolean
-  notes?: string[]
 } }
   /** settings.saveNetwork */
   'settings.saveNetwork': { params: {
   mode?: "auto" | "direct" | "manual"
-  url?: string
+  url?: string | null
   retry?: number
-  headersEnabled?: boolean
-  headers?: HeaderPair[]
-  providerHeaders?: Record<string, unknown>
 }; result: {
   ok?: boolean
   notes?: string[]
 } }
   /** settings.probeModels */
   'settings.probeModels': { params: {
-  baseUrl: string
+  baseUrl?: string
   apiKey?: string | null
+  providerId?: string | null
+  headers?: HeaderPair[]
+  useProxy?: boolean
 }; result: {
   models?: string[]
-} }
-  /** settings.saveExtraHeaders */
-  'settings.saveExtraHeaders': { params: {
-  enabled: boolean
-}; result: {
-  ok?: boolean
-  notes?: string[]
 } }
   /** settings.mcp.get */
   'settings.mcp.get': { params: void; result: {
@@ -619,6 +602,23 @@ export interface HaloMethods {
   'fs.readImageAsBase64': { params: {
   path: string
 }; result: string | null }
+  /** settings.saveProviders */
+  'settings.saveProviders': { params: {
+  providers?: Record<string, unknown>
+  force?: boolean
+}; result: {
+  ok?: boolean
+  notes?: string[]
+  warnings?: string[]
+  errors?: unknown[]
+} }
+  /** settings.setActive */
+  'settings.setActive': { params: {
+  providerId?: string
+  modelId?: string
+}; result: {
+  ok?: boolean
+} }
 }
 
 /** 事件载荷表：kind → payload。ask.* 的 payload 即 PendingAsk。 */
@@ -785,14 +785,11 @@ export const METHODS = [
   'state.snapshot',
   'state.setMode',
   'state.setPersona',
-  'state.setProvider',
   'state.setMaxTurns',
   'state.setRetry',
   'settings.get',
-  'settings.saveModel',
   'settings.saveNetwork',
   'settings.probeModels',
-  'settings.saveExtraHeaders',
   'settings.mcp.get',
   'settings.mcp.save',
   'asset.skills.list',
@@ -822,6 +819,8 @@ export const METHODS = [
   'fs.pickFiles',
   'fs.pickSavePath',
   'fs.readImageAsBase64',
+  'settings.saveProviders',
+  'settings.setActive',
 ] as const
 
 /** 全部事件 kind（与 schema.events 的键集合一致）。 */

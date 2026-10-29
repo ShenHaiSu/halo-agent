@@ -57,6 +57,20 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private int _maxTurns;
     private int _retry;
     private bool _askInteractive;
+    private string? _globalProxyUrl;
+    private string _activeProviderId = "";
+    private string _activeProviderDisplay = "";
+    private string _activeModelId = "";
+    private string _activeModelDisplay = "";
+    private string _activeProtocol = "chat";
+    private int? _activeContextWindow;
+    private int? _activeMaxTokens;
+    private bool _activeAcceptsImages;
+    private bool _activeIncludeReasoning = true;
+    private bool _activeProxyInUse;
+    private string _activeBaseUrl = "";
+    private bool _activeApiKeySet;
+    private bool _activeConfigured;
     private bool _fileAlways;
     private bool _commandAlways;
 
@@ -77,6 +91,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private const int RepeatAbort = 6;
     private const int ContextMaxChars = 20_000;
     private const int KeepTailForCompact = 4;
+
 
     public AgentSession(
         ILlmClient llm,
@@ -121,8 +136,60 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     public int Retry => _retry;
     public string? CurrentToolCallId => _currentToolCallId;
 
-    public string? ProxyUrl => _llm.ProxyUrl;
+    /// <summary>当前生效的网络代理（P10：全局代理，与 provider.useProxy 无关，供 WebFetch 等非模型链路用）。</summary>
+    public string? ProxyUrl => _globalProxyUrl;
     public string DataDir => _dataDir;
+
+    /// <summary>P10 热切：持久化 active 指针后同进程换 llm（无需重启）。busy 时由调用方前置拒绝。</summary>
+    public void ReconfigureActive(ResolvedActiveModel resolved)
+    {
+        var proto = (resolved.Protocol ?? "chat").ToLowerInvariant() == "responses"
+            ? LlmProtocol.Responses : LlmProtocol.Chat;
+        _llm.Reconfigure(new LlmConfig
+        {
+            BaseUrl = resolved.BaseUrl,
+            Model = resolved.ModelId,
+            ApiKey = resolved.ApiKey,
+            ProxyUrl = resolved.ProxyUrl,
+            Headers = resolved.Headers,
+            Protocol = proto,
+            MaxTokens = resolved.MaxTokens,
+            AcceptsImages = resolved.AcceptsImages,
+            IncludeReasoningHistory = resolved.IncludeReasoningHistory,
+        });
+        lock (_lock)
+        {
+            _globalProxyUrl = resolved.GlobalProxyUrl;
+            _activeProviderId = resolved.ProviderId ?? "";
+            _activeProviderDisplay = resolved.ProviderDisplay ?? "";
+            _activeModelId = resolved.ModelId ?? "";
+            _activeModelDisplay = resolved.ModelDisplay ?? "";
+            _activeProtocol = resolved.Protocol ?? "chat";
+            _activeContextWindow = resolved.ContextWindow;
+            _activeMaxTokens = resolved.MaxTokens;
+            _activeAcceptsImages = resolved.AcceptsImages;
+            _activeIncludeReasoning = resolved.IncludeReasoningHistory;
+            _activeProxyInUse = resolved.ProxyInUse;
+            _activeBaseUrl = resolved.BaseUrl ?? "";
+            _activeApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey);
+            _activeConfigured = resolved.Configured;
+            _maxTurns = resolved.MaxTurns;
+            _retry = resolved.Retry;
+            _persona = resolved.Persona ?? "";
+
+            if (_messages.Count > 0 && _messages[0].Role == Role.System)
+                _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
+                    _cwd, _mode, _store.SessionId, _persona, _dataDir));
+
+        }
+    }
+
+    /// <summary>设置全局代理（非模型链路用）。</summary>
+    public void SetGlobalProxy(string? url)
+    {
+        lock (_lock) _globalProxyUrl = url;
+    }
+
 
     public void SetMode(PermissionMode mode)
     {
@@ -151,6 +218,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         _cwd = Path.GetFullPath(path);
         lock (_lock) RefreshSystemPrompt();
     }
+
+
 
     /// <summary>新的 turnId（供 agent.prompt 立即返回）。</summary>
     public string NewTurnId() => "t-" + Guid.NewGuid().ToString("N")[..8];
@@ -768,7 +837,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var keep = tail.Skip(splitAt).ToList();
 
         var body = string.Join("\n", old.Select(m =>
-            "[" + RoleLabel(m.Role) + "] " + Truncate(m.Content ?? "", 2000)));
+            "[" + RoleLabel(m.Role) + "] " + Truncate(MessageAdapters.StripImagesForSummary(m).Content ?? "", 2000)));
+
 
         var summaryMessages = new[]
         {
@@ -894,16 +964,24 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     Mode = _mode,
                     ModeLabel = _mode.ToLabel(),
                     Persona = _persona,
-                    Model = _llm.Model,
-                    Provider = "",
-                    BaseUrl = "",
-                    ApiKeySet = false,
-                    ContextWindow = ContextWindows.ForModel(_llm.Model),
+                    Provider = _activeProviderId,
+                    ProviderDisplay = _activeProviderDisplay,
+                    Model = string.IsNullOrEmpty(_activeModelId) ? _llm.Model : _activeModelId,
+                    ModelDisplay = _activeModelDisplay,
+                    Protocol = _activeProtocol,
+                    BaseUrl = _activeBaseUrl,
+                    ApiKeySet = _activeApiKeySet,
+                    ContextWindow = _activeContextWindow,
+                    MaxTokens = _activeMaxTokens,
+                    AcceptsImages = _activeAcceptsImages,
+                    IncludeReasoning = _activeIncludeReasoning,
+                    ProxyInUse = _activeProxyInUse,
                     MaxTurns = _maxTurns,
                     Retry = _retry,
-                    Configured = true,
+                    Configured = _activeConfigured,
                     Round = new RoundState { Used = _roundUsed, Limit = _roundLimit },
                 },
+
                 Usage = new UsageState
                 {
                     InputTotal = _usageIn,

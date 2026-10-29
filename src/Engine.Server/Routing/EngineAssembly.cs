@@ -48,8 +48,7 @@ public sealed class AssembledEngine : IAsyncDisposable
 }
 
 /// <summary>
-/// P2 装配：把 LLM / 工具 / 存储 / 会话 / 路由连起来（见 05 §7.3 装配清单）。
-/// 未配置模型等失败时抛异常，由调用方决定回落到 P1 stub。
+/// P10 装配：按 active 装配；失败（无 active / provider 空 / model 缺）则引擎仍启动但 Configured=false。
 /// </summary>
 public static class EngineAssembly
 {
@@ -66,16 +65,31 @@ public static class EngineAssembly
 
         Paths.EnsureDataDirs();
 
-        // 1) 建 llm
+        // 1) 读配置 + 解析 active（失败则未配置态，不抛）
         var cfg = ConfigStore.Load();
-        var resolved = ConfigStore.Resolve(cfg);
+        ResolvedActiveModel? resolved = null;
+        try { resolved = ConfigStore.Resolve(cfg); }
+        catch { resolved = null; }
+
+        // 种子：新文件首次创建时写入内置种子
+        if (!File.Exists(Paths.ConfigFile) || cfg.Providers.Count == 0 && resolved is null)
+        {
+            // 不自动写种子覆盖用户空配置；仅在文件不存在时由首次 saveProviders 创建。
+        }
+
+        var llmProto = resolved is not null && string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase)
+            ? LlmProtocol.Responses : LlmProtocol.Chat;
         var llm = new OpenAiCompatibleClient(new LlmConfig
         {
-            BaseUrl = resolved.BaseUrl,
-            Model = resolved.Model,
-            ApiKey = resolved.ApiKey,
-            ProxyUrl = resolved.ProxyUrl,
-            Headers = resolved.Headers,
+            BaseUrl = resolved?.BaseUrl ?? "http://localhost:11434/v1",
+            Model = resolved?.ModelId ?? "",
+            ApiKey = resolved?.ApiKey,
+            ProxyUrl = resolved?.ProxyUrl,
+            Headers = resolved?.Headers ?? Array.Empty<KeyValuePair<string, string>>(),
+            Protocol = llmProto,
+            MaxTokens = resolved?.MaxTokens,
+            AcceptsImages = resolved?.AcceptsImages ?? false,
+            IncludeReasoningHistory = resolved?.IncludeReasoningHistory ?? true,
         });
 
         // 2) 建工具
@@ -89,26 +103,42 @@ public static class EngineAssembly
         var bus = new EventBus(channel, busLogger);
         var session = new AgentSession(
             llm, tools, store, bus,
-            Paths.DataDir, Environment.CurrentDirectory, PermissionMode.Ask, resolved.Persona,
-            resolved.MaxTurns, resolved.Retry,
+            Paths.DataDir, Environment.CurrentDirectory, PermissionMode.Ask, resolved?.Persona ?? "",
+            resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
             askInteractive: true);
+        if (resolved is not null)
+        {
+            try { session.ReconfigureActive(resolved); }
+            catch (NotSupportedException) { /* responses 种子不出现；启动容错 */ }
+        }
+        else
+        {
+            session.SetGlobalProxy(ConfigStore.GlobalProxyUrl(cfg));
+        }
 
         // 5) 状态（给 stub 的 system.* 用）+ 同步已解析的配置
         var router = new MethodRouter();
         var state = new EngineState(Paths.DataDir, router)
         {
-            Model = resolved.Model,
-            Provider = resolved.ProviderName,
-            BaseUrl = resolved.BaseUrl,
-            ApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey),
-            ContextWindow = resolved.ContextWindow,
-            MaxTurns = resolved.MaxTurns,
-            Retry = resolved.Retry,
-            Persona = resolved.Persona,
+            Provider = resolved?.ProviderId ?? "",
+            ProviderDisplay = resolved?.ProviderDisplay ?? "",
+            Model = resolved?.ModelId ?? "",
+            ModelDisplay = resolved?.ModelDisplay ?? "",
+            Protocol = resolved?.Protocol ?? "chat",
+            BaseUrl = resolved?.BaseUrl ?? "",
+            ApiKeySet = !string.IsNullOrEmpty(resolved?.ApiKey),
+            ContextWindow = resolved?.ContextWindow,
+            MaxTokens = resolved?.MaxTokens,
+            AcceptsImages = resolved?.AcceptsImages ?? false,
+            IncludeReasoning = resolved?.IncludeReasoningHistory ?? true,
+            ProxyInUse = resolved?.ProxyInUse ?? false,
+            Configured = resolved is not null,
+            MaxTurns = resolved?.MaxTurns ?? 200,
+            Retry = resolved?.Retry ?? 0,
+            Persona = resolved?.Persona ?? "",
         };
 
-        // 6) 注册路由（P1 stub → P2 真实，见 §7.3 清单）
-        // 6) 注册路由（P1 stub → P2 真实，见 §7.3 清单；P07 已全部 real 化，零 stub）
+        // 6) 注册路由（P10 新契约；旧方法删除）
         var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt);
         var stub = new StubMethods(state);
         router.RegisterAll(
@@ -138,15 +168,14 @@ public static class EngineAssembly
             ("state.snapshot", real.StateSnapshotAsync),
             ("state.setMode", real.StateSetModeAsync),
             ("state.setPersona", real.StateSetPersonaAsync),
-            ("state.setProvider", real.StateSetProviderAsync),
             ("state.setMaxTurns", real.StateSetMaxTurnsAsync),
             ("state.setRetry", real.StateSetRetryAsync),
 
             ("settings.get", real.SettingsGetAsync),
-            ("settings.saveModel", real.SettingsSaveModelAsync),
+            ("settings.saveProviders", real.SettingsSaveProvidersAsync),
+            ("settings.setActive", real.SettingsSetActiveAsync),
             ("settings.saveNetwork", real.SettingsSaveNetworkAsync),
             ("settings.probeModels", real.SettingsProbeModelsAsync),
-            ("settings.saveExtraHeaders", real.SettingsSaveExtraHeadersAsync),
             ("settings.mcp.get", real.SettingsMcpGetAsync),
             ("settings.mcp.save", real.SettingsMcpSaveAsync),
 

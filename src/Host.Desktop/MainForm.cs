@@ -50,7 +50,7 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
         _single = single;
 
         Text = Program.ProductName;
-        MinimumSize = new Size(880, 560);
+        MinimumSize = new Size(900, 560);
         ClientSize = new Size(1200, 820);
         BackColor = Color.FromArgb(24, 24, 27); // 深色底，防白闪
         TitleBarHeight = 40;

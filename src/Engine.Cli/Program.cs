@@ -97,21 +97,20 @@ catch (Exception ex)
     return 3;
 }
 
-ResolvedConfig resolved;
+ResolvedActiveModel resolved;
 try
 {
-    resolved = ConfigStore.Resolve(
-        cfg,
-        cliModel: opts.Model,
-        cliBaseUrl: opts.BaseUrl,
-        cliApiKey: opts.ApiKey,
-        cliProvider: opts.Provider,
-        cliProxy: opts.Proxy,
-        noProxy: opts.NoProxy);
+    resolved = ConfigStore.Resolve(cfg);
 }
 catch (Exception ex)
 {
     Console.Error.WriteLine("配置未就绪: " + ex.Message);
+    return 3;
+}
+
+if (string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine("配置未就绪: Responses 协议尚未支持（当前仅 chat 可用）。");
     return 3;
 }
 
@@ -132,11 +131,16 @@ if (!Directory.Exists(cwd))
 using var llm = new OpenAiCompatibleClient(new LlmConfig
 {
     BaseUrl = resolved.BaseUrl,
-    Model = resolved.Model,
+    Model = resolved.ModelId,
     ApiKey = resolved.ApiKey,
     ProxyUrl = resolved.ProxyUrl,
     Headers = resolved.Headers,
+    Protocol = LlmProtocol.Chat,
+    MaxTokens = resolved.MaxTokens,
+    AcceptsImages = resolved.AcceptsImages,
+    IncludeReasoningHistory = resolved.IncludeReasoningHistory,
 });
+
 
 var tools = ToolRegistry.CreateBuiltin();
 var store = new SessionStore();
@@ -154,6 +158,8 @@ await using var session = new AgentSession(
     maxTurns: opts.MaxTurns ?? resolved.MaxTurns,
     retry: opts.Retry ?? resolved.Retry,
     askInteractive: false);
+session.ReconfigureActive(resolved);
+
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

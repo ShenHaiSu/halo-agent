@@ -3,23 +3,19 @@ using System.Text.Json.Serialization;
 namespace HaloAgent.Engine.Storage.Config;
 
 /// <summary>
-/// config.json 的模型。
+/// config.json 的模型（P10 新形状：Provider 1—N Model 全量树）。
 ///
-/// ============ 命名策略 ============
-/// 存储用 snake_case（与既有格式一致，文件是给人看的）。
-/// 通信用的 camelCase 在 P1 的 HaloJson.Options 里，两套必须分开。
+/// 破坏性：不再保留顶层 model/base_url/api_key/provider/context_window，
+/// 也不做旧文件自动迁移（见 ConfigStore嗅探/备份）。
 /// </summary>
 public sealed class ConfigModel
 {
-    [JsonPropertyName("model")] public string? Model { get; set; }
-    [JsonPropertyName("base_url")] public string? BaseUrl { get; set; }
-    [JsonPropertyName("api_key")] public string? ApiKey { get; set; }
-    [JsonPropertyName("provider")] public string? Provider { get; set; }
+    [JsonPropertyName("active_provider")] public string? ActiveProvider { get; set; }
+    [JsonPropertyName("active_model")] public string? ActiveModel { get; set; }
 
     [JsonPropertyName("providers")]
-    public Dictionary<string, ProviderDef> Providers { get; set; } = new();
+    public Dictionary<string, ProviderConfig> Providers { get; set; } = new(StringComparer.Ordinal);
 
-    [JsonPropertyName("context_window")] public int? ContextWindow { get; set; }
     [JsonPropertyName("max_turns")] public int? MaxTurns { get; set; }
     [JsonPropertyName("persona")] public string? Persona { get; set; }
 
@@ -29,24 +25,31 @@ public sealed class ConfigModel
     public ProxyConfig Proxy { get; set; } = new();
 
     [JsonPropertyName("retry")] public int? Retry { get; set; }
-
-    [JsonPropertyName("extra_headers_enabled")] public bool? ExtraHeadersEnabled { get; set; }
-
-    [JsonPropertyName("extra_headers")]
-    public Dictionary<string, string> ExtraHeaders { get; set; } = new();
 }
 
-public sealed class ProviderDef
+public sealed class ProviderConfig
 {
+    [JsonPropertyName("display_name")] public string? DisplayName { get; set; }
     [JsonPropertyName("base_url")] public string? BaseUrl { get; set; }
-    [JsonPropertyName("model")] public string? Model { get; set; }
-    [JsonPropertyName("api_key_env")] public string? ApiKeyEnv { get; set; }
     [JsonPropertyName("api_key")] public string? ApiKey { get; set; }
+    [JsonPropertyName("headers_enabled")] public bool HeadersEnabled { get; set; } = true;
+    [JsonPropertyName("headers")]
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    [JsonPropertyName("use_proxy")] public bool UseProxy { get; set; } = true;
+    [JsonPropertyName("models")]
+    public List<ModelConfig> Models { get; set; } = new();
+}
+
+public sealed class ModelConfig
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("display_name")] public string? DisplayName { get; set; }
+    /// <summary>chat 可用；responses 保留枚举但前端 disabled、引擎拒绝执行。</summary>
+    [JsonPropertyName("protocol")] public string Protocol { get; set; } = "chat";
     [JsonPropertyName("context_window")] public int? ContextWindow { get; set; }
-    [JsonPropertyName("extra_headers_enabled")] public bool? ExtraHeadersEnabled { get; set; }
-    /// <summary>请求头模板：值可含 `{{session_id}}` / `{{session_hash}}`，请求时按会话展开。</summary>
-    [JsonPropertyName("extra_headers")]
-    public Dictionary<string, string> ExtraHeaders { get; set; } = new();
+    [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }
+    [JsonPropertyName("accepts_images")] public bool AcceptsImages { get; set; }
+    [JsonPropertyName("include_reasoning_history")] public bool IncludeReasoningHistory { get; set; } = true;
 }
 
 public sealed class ProxyConfig

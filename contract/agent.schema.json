@@ -3,8 +3,8 @@
   "$id": "https://haloagent.local/contract/agent.schema.json",
   "title": "HaloAgent 通信契约",
   "description": "宿主 ↔ 引擎的 NDJSON 帧契约。所有字段 camelCase。信封字段用短名。",
-  "contractVersion": 1,
-  "frozen": "2025-01-01",
+  "contractVersion": 2,
+  "frozen": "2026-10-29",
   "envelope": {
     "request": {
       "type": "object",
@@ -200,6 +200,12 @@
           "type": "boolean"
         },
         "tsMs": {
+          "type": "integer"
+        },
+        "hasImages": {
+          "type": "boolean"
+        },
+        "attachmentCount": {
           "type": "integer"
         }
       },
@@ -537,6 +543,34 @@
                   "type": "integer"
                 }
               }
+            },
+            "providerDisplay": {
+              "type": "string"
+            },
+            "modelDisplay": {
+              "type": "string"
+            },
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "chat",
+                "responses"
+              ]
+            },
+            "maxTokens": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "acceptsImages": {
+              "type": "boolean"
+            },
+            "includeReasoning": {
+              "type": "boolean"
+            },
+            "proxyInUse": {
+              "type": "boolean"
             }
           }
         },
@@ -1180,34 +1214,6 @@
       },
       "implementedIn": "engine"
     },
-    "state.setProvider": {
-      "params": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
-      "result": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "baseUrl": {
-            "type": "string"
-          }
-        }
-      },
-      "implementedIn": "engine"
-    },
     "state.setMaxTurns": {
       "params": {
         "type": "object",
@@ -1257,35 +1263,88 @@
       "result": {
         "type": "object",
         "properties": {
-          "model": {
+          "activeProvider": {
             "type": "string"
           },
-          "provider": {
+          "activeModel": {
             "type": "string"
           },
-          "baseUrl": {
-            "type": "string"
-          },
-          "apiKeySet": {
+          "migrationRequired": {
             "type": "boolean"
           },
-          "apiKeyEnv": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "contextWindow": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "maxTurns": {
-            "type": "integer"
-          },
-          "retry": {
-            "type": "integer"
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "apiKeySet": {
+                  "type": "boolean"
+                },
+                "headersEnabled": {
+                  "type": "boolean"
+                },
+                "headers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/types/HeaderPair"
+                  }
+                },
+                "useProxy": {
+                  "type": "boolean"
+                },
+                "modelCount": {
+                  "type": "integer"
+                },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "displayName": {
+                        "type": "string"
+                      },
+                      "protocol": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "responses"
+                        ]
+                      },
+                      "contextWindow": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "maxTokens": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "acceptsImages": {
+                        "type": "boolean"
+                      },
+                      "includeReasoningHistory": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "proxy": {
             "type": "object",
@@ -1306,135 +1365,20 @@
               }
             }
           },
-          "headers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/types/HeaderPair"
-            }
+          "retry": {
+            "type": "integer"
           },
-          "extraHeadersEnabled": {
-            "type": "boolean"
+          "maxTurns": {
+            "type": "integer"
           },
-          "providers": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "model": {
-                  "type": "string"
-                },
-                "baseUrl": {
-                  "type": "string"
-                }
-              }
-            }
+          "persona": {
+            "type": "string"
           },
           "dataDir": {
             "type": "string"
           },
           "configPath": {
             "type": "string"
-          },
-          "network": {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "auto",
-                  "direct",
-                  "manual"
-                ]
-              },
-              "url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "retry": {
-                "type": "integer"
-              },
-              "headers": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/types/HeaderPair"
-                }
-              },
-              "headersEnabled": {
-                "type": "boolean"
-              },
-              "providerHeaders": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/types/HeaderPair"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "implementedIn": "engine"
-    },
-    "settings.saveModel": {
-      "params": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string"
-          },
-          "model": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "baseUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "apiKey": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "clearKey": {
-            "type": "boolean"
-          },
-          "contextWindow": {
-            "type": "integer"
-          },
-          "maxTurns": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "provider"
-        ]
-      },
-      "result": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "notes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },
@@ -1453,28 +1397,13 @@
             ]
           },
           "url": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "retry": {
             "type": "integer"
-          },
-          "headersEnabled": {
-            "type": "boolean"
-          },
-          "headers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/types/HeaderPair"
-            }
-          },
-          "providerHeaders": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/types/HeaderPair"
-              }
-            }
           }
         }
       },
@@ -1506,48 +1435,28 @@
               "string",
               "null"
             ]
+          },
+          "providerId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/HeaderPair"
+            }
+          },
+          "useProxy": {
+            "type": "boolean"
           }
-        },
-        "required": [
-          "baseUrl"
-        ]
+        }
       },
       "result": {
         "type": "object",
         "properties": {
           "models": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "errors": [
-        "llm.error",
-        "llm.timeout"
-      ],
-      "implementedIn": "engine"
-    },
-    "settings.saveExtraHeaders": {
-      "params": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ]
-      },
-      "result": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "notes": {
             "type": "array",
             "items": {
               "type": "string"
@@ -2333,6 +2242,65 @@
         ]
       },
       "implementedIn": "host"
+    },
+    "settings.saveProviders": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "object"
+          },
+          "force": {
+            "type": "boolean"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "array"
+          }
+        }
+      },
+      "implementedIn": "engine"
+    },
+    "settings.setActive": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "implementedIn": "engine"
     }
   },
   "events": {

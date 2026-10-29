@@ -166,7 +166,8 @@ function requestClose(): void {
   justify-content: flex-end;
 }
 .settings-panel {
-  width: min(860px, 100%);
+  width: 75%;
+  width: min(1400px, 100%, max(75%, 900px));
   height: 100%;
   background: hsl(var(--bg));
   border-left: 1px solid hsl(var(--border));
@@ -211,13 +212,13 @@ function requestClose(): void {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: var(--space-4);
-  padding: var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-3);
   overflow: hidden;
 }
 .settings-body > nav {
   flex: none;
-  width: 160px;
+  width: 148px;
 }
 .settings-page {
   flex: 1;

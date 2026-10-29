@@ -20,6 +20,10 @@ public sealed record MessageView
     public IReadOnlyList<ToolCallView>? ToolCalls { get; init; }
     /// <summary>是否是“排队插入”的用户消息（UI 上加特殊标记）。</summary>
     public bool Injected { get; init; }
+    /// <summary>是否含图片附件（展示位，不含 base64 全量）。</summary>
+    public bool HasImages { get; init; }
+    /// <summary>附件数（图片数）。</summary>
+    public int AttachmentCount { get; init; }
     /// <summary>毫秒时间戳。</summary>
     public long TsMs { get; init; }
 }

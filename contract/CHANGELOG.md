@@ -4,6 +4,22 @@
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 
 ## [1] - 2026-10-27 · P3 增补（非破坏性）
+
+## [2] - 2026-10-29 · P10 provider-model-rework（破坏性）
+
+**破坏性**（`contractVersion` 1 → 2，不向后兼容；旧 config.json 不迁移，启动嗅探旧形状即视为无效并自动备份一次 `config.json.bak.*`，`settings.get.migrationRequired=true`，前端弹重建）：
+
+- `settings.get` 整树：`{ activeProvider/activeModel/migrationRequired/providers[{id/displayName/baseUrl/apiKeySet/headersEnabled/headers/useProxy/modelCount/models[{id/displayName/protocol/contextWindow/maxTokens/acceptsImages/includeReasoningHistory}]}]/proxy/retry/maxTurns/persona/dataDir/configPath }`；删除顶层 `model/provider/baseUrl/apiKeySet/apiKeyEnv/contextWindow/headers/extraHeadersEnabled/network/providers(name,model,baseUrl)`。
+- 新增 `settings.saveProviders { providers: Record<id, {displayName/baseUrl/apiKey/clearKey/headersEnabled/headers/useProxy/models[]}> }`（整包校验失败整包拒绝，原子性）；删除 `settings.saveModel`。
+- 新增 `settings.setActive { providerId/modelId }`（持久化+热切，重建 HttpClient，无需重启；busy 拒绝，dirty 时前端禁用）。
+- `settings.saveNetwork` 瘦身：仅 `{ mode/retry/url }`；`headers/headersEnabled/providerHeaders` 直接 422。
+- `settings.probeModels` 加参 `{ providerId/headers/useProxy }`（带头、走对代理；含会话模板的头跳过）。
+- 删除 `settings.saveExtraHeaders`、`state.setProvider`（改调 `settings.setActive`）。
+- `AgentState` 改为 `{ provider/providerDisplay/model/modelDisplay/protocol/baseUrl/apiKeySet/contextWindow/maxTokens/acceptsImages/includeReasoning/proxyInUse/configured }`；`MessageView` 新增 `hasImages/attachmentCount`（不含 base64 全量）。
+- `protocol=responses` 全链路 fail-fast（`save/setActive/Chat` 抛 `notSupported`，前端 disabled+tooltip；真形态 P11）。
+- `maxTokens` 直通 `max_tokens`（只发该字段）；`acceptsImages=false` 硬拦含图消息；`includeReasoningHistory=false` 发送侧 strip（落盘保留）；`useProxy=false` 直连；全局 `auto` 钉死为直连。
+- CLI/env 旁路删除：`--model/--base-url/--api-key/--provider/--proxy/--no-proxy` + `HALO_MODEL/HALO_BASE_URL/HALO_API_KEY/HALO_PROVIDER/HALO_PROXY/OPENAI_*`，仅保留 `--data-dir`。
+
 ## [1] — 2026-10-27 · P07 联调修复增补（非破坏性）
 
 **非破坏性增补**（`contractVersion` 保持 `1`）：

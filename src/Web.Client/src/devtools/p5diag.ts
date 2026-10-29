@@ -765,7 +765,7 @@ async function saveFail(): Promise<void> {
   const inputs = [...document.querySelectorAll<HTMLInputElement>('.row-control input')];
   const snap = inputs.map((i) => i.value);
 
-  failNext('settings.saveModel');
+  failNext('settings.saveProviders');
   const saveBtn = [...document.querySelectorAll('button')].find(
     (b) => b.textContent?.trim() === '保存'
   );

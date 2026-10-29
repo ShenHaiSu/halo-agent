@@ -46,10 +46,11 @@ public sealed class FrameServer
         "agent.prompt", "agent.queue", "agent.unqueue", "agent.cancel", "agent.answer",
         "agent.drain", "session.new", "session.resume", "session.rename", "session.delete",
         "session.clear", "session.compact", "session.setCwd",
-        "state.setMode", "state.setPersona", "state.setProvider",
+        "state.setMode", "state.setPersona",
         "state.setMaxTurns", "state.setRetry",
-        "settings.saveModel", "settings.saveNetwork", "settings.saveExtraHeaders",
+        "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
         "settings.mcp.save",
+
         "asset.skills.save", "asset.skills.delete", "asset.skills.run",
         "asset.personas.save", "asset.memory.save", "asset.memory.delete",
         "tool.undoRollback", "system.shutdown", "update.install",

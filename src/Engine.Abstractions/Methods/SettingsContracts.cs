@@ -4,57 +4,43 @@ namespace HaloAgent.Engine.Abstractions.Methods;
 
 // ============================ settings.get ============================
 
-/// <summary>settings.get 结果。</summary>
+/// <summary>settings.get 结果（P10 新整树：一次拿全）。</summary>
 public sealed record SettingsGetResult
 {
-    /// <summary>模型名。</summary>
-    public string Model { get; init; } = "";
-    /// <summary>服务商名。</summary>
-    public string Provider { get; init; } = "";
-    /// <summary>服务地址。</summary>
-    public string BaseUrl { get; init; } = "";
-    /// <summary>是否已配置 API Key。</summary>
-    public bool ApiKeySet { get; init; }
-    /// <summary>API Key 环境变量名（可为空）。</summary>
-    public string? ApiKeyEnv { get; init; }
-    /// <summary>上下文窗口（可为空）。</summary>
-    public int? ContextWindow { get; init; }
-    /// <summary>最大轮数。</summary>
-    public int MaxTurns { get; init; }
-    /// <summary>重试次数。</summary>
-    public int Retry { get; init; }
-    /// <summary>代理设置。</summary>
+    public string ActiveProvider { get; init; } = "";
+    public string ActiveModel { get; init; } = "";
+    public bool MigrationRequired { get; init; }
+    public IReadOnlyList<ProviderView> Providers { get; init; } = Array.Empty<ProviderView>();
     public ProxySettings? Proxy { get; init; }
-    /// <summary>请求头（原始模板值，未展开；与 Network.Headers 一致）。</summary>
-    public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
-    /// <summary>是否启用扩展头。</summary>
-    public bool ExtraHeadersEnabled { get; init; }
-    /// <summary>服务商列表。</summary>
-    public IReadOnlyList<ProviderEntry> Providers { get; init; } = Array.Empty<ProviderEntry>();
-    /// <summary>数据目录。</summary>
+    public int Retry { get; init; }
+    public int MaxTurns { get; init; }
+    public string Persona { get; init; } = "";
     public string DataDir { get; init; } = "";
-    /// <summary>配置文件路径。</summary>
     public string ConfigPath { get; init; } = "";
-    /// <summary>网络分组（D-13 增补：与顶层 proxy/headers 含义一致，便于 NetworkPage 直接消费；缺省为 null）。</summary>
-    public SettingsGetNetwork? Network { get; init; }
 }
 
-/// <summary>settings.get 的 network 子对象（与 saveNetwork 参数语义对应）。</summary>
-public sealed record SettingsGetNetwork
+public sealed record ProviderView
 {
-    /// <summary>“auto” | “direct” | “manual”。</summary>
-    public string Mode { get; init; } = "auto";
-    /// <summary>代理地址（可为空）。</summary>
-    public string? Url { get; init; }
-    /// <summary>重试次数。</summary>
-    public int Retry { get; init; }
-    /// <summary>顶层请求头（原始模板值，未展开）。</summary>
-    public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
-    /// <summary>是否启用扩展头。</summary>
+    public string Id { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public string BaseUrl { get; init; } = "";
+    public bool ApiKeySet { get; init; }
     public bool HeadersEnabled { get; init; } = true;
-    /// <summary>分服务商请求头（原始模板值）。</summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<HeaderPair>> ProviderHeaders { get; init; }
-        = new Dictionary<string, IReadOnlyList<HeaderPair>>();
+    public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
+    public bool UseProxy { get; init; } = true;
+    public int ModelCount { get; init; }
+    public IReadOnlyList<ModelView> Models { get; init; } = Array.Empty<ModelView>();
+}
+
+public sealed record ModelView
+{
+    public string Id { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public string Protocol { get; init; } = "chat";
+    public int? ContextWindow { get; init; }
+    public int? MaxTokens { get; init; }
+    public bool AcceptsImages { get; init; }
+    public bool IncludeReasoningHistory { get; init; } = true;
 }
 
 /// <summary>代理设置。</summary>
@@ -66,50 +52,70 @@ public sealed record ProxySettings
     public string? Url { get; init; }
 }
 
-/// <summary>服务商条目。</summary>
-public sealed record ProviderEntry
+// ============================ settings.saveProviders ============================
+
+public sealed record SettingsSaveProvidersParams
 {
-    /// <summary>服务商名。</summary>
-    public string Name { get; init; } = "";
-    /// <summary>模型名。</summary>
-    public string Model { get; init; } = "";
-    /// <summary>服务地址。</summary>
-    public string BaseUrl { get; init; } = "";
+    public IReadOnlyDictionary<string, ProviderSaveEntry>? Providers { get; init; }
+    /// <summary>二次确认覆盖旧结构/损坏配置。前端仅在 migrationRequired 两步确认后传 true；默认 false 仍拒绝覆盖。</summary>
+    public bool Force { get; init; }
 }
 
-// ============================ settings.saveModel ============================
-
-/// <summary>settings.saveModel 参数。</summary>
-public sealed record SettingsSaveModelParams
+public sealed record ProviderSaveEntry
 {
-    /// <summary>服务商名。</summary>
-    public string Provider { get; init; } = "";
-    /// <summary>模型名（可为空）。</summary>
-    public string? Model { get; init; }
-    /// <summary>服务地址（可为空）。</summary>
+    public string? DisplayName { get; init; }
     public string? BaseUrl { get; init; }
-    /// <summary>API Key（可为空）。</summary>
     public string? ApiKey { get; init; }
-    /// <summary>是否清除 Key。</summary>
     public bool ClearKey { get; init; }
-    /// <summary>上下文窗口（可为空）。</summary>
-    public int? ContextWindow { get; init; }
-    /// <summary>最大轮数（可为空）。</summary>
-    public int? MaxTurns { get; init; }
+    public bool? HeadersEnabled { get; init; }
+    public IReadOnlyList<HeaderPair>? Headers { get; init; }
+    public bool? UseProxy { get; init; }
+    public IReadOnlyList<ModelSaveEntry>? Models { get; init; }
 }
 
-/// <summary>settings.saveModel 结果。</summary>
-public sealed record SettingsSaveModelResult
+public sealed record ModelSaveEntry
 {
-    /// <summary>是否成功。</summary>
+    public string Id { get; init; } = "";
+    public string? DisplayName { get; init; }
+    public string? Protocol { get; init; }
+    public int? ContextWindow { get; init; }
+    public int? MaxTokens { get; init; }
+    public bool? AcceptsImages { get; init; }
+    public bool? IncludeReasoningHistory { get; init; }
+}
+
+public sealed record SettingsSaveProvidersResult
+{
     public bool Ok { get; init; }
-    /// <summary>备注。</summary>
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<SettingsFieldError> Errors { get; init; } = Array.Empty<SettingsFieldError>();
+}
+
+public sealed record SettingsFieldError
+{
+    public string Provider { get; init; } = "";
+    public string? Model { get; init; }
+    public string Field { get; init; } = "";
+    public string Message { get; init; } = "";
+}
+
+// ============================ settings.setActive ============================
+
+public sealed record SettingsSetActiveParams
+{
+    public string ProviderId { get; init; } = "";
+    public string ModelId { get; init; } = "";
+}
+
+public sealed record SettingsSetActiveResult
+{
+    public bool Ok { get; init; }
 }
 
 // ============================ settings.saveNetwork ============================
 
-/// <summary>settings.saveNetwork 参数。</summary>
+/// <summary>settings.saveNetwork 参数（P10 瘦身：只剩全局代理+重试）。</summary>
 public sealed record SettingsSaveNetworkParams
 {
     /// <summary>代理模式：“auto” | “direct” | “manual”（可为空）。</summary>
@@ -118,12 +124,6 @@ public sealed record SettingsSaveNetworkParams
     public string? Url { get; init; }
     /// <summary>重试次数（可为空）。</summary>
     public int? Retry { get; init; }
-    /// <summary>是否启用请求头（可为空）。</summary>
-    public bool? HeadersEnabled { get; init; }
-    /// <summary>请求头（可为空）。</summary>
-    public IReadOnlyList<HeaderPair>? Headers { get; init; }
-    /// <summary>分服务商请求头（可为空；键为服务商名，值为该服务商的头列表）。</summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<HeaderPair>>? ProviderHeaders { get; init; }
 }
 
 /// <summary>settings.saveNetwork 结果。</summary>
@@ -137,13 +137,16 @@ public sealed record SettingsSaveNetworkResult
 
 // ============================ settings.probeModels ============================
 
-/// <summary>settings.probeModels 参数。</summary>
+/// <summary>settings.probeModels 参数（P10 加参：带头+走对代理）。</summary>
 public sealed record SettingsProbeModelsParams
 {
     /// <summary>服务地址。</summary>
     public string BaseUrl { get; init; } = "";
     /// <summary>API Key（可为空）。</summary>
     public string? ApiKey { get; init; }
+    public string? ProviderId { get; init; }
+    public IReadOnlyList<HeaderPair>? Headers { get; init; }
+    public bool? UseProxy { get; init; }
 }
 
 /// <summary>settings.probeModels 结果。</summary>
@@ -151,24 +154,6 @@ public sealed record SettingsProbeModelsResult
 {
     /// <summary>模型名列表。</summary>
     public IReadOnlyList<string> Models { get; init; } = Array.Empty<string>();
-}
-
-// ============================ settings.saveExtraHeaders ============================
-
-/// <summary>settings.saveExtraHeaders 参数。</summary>
-public sealed record SettingsSaveExtraHeadersParams
-{
-    /// <summary>是否启用。</summary>
-    public bool Enabled { get; init; }
-}
-
-/// <summary>settings.saveExtraHeaders 结果。</summary>
-public sealed record SettingsSaveExtraHeadersResult
-{
-    /// <summary>是否成功。</summary>
-    public bool Ok { get; init; }
-    /// <summary>备注。</summary>
-    public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
 // ============================ settings.mcp.get ============================

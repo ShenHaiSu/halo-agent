@@ -33,24 +33,25 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     public OpenAiCompatibleClient(LlmConfig cfg)
         : this(cfg, BuildHttp(cfg.ProxyUrl))
     {
+        EnsureProtocol(cfg);
     }
 
     /// <summary>测试用：注入 HttpClient（FakeHttpHandler）。</summary>
     public OpenAiCompatibleClient(LlmConfig cfg, HttpClient http)
     {
+        EnsureProtocol(cfg);
         _cfg = cfg;
         _http = http;
     }
+
 
     public string Model => _cfg.Model;
     public string? ProxyUrl => _cfg.ProxyUrl;
 
     // ============================================================
-    //  配置
-    // ============================================================
-
     public void Reconfigure(LlmConfig cfg)
     {
+        EnsureProtocol(cfg);
         // 代理换了必须重建 client（连接池绑在旧代理上）
         if (!string.Equals(cfg.ProxyUrl, _cfg.ProxyUrl, StringComparison.Ordinal))
         {
@@ -59,6 +60,13 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         }
         _cfg = cfg;
     }
+
+    private static void EnsureProtocol(LlmConfig cfg)
+    {
+        if (cfg.Protocol != LlmProtocol.Chat)
+            throw new NotSupportedException("Responses 协议尚未支持（当前仅 chat 可用）。");
+    }
+
 
     private static HttpClient BuildHttp(string? proxyUrl) =>
         // 模型可能很久才吐第一个 token：总超时 600s
@@ -273,16 +281,23 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     //  请求体
     // ============================================================
 
-    private object BuildBody(
+    public object BuildBody(
         IReadOnlyList<ChatMessage> messages, IReadOnlyList<object>? tools, bool stream)
     {
+        EnsureProtocol(_cfg);
+        // 发送前：strip reasoning（拷贝投影，不 mutate 落盘）
+        var outgoing = MessageAdapters.StripReasoning(messages, _cfg.IncludeReasoningHistory);
+        // 图片强校验（false 硬拦，不静默丢图）
+        foreach (var m in outgoing) MessageAdapters.ValidateImages(m, _cfg.AcceptsImages);
         var body = new Dictionary<string, object?>
         {
             ["model"] = _cfg.Model,
-            ["messages"] = messages,
+            ["messages"] = outgoing,
             ["user"] = ReqUser,
             ["stream"] = stream,
         };
+        // maxTokens 直通 max_tokens（只发该字段）
+        if (_cfg.MaxTokens is not null) body["max_tokens"] = _cfg.MaxTokens.Value;
         if (stream)
         {
             // 让端点把真实用量放在流末尾的 usage 事件里
@@ -291,6 +306,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         if (tools is { Count: > 0 }) body["tools"] = tools;
         return body;
     }
+
 
     // ============================================================
     //  响应解析（容错）

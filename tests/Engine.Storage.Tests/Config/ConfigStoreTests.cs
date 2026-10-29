@@ -6,16 +6,28 @@ namespace HaloAgent.Engine.Storage.Tests.Config;
 
 public class ConfigStoreTests
 {
+    private static ConfigModel NewTree() => new()
+    {
+        ActiveProvider = "deepseek",
+        ActiveModel = "deepseek-chat",
+        Providers =
+        {
+            ["deepseek"] = new ProviderConfig
+            {
+                BaseUrl = "https://api.deepseek.com/v1",
+                UseProxy = true,
+                Models = new() { new ModelConfig { Id = "deepseek-chat", Protocol = "chat", ContextWindow = 65536 } },
+            },
+        },
+    };
+
     [Fact]
     public void Load_missing_file_returns_default()
     {
         using var dir = new TempDataDir();
-
         var cfg = ConfigStore.Load();
-
-        Assert.Null(cfg.Model);
+        Assert.Null(cfg.ActiveProvider);
         Assert.NotNull(cfg.Providers);
-        Assert.NotNull(cfg.ExtraHeaders);
     }
 
     [Fact]
@@ -23,65 +35,108 @@ public class ConfigStoreTests
     {
         using var dir = new TempDataDir();
         File.WriteAllText(Paths.ConfigFile, "{ this is not json");
-
         var cfg = ConfigStore.Load();
-
-        Assert.Null(cfg.Model);
+        Assert.Null(cfg.ActiveProvider);
     }
 
     [Fact]
-    public void LoadForWrite_missing_file_returns_default_without_throwing()
+    public void Load_old_shape_returns_empty_and_backups_once()
     {
         using var dir = new TempDataDir();
-
-        var cfg = ConfigStore.LoadForWrite();
-
-        Assert.NotNull(cfg);
-        Assert.Null(cfg.Model);
+        File.WriteAllText(Paths.ConfigFile, "{\"model\":\"m\",\"base_url\":\"http://x/v1\",\"provider\":\"ollama\"}");
+        var cfg = ConfigStore.Load();
+        Assert.Null(cfg.ActiveProvider);
+        Assert.Empty(cfg.Providers);
+        var baks = Directory.GetFiles(Path.GetDirectoryName(Paths.ConfigFile)!, "config.json.bak.*");
+        Assert.Single(baks);
+        // 幂等：不再重复备份
+        var cfg2 = ConfigStore.Load();
+        Assert.Equal(baks.Length, Directory.GetFiles(Path.GetDirectoryName(Paths.ConfigFile)!, "config.json.bak.*").Length);
     }
 
     [Fact]
-    public void LoadForWrite_malformed_file_throws_to_avoid_overwrite()
+    public void LoadForWrite_old_shape_throws()
     {
         using var dir = new TempDataDir();
-        File.WriteAllText(Paths.ConfigFile, "{ this is not json");
-
+        File.WriteAllText(Paths.ConfigFile, "{\"model\":\"m\"}");
         Assert.Throws<InvalidOperationException>(() => ConfigStore.LoadForWrite());
+    }
+
+    [Fact]
+    public void LoadForWrite_force_old_shape_returns_empty_and_backs_up()
+    {
+        using var dir = new TempDataDir();
+        File.WriteAllText(Paths.ConfigFile, "{\"model\":\"m\",\"base_url\":\"http://x/v1\"}");
+        var cfg = ConfigStore.LoadForWrite(forceOverwriteOldShape: true);
+        Assert.Empty(cfg.Providers);
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(Paths.ConfigFile)!, "config.json.bak.*"));
     }
 
     [Fact]
     public void Save_then_load_roundtrips()
     {
         using var dir = new TempDataDir();
-        var cfg = new ConfigModel { Model = "m", BaseUrl = "http://x/v1" };
-
+        var cfg = NewTree();
         ConfigStore.Save(cfg);
         var back = ConfigStore.Load();
-
-        Assert.Equal("m", back.Model);
-        Assert.Equal("http://x/v1", back.BaseUrl);
+        Assert.Equal("deepseek", back.ActiveProvider);
+        Assert.Equal("https://api.deepseek.com/v1", back.Providers["deepseek"].BaseUrl);
     }
 
     [Fact]
-    public void AllProviders_merges_user_fields_without_replacing_builtin()
+    public void AllProviders_no_merge_returns_user_layer()
     {
-        using var dir = new TempDataDir();
-        var cfg = new ConfigModel();
-        cfg.Providers["dashscope"] = new ProviderDef { Model = "custom-model" };
-        cfg.Providers["mine"] = new ProviderDef { BaseUrl = "http://mine/v1", Model = "mm" };
-
+        var cfg = NewTree();
         var all = ConfigStore.AllProviders(cfg);
-
-        Assert.Equal("custom-model", all["dashscope"].Model);
-        Assert.Equal("https://dashscope.aliyuncs.com/compatible-mode/v1", all["dashscope"].BaseUrl);
-        Assert.Equal("http://mine/v1", all["mine"].BaseUrl);
+        Assert.True(all.ContainsKey("deepseek"));
+        Assert.False(all.ContainsKey("dashscope"));
     }
 
     [Fact]
-    public void ContextWindows_unknown_model_returns_null()
+    public void Resolve_new_shape_folds_proxy()
     {
-        Assert.Null(ContextWindows.ForModel("totally-unknown-model-zzz"));
-        Assert.Equal(65536, ContextWindows.ForModel("deepseek-chat"));
+        var cfg = NewTree();
+        cfg.Proxy.Mode = "manual";
+        cfg.Proxy.Url = "http://127.0.0.1:7890";
+        var r = ConfigStore.Resolve(cfg);
+        Assert.Equal("deepseek", r.ProviderId);
+        Assert.Equal("deepseek-chat", r.ModelId);
+        Assert.Equal("http://127.0.0.1:7890", r.ProxyUrl);
+        Assert.True(r.ProxyInUse);
+        // useProxy=false 则直连
+        cfg.Providers["deepseek"].UseProxy = false;
+        var r2 = ConfigStore.Resolve(cfg);
+        Assert.Null(r2.ProxyUrl);
+        Assert.False(r2.ProxyInUse);
+        Assert.Equal("http://127.0.0.1:7890", r2.GlobalProxyUrl);
+    }
+
+    [Fact]
+    public void Resolve_auto_is_direct()
+    {
+        var cfg = NewTree();
+        cfg.Proxy.Mode = "auto";
+        var r = ConfigStore.Resolve(cfg);
+        Assert.Null(r.ProxyUrl);
+        Assert.False(r.GlobalProxyAvailable);
+    }
+
+    [Fact]
+    public void Resolve_unconfigured_throws()
+    {
+        var cfg = new ConfigModel();
+        Assert.Throws<InvalidOperationException>(() => ConfigStore.Resolve(cfg));
+    }
+
+    [Fact]
+    public void ResolveHeaders_provider_level()
+    {
+        var cfg = NewTree();
+        cfg.Providers["deepseek"].Headers["X-A"] = "1";
+        var h = ConfigStore.ResolveHeaders(cfg, "deepseek");
+        Assert.Single(h);
+        cfg.Providers["deepseek"].HeadersEnabled = false;
+        Assert.Empty(ConfigStore.ResolveHeaders(cfg, "deepseek"));
     }
 
     [Fact]
@@ -92,9 +147,7 @@ public class ConfigStoreTests
             new KeyValuePair<string, string>("X-Token", "pre-{{session_id}}-{{session_hash}}"),
             new KeyValuePair<string, string>("X-Plain", "abc"),
         };
-
         var expanded = ConfigStore.HeaderTemplate.ExpandAll(templates, "my-session");
-
         Assert.Equal(2, expanded.Count);
         var token = expanded[0].Value;
         Assert.Contains("my-session", token, StringComparison.Ordinal);
@@ -114,29 +167,17 @@ public class ConfigStoreTests
             new KeyValuePair<string, string>("X-Token", "pre-{{session_id}}"),
             new KeyValuePair<string, string>("X-Plain", "abc"),
         };
-
         var expanded = ConfigStore.HeaderTemplate.ExpandAll(templates, null);
-
         Assert.Single(expanded);
         Assert.Equal("X-Plain", expanded[0].Key);
     }
 
     [Fact]
-    public void ResolveHeaders_master_switch_off_sends_nothing()
+    public void ValidateTree_matrix()
     {
-        using var dir = new TempDataDir();
-        var cfg = new ConfigModel
-        {
-            ExtraHeadersEnabled = false,
-            ExtraHeaders = new Dictionary<string, string> { ["X-A"] = "1" },
-        };
-        cfg.Providers["p1"] = new ProviderDef
-        {
-            ExtraHeaders = new Dictionary<string, string> { ["X-B"] = "2" },
-        };
-
-        var headers = ConfigStore.ResolveHeaders(cfg, "p1");
-
-        Assert.Empty(headers);
+        var cfg = NewTree();
+        Assert.Empty(ConfigValidation.ValidateTree(cfg));
+        cfg.Providers["bad id"] = new ProviderConfig { BaseUrl = "https://x.local/v1" };
+        Assert.NotEmpty(ConfigValidation.ValidateTree(cfg));
     }
 }
