@@ -1,5 +1,6 @@
 // src/Web.Client/src/stores/messages.ts
 // P5 扩展：streamingId / lastSeq / injected / truncated。
+// P08-fix 02：新增 normalizeToolCalls 唯一适配（args/output 契约消化 + 双写），过滤孤立 role=tool。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -33,6 +34,51 @@ export interface MessageItem {
   injected?: boolean;
 }
 
+/**
+ * P08-fix 02 唯一适配函数：消化后端 ToolCallView{args,output} 与前端 ToolCallInfo{arguments,result} 的字段分歧。
+ * - args ?? arguments → arguments（缺省 '{}'，保证 ToolCardBody 的 JSON.parse 与 summarizeArgs 不空）
+ * - output → output + result 双写（result ?? output，保证历史卡片结果区有内容）
+ * - ok 透传（boolean 才保留，否则 undefined，deriveState 才能正确判 error/done）
+ * - status 恒 'done'，alertLevel 缺省 0
+ */
+export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return (raw as Array<Record<string, unknown>>).map((tc) => {
+    const o = (tc ?? {}) as Record<string, unknown>;
+    let args: string;
+    if (typeof o.args === 'string') args = o.args;
+    else if (typeof o.arguments === 'string') args = o.arguments;
+    else if (o.args != null && typeof o.args === 'object') {
+      try {
+        args = JSON.stringify(o.args);
+      } catch {
+        args = '{}';
+      }
+    } else if (o.arguments != null && typeof o.arguments === 'object') {
+      try {
+        args = JSON.stringify(o.arguments);
+      } catch {
+        args = '{}';
+      }
+    } else {
+      args = '{}';
+    }
+    if (!args) args = '{}';
+    const output =
+      typeof o.output === 'string' ? o.output : typeof o.result === 'string' ? (o.result as string) : undefined;
+    return {
+      id: String(o.id ?? ''),
+      name: String(o.name ?? ''),
+      arguments: args,
+      result: output,
+      ok: typeof o.ok === 'boolean' ? (o.ok as boolean) : undefined,
+      status: 'done' as const,
+      output,
+      alertLevel: typeof o.alertLevel === 'number' ? (o.alertLevel as number) : 0,
+    };
+  });
+}
+
 export const useMessagesStore = defineStore('messages', () => {
   const items = ref<MessageItem[]>([]);
   const lastSeq = ref(0);
@@ -59,7 +105,9 @@ export const useMessagesStore = defineStore('messages', () => {
   }): void {
     lastSeq.value = typeof snapshot.seq === 'number' ? snapshot.seq : 0;
     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
-    items.value = raw.map(normalizeMessage);
+    // P08-fix 02：快照中残留的孤立 role=tool 消息直接过滤，不再渲染为正文。
+    const filtered = raw.filter((m) => String((m as Record<string, unknown>)?.role ?? '') !== 'tool');
+    items.value = filtered.map(normalizeMessage);
     streamingId.value = null;
   }
 
@@ -84,19 +132,7 @@ export const useMessagesStore = defineStore('messages', () => {
             status: 'done' as const,
           };
         })
-      : Array.isArray(m.toolCalls)
-        ? (m.toolCalls as Array<Record<string, unknown>>).map((tc) => ({
-            id: String(tc.id ?? ''),
-            name: String(tc.name ?? ''),
-            arguments:
-              typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {}),
-            result: typeof tc.result === 'string' ? tc.result : undefined,
-            ok: typeof tc.ok === 'boolean' ? tc.ok : undefined,
-            status: String(tc.status ?? 'done') as ToolCallInfo['status'],
-            output: typeof tc.output === 'string' ? tc.output : undefined,
-            alertLevel: typeof tc.alertLevel === 'number' ? tc.alertLevel : 0,
-          }))
-        : undefined;
+      : normalizeToolCalls(m.toolCalls);
 
     return {
       id: typeof m.id === 'string' ? m.id : nextId(role),

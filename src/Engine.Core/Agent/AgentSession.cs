@@ -807,7 +807,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             {
                 Removed = old.Count,
                 Summary = summary,
-                Kept = keep.Select(MessageProjector.ToView).ToList(),
+                 // P08-fix 01：快照投影统一走 ProjectSnapshot（合并 tool 结果 + 稳定 Id/TsMs）。
+                 Kept = MessageProjector.ProjectSnapshot(keep),
             }, ct).ConfigureAwait(false);
 
         return (old.Count, summary);
@@ -909,17 +910,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     OutputTotal = _usageOut,
                     LastPromptTokens = _lastPromptTokens,
                 },
-                Queue = _inbox.ToArray(),
-                PendingAsk = _pendingAsk?.Ask,
-                Messages = _messages
-                    .Where(m => m.Role != Role.System)
-                    .Select(MessageProjector.ToView)
-                    .ToList(),
-                Notes = Array.Empty<Note>(),
-                Update = new UpdateState(),
-            };
-        }
-    }
+                 Queue = _inbox.ToArray(),
+                 PendingAsk = _pendingAsk?.Ask,
+                 // P08-fix 01：快照同源生成，统一走 ProjectSnapshot（合并 + 跳过 system/tool + 稳定 Id/TsMs）。
+                 Messages = MessageProjector.ProjectSnapshot(_messages),
+                 Notes = Array.Empty<Note>(),
+                 Update = new UpdateState(),
+             };
+         }
+     }
 
     // ============================================================
     //  IToolHost 实现

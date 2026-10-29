@@ -64,6 +64,32 @@ public static class MessageProjector
         return result;
     }
 
+    /// <summary>快照投影：语义同 Project（合并 + 跳过 system/tool 独立消息 + ok 判定复用），另加稳定 Id/TsMs。</summary>
+    /// <remarks>
+    /// P08-fix 01：快照类输出（snapshot/resume/resync/compact.kept）统一走这里；
+    /// ToView 降级为增量场景专用，不再用于快照。
+    /// - 稳定 Id：m-&lt;序号&gt;（1 起，替代随机，保证折叠/锚点/重试查找稳定；toolCallId 本就不动）。
+    /// - TsMs：按序号递增（存储无 ts 时的最小方案，以当前时间倒推，步长 1s，保证有序且非 0）。
+    /// </remarks>
+    public static List<HaloAgent.Engine.Abstractions.Types.MessageView> ProjectSnapshot(
+        IReadOnlyList<HaloAgent.Engine.Core.Llm.ChatMessage> messages)
+    {
+        var merged = Project(messages);
+        if (merged.Count == 0) return merged;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var baseTs = now - (long)merged.Count * 1000L;
+        if (baseTs < 0) baseTs = 0;
+        for (var i = 0; i < merged.Count; i++)
+        {
+            merged[i] = merged[i] with
+            {
+                Id = "m-" + (i + 1),
+                TsMs = baseTs + (long)(i + 1) * 1000L,
+            };
+        }
+        return merged;
+    }
+
     /// <summary>单条投影（不含工具合并，用于增量场景）。</summary>
     public static HaloAgent.Engine.Abstractions.Types.MessageView ToView(
         HaloAgent.Engine.Core.Llm.ChatMessage m) => new()

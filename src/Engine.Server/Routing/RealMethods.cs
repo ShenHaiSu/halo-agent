@@ -137,19 +137,41 @@ public sealed partial class RealMethods
 
     public Task<object?> SessionNewAsync(JsonElement? p, CancellationToken ct)
     {
+        // P08-fix 03：跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
+        if (_session.IsBusy)
+            throw RpcException.Busy("有回合正在执行，暂不能新建会话");
         _session.StartNewSession();
         return Task.FromResult<object?>(new { id = _store.SessionId });
     }
 
     public Task<object?> SessionResumeAsync(JsonElement? p, CancellationToken ct)
     {
+        // P08-fix 03：跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
+        if (_session.IsBusy)
+            throw RpcException.Busy("有回合正在执行，暂不能切换会话");
         var id = p?.TryGetProperty("id", out var i) == true ? i.GetString() : null;
         if (string.IsNullOrWhiteSpace(id))
             throw RpcException.ParamsInvalid("id 不能为空");
 
-        var path = Path.Combine(Paths.SessionsDir, id + ".jsonl");
+        // P08-fix 03/04：路径安全，堵 ../../ 逃逸。
+        var safeId = SanitizeSessionId(id!);
+        var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         if (!File.Exists(path))
-            throw new RpcException(RpcError.SessionNotFound, "会话不存在: " + id);
+        {
+            // P08-fix 03：合法空会话宽容（懒创建不变式：不预建空文件）。
+            // 内存已丢（重启后）也覆盖：合法 s-* id 无文件即视为空会话，直接 attach + 清空。
+            if (IsEmptySessionId(safeId))
+            {
+                var (emptyCount, _) = _session.LoadHistory(path);
+                var emptySnap = _session.BuildSnapshot();
+                return Task.FromResult<object?>(new
+                {
+                    count = emptyCount,
+                    messages = emptySnap.Messages,
+                });
+            }
+            throw new RpcException(RpcError.SessionNotFound, "会话不存在: " + safeId);
+        }
 
         var (count, repaired) = _session.LoadHistory(path);
         if (repaired > 0)
@@ -163,6 +185,33 @@ public sealed partial class RealMethods
             count,
             messages = snapshot.Messages,
         });
+    }
+
+    /// <summary>P08-fix 03/04：会话 id 洗白，防路径穿越。含 / \ 或 GetFileName 后不一致即判非法。</summary>
+    private static string SanitizeSessionId(string id)
+    {
+        var trimmed = id.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            throw RpcException.ParamsInvalid("id 不能为空");
+        var clean = Path.GetFileName(trimmed);
+        if (string.IsNullOrEmpty(clean) || !string.Equals(clean, trimmed, StringComparison.Ordinal))
+            throw RpcException.ParamsInvalid("id 不合法: " + id);
+        if (clean.Contains("..", StringComparison.Ordinal))
+            throw RpcException.ParamsInvalid("id 不合法: " + id);
+        return clean;
+    }
+
+    /// <summary>P08-fix 03：合法空会话判定（s-* 形）。真不存在的 id 仍走 session.notFound。</summary>
+    private static bool IsEmptySessionId(string safeId)
+    {
+        if (!safeId.StartsWith("s-", StringComparison.Ordinal) || safeId.Length > 80)
+            return false;
+        foreach (var c in safeId)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_'))
+                return false;
+        }
+        return true;
     }
 
     public Task<object?> SessionListAsync(JsonElement? p, CancellationToken ct)
@@ -196,7 +245,9 @@ public sealed partial class RealMethods
         var note = p?.TryGetProperty("note", out var n) == true ? n.GetString() : null;
         if (string.IsNullOrWhiteSpace(id)) throw RpcException.ParamsInvalid("id 不能为空");
 
-        var path = Path.Combine(Paths.SessionsDir, id + ".jsonl");
+        // P08-fix 04：防路径穿越。
+        var safeId = SanitizeSessionId(id!);
+        var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         SessionStore.WriteNote(path, note);
         return Task.FromResult<object?>(new OkResult { Ok = true });
     }
@@ -206,7 +257,9 @@ public sealed partial class RealMethods
         var id = p?.TryGetProperty("id", out var i) == true ? i.GetString() : null;
         if (string.IsNullOrWhiteSpace(id)) throw RpcException.ParamsInvalid("id 不能为空");
 
-        var path = Path.Combine(Paths.SessionsDir, id + ".jsonl");
+        // P08-fix 04：防路径穿越。
+        var safeId = SanitizeSessionId(id!);
+        var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         SessionStore.DeleteHistory(path);
         return Task.FromResult<object?>(new OkResult { Ok = true });
     }

@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { transport } from '@/transport';
 import { useMessagesStore } from './messages';
 import { useStreamStore } from './stream';
+import { useToast } from '@/composables/useToast';
 import { formatRelativeTime } from '@/utils/format';
 import type { SessionSummary } from '@/contract/agent';
 
@@ -99,14 +100,51 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
+  function rpcCodeOf(e: unknown): string {
+    const code = (e as { code?: unknown })?.code;
+    if (typeof code === 'string' && code) return code;
+    const msg = String((e as Error)?.message ?? '');
+    if (msg.includes('session.notFound')) return 'session.notFound';
+    if (msg.includes('state.busy')) return 'state.busy';
+    if (msg.includes('params.invalid')) return 'params.invalid';
+    return '';
+  }
+
   async function select(id: string): Promise<void> {
     if (id === currentId.value) return;
-    currentId.value = id;
+    // P08-fix 03：先 resume，成功后再切 state；失败回滚 currentId（原先先 clear 后 resume，失败即白屏）。
+    const prev = currentId.value;
     const messages = useMessagesStore();
     const stream = useStreamStore();
+    try {
+      await transport.request('session.resume', { id });
+    } catch (e) {
+      const code = rpcCodeOf(e);
+      // P08-fix 03：本地乐观空会话容错（title==新会话 或 已知 0 消息），降级为 clear + loadSnapshot + toast。
+      if (code === 'session.notFound') {
+        const target = items.value.find((s) => s.id === id);
+        const looksEmpty =
+          !!target &&
+          (target.title === '新会话' ||
+            ((target.userMsgs ?? 0) === 0 && (target.assistantMsgs ?? 0) === 0));
+        if (looksEmpty) {
+          currentId.value = id;
+          stream.endTurn();
+          messages.clear();
+          try {
+            await messages.loadSnapshot();
+          } catch {
+            /* 快照失败保留空白页 */
+          }
+          useToast().info('已回到空白会话');
+          return;
+        }
+      }
+      currentId.value = prev;
+      throw e;
+    }
+    currentId.value = id;
     stream.endTurn();
-    messages.clear();
-    await transport.request('session.resume', { id });
     await messages.loadSnapshot();
   }
 

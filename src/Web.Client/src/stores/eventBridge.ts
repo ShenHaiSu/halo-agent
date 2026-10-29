@@ -1,6 +1,6 @@
 // src/Web.Client/src/stores/eventBridge.ts
 // P5：24 事件 → UI 唯一映射（I-1 铁律）。
-import { useMessagesStore } from './messages';
+import { normalizeToolCalls, useMessagesStore } from './messages';
 import { useStreamStore } from './stream';
 import { usePermissionsStore } from './permissions';
 import { useSessionStore } from './session';
@@ -15,21 +15,25 @@ function asRecord(p: unknown): Record<string, unknown> {
   return (p ?? {}) as Record<string, unknown>;
 }
 
-function toMessageViews(list: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(list)) return [];
-  return list.map((m) => {
-    const o = (m ?? {}) as Record<string, unknown>;
-    return {
-      id: o.id,
-      role: o.role ?? 'assistant',
-      content: o.text ?? o.content ?? '',
-      reasoning: o.reasoning ?? undefined,
-      ts: o.tsMs ?? Date.now(),
-      injected: o.injected ?? false,
-      toolCalls: o.toolCalls ?? undefined,
-    };
-  });
-}
+ // P08-fix 02：与 messages.normalizeMessage 共用 normalizeToolCalls；过滤孤立 role=tool。
+ function toMessageViews(list: unknown): Array<Record<string, unknown>> {
+   if (!Array.isArray(list)) return [];
+   const out: Array<Record<string, unknown>> = [];
+   for (const m of list) {
+     const o = (m ?? {}) as Record<string, unknown>;
+     if (String(o.role ?? '') === 'tool') continue;
+     out.push({
+       id: o.id,
+       role: o.role ?? 'assistant',
+       content: o.text ?? o.content ?? '',
+       reasoning: o.reasoning ?? undefined,
+       ts: o.tsMs ?? Date.now(),
+       injected: o.injected ?? false,
+       toolCalls: normalizeToolCalls(o.toolCalls) ?? undefined,
+     });
+   }
+   return out;
+ }
 
 export function dispatchFrames(frames: HaloFrame[]): void {
   if (!frames || frames.length === 0) return;
@@ -283,21 +287,25 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           const stream = useStreamStore();
           stream.resyncRequired = true;
           stream.notice = { level: 'warn', text: '界面与后台不同步，正在重新载入…' };
-          void (async () => {
-            try {
-              const snap = await transport.request<{
-                seq?: number;
-                messages?: Array<Record<string, unknown>>;
-                busy?: boolean;
-                queue?: unknown[];
-              }>('agent.resync', null);
-              messages.applySnapshot({
-                seq: typeof snap.seq === 'number' ? snap.seq : seq,
-                messages: (snap.messages ?? []) as Array<Record<string, unknown>>,
-              });
-              useUiStore().collapsedTools.clear();
-              stream.resyncRequired = false;
-              stream.notice = { level: 'success', text: '已重新载入' };
+           void (async () => {
+             try {
+               // P08-fix 04：agent.resync 复用 StateSnapshot（无顶层 seq），按 StateSnapshot 形态取 messages，
+               // 以当前 lastSeq 推进，绝不回退（契约冻结，不为 resync 另包一层）。
+               const snap = await transport.request<{
+                 seq?: number;
+                 messages?: Array<Record<string, unknown>>;
+                 busy?: boolean;
+                 queue?: unknown[];
+               }>('agent.resync', null);
+               const cur = messages.lastSeq;
+               const snapSeq = typeof snap.seq === 'number' ? snap.seq : seq;
+               messages.applySnapshot({
+                 seq: Math.max(cur, seq, snapSeq),
+                 messages: toMessageViews(snap.messages ?? []),
+               });
+               useUiStore().collapsedTools.clear();
+               stream.resyncRequired = false;
+               stream.notice = { level: 'success', text: '已重新载入' };
             } catch {
               // 失败时黄条保留
             }
