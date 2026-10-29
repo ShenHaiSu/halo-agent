@@ -1,5 +1,5 @@
 // src/Web.Client/src/bridge/mock/mockHost.ts
-// D4-7 无宿主时的 Mock（12 方法 + 内部测试钩子）。
+// D4-7 无宿主时的 Mock（13 方法 + 内部测试钩子）。
 import type { WindowState, HostSystemInfo } from '../types';
 
 /**
@@ -32,6 +32,10 @@ export function createMockHost() {
     async windowDragStart(): Promise<void> {
       // 浏览器里没有窗口可拖：空操作（B 方案仅宿主有效）。
       console.debug('[mock] windowDragStart（浏览器里无效果）');
+    },
+    async windowResizeStart(hitTest: number): Promise<void> {
+      // 浏览器 Mock 下无效果（P07-Enhance 04 真机验收项）。
+      console.debug('[mock] windowResizeStart（浏览器里无效果）', hitTest);
     },
 
     async windowMaximizeOrRestore(): Promise<WindowState> {

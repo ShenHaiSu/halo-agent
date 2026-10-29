@@ -8,9 +8,9 @@ using HaloAgent.Desktop.Shell;
 
 namespace HaloAgent.Desktop.Bridge;
 
- /// <summary>
- /// 宿主业务桥接（window.haloHost，恰好 12 方法 + 3 事件）。
- /// 其中 windowDragStart 是自绘标题栏 B 方案的显式拖拽入口：
+  /// <summary>
+  /// 宿主业务桥接（window.haloHost，13 方法 + 3 事件）。
+  /// 其中 windowDragStart / windowResizeStart 是自绘标题栏 B 方案的显式拖拽/缩放入口。
  /// CEF 铺满客户区后 WM_NCHITTEST 到不了窗体，前端在标题栏 mousedown 时直调本方法，
  /// 宿主用 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/HTCAPTION) 把拖拽交给系统。
  /// 铁律：①全返回 Task ②UI 操作切 UI 线程（BeginInvoke+TCS，不用 Invoke 防死锁）
@@ -98,38 +98,67 @@ public sealed class HaloHostBridge
         });
         return tcs.Task;
     }
-    /// <summary>
-    /// 显式启动窗口拖拽（自绘标题栏 B 方案）。
-    /// 前端在标题栏 mousedown（左键、非最大化、非按钮区）时调用；
-    /// 最大化状态下直接返回（由前端双击走最大化/还原）。
-    /// 实现：ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/HTCAPTION)，
-    /// 把移动/双击/Aero Snap 都交给系统，与原生标题栏行为一致。
-    /// 注意：调用时左键必须仍处于按下状态（前端 mousedown 里同步直调，不 await），
-    /// 否则 SendMessage 进不了移动模态循环，本次调用即为空操作（无害）。
-    /// </summary>
-    public Task WindowDragStart()
-    {
-        var f = _formAccessor();
-        f.BeginInvoke(() =>
-        {
-            try
-            {
-                if (f.IsDisposed || !f.IsHandleCreated) return;
-                if (f.WindowState == FormWindowState.Maximized) return;
-                if (f.WindowState == FormWindowState.Minimized) return;
-                NativeMethods.ReleaseCapture();
-                NativeMethods.SendMessage(
-                    f.Handle,
-                    NativeMethods.WM_NCLBUTTONDOWN,
-                    (IntPtr)NativeMethods.HTCAPTION,
-                    IntPtr.Zero);
-            }
-            catch (Exception ex) { AppLog.Warn("窗口拖拽启动失败：" + ex.Message); }
-        });
-        return Task.CompletedTask;
-    }
-
-    // ---------- 系统信息（1） ----------
+     /// <summary>
+     /// 显式启动窗口拖拽（自绘标题栏 B 方案）。
+     /// 前端在标题栏 mousedown（左键、非最大化、非按钮区）时调用；
+     /// 最大化状态下直接返回（由前端双击走最大化/还原）。
+     /// 实现：ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/HTCAPTION)，
+     /// 把移动/双击/Aero Snap 都交给系统，与原生标题栏行为一致。
+     /// 注意：调用时左键必须仍处于按下状态（前端 mousedown 里同步直调，不 await），
+     /// 否则 SendMessage 进不了移动模态循环，本次调用即为空操作（无害）。
+     /// </summary>
+     public Task WindowDragStart()
+     {
+         var f = _formAccessor();
+         f.BeginInvoke(() =>
+         {
+             try
+             {
+                 if (f.IsDisposed || !f.IsHandleCreated) return;
+                 if (f.WindowState == FormWindowState.Maximized) return;
+                 if (f.WindowState == FormWindowState.Minimized) return;
+                 NativeMethods.ReleaseCapture();
+                 NativeMethods.SendMessage(
+                     f.Handle,
+                     NativeMethods.WM_NCLBUTTONDOWN,
+                     (IntPtr)NativeMethods.HTCAPTION,
+                     IntPtr.Zero);
+             }
+             catch (Exception ex) { AppLog.Warn("窗口拖拽启动失败：" + ex.Message); }
+         });
+         return Task.CompletedTask;
+     }
+     /// <summary>
+     /// 显式启动窗口缩放（P07-Enhance 04，主路径）。
+     /// 前端 8 方位热区 mousedown（左键、非最大化/最小化）时同步直调本方法；
+     /// 宿主用 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/hitTest) 把缩放交给系统（与 WindowDragStart 同一机制）。
+     /// hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT），非法值抛 ArgumentOutOfRangeException。
+     /// 注意：调用时左键必须仍处于按下状态（前端 mousedown 里同步直调、不 await），否则为空操作（无害）。
+     /// </summary>
+     public Task WindowResizeStart(int hitTest)
+     {
+         if (hitTest < 10 || hitTest > 17)
+             throw new ArgumentOutOfRangeException(nameof(hitTest), "hitTest 必须在 10..17（HTLEFT..HTBOTTOMRIGHT）之间");
+         var f = _formAccessor();
+         f.BeginInvoke(() =>
+         {
+             try
+             {
+                 if (f.IsDisposed || !f.IsHandleCreated) return;
+                 if (f.WindowState == FormWindowState.Maximized) return;
+                 if (f.WindowState == FormWindowState.Minimized) return;
+                 NativeMethods.ReleaseCapture();
+                 NativeMethods.SendMessage(
+                     f.Handle,
+                     NativeMethods.WM_NCLBUTTONDOWN,
+                     (IntPtr)hitTest,
+                     IntPtr.Zero);
+             }
+             catch (Exception ex) { AppLog.Warn("窗口缩放启动失败：" + ex.Message); }
+         });
+         return Task.CompletedTask;
+     }
+     // ---------- 系统信息（1） ----------
 
     /// <summary>返回 HostSystemInfo 的 JSON 字符串（camelCase）。</summary>
     public Task<string> SystemInfo()

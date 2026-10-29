@@ -1,18 +1,20 @@
 // src/Web.Client/src/bridge/types.ts
-// D4-7 桥接类型声明：window.haloHost（12 方法）/ haloAgent（3 方法）/ 事件入口。
+// D4-7 桥接类型声明：window.haloHost（13 方法）/ haloAgent（3 方法）/ 事件入口。
 //
-// 分层：bridge 只定义类型，不依赖任何业务模块。
+// 分层：bridge 只定义类型，不依赖任何业务模块.
 
- /** window.haloHost（宿主业务接口，12 个方法；第 12 个 windowDragStart 为自绘标题栏 B 方案显式拖拽入口）。
+ /** window.haloHost（宿主业务接口，13 个方法；第 12 个 windowDragStart 为自绘标题栏 B 方案显式拖拽入口，第 13 个 windowResizeStart 为窗体边缘缩放入口）。
   *
   * 桥契约（dist 骨架屏根因修复）：凡返回 DTO 的方法（windowMaximizeOrRestore /
   * windowState / systemInfo），C# 侧返回 JSON 字符串（camelCase），调用方负责 parse。
   * 绝不能假设桥直接返回对象（CefSharp 对复杂返回值的编组不稳定且按 C# 原名返回）。
   */
  export interface HaloHost {
-   windowMinimize(): Promise<void>;
+  windowMinimize(): Promise<void>;
   /** 显式启动窗口拖拽（B 方案）：前端标题栏 mousedown 时调用，最大化/最小化下宿主侧直接返回。 */
   windowDragStart(): Promise<void>;
+  /** 显式启动窗口缩放（P07-Enhance 04）：前端 8 方位热区 mousedown 时同步直调，hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT）。最大化/最小化下宿主侧直接返回。 */
+  windowResizeStart(hitTest: number): Promise<void>;
    /** 返回 WindowState 的 JSON 字符串。 */
    windowMaximizeOrRestore(): Promise<string>;
    windowClose(): Promise<void>;
@@ -28,16 +30,16 @@
    restartEngine(): Promise<void>;
  }
 
- /** window.haloAgent（引擎传输，3 个方法）。
+/** window.haloAgent（引擎传输，3 个方法）。
   *
   * 桥契约（dist 骨架屏根因修复）：request / pollEvents 返回 JSON 字符串，
   * 调用方（agent.ts）负责 JSON.parse。isReady 返回布尔，不变。
   */
- export interface HaloAgent {
-   request(method: string, params: unknown): Promise<string>;
-   pollEvents(sinceSeq: number): Promise<string>;
-   isReady(): Promise<boolean>;
- }
+export interface HaloAgent {
+  request(method: string, params: unknown): Promise<string>;
+  pollEvents(sinceSeq: number): Promise<string>;
+  isReady(): Promise<boolean>;
+}
 
 export interface WindowState {
   maximized: boolean;

@@ -1,5 +1,5 @@
 // src/Web.Client/src/bridge/host.ts
-// D4-7 window.haloHost 的安全封装（12 方法，无宿主/调用失败时安全降级，不抛）。
+// D4-7 window.haloHost 的安全封装（13 方法，无宿主/调用失败时安全降级，不抛）。
 import type { WindowState, HostSystemInfo } from './types';
 import { hasHost, forceMock } from './bind';
 import { createMockHost, type MockHost } from './mock/mockHost';
@@ -80,13 +80,20 @@ export const hostBridge = {
       () => getMock().windowMinimize()
     );
   },
-  async windowDragStart(): Promise<void> {
-    return callOrMock(
-      'windowDragStart',
-      () => requireMethod('windowDragStart')(),
-      () => getMock().windowDragStart()
-    );
-  },
+   async windowDragStart(): Promise<void> {
+     return callOrMock(
+       'windowDragStart',
+       () => requireMethod('windowDragStart')(),
+       () => getMock().windowDragStart()
+     );
+   },
+   async windowResizeStart(hitTest: number): Promise<void> {
+     return callOrMock(
+       'windowResizeStart',
+       () => requireMethod('windowResizeStart')(hitTest),
+       () => getMock().windowResizeStart(hitTest)
+     );
+   },
 
   async windowMaximizeOrRestore(): Promise<WindowState> {
     return callOrMock(

@@ -12,6 +12,7 @@ import { transport } from '@/transport';
 import { useEventPump } from '@/stores/useEventPump';
 import { useToast } from '@/composables/useToast';
 import MockWarningBar from './components/common/MockWarningBar.vue';
+import WindowResizeHandles from './components/layout/WindowResizeHandles.vue';
 import { useHostStore } from '@/stores/host';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
@@ -102,7 +103,8 @@ onBeforeUnmount(() => undefined);
 
   <!-- 主界面 -->
   <ErrorBoundary v-else>
-    <div class="flex h-full w-full flex-col overflow-hidden bg-bg text-fg">
+    <div class="relative flex h-full w-full flex-col overflow-hidden bg-bg text-fg">
+      <WindowResizeHandles />
       <div class="min-h-0 flex-1">
         <AppShell />
       </div>

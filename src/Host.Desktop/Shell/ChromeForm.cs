@@ -1,5 +1,6 @@
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
+ using System.Drawing;
+ using System.Runtime.InteropServices;
+ using System.Windows.Forms;
 
 namespace HaloAgent.Desktop.Shell;
 
@@ -7,10 +8,12 @@ namespace HaloAgent.Desktop.Shell;
 /// 无边框主窗口基类。用 NCHITTEST 返回 HTCAPTION 让系统接管拖拽
 /// （双击最大化/Win+方向键/Aero Snap 免费获得），代价是处理 WM_NCCALCSIZE 留边。
 /// </summary>
-public class ChromeForm : Form
-{
-    private const int ResizeBorder = 6;
-    private const int TitleBarButtonZoneWidth = 200;
+ public class ChromeForm : Form
+ {
+     // P07-Enhance 04：固定 8px 缩放边（高 DPI 下仍易命中；CreateGraphics 在构造期不可用，故不用动态 DPI 计算）。
+     private const int ResizeBorder = 8;
+     private const int TitleBarButtonZoneWidth = 200;
+     private const int WS_THICKFRAME = 0x00040000;
 
     private const int WM_NCCALCSIZE = 0x0083;
     private const int WM_NCHITTEST = 0x0084;
@@ -35,17 +38,28 @@ public class ChromeForm : Form
     /// <summary>DPI 变化时触发，参数是新 DPI。</summary>
     public event EventHandler<int>? DpiChanged2;
 
-    public ChromeForm()
-    {
-        FormBorderStyle = FormBorderStyle.None;
-        SetStyle(
-            ControlStyles.OptimizedDoubleBuffer |
-            ControlStyles.AllPaintingInWmPaint |
-            ControlStyles.ResizeRedraw,
-            true);
-        DoubleBuffered = true;
-        Padding = Padding.Empty;
-    }
+     public ChromeForm()
+     {
+         FormBorderStyle = FormBorderStyle.None;
+         SetStyle(
+             ControlStyles.OptimizedDoubleBuffer |
+             ControlStyles.AllPaintingInWmPaint |
+             ControlStyles.ResizeRedraw,
+             true);
+         DoubleBuffered = true;
+         Padding = Padding.Empty;
+         MinimumSize = new Size(880, 560);
+     }
+     /// <summary>P07-Enhance 04：补 WS_THICKFRAME 让 DWM 保留隐形缩放边（无边框下仍可缩放）。Win7 下若出现黑边/闪烁可回退删此重写。</summary>
+     protected override CreateParams CreateParams
+     {
+         get
+         {
+             var cp = base.CreateParams;
+             cp.Style |= WS_THICKFRAME;
+             return cp;
+         }
+     }
 
     protected override void WndProc(ref Message m)
     {

@@ -5,10 +5,18 @@ namespace HaloAgent.Desktop;
 /// <summary>集中 P/Invoke（窗口拖拽 / 前台激活 / OLE / DLL 可加载探测）。</summary>
 internal static class NativeMethods
 {
-    // ---------- 窗口拖拽（自绘标题栏 B 方案：前端 mousedown → haloHost.windowDragStart） ----------
-    internal const int WM_NCLBUTTONDOWN = 0x00A1;
-    internal const int HTCAPTION = 2;
-
+   // ---------- 窗口拖拽（自绘标题栏 B 方案：前端 mousedown → haloHost.windowDragStart） ----------
+   internal const int WM_NCLBUTTONDOWN = 0x00A1;
+   internal const int HTCAPTION = 2;
+   // ---------- 窗体边缘缩放（P07-Enhance 04：前端热区 mousedown → haloHost.windowResizeStart(hitTest)） ----------
+   internal const int HTLEFT = 10;
+   internal const int HTRIGHT = 11;
+   internal const int HTTOP = 12;
+   internal const int HTTOPLEFT = 13;
+   internal const int HTTOPRIGHT = 14;
+   internal const int HTBOTTOM = 15;
+   internal const int HTBOTTOMLEFT = 16;
+   internal const int HTBOTTOMRIGHT = 17;
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool ReleaseCapture();
