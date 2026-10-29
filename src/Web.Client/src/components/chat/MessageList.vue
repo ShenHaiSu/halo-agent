@@ -6,6 +6,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useMessagesStore } from '@/stores/messages';
 import { useStreamStore } from '@/stores/stream';
 import { useSessionStore } from '@/stores/session';
+import { useSessionsStore } from '@/stores/sessions';
 import { useMessageWindow } from '@/composables/useMessageWindow';
 import HScroll from '@/components/base/HScroll.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
@@ -19,6 +20,7 @@ const emit = defineEmits<{ (e: 'use-sample', text: string): void }>();
 const messages = useMessagesStore();
 const stream = useStreamStore();
 const session = useSessionStore();
+const sessions = useSessionsStore();
 
 // messages store 暂无 streamingId 字段（不改 stores）：用 stream.streamingMessageId 判定
 const streamingId = computed(() => stream.streamingMessageId);
@@ -53,6 +55,16 @@ function followIfNeeded(): void {
 
 watch(() => messages.items.length, followIfNeeded);
 watch(() => messages.items[messages.items.length - 1]?.content.length ?? 0, followIfNeeded);
+
+// P09-fix2 C：切会话即重置展开态并回顶，避免小会话沿用大会话的 showAll。
+watch(
+  () => sessions.currentId,
+  () => {
+    showAll.value = false;
+    const s = scroller.value as unknown as { scrollToTop?: (smooth?: boolean) => void } | null;
+    s?.scrollToTop?.(false);
+  },
+);
 
 const samples = [
   '帮我看看这个项目用了哪些依赖',

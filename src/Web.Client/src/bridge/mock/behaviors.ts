@@ -5,11 +5,112 @@ export type MockBehavior =
   | { kind: 'ok'; run: (params: unknown) => unknown }
   | { kind: 'throws'; code: string; message: string };
 
-function mockSnapshot(): unknown {
+// P09-fix2 D：Mock 多会话历史（?mock=1 下可复现切换，不再恒返空历史）。
+export interface MockChatMessage {
+  id: string;
+  role: string;
+  text: string;
+  tsMs: number;
+}
+
+interface MockSessionData {
+  id: string;
+  title: string;
+  cwd: string | null;
+  historyPath: string | null;
+  headless: boolean;
+  mtimeMs: number;
+  messages: MockChatMessage[];
+}
+
+let mockMsgSeq = 0;
+function mockMsg(role: string, text: string, tsMs: number): MockChatMessage {
+  mockMsgSeq += 1;
+  return { id: `m-mock-${mockMsgSeq}`, role, text, tsMs };
+}
+
+const mockNow = Date.now();
+const mockSessions = new Map<string, MockSessionData>([
+  [
+    's-mock-1',
+    {
+      id: 's-mock-1',
+      title: 'Mock 会话一',
+      cwd: '(mock)',
+      historyPath: '(mock)/s-mock-1.jsonl',
+      headless: false,
+      mtimeMs: mockNow - 3600000,
+      messages: [
+        mockMsg('user', '帮我看看这个项目用了哪些依赖', mockNow - 3600000),
+        mockMsg('assistant', '## 分析结果\n\n- 找到 3 个文件\n- 其中 `config.json` 需要修改', mockNow - 3590000),
+      ],
+    },
+  ],
+  [
+    's-mock-2',
+    {
+      id: 's-mock-2',
+      title: 'Mock 会话二',
+      cwd: '(mock)',
+      historyPath: '(mock)/s-mock-2.jsonl',
+      headless: false,
+      mtimeMs: mockNow - 7200000,
+      messages: [
+        mockMsg('user', '找出所有 TODO 并整理成清单', mockNow - 7200000),
+        mockMsg('assistant', '- [ ] 接入真实后端\n- [x] Mock 多会话历史', mockNow - 7190000),
+        mockMsg('user', '这个文件里的报错是什么原因', mockNow - 7180000),
+        mockMsg('assistant', '缺少空值检查，加上 `?? []` 兜底即可。', mockNow - 7170000),
+      ],
+    },
+  ],
+]);
+
+let currentMockSessionId = 's-mock-1';
+let mockSessionSeq = 2;
+
+function currentMockSession(): MockSessionData {
+  let s = mockSessions.get(currentMockSessionId);
+  if (!s) {
+    s = mockSessions.values().next().value as MockSessionData;
+    currentMockSessionId = s.id;
+  }
+  return s;
+}
+
+function mockSummary(s: MockSessionData): unknown {
+  const userMsgs = s.messages.filter((m) => m.role === 'user').length;
+  return {
+    id: s.id,
+    title: s.title,
+    note: null,
+    cwd: s.cwd,
+    headless: s.headless,
+    mtimeMs: s.mtimeMs,
+    userMsgs,
+    assistantMsgs: s.messages.length - userMsgs,
+  };
+}
+
+function mockMessageViews(s: MockSessionData): unknown[] {
+  return s.messages.map((m) => ({ id: m.id, role: m.role, text: m.text, tsMs: m.tsMs }));
+}
+
+/** Mock 用户发言 / 回放落盘：追加进当前会话，切走切回仍在。 */
+export function mockAppendMessage(role: string, text: string): void {
+  currentMockSession().messages.push(mockMsg(role, text, Date.now()));
+}
+
+/** 当前 Mock 会话 id（供 mockAgent 保持 prompt 归属一致）。 */
+export function getCurrentMockSessionId(): string {
+  return currentMockSessionId;
+}
+
+function mockSnapshot(sessionId?: string): unknown {
+  const s = (sessionId ? mockSessions.get(sessionId) : undefined) ?? currentMockSession();
   return {
     protocol: 1,
     engine: { version: '0.0.0-mock', pid: 0, startedAtMs: Date.now(), osVersion: 'mock', isWin7: false },
-    session: { id: 's-mock-1', cwd: '(mock)', historyPath: null },
+    session: { id: s.id, cwd: s.cwd, historyPath: s.historyPath },
     agent: {
       busy: false,
       turnId: null,
@@ -28,7 +129,7 @@ function mockSnapshot(): unknown {
     },
     usage: { input: 0, output: 0 },
     queue: { length: 0 },
-    messages: [],
+    messages: mockMessageViews(s),
   };
 }
 
@@ -66,7 +167,14 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'system.diagnostics': { kind: 'ok', run: () => ({}) },
   'system.shutdown': { kind: 'ok', run: () => ({ ok: true }) },
 
-  'agent.prompt': { kind: 'ok', run: () => ({ accepted: true, turnId: 'mock-turn' }) },
+  'agent.prompt': {
+    kind: 'ok',
+    run: (p) => {
+      const text = (p as { text?: string } | null)?.text ?? '(空)';
+      mockAppendMessage('user', text);
+      return { accepted: true, turnId: 'mock-turn' };
+    },
+  },
   'agent.queue': { kind: 'ok', run: () => ({ queued: true, position: 1 }) },
   'agent.unqueue': { kind: 'ok', run: () => ({ removed: true }) },
   'agent.cancel': { kind: 'ok', run: () => ({ cancelled: true }) },
@@ -74,11 +182,56 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'agent.drain': { kind: 'ok', run: () => ({ text: null }) },
   'agent.resync': { kind: 'ok', run: () => mockSnapshot() },
 
-  'session.new': { kind: 'ok', run: () => ({ id: 's-mock' }) },
-  'session.resume': { kind: 'ok', run: () => ({ count: 0, messages: [] }) },
-  'session.list': { kind: 'ok', run: () => ({ items: [] }) },
-  'session.rename': { kind: 'ok', run: () => ({ ok: true }) },
-  'session.delete': { kind: 'ok', run: () => ({ ok: true }) },
+  'session.new': {
+    kind: 'ok',
+    run: () => {
+      mockSessionSeq += 1;
+      const id = `s-mock-${mockSessionSeq}`;
+      mockSessions.set(id, {
+        id,
+        title: '新会话',
+        cwd: '(mock)',
+        historyPath: `(mock)/${id}.jsonl`,
+        headless: false,
+        mtimeMs: Date.now(),
+        messages: [],
+      });
+      currentMockSessionId = id;
+      return { id };
+    },
+  },
+  'session.resume': {
+    kind: 'ok',
+    run: (p) => {
+      const id = (p as { id?: string } | null)?.id;
+      if (id && mockSessions.has(id)) currentMockSessionId = id;
+      const s = currentMockSession();
+      return { count: s.messages.length, messages: mockMessageViews(s) };
+    },
+  },
+  'session.list': { kind: 'ok', run: () => ({ items: [...mockSessions.values()].map(mockSummary) }) },
+  'session.rename': {
+    kind: 'ok',
+    run: (p) => {
+      const o = (p as { id?: string; note?: string } | null) ?? {};
+      const s = o.id ? mockSessions.get(o.id) : undefined;
+      if (s && typeof o.note === 'string') s.title = o.note.trim() || s.title;
+      return { ok: true };
+    },
+  },
+  'session.delete': {
+    kind: 'ok',
+    run: (p) => {
+      const id = (p as { id?: string } | null)?.id;
+      if (id) {
+        mockSessions.delete(id);
+        if (currentMockSessionId === id) {
+          currentMockSessionId = mockSessions.keys().next().value as string ?? id;
+        }
+      }
+      return { ok: true };
+    },
+  },
   'session.clear': { kind: 'ok', run: () => ({ ok: true }) },
   'session.compact': { kind: 'ok', run: () => ({ removed: 0, summary: '' }) },
   'session.setCwd': { kind: 'ok', run: (p) => ({ cwd: (p as { path?: string } | null)?.path ?? '(mock)' }) },

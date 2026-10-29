@@ -6,6 +6,7 @@ import { usePermissionsStore } from './permissions';
 import { useSessionStore } from './session';
 import { useQueueStore } from './queue';
 import { useUiStore } from './ui';
+import { isSwitching } from './sessions';
 import { transport } from '@/transport';
 import type { HaloFrame } from '@/bridge/types';
 
@@ -33,17 +34,38 @@ function asRecord(p: unknown): Record<string, unknown> {
      });
    }
    return out;
- }
+}
+// P09-fix2 B/C：切换中到达的历史变更帧一律丢弃（仍推进游标，避免 pump 反复拉取）。
+// 只保留会话元信息 / 状态类帧（session.info/usage/state.*/resync 等）。
+const DROP_DURING_SWITCH = new Set([
+  'turn.started',
+  'turn.finished',
+  'text.delta',
+  'reasoning.delta',
+  'tool.started',
+  'tool.finished',
+  'tool.outputDelta',
+  'tool.silentAlert',
+  'user.injected',
+  'session.historyLoaded',
+  'session.contextCleared',
+]);
 
 export function dispatchFrames(frames: HaloFrame[]): void {
   if (!frames || frames.length === 0) return;
   const sorted = [...(frames as unknown as Frame[])].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
   const messages = useMessagesStore();
+  const switching = isSwitching();
   for (const f of sorted) {
     if (f.t !== 'evt') continue;
     const seq = f.seq ?? 0;
     if (seq <= messages.lastSeq) {
       console.debug('[evt] 丢弃重复 seq', seq, f.k);
+      continue;
+    }
+    if (switching && DROP_DURING_SWITCH.has(f.k)) {
+      console.debug('[evt] 切换中丢弃过期帧', seq, f.k);
+      messages.setLastSeq(seq);
       continue;
     }
     try {

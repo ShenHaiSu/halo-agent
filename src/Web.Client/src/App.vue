@@ -16,7 +16,6 @@ import WindowResizeHandles from './components/layout/WindowResizeHandles.vue';
 import { useHostStore } from '@/stores/host';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
-import { useMessagesStore } from '@/stores/messages';
 import { useStreamStore } from '@/stores/stream';
 import { useUiStore } from '@/stores/ui';
 import { useThemeStore } from '@/stores/theme';
@@ -48,7 +47,6 @@ if (import.meta.env.DEV) {
 const host = useHostStore();
 const sessions = useSessionsStore();
 const session = useSessionStore();
-const messages = useMessagesStore();
 const stream = useStreamStore();
 const ui = useUiStore();
 const themeStore = useThemeStore();
@@ -84,12 +82,13 @@ useShortcuts({
 onMounted(() => {
   session.restoreMode();
   void host.load();
+  // P09-fix2 C：启动串行化。先加载会话列表并切首个会话（select 内含快照绘制），
+  // 删除裸 messages.loadSnapshot()，避免与 select 竞态互相覆盖。
   void sessions.load().then(() => {
     if (sessions.list.length > 0 && !sessions.currentId) {
       void sessions.select(sessions.list[0]!.id);
     }
   });
-  void messages.loadSnapshot();
 });
 
 onBeforeUnmount(() => undefined);

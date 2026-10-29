@@ -5,9 +5,26 @@ import { computed, ref } from 'vue';
 import { transport } from '@/transport';
 import { useMessagesStore } from './messages';
 import { useStreamStore } from './stream';
+import { usePermissionsStore } from './permissions';
+import { useQueueStore } from './queue';
+import { useSessionStore } from './session';
 import { useToast } from '@/composables/useToast';
 import { formatRelativeTime } from '@/utils/format';
 import type { SessionSummary } from '@/contract/agent';
+// P09-fix2 B：切换令牌。select 进入即 +1 并快照；任何异步返回后若令牌已变则直接丢弃，
+// 保证快速连点 A→B→A 只保留最后一次，无旧快照覆盖新会话。
+let switchToken = 0;
+let switchDepth = 0;
+
+/** 当前切换令牌（eventBridge 用它判定切换中过期帧）。 */
+export function getSwitchToken(): number {
+  return switchToken;
+}
+
+/** 是否正处在会话切换中（select/createNew 尚未结束）。 */
+export function isSwitching(): boolean {
+  return switchDepth > 0;
+}
 
 export interface SessionListItem {
   id: string;
@@ -110,54 +127,117 @@ export const useSessionsStore = defineStore('sessions', () => {
     return '';
   }
 
+  // P09-fix2 B：复用 resume.messages 直接绘制 + 切换令牌 + 全程 loading。
+  // 失败语义保持：busy 直接抛 + Toast，不切 currentId、不清空。
   async function select(id: string): Promise<void> {
     if (id === currentId.value) return;
-    // P08-fix 03：先 resume，成功后再切 state；失败回滚 currentId（原先先 clear 后 resume，失败即白屏）。
     const prev = currentId.value;
     const messages = useMessagesStore();
     const stream = useStreamStore();
-    try {
-      await transport.request('session.resume', { id });
-    } catch (e) {
-      const code = rpcCodeOf(e);
-      // P08-fix 03：本地乐观空会话容错（title==新会话 或 已知 0 消息），降级为 clear + loadSnapshot + toast。
-      if (code === 'session.notFound') {
-        const target = items.value.find((s) => s.id === id);
-        const looksEmpty =
-          !!target &&
-          (target.title === '新会话' ||
-            ((target.userMsgs ?? 0) === 0 && (target.assistantMsgs ?? 0) === 0));
-        if (looksEmpty) {
-          currentId.value = id;
-          stream.endTurn();
-          messages.clear();
-          try {
-            await messages.loadSnapshot();
-          } catch {
-            /* 快照失败保留空白页 */
-          }
-          useToast().info('已回到空白会话');
-          return;
-        }
-      }
-      currentId.value = prev;
-      throw e;
-    }
-    currentId.value = id;
+    const perms = usePermissionsStore();
+    const queue = useQueueStore();
+    const sessionInfo = useSessionStore();
+    const token = ++switchToken;
+    switchDepth++;
+    messages.loading = true;
+    // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡。
     stream.endTurn();
-    await messages.loadSnapshot();
+    messages.streamingId = null;
+    perms.clear();
+    queue.clear();
+    try {
+      let resumed: { count?: number; messages?: unknown } | null = null;
+      try {
+        resumed = await transport.request<{ count?: number; messages?: unknown }>('session.resume', { id });
+      } catch (e) {
+        const code = rpcCodeOf(e);
+        // busy：直接抛 + Toast，不切 currentId、不清空当前页。
+        if (code === 'state.busy') {
+          useToast().info('有回合正在执行，稍后再切');
+          currentId.value = prev;
+          throw e;
+        }
+        // P08-fix 03：本地乐观空会话容错，降级为空白页 + toast。
+        if (code === 'session.notFound') {
+          const target = items.value.find((s) => s.id === id);
+          const looksEmpty =
+            !!target &&
+            (target.title === '新会话' ||
+              ((target.userMsgs ?? 0) === 0 && (target.assistantMsgs ?? 0) === 0));
+          if (looksEmpty) {
+            if (token !== switchToken) return;
+            currentId.value = id;
+            messages.clearItems();
+            sessionInfo.compactionSummary = null;
+            try {
+              await messages.loadSnapshot();
+            } catch {
+              /* 快照失败保留空白页 */
+            }
+            useToast().info('已回到空白会话');
+            return;
+          }
+        }
+        currentId.value = prev;
+        throw e;
+      }
+      if (token !== switchToken) return;
+      currentId.value = id;
+      // 复用 resume.messages 直接绘制（无 seq 不回退游标，见 01）；缺字段才回退 loadSnapshot。
+      const resumedMessages = Array.isArray(resumed?.messages) ? resumed!.messages as Array<Record<string, unknown>> : null;
+      if (resumedMessages) {
+        messages.applySnapshot({ messages: resumedMessages });
+      } else {
+        await messages.loadSnapshot();
+        if (token !== switchToken) return;
+      }
+      // 成功后补齐：resume 不带 session 元信息；session.info 事件随后经 pump 到达，
+      // 这里先以快照 session 补 id/cwd/historyPath，并清除旧摘要卡。
+      sessionInfo.compactionSummary = null;
+      try {
+        const snap = await transport.request<{ session?: Record<string, unknown> }>('state.snapshot', null);
+        if (token !== switchToken) return;
+        const s = snap?.session;
+        if (s) sessionInfo.applyInfo({ sessionId: id, cwd: s.cwd, historyPath: s.historyPath });
+        else sessionInfo.applyInfo({ sessionId: id });
+      } catch {
+        sessionInfo.applyInfo({ sessionId: id });
+      }
+    } finally {
+      switchDepth--;
+      if (token === switchToken) messages.loading = false;
+    }
   }
 
   async function createNew(): Promise<void> {
-    const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
+    const token = ++switchToken;
+    switchDepth++;
     const messages = useMessagesStore();
-    messages.clear();
-    const nid = res?.id ?? res?.sessionId ?? '';
-    if (nid) {
-      currentId.value = nid;
-      items.value.unshift({ id: nid, title: '新会话', mtimeMs: Date.now(), headless: false });
+    const stream = useStreamStore();
+    const perms = usePermissionsStore();
+    const queue = useQueueStore();
+    const sessionInfo = useSessionStore();
+    messages.loading = true;
+    stream.endTurn();
+    messages.streamingId = null;
+    perms.clear();
+    queue.clear();
+    sessionInfo.compactionSummary = null;
+    try {
+      const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
+      if (token !== switchToken) return;
+      messages.clearItems();
+      const nid = res?.id ?? res?.sessionId ?? '';
+      if (nid) {
+        currentId.value = nid;
+        items.value.unshift({ id: nid, title: '新会话', mtimeMs: Date.now(), headless: false });
+        sessionInfo.applyInfo({ sessionId: nid });
+      }
+      await messages.loadSnapshot();
+    } finally {
+      switchDepth--;
+      if (token === switchToken) messages.loading = false;
     }
-    await messages.loadSnapshot();
   }
 
   function create(): Promise<void> {

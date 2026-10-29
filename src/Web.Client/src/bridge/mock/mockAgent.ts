@@ -1,31 +1,28 @@
 // src/Web.Client/src/bridge/mock/mockAgent.ts
 // D4-7 无宿主时的假引擎（P07 已改为行为表驱动，见 behaviors.ts）。
 import type { HaloFrame, PollResult } from '../types';
-import { BEHAVIORS } from './behaviors';
+import { BEHAVIORS, mockAppendMessage } from './behaviors';
+
 /**
  * 无宿主时的假引擎。
  *
  * ============ 设计要点 ============
  *  ① agent.prompt → turn.started → text.delta × N → turn.finished 流式
- *  ② 事件按 seq 递增，前端可以用 pollEvents 拉到"看起来真实"的流
+ *  ② 事件按 seq 递增，前端可以用 pollEvents 拉到“看起来真实”的流
  *  ③ P1 契约里的方法都有返回值（不返回 NotImplemented）
- *  ④ 参数校验宽松（前端传什么都能"成功"）
+ *  ④ 参数校验宽松（前端传什么都能“成功”）
  * ============ 为什么事件要延迟产生 ============
  *  如果一次性产生所有事件，前端的流式渲染就测不出来。
  *  所以每条事件按 40–80ms 的间隔产生，模拟真实模型。
+ * ============ P09-fix2 D ============
+ *  会话历史由 behaviors.ts 的 Mock 会话存储持有（多会话、切走切回仍在）；
+ *  这里只负责事件 seq 与流式回放，回放结束把助理回复落盘进当前 Mock 会话。
  * ============ ============
  */
 
-interface MockSession {
-  messages: Array<{ role: string; content: string }>;
-}
-
 let seqCounter = 0;
 const events: HaloFrame[] = [];
-const sessions: MockSession[] = [{ messages: [] }];
-let currentSession = 0;
 let busy = false;
-
 function emit(kind: string, payload: unknown): void {
   events.push({ t: 'evt', seq: ++seqCounter, k: kind, p: payload });
   // 限制内存
@@ -60,7 +57,7 @@ const SAMPLE_REPLY = [
  *   turn.started → text.delta × N → turn.finished
  * 每隔约 60ms 推一块。
  */
-function runMockTurn(prompt: string): void {
+function runMockTurn(): void {
   if (busy) return;
   busy = true;
 
@@ -73,10 +70,8 @@ function runMockTurn(prompt: string): void {
   const tick = () => {
     if (i >= chunks.length) {
       emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false });
-      sessions[currentSession]!.messages.push(
-        { role: 'user', content: prompt },
-        { role: 'assistant', content: SAMPLE_REPLY }
-      );
+      // P09-fix2 D：用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
+      mockAppendMessage('assistant', SAMPLE_REPLY);
       busy = false;
       return;
     }
@@ -97,10 +92,9 @@ function chunkText(s: string, size: number): string[] {
 export function createMockAgent() {
   return {
     async request(method: string, params: unknown): Promise<unknown> {
-      // agent.prompt 保留流式副作用
+      // agent.prompt 保留流式副作用（用户发言落盘在 BEHAVIORS 里同步完成）
       if (method === 'agent.prompt') {
-        const p = params as { text?: string } | null;
-        runMockTurn(p?.text ?? '(空)');
+        runMockTurn();
       }
       if (method === 'agent.cancel') {
         emit('turn.finished', { turnId: 'mock', text: '', truncated: true, byUser: true });

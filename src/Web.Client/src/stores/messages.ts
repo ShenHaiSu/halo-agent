@@ -99,11 +99,13 @@ export const useMessagesStore = defineStore('messages', () => {
     if (seq > lastSeq.value) lastSeq.value = seq;
   }
 
+  // P09-fix2 A：游标只增不减。快照无 seq（契约冻结）时保持原游标，禁止回退为 0，
+  // 否则下一 tick pollEvents(0) 会重放旧事件覆盖新快照（切换闪白主因）。
   function applySnapshot(snapshot: {
     seq?: number;
     messages?: Array<Record<string, unknown>>;
   }): void {
-    lastSeq.value = typeof snapshot.seq === 'number' ? snapshot.seq : 0;
+    if (typeof snapshot.seq === 'number') setLastSeq(snapshot.seq);
     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
     // P08-fix 02：快照中残留的孤立 role=tool 消息直接过滤，不再渲染为正文。
     const filtered = raw.filter((m) => String((m as Record<string, unknown>)?.role ?? '') !== 'tool');
@@ -214,10 +216,18 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  function clear(): void {
+  // P09-fix2 A：clear 只清条目不碰游标（游标只增不减）；真正断连/登出再用 resetCursor。
+  function clearItems(): void {
     items.value = [];
-    lastSeq.value = 0;
     streamingId.value = null;
+  }
+
+  function resetCursor(): void {
+    lastSeq.value = 0;
+  }
+
+  function clear(): void {
+    clearItems();
   }
 
   return {
@@ -228,6 +238,8 @@ export const useMessagesStore = defineStore('messages', () => {
     isEmpty,
     lastAssistant,
     applySnapshot,
+    clearItems,
+    resetCursor,
     append,
     patch,
     appendDelta,

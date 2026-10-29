@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { transport } from '@/transport';
 import { onHostEvent } from '@/bridge/events';
 import { useMessagesStore } from './messages';
+import { useSessionsStore } from './sessions';
 import type {
   HostSystemInfo,
   WindowState,
@@ -40,7 +41,15 @@ export const useHostStore = defineStore('host', () => {
     onHostEvent('host.engineStatus', (p) => {
       const s = p as EngineStatusPayload;
       engineStatus.value = s;
-      if (s.state === 'ready') useMessagesStore().loadSnapshot();
+      // P09-fix2 C：已有会话亲和则跳过，避免与 select 切换链打架。
+      if (s.state === 'ready') {
+        try {
+          if (useSessionsStore().currentId) return;
+        } catch {
+          /* pinia 未就绪时回退旧行为 */
+        }
+        useMessagesStore().loadSnapshot();
+      }
     });
     onHostEvent('host.filesDropped', (p) => {
       droppedFiles.value = (p as FilesDroppedPayload).paths ?? [];
