@@ -33,9 +33,9 @@ export const light: ThemeFile = {
     'fg-inverse': '0 0% 100%',
 
     // ---- 边框 ----
-    border: '220 13% 90%',
-    'border-strong': '220 12% 78%',
-    'border-subtle': '220 14% 95%',
+    border: '220 13% 82%',
+    'border-strong': '220 12% 68%',
+    'border-subtle': '220 14% 92%',
 
     // ---- 强调色 ----
     accent: '212 92% 48%',
