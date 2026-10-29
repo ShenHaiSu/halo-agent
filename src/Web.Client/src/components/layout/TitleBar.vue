@@ -3,6 +3,7 @@
 import { computed } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import HIconButton from '@/components/base/HIconButton.vue';
+import EngineStatusDot from './EngineStatusDot.vue';
 import { hostBridge } from '@/bridge/host';
 import { transport } from '@/transport';
 import { useSessionStore } from '@/stores/session';
@@ -127,8 +128,9 @@ function onTitleBarDblClick(e: MouseEvent) {
       </span>
     </div>
 
-    <!-- 右：右栏开关 + 窗口按钮 -->
+    <!-- 右：引擎指示灯 + 右栏开关 + 窗口按钮 -->
     <div class="app-region-no-drag flex shrink-0 items-center gap-0.5">
+      <EngineStatusDot />
       <HIconButton
         icon="panel-right"
         label="显示/隐藏详情栏"
