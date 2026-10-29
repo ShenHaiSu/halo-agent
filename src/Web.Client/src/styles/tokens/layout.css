@@ -11,11 +11,12 @@
   --layout-detail-width-min: 280px;
   --layout-detail-width-max: 640px;
 
-  /* ---- 内容区 ---- */
-  --layout-composer-min-height: 88px;
-  --layout-composer-max-height: 320px;
-  --layout-message-max-width: 820px;
-  --layout-content-max-width: 1200px;
+   /* ---- 内容区 ---- */
+   --layout-composer-min-height: 88px;
+   --layout-composer-max-height: 320px;
+   /* P07-Enhance 03：消息区默认占满模式，--layout-message-max-width 当前未被消息区使用（保留供将来“阅读宽度”开关）；误引用会导致 820px 居中回退。 */
+   --layout-message-max-width: 820px;
+   --layout-content-max-width: 1200px;
 
   /* ---- z-index（只有 7 档，不要新增） ---- */
   --z-base: 0;

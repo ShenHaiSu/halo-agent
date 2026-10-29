@@ -103,11 +103,24 @@ function forceScrollToBottom() {
   scrollToBottom(true);
 }
 
-defineExpose({ scrollToBottom, scrollToTop, forceScrollToBottom, atBottom, atTop });
+/** 同步判据（供 MessageList.followIfNeeded 调用，避免读取 Ref 误判） */
+function isAtBottom(): boolean {
+  const el = containerRef.value;
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+}
+
+function isAtTop(): boolean {
+  const el = containerRef.value;
+  if (!el) return true;
+  return el.scrollTop <= 2;
+}
+
+defineExpose({ scrollToBottom, scrollToTop, forceScrollToBottom, atBottom, atTop, isAtBottom, isAtTop });
 </script>
 
 <template>
-  <div class="relative flex min-h-0 flex-col">
+  <div class="relative flex h-full min-h-0 flex-1 flex-col">
     <!-- 顶部渐隐 -->
     <div
       class="pointer-events-none absolute inset-x-0 top-0 z-10 h-4 bg-gradient-to-b from-bg to-transparent transition-opacity duration-fast"
@@ -117,7 +130,7 @@ defineExpose({ scrollToBottom, scrollToTop, forceScrollToBottom, atBottom, atTop
 
     <div
       ref="containerRef"
-      class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      class="h-full min-h-0 flex-1 overflow-y-auto overscroll-contain"
       @scroll.passive="onScroll"
     >
       <slot />

@@ -36,15 +36,17 @@ const visible = computed(() =>
   showAll.value ? { items: messages.items, hiddenTop: 0, hiddenBottom: 0 } : win.value
 );
 
-/** 自动滚动的唯一判据：只在本来就在底部时跟随（HScroll 用 IntersectionObserver 判定） */
+/** 自动滚动的唯一判据：只在本来就在底部时跟随（调 HScroll.isAtBottom 方法，避免直接读 Ref 误判） */
 function followIfNeeded(): void {
   void nextTick(() => {
     const s = scroller.value as unknown as {
-      atBottom: boolean;
+      isAtBottom: () => boolean;
       scrollToBottom: (smooth?: boolean) => void;
     } | null;
     if (!s) return;
-    if (!s.atBottom) return;
+    if (typeof s.isAtBottom === 'function') {
+      if (!s.isAtBottom()) return;
+    }
     s.scrollToBottom(false);
   });
 }
@@ -60,7 +62,8 @@ const samples = [
 </script>
 
 <template>
-  <HScroll ref="scroller" data-scroll="messages" class="msg-scroll">
+  <!-- 滚动只发生在消息区：HScroll 内层容器是唯一 overflow-y:auto（auto-follow 由 followIfNeeded 显式触发） -->
+  <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
     <div class="msg-inner">
       <!-- 压缩摘要卡（在消息最上方） -->
       <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" />
@@ -126,12 +129,14 @@ const samples = [
 <style scoped>
 .msg-scroll {
   flex: 1;
-  min-height: 0; /* * 否则 flex 容器被内容撑开 */
+  min-height: 0; /* 否则 flex 容器被内容撑开；滚动行为见 chat.css 全局 .msg-scroll */
+  height: 100%;
 }
 .msg-inner {
-  max-width: var(--layout-message-max, 820px);
-  margin: 0 auto;
-  padding: var(--space-4) var(--space-4) var(--space-6);
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-4) var(--space-6) var(--space-6);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);

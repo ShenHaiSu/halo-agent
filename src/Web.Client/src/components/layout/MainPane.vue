@@ -17,7 +17,7 @@ function fillComposer(text: string): void {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="min-h-0 flex-1">
+    <div class="flex min-h-0 flex-1 flex-col">
       <MessageList @use-sample="fillComposer" />
     </div>
     <NoticeBar />
