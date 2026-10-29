@@ -142,11 +142,13 @@ public sealed record SettingsProbeModelsParams
 {
     /// <summary>服务地址。</summary>
     public string BaseUrl { get; init; } = "";
-    /// <summary>API Key（可为空）。</summary>
+    /// <summary>API Key（可为空，为空时回落库中已存 key；clearKey=true 时不回落）。</summary>
     public string? ApiKey { get; init; }
     public string? ProviderId { get; init; }
     public IReadOnlyList<HeaderPair>? Headers { get; init; }
     public bool? UseProxy { get; init; }
+    /// <summary>用户已点“清除”但未保存：探测不回落旧 key。</summary>
+    public bool ClearKey { get; init; }
 }
 
 /// <summary>settings.probeModels 结果。</summary>

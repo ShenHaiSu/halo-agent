@@ -345,9 +345,24 @@ public sealed partial class RealMethods
 
         var apiKey = p?.TryGetProperty("apiKey", out var kv) == true ? kv.GetString() : null;
         var providerId = p?.TryGetProperty("providerId", out var piv) == true ? piv.GetString() : null;
+        bool clearKey = p?.TryGetProperty("clearKey", out var ckv) == true && ckv.ValueKind == JsonValueKind.True;
+
+        // apiKey 回落：newKey 空 + providerId 非空 + 库中有 key + 未点 clearKey 才回落（全程不打明文日志）。
+        if (string.IsNullOrWhiteSpace(apiKey) && !clearKey && !string.IsNullOrWhiteSpace(providerId))
+        {
+            try
+            {
+                var cfgKey = ConfigStore.Load();
+                if (cfgKey.Providers.TryGetValue(providerId!.Trim(), out var kd) && !string.IsNullOrEmpty(kd.ApiKey))
+                    apiKey = kd.ApiKey;
+            }
+            catch { }
+        }
 
         List<KeyValuePair<string, string>> headers = new();
-        if (p?.TryGetProperty("headers", out var hv) == true && hv.ValueKind == JsonValueKind.Array)
+        JsonElement hv = default;
+        bool hasHeadersField = p?.TryGetProperty("headers", out hv) == true && hv.ValueKind == JsonValueKind.Array;
+        if (hasHeadersField)
         {
             foreach (var el in hv.EnumerateArray())
             {
@@ -357,6 +372,17 @@ public sealed partial class RealMethods
                 var val = el.TryGetProperty("value", out var v) ? v.GetString() : null;
                 if (string.IsNullOrWhiteSpace(key) || val is null) continue;
                 headers.Add(new(key!, val));
+            }
+            // 空数组视同缺失：回落库中头（与前端空数组省传对称，后端兜底）。
+            if (headers.Count == 0 && !string.IsNullOrWhiteSpace(providerId))
+            {
+                try
+                {
+                    var cfgHdr = ConfigStore.Load();
+                    if (cfgHdr.Providers.TryGetValue(providerId!.Trim(), out var pd))
+                        headers = pd.Headers.Select(kv2 => new KeyValuePair<string, string>(kv2.Key, kv2.Value)).ToList();
+                }
+                catch { }
             }
         }
         else if (!string.IsNullOrWhiteSpace(providerId))

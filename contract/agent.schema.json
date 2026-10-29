@@ -1450,6 +1450,9 @@
           },
           "useProxy": {
             "type": "boolean"
+          },
+          "clearKey": {
+            "type": "boolean"
           }
         }
       },

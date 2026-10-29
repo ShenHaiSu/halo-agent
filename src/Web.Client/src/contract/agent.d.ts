@@ -410,6 +410,7 @@ export interface HaloMethods {
   providerId?: string | null
   headers?: HeaderPair[]
   useProxy?: boolean
+  clearKey?: boolean
 }; result: {
   models?: string[]
 } }

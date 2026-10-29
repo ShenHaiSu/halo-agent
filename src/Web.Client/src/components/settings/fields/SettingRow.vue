@@ -14,15 +14,20 @@ withDefaults(
     /** 紧凑模式：desc 收进 label 旁 info 图标 + HTooltip，不再占列。默认 false，其他页零变化。 */
     compact?: boolean;
     tooltipMaxWidth?: number;
+    /** label 本体 hover/focus tooltip（占位说明等）；空=不包。后向兼容。 */
+    tooltip?: string;
   }>(),
-  { compact: false, tooltipMaxWidth: 260 },
+  { compact: false, tooltipMaxWidth: 260, tooltip: '' },
 );
 </script>
 
 <template>
   <div class="srow" :class="{ invalid: !!error, compact }">
     <div class="srow-label">
-      <span class="srow-name">
+      <HTooltip v-if="tooltip" :content="tooltip" placement="top" :delay="150" :maxWidth="280">
+        <span class="srow-name srow-name-tip" tabindex="0" :aria-label="`${label}：${tooltip}`">{{ label }}<span v-if="required" class="req" aria-hidden="true">*</span></span>
+      </HTooltip>
+      <span v-else class="srow-name">
         {{ label }}
         <span v-if="required" class="req" aria-hidden="true">*</span>
       </span>
@@ -64,6 +69,16 @@ withDefaults(
   font-size: var(--text-sm);
   color: hsl(var(--fg));
   font-weight: 500;
+}
+.srow-name-tip {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+  border-radius: var(--radius-xs);
+}
+.srow-name-tip:focus-visible {
+  outline: 2px solid hsl(var(--accent) / 0.4);
+  outline-offset: 1px;
 }
 .req {
   color: hsl(var(--danger));

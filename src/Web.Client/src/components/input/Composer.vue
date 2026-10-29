@@ -23,6 +23,7 @@ import SlashPopover from './SlashPopover.vue';
 import DropOverlay from './DropOverlay.vue';
 import QueueList from './QueueList.vue';
 import ComposerToolbar from './ComposerToolbar.vue';
+import ModelSelector from './ModelSelector.vue';
 import { useMention } from './useMention';
 import { useSlash } from './useSlash';
 import { createInputHandler } from './composerInput';
@@ -403,6 +404,8 @@ defineExpose({
         @cancel="cancel"
       />
     </div>
+
+    <ModelSelector />
 
     <MentionPopover
       v-if="mention.open.value"

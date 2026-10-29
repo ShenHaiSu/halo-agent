@@ -14,6 +14,7 @@ import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
 import HSwitch from '@/components/base/HSwitch.vue';
 import HDialog from '@/components/base/HDialog.vue';
+import { headerPlaceholderTooltip } from '../fields/headerPlaceholders';
 import { normalizeProvidersTree, validateProvidersTree, type ProvidersTree } from '../providerEditing';
 
 /** 上下文/输出上限预设（input + ButtonGroup，不用滑杆）。1M = 1000000，2M = 2000000。 */
@@ -67,6 +68,25 @@ function snapshotForDirty(): unknown {
 }
 
 function markDirty(): void { fieldErrors.value = {}; }
+
+const headersTooltip = headerPlaceholderTooltip();
+
+/** 探测勾选确认：去重合并进 model 列表（精确 Ordinal 匹配），走正常保存链。 */
+function onProbeConfirm(names: string[]): void {
+  const p = selected.value;
+  if (!p) return;
+  const have = new Set(p.models.map((m) => m.id));
+  let added = 0;
+  for (const name of names) {
+    const id = (name ?? '').trim();
+    if (!id || have.has(id)) continue;
+    p.models.push({ id, displayName: '', protocol: 'chat', contextWindow: null, maxTokens: null, acceptsImages: false, includeReasoningHistory: true, expanded: true });
+    have.add(id);
+    added += 1;
+  }
+  markDirty();
+  toast.success(added > 0 ? `已加入 ${added} 个（未保存）` : '所选均已在列表');
+}
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -338,12 +358,12 @@ onMounted(() => void load());
               <HSwitch :model-value="selected.useProxy" label="使用代理" :disabled="globalMode === 'direct'" @update:model-value="(v: boolean) => { selected!.useProxy = v; markDirty(); }" />
               <span v-if="globalMode === 'direct'" class="hint">全局 direct 下无可用代理</span>
             </SettingRow>
-            <SettingRow compact label="自定义请求头" desc="该 Provider 专属">
+            <SettingRow compact label="自定义请求头" desc="该 Provider 专属" :tooltip="headersTooltip">
               <HSwitch :model-value="selected.headersEnabled" label="自定义请求头开关" @update:model-value="(v: boolean) => { selected!.headersEnabled = v; markDirty(); }" />
               <HeadersEditor :model-value="selected.headers as HeaderRow[]" @update:model-value="(v: HeaderRow[]) => { selected!.headers = v; markDirty(); }" />
             </SettingRow>
             <SettingRow compact label="探测模型" desc="/models 探活（带头、走对代理）">
-              <ModelProbe :base-url="selected.baseUrl" :api-key="selected.newKey" :provider-id="selected.id" :headers="selected.headers as HeaderRow[]" :use-proxy="selected.useProxy" @probe-models="(ms: string[]) => toast.success(`找到 ${ms.length} 个模型`)" />
+              <ModelProbe :base-url="selected.baseUrl" :api-key="selected.newKey" :provider-id="selected.id" :headers="selected.headers as HeaderRow[]" :use-proxy="selected.useProxy" :clear-key="selected.clearKey" :existing-models="selected.models.map((m) => m.id)" @probe-confirm="onProbeConfirm" />
              </SettingRow>
              </section>
             <div class="row-actions">
