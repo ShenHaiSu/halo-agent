@@ -476,11 +476,11 @@ onMounted(() => void load());
 .left { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 .prov-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1-5) var(--space-2); border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; }
 .prov-row:hover { background: hsl(var(--bg-muted)); }
-.prov-row.active { border-color: hsl(var(--primary)); }
+ .prov-row.active { border-color: hsl(var(--accent)); }
 .prov-main { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .prov-sub { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); overflow: hidden; text-overflow: ellipsis; }
 .badge { margin-left: auto; font-size: var(--text-xs); background: hsl(var(--bg-muted)); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
-.active-dot { color: hsl(var(--primary)); }
+ .active-dot { color: hsl(var(--accent)); }
 .right { flex: 1; min-width: 0; }
 .models-head { display: flex; align-items: center; justify-content: space-between; margin: var(--space-3) 0 var(--space-1-5); }
 .model-card { border: 1px solid hsl(var(--border-subtle)); border-radius: var(--radius-md); margin-bottom: var(--space-1-5); }

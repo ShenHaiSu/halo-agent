@@ -53,16 +53,16 @@ const el = ref<HTMLTextAreaElement | null>(null);
 
 const value = computed(() => props.modelValue ?? '');
 
-const classes = computed(() => [
-  'w-full min-w-0 resize-none rounded-md border bg-bg-elevated px-3 py-2 text-sm text-fg',
-  'transition-colors duration-fast ease-out',
-  'placeholder:text-fg-subtle',
-  'hover:border-border-strong',
-  'focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25',
-  'disabled:cursor-not-allowed disabled:bg-bg-muted disabled:text-fg-subtle',
-  'read-only:bg-bg-subtle',
-  props.error ? 'border-danger focus:border-danger focus:ring-danger/25' : 'border-border',
-]);
+ const classes = computed(() => [
+   'w-full min-w-0 resize-none rounded-md border-2 bg-bg-elevated px-3 py-2 text-sm text-fg',
+   'transition-colors duration-fast ease-out',
+   'placeholder:text-fg-subtle',
+   'disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-muted disabled:text-fg-subtle disabled:opacity-60',
+   'read-only:bg-bg-subtle',
+   props.error
+     ? 'border-danger hover:border-danger focus-visible:border-danger'
+     : 'border-border-strong hover:border-fg-subtle focus-visible:border-accent',
+ ]);
 
 const countState = computed(() => {
   if (!props.maxlength) return 'none' as const;

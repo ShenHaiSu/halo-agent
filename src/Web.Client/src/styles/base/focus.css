@@ -26,13 +26,14 @@ button:focus:not(:focus-visible),
   box-shadow: none;
 }
 
-/* 输入框：用边框色变化代替外环（更贴近系统原生风格） */
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-[contenteditable='true']:focus-visible {
-  box-shadow: none;
-  border-color: hsl(var(--accent));
-  outline: 2px solid hsl(var(--accent) / 0.25);
-  outline-offset: -1px;
-}
+ /* 输入框：用边框色变化代替外环（更贴近系统原生风格） */
+ /* 2px 边框：outline 内沿对齐，避免压住半条边框 */
+ input:focus-visible,
+ textarea:focus-visible,
+ select:focus-visible,
+ [contenteditable='true']:focus-visible {
+   box-shadow: none;
+   border-color: hsl(var(--accent));
+   outline: 2px solid hsl(var(--accent) / 0.25);
+   outline-offset: -2px;
+ }

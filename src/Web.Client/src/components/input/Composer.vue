@@ -438,20 +438,23 @@ defineExpose({
   gap: var(--space-2);
   min-width: 0;
 }
-.composer-box {
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md);
-  background: hsl(var(--bg-elevated));
-  padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.composer-box:focus-within {
-  box-shadow: var(--shadow-focus);
-  border-color: hsl(var(--accent));
-}
+ .composer-box {
+   border: 2px solid hsl(var(--border-strong));
+   border-radius: var(--radius-md);
+   background: hsl(var(--bg-elevated));
+   padding: var(--space-2);
+   display: flex;
+   flex-direction: column;
+   gap: var(--space-1);
+   min-width: 0;
+ }
+ .composer-box:hover {
+   border-color: hsl(var(--fg-subtle));
+ }
+ .composer-box:focus-within {
+   box-shadow: var(--shadow-focus);
+   border-color: hsl(var(--accent));
+ }
 .composer-top {
   display: flex;
   align-items: center;
@@ -480,17 +483,22 @@ defineExpose({
   outline: none;
   margin-bottom: 8px; /* 坑 8：候选框不压住按钮栏 */
 }
-.composer-input::placeholder {
-  color: hsl(var(--fg-subtle));
-}
-.composer-input::selection {
-  background: hsl(var(--accent) / 0.35);
-  color: hsl(var(--fg));
-}
-.composer-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
+ .composer-input:focus-visible {
+   outline: none;
+   box-shadow: none;
+   border-color: transparent;
+ }
+ .composer-input::placeholder {
+   color: hsl(var(--fg-subtle));
+ }
+ .composer-input::selection {
+   background: hsl(var(--accent) / 0.35);
+   color: hsl(var(--fg));
+ }
+ .composer-input:disabled {
+   cursor: not-allowed;
+   opacity: 0.6;
+ }
 .composer-attach {
   display: flex;
   flex-wrap: wrap;

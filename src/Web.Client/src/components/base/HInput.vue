@@ -64,17 +64,17 @@ const countState = computed(() => {
   return 'normal' as const;
 });
 
-const classes = computed(() => [
-  'w-full min-w-0 rounded-md border bg-bg-elevated text-fg',
-  'transition-colors duration-fast ease-out',
-  'placeholder:text-fg-subtle',
-  'hover:border-border-strong',
-  'focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25',
-  'disabled:cursor-not-allowed disabled:bg-bg-muted disabled:text-fg-subtle',
-  'read-only:bg-bg-subtle',
-  props.size === 'sm' ? 'h-7 px-2 text-xs' : 'h-8 px-3 text-sm',
-  props.error ? 'border-danger focus:border-danger focus:ring-danger/25' : 'border-border',
-]);
+ const classes = computed(() => [
+   'w-full min-w-0 rounded-md border-2 bg-bg-elevated text-fg',
+   'transition-colors duration-fast ease-out',
+   'placeholder:text-fg-subtle',
+   'disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-muted disabled:text-fg-subtle disabled:opacity-60',
+   'read-only:bg-bg-subtle',
+   props.size === 'sm' ? 'h-7 px-2 text-xs' : 'h-8 px-3 text-sm',
+   props.error
+     ? 'border-danger hover:border-danger focus-visible:border-danger'
+     : 'border-border-strong hover:border-fg-subtle focus-visible:border-accent',
+ ]);
 
 function onInput(e: Event) {
   const el = e.target as HTMLInputElement;

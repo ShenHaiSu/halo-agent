@@ -33,15 +33,15 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>();
 
 const attrs = useAttrs();
 
-const classes = computed(() => [
-  'w-full appearance-none rounded-md border bg-bg-elevated text-fg',
-  'pr-8 pl-3 transition-colors duration-fast ease-out',
-  'hover:border-border-strong',
-  'focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25',
-  props.size === 'sm' ? 'h-7 text-xs' : 'h-8 text-sm',
-  props.error ? 'border-danger' : 'border-border',
-  props.disabled ? 'cursor-not-allowed opacity-60' : '',
-]);
+ const classes = computed(() => [
+   'w-full appearance-none rounded-md border-2 bg-bg-elevated text-fg',
+   'pr-8 pl-3 transition-colors duration-fast ease-out',
+   props.size === 'sm' ? 'h-7 text-xs' : 'h-8 text-sm',
+   props.error
+     ? 'border-danger hover:border-danger focus-visible:border-danger disabled:border-border-subtle'
+     : 'border-border-strong hover:border-fg-subtle focus-visible:border-accent disabled:border-border-subtle',
+   props.disabled ? 'cursor-not-allowed opacity-60' : '',
+ ]);
 
 function onChange(e: Event) {
   emit('update:modelValue', (e.target as HTMLSelectElement).value);

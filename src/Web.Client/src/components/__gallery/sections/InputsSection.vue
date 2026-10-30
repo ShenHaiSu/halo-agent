@@ -11,8 +11,8 @@ const radio = ref<string>('a');
 const slider = ref(50);
 const select = ref('deepseek');
 
-const inputCls =
-  'w-full rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50';
+ const inputCls =
+   'w-full rounded-md border-2 border-border-strong bg-bg px-2.5 py-1.5 text-sm text-fg placeholder:text-fg-subtle hover:border-fg-subtle focus-visible:border-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:border-border-subtle disabled:opacity-60';
 </script>
 
 <template>
