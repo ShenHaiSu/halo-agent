@@ -243,18 +243,19 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.ms-panel {
-  min-width: 320px;
-  max-width: 420px;
-  max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  background: hsl(var(--bg-elevated));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
+ .ms-panel {
+   min-width: 320px;
+   width: 380px;
+   max-width: calc(100vw - 32px);
+   max-height: min(320px, 50vh);
+   display: flex;
+   flex-direction: column;
+   background: hsl(var(--bg-elevated));
+   border: 1px solid hsl(var(--border));
+   border-radius: var(--radius-md);
+   box-shadow: var(--shadow-lg);
+   overflow: hidden;
+ }
 .ms-search {
   padding: var(--space-2);
   border-bottom: 1px solid hsl(var(--border-subtle));

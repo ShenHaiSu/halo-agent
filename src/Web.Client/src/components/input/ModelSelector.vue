@@ -222,10 +222,11 @@ onBeforeUnmount(() => {
   color: hsl(var(--fg-subtle));
   font-family: var(--font-mono);
 }
-.modelbar-pop {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 4px);
-  z-index: 40;
-}
+ .modelbar-pop {
+   position: absolute;
+   left: 0;
+   top: auto;
+   bottom: calc(100% + 4px);
+   z-index: var(--z-popover);
+ }
 </style>
