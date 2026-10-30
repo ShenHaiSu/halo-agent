@@ -105,23 +105,32 @@ function focusTrigger(): void {
   });
 }
 
-async function onSelect(providerId: string, modelId: string): Promise<void> {
-  if (switching.value) return;
-  open.value = false;
-  focusTrigger();
-  if (providerId === session.provider && modelId === session.model) return;
-  switching.value = true;
-  try {
-    await transport.request('settings.setActive', { providerId, modelId });
-    // 成功后等 state.snapshot 推送刷新高亮（session.ts），此处不另拉 settings.get。
-    toast.success(`已切换：${providerId}/${modelId}`);
-  } catch (e) {
-    // 失败本地回滚：不改本地高亮（高亮源自 snapshot，未动），仅 toast。
-    toast.error(`切换失败：${(e as Error).message}`);
-  } finally {
-    switching.value = false;
-  }
-}
+ async function onSelect(providerId: string, modelId: string): Promise<void> {
+   if (switching.value) return;
+   open.value = false;
+   focusTrigger();
+   if (providerId === session.provider && modelId === session.model) return;
+   switching.value = true;
+   try {
+     await transport.request('settings.setActive', { providerId, modelId });
+     // P12-02：setActive 无事件推送（后端 PublishSnapshotAsync 为空实现），成功后主动拉快照补 session，
+     // 再刷新全树以同步 tree.active 高亮（双数据源：tree 来自 settings.get，高亮用 session）。
+     try {
+       const snap = await transport.request<{ agent?: Record<string, unknown>; session?: Record<string, unknown> }>('state.snapshot', null);
+       if (snap?.agent && typeof snap.agent === 'object') session.applySnapshotAgent(snap.agent);
+       if (snap?.session && typeof snap.session === 'object') session.applyInfo(snap.session);
+     } catch {
+       /* 快照补齐失败不影响 toast，下次 loadSnapshot 会补 */
+     }
+     await loadTree();
+     toast.success(`已切换：${providerId}/${modelId}`);
+   } catch (e) {
+     // 失败本地回滚：不改本地高亮（高亮源自 snapshot，未动），仅 toast。
+     toast.error(`切换失败：${(e as Error).message}`);
+   } finally {
+     switching.value = false;
+   }
+ }
 
 function onDocClick(e: MouseEvent): void {
   if (!open.value) return;

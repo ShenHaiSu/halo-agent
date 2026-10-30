@@ -16,6 +16,7 @@ import HSwitch from '@/components/base/HSwitch.vue';
 import HDialog from '@/components/base/HDialog.vue';
 import { headerPlaceholderTooltip } from '../fields/headerPlaceholders';
 import { normalizeProvidersTree, validateProvidersTree, type ProvidersTree } from '../providerEditing';
+ import { useSessionStore } from '@/stores/session';
 
 /** 上下文/输出上限预设（input + ButtonGroup，不用滑杆）。1M = 1000000，2M = 2000000。 */
 const CTX_PRESETS = [
@@ -277,27 +278,35 @@ async function save(force = false): Promise<void> {
   }
 }
 
-async function setActive(pid: string, mid: string): Promise<void> {
-  if (dirty.value) {
-    toast.warning('有未保存的改动，请先保存再设 active');
-    return;
-  }
-  if (busy.value) {
-    toast.warning('有回合正在执行，切换被拒绝');
-    return;
-  }
-  activating.value = true;
-  try {
-    await transport.request('settings.setActive', { providerId: pid, modelId: mid });
-    tree.value.activeProvider = pid;
-    tree.value.activeModel = mid;
-    toast.success(`已切换 active：${pid}/${mid}`);
-  } catch (e) {
-    toast.error(`切换失败：${(e as Error).message}`);
-  } finally {
-    activating.value = false;
-  }
-}
+ async function setActive(pid: string, mid: string): Promise<void> {
+   if (dirty.value) {
+     toast.warning('有未保存的改动，请先保存再设 active');
+     return;
+   }
+   if (busy.value) {
+     toast.warning('有回合正在执行，切换被拒绝');
+     return;
+   }
+   activating.value = true;
+   try {
+     await transport.request('settings.setActive', { providerId: pid, modelId: mid });
+     tree.value.activeProvider = pid;
+     tree.value.activeModel = mid;
+     // P12-02：setActive 无事件推送，成功后主动拉快照同步 session（切换器高亮源），
+     // responses 模型保持禁用态、后端 NotSupported 原文透传，不另做引导。
+     try {
+       const snap = await transport.request<{ agent?: Record<string, unknown> }>('state.snapshot', null);
+       if (snap?.agent && typeof snap.agent === 'object') useSessionStore().applySnapshotAgent(snap.agent);
+     } catch {
+       /* 快照补齐失败不影响 toast */
+     }
+     toast.success(`已切换 active：${pid}/${mid}`);
+   } catch (e) {
+     toast.error(`切换失败：${(e as Error).message}`);
+   } finally {
+     activating.value = false;
+   }
+ }
 
 function isDirty(): boolean { return dirty.value; }
 function resetToSaved(): void { void load(); }

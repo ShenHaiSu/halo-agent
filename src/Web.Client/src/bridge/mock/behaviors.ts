@@ -105,40 +105,47 @@ export function getCurrentMockSessionId(): string {
   return currentMockSessionId;
 }
 
-function mockSnapshot(sessionId?: string): unknown {
-  const s = (sessionId ? mockSessions.get(sessionId) : undefined) ?? currentMockSession();
-  return {
-    protocol: 1,
-    engine: { version: '0.0.0-mock', pid: 0, startedAtMs: Date.now(), osVersion: 'mock', isWin7: false },
-    session: { id: s.id, cwd: s.cwd, historyPath: s.historyPath },
-    agent: {
-      busy: false,
-      turnId: null,
-      mode: 'ask',
-      modeLabel: '询问模式',
-      persona: '',
-      provider: 'deepseek',
-      providerDisplay: 'DeepSeek',
-      model: 'deepseek-chat',
-      modelDisplay: 'deepseek-chat',
-      protocol: 'chat',
-      baseUrl: 'https://api.deepseek.com/v1',
-      apiKeySet: true,
-      contextWindow: 65536,
-      maxTokens: null,
-      acceptsImages: false,
-      includeReasoning: true,
-      proxyInUse: false,
-      maxTurns: 200,
-      retry: 0,
-      configured: true,
-      round: { used: 0, limit: 200 },
-    },
-    usage: { input: 0, output: 0 },
-    queue: { length: 0 },
-    messages: mockMessageViews(s),
-  };
-}
+ // P12-02：未配置态回归分支。默认保持 configured:true（历史行为），测试可经
+ // setMockAgentConfigured(false) 切到 configured:false/provider='',model=''，复现切换器直开设置。
+ let mockAgentConfigured = true;
+ export function setMockAgentConfigured(v: boolean): void {
+   mockAgentConfigured = v;
+ }
+ function mockSnapshot(sessionId?: string): unknown {
+   const s = (sessionId ? mockSessions.get(sessionId) : undefined) ?? currentMockSession();
+   const agentConfigured = mockAgentConfigured;
+   return {
+     protocol: 1,
+     engine: { version: '0.0.0-mock', pid: 0, startedAtMs: Date.now(), osVersion: 'mock', isWin7: false },
+     session: { id: s.id, cwd: s.cwd, historyPath: s.historyPath },
+     agent: {
+       busy: false,
+       turnId: null,
+       mode: 'ask',
+       modeLabel: '询问模式',
+       persona: '',
+       provider: agentConfigured ? 'deepseek' : '',
+       providerDisplay: agentConfigured ? 'DeepSeek' : '',
+       model: agentConfigured ? 'deepseek-chat' : '',
+       modelDisplay: agentConfigured ? 'deepseek-chat' : '',
+       protocol: 'chat',
+       baseUrl: agentConfigured ? 'https://api.deepseek.com/v1' : '',
+       apiKeySet: agentConfigured,
+       contextWindow: agentConfigured ? 65536 : null,
+       maxTokens: null,
+       acceptsImages: false,
+       includeReasoning: true,
+       proxyInUse: false,
+       maxTurns: 200,
+       retry: 0,
+       configured: agentConfigured,
+       round: { used: 0, limit: 200 },
+     },
+     usage: { input: 0, output: 0 },
+     queue: { length: 0 },
+     messages: mockMessageViews(s),
+   };
+ }
 
 function mockSettings(): unknown {
   return {

@@ -1,10 +1,11 @@
-using System.Text.Json;
-using HaloAgent.Engine.Abstractions.Frames;
-using HaloAgent.Engine.Abstractions.Methods;
-using HaloAgent.Engine.Abstractions.Types;
-using HaloAgent.Engine.Core.Llm;
-using HaloAgent.Engine.Storage;
-using HaloAgent.Engine.Storage.Config;
+ using System.Text.Json;
+ using HaloAgent.Engine.Abstractions.Frames;
+ using HaloAgent.Engine.Abstractions.Methods;
+ using HaloAgent.Engine.Abstractions.Types;
+ using HaloAgent.Engine.Core.Llm;
+ using HaloAgent.Engine.Storage;
+ using HaloAgent.Engine.Storage.Config;
+ using Microsoft.Extensions.Logging;
 
 namespace HaloAgent.Engine.Server.Routing;
 
@@ -154,17 +155,32 @@ public sealed partial class RealMethods
                 "整树校验失败（已拒绝保存，落盘无变化）: " +
                 string.Join("；", errs.Select(e => $"[{e.Provider}/{e.Model ?? "-"}.{e.Field}] {e.Message}")));
         }
-        warnings.AddRange(ConfigValidation.Warnings(next));
-
-        ConfigStore.Save(next);
-
-        return Task.FromResult<object?>(new SettingsSaveProvidersResult
-        {
-            Ok = true,
-            Notes = Array.Empty<string>(),
-            Warnings = warnings,
-            Errors = Array.Empty<SettingsFieldError>(),
-        });
+         warnings.AddRange(ConfigValidation.Warnings(next));
+         ConfigStore.Save(next);
+         // P12-02：保存即生效（此前只落盘不进内存，改 key/baseUrl 后需重启才生效）。
+         // active 指针沿用旧值；Resolve 失败（删了 active 目标/旧形状）则显式置未配置并 warning。
+         try
+         {
+             var resolvedSave = ConfigStore.Resolve(next);
+             try { _session.ReconfigureActive(resolvedSave); }
+             catch (NotSupportedException)
+             {
+                 _session.ClearActive();
+                 warnings.Add("已保存，但生效模型协议暂不支持，已置为未配置态，请重选 chat 模型");
+             }
+         }
+         catch (Exception ex)
+         {
+             _session.ClearActive();
+             warnings.Add("已保存，但 active 指向无效，已置为未配置态，请重选 active 后再试（" + ex.Message + "）");
+         }
+         return Task.FromResult<object?>(new SettingsSaveProvidersResult
+         {
+             Ok = true,
+             Notes = Array.Empty<string>(),
+             Warnings = warnings,
+             Errors = Array.Empty<SettingsFieldError>(),
+         });
     }
 
     private sealed record ParsedProvider(
@@ -258,37 +274,39 @@ public sealed partial class RealMethods
             throw RpcException.ParamsInvalid("active 校验失败: " +
                 string.Join("；", errs.Select(e => $"[{e.Provider}/{e.Model ?? "-"}.{e.Field}] {e.Message}")));
 
-        ConfigStore.Save(cfg);
-
-        // 热切：Resolve + Reconfigure（proxy 变化重建 HttpClient）
-        ResolvedActiveModel resolved;
-        try { resolved = ConfigStore.Resolve(cfg); }
-        catch (Exception ex)
-        {
-            throw new RpcException(RpcError.Internal, "切换后解析失败：" + ex.Message);
-        }
-        try
-        {
-            _session.ReconfigureActive(resolved);
-        }
-        catch (NotSupportedException ex)
-        {
-            throw new RpcException(RpcError.NotSupported, ex.Message);
-        }
-        _ = PublishSnapshotAsync();
-
-        return Task.FromResult<object?>(new SettingsSetActiveResult { Ok = true });
-    }
-
-    private Task PublishSnapshotAsync()
-    {
-        try
-        {
-            var snap = _session.BuildSnapshot();
-            return Task.CompletedTask;
-        }
-        catch { return Task.CompletedTask; }
-    }
+         ConfigStore.Save(cfg);
+         // 热切：Resolve + Reconfigure（proxy 变化重建 HttpClient）
+         ResolvedActiveModel resolved;
+         try { resolved = ConfigStore.Resolve(cfg); }
+         catch (Exception ex)
+         {
+             throw new RpcException(RpcError.Internal, "切换后解析失败：" + ex.Message);
+         }
+         try
+         {
+             _session.ReconfigureActive(resolved);
+         }
+         catch (NotSupportedException ex)
+         {
+             throw new RpcException(RpcError.NotSupported, ex.Message);
+         }
+         _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}");
+         return Task.FromResult<object?>(new SettingsSetActiveResult { Ok = true });
+     }
+     // P12-02：此前为空实现（BuildSnapshot 后直接丢弃）。RealMethods 无 EventBus 成员，
+     // 经 _session 复用存量 notice 事件提示，不新增事件 kind、不改契约。
+     private Task PublishAgentChangedAsync(string text)
+     {
+         try
+         {
+             return _session.PublishAgentChangedAsync(text, CancellationToken.None);
+         }
+         catch (Exception ex)
+         {
+             try { _log.LogDebug(ex, "发布模型切换提示失败"); } catch { }
+             return Task.CompletedTask;
+         }
+     }
 
     public Task<object?> SettingsSaveNetworkAsync(JsonElement? p, CancellationToken ct)
     {

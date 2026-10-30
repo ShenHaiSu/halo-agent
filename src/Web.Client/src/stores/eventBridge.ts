@@ -305,35 +305,52 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           }
           break;
         }
-        case 'resync.required': {
-          const stream = useStreamStore();
-          stream.resyncRequired = true;
-          stream.notice = { level: 'warn', text: '界面与后台不同步，正在重新载入…' };
-           void (async () => {
-             try {
-               // P08-fix 04：agent.resync 复用 StateSnapshot（无顶层 seq），按 StateSnapshot 形态取 messages，
-               // 以当前 lastSeq 推进，绝不回退（契约冻结，不为 resync 另包一层）。
-               const snap = await transport.request<{
-                 seq?: number;
-                 messages?: Array<Record<string, unknown>>;
-                 busy?: boolean;
-                 queue?: unknown[];
-               }>('agent.resync', null);
-               const cur = messages.lastSeq;
-               const snapSeq = typeof snap.seq === 'number' ? snap.seq : seq;
-               messages.applySnapshot({
-                 seq: Math.max(cur, seq, snapSeq),
-                 messages: toMessageViews(snap.messages ?? []),
-               });
-               useUiStore().collapsedTools.clear();
-               stream.resyncRequired = false;
-               stream.notice = { level: 'success', text: '已重新载入' };
-            } catch {
-              // 失败时黄条保留
-            }
-          })();
-          break;
-        }
+         case 'resync.required': {
+           const stream = useStreamStore();
+           stream.resyncRequired = true;
+           stream.notice = { level: 'warn', text: '界面与后台不同步，正在重新载入…' };
+            void (async () => {
+              try {
+                // P08-fix 04：agent.resync 复用 StateSnapshot（无顶层 seq），按 StateSnapshot 形态取 messages，
+                // 以当前 lastSeq 推进，绝不回退（契约冻结，不为 resync 另包一层）。
+                // P12-02：同步补 agent/session（与 messages.loadSnapshot 同函数语义），session.info 保持三字段不变。
+                const snap = await transport.request<{
+                  seq?: number;
+                  messages?: Array<Record<string, unknown>>;
+                  agent?: Record<string, unknown>;
+                  session?: Record<string, unknown>;
+                  busy?: boolean;
+                  queue?: unknown[];
+                }>('agent.resync', null);
+                const cur = messages.lastSeq;
+                const snapSeq = typeof snap.seq === 'number' ? snap.seq : seq;
+                messages.applySnapshot({
+                  seq: Math.max(cur, seq, snapSeq),
+                  messages: toMessageViews(snap.messages ?? []),
+                });
+                try {
+                  const ag = snap?.agent;
+                  if (ag && typeof ag === 'object') useSessionStore().applySnapshotAgent(ag);
+                  const ss = snap?.session as { id?: unknown; cwd?: unknown; historyPath?: unknown } | undefined;
+                  if (ss && typeof ss === 'object') {
+                    useSessionStore().applyInfo({
+                      sessionId: typeof ss.id === 'string' ? ss.id : undefined,
+                      cwd: ss.cwd as string | undefined,
+                      historyPath: (ss.historyPath ?? null) as string | null,
+                    });
+                  }
+                } catch {
+                  /* 会话元信息同步失败不影响重载 */
+                }
+                useUiStore().collapsedTools.clear();
+                stream.resyncRequired = false;
+                stream.notice = { level: 'success', text: '已重新载入' };
+             } catch {
+               // 失败时黄条保留
+             }
+           })();
+           break;
+         }
         default: {
           console.debug('[evt] 未处理的事件类型', f.k, f.p);
         }

@@ -189,6 +189,36 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     {
         lock (_lock) _globalProxyUrl = url;
     }
+     /// <summary>P12-02：保存后 active 悬空/非法时显式置未配置（此前无此方法，只能保持旧内存）。</summary>
+     public void ClearActive()
+     {
+         lock (_lock)
+         {
+             _activeProviderId = "";
+             _activeProviderDisplay = "";
+             _activeModelId = "";
+             _activeModelDisplay = "";
+             _activeProtocol = "chat";
+             _activeContextWindow = null;
+             _activeMaxTokens = null;
+             _activeAcceptsImages = false;
+             _activeIncludeReasoning = true;
+             _activeProxyInUse = false;
+             _activeBaseUrl = "";
+             _activeApiKeySet = false;
+             _activeConfigured = false;
+         }
+     }
+     /// <summary>P12-02：setActive 成功后经存量 notice 事件提示（不新增事件 kind，不改契约）。</summary>
+     public async Task PublishAgentChangedAsync(string text, CancellationToken ct)
+     {
+         try
+         {
+             await _bus.PublishStateAsync(EventKinds.Notice,
+                 new NoticePayload { Text = text, Level = "info" }, ct).ConfigureAwait(false);
+         }
+         catch { /* 推送失败不影响切换结果 */ }
+     }
 
 
     public void SetMode(PermissionMode mode)

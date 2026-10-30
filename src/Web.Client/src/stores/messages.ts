@@ -1,9 +1,10 @@
 // src/Web.Client/src/stores/messages.ts
 // P5 扩展：streamingId / lastSeq / injected / truncated。
 // P08-fix 02：新增 normalizeToolCalls 唯一适配（args/output 契约消化 + 双写），过滤孤立 role=tool。
-import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import { transport } from '@/transport';
+ import { defineStore } from 'pinia';
+ import { computed, ref } from 'vue';
+ import { transport } from '@/transport';
+ import { useSessionStore } from '@/stores/session';
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 
@@ -203,18 +204,46 @@ export const useMessagesStore = defineStore('messages', () => {
     Object.assign(tc, p);
   }
 
-  async function loadSnapshot(): Promise<void> {
-    loading.value = true;
-    try {
-      const snap = await transport.request<{
-        seq?: number;
-        messages?: Array<Record<string, unknown>>;
-      }>('state.snapshot', null);
-      applySnapshot(snap ?? {});
-    } finally {
-      loading.value = false;
-    }
-  }
+   async function loadSnapshot(): Promise<void> {
+     loading.value = true;
+     try {
+       const snap = await transport.request<{
+         seq?: number;
+         messages?: Array<Record<string, unknown>>;
+         agent?: Record<string, unknown>;
+         session?: Record<string, unknown>;
+         usage?: Record<string, unknown>;
+       }>('state.snapshot', null);
+       applySnapshot(snap ?? {});
+       // P12-02：一处收敛同步 session/agent（ModelSelector unconfigured 恒 true 的根因）。
+       try {
+         const sessionStore = useSessionStore();
+         const s = snap?.session;
+         if (s && typeof s === 'object') {
+           sessionStore.applyInfo({
+             sessionId: typeof s.id === 'string' ? (s.id as string) : undefined,
+             cwd: s.cwd as string | undefined,
+             historyPath: (s.historyPath ?? null) as string | null,
+           });
+         }
+         const a = snap?.agent;
+         if (a && typeof a === 'object') sessionStore.applySnapshotAgent(a);
+         const u = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown; input?: unknown; output?: unknown } | undefined;
+         if (u && typeof u === 'object') {
+           sessionStore.applyInfo({
+             usage: {
+               input: typeof u.inputTotal === 'number' ? u.inputTotal : typeof u.input === 'number' ? u.input : 0,
+               output: typeof u.outputTotal === 'number' ? u.outputTotal : typeof u.output === 'number' ? u.output : 0,
+             },
+           });
+         }
+       } catch {
+         /* 会话元信息同步失败不影响消息绘制 */
+       }
+     } finally {
+       loading.value = false;
+     }
+   }
 
   // P09-fix2 A：clear 只清条目不碰游标（游标只增不减）；真正断连/登出再用 resetCursor。
   function clearItems(): void {

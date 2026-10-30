@@ -191,18 +191,29 @@ export const useSessionsStore = defineStore('sessions', () => {
         await messages.loadSnapshot();
         if (token !== switchToken) return;
       }
-      // 成功后补齐：resume 不带 session 元信息；session.info 事件随后经 pump 到达，
-      // 这里先以快照 session 补 id/cwd/historyPath，并清除旧摘要卡。
-      sessionInfo.compactionSummary = null;
-      try {
-        const snap = await transport.request<{ session?: Record<string, unknown> }>('state.snapshot', null);
-        if (token !== switchToken) return;
-        const s = snap?.session;
-        if (s) sessionInfo.applyInfo({ sessionId: id, cwd: s.cwd, historyPath: s.historyPath });
-        else sessionInfo.applyInfo({ sessionId: id });
-      } catch {
-        sessionInfo.applyInfo({ sessionId: id });
-      }
+       // 成功后补齐：resume 不带 session/agent 元信息；以 state.snapshot 全量补齐（含 agent.configured）。
+       // P12-02：此前只补 session.id/cwd/historyPath，agent 恒为初始值导致切换器恒未配置。
+       sessionInfo.compactionSummary = null;
+       try {
+         const snap = await transport.request<{ session?: Record<string, unknown>; agent?: Record<string, unknown>; usage?: Record<string, unknown> }>('state.snapshot', null);
+         if (token !== switchToken) return;
+         const s = snap?.session;
+         if (s) sessionInfo.applyInfo({ sessionId: id, cwd: s.cwd, historyPath: s.historyPath });
+         else sessionInfo.applyInfo({ sessionId: id });
+         const ag = snap?.agent;
+         if (ag && typeof ag === 'object') sessionInfo.applySnapshotAgent(ag);
+         const us = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown } | undefined;
+         if (us && typeof us === 'object') {
+           sessionInfo.applyInfo({
+             usage: {
+               input: typeof us.inputTotal === 'number' ? us.inputTotal : 0,
+               output: typeof us.outputTotal === 'number' ? us.outputTotal : 0,
+             },
+           });
+         }
+       } catch {
+         sessionInfo.applyInfo({ sessionId: id });
+       }
     } finally {
       switchDepth--;
       if (token === switchToken) messages.loading = false;
