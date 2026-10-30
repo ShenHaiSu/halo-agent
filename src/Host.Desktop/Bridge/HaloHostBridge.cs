@@ -107,9 +107,9 @@ public sealed class HaloHostBridge
      /// 注意：调用时左键必须仍处于按下状态（前端 mousedown 里同步直调，不 await），
      /// 否则 SendMessage 进不了移动模态循环，本次调用即为空操作（无害）。
      /// </summary>
-     public Task WindowDragStart()
-     {
-         var f = _formAccessor();
+    public Task WindowDragStart()
+    {
+        var f = _formAccessor();
          f.BeginInvoke(() =>
          {
              try
@@ -135,11 +135,11 @@ public sealed class HaloHostBridge
      /// hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT），非法值抛 ArgumentOutOfRangeException。
      /// 注意：调用时左键必须仍处于按下状态（前端 mousedown 里同步直调、不 await），否则为空操作（无害）。
      /// </summary>
-     public Task WindowResizeStart(int hitTest)
-     {
-         if (hitTest < 10 || hitTest > 17)
-             throw new ArgumentOutOfRangeException(nameof(hitTest), "hitTest 必须在 10..17（HTLEFT..HTBOTTOMRIGHT）之间");
-         var f = _formAccessor();
+    public Task WindowResizeStart(int hitTest)
+    {
+        if (hitTest < 10 || hitTest > 17)
+            throw new ArgumentOutOfRangeException(nameof(hitTest), "hitTest 必须在 10..17（HTLEFT..HTBOTTOMRIGHT）之间");
+        var f = _formAccessor();
          f.BeginInvoke(() =>
          {
              try
@@ -147,7 +147,7 @@ public sealed class HaloHostBridge
                  if (f.IsDisposed || !f.IsHandleCreated) return;
                  if (f.WindowState == FormWindowState.Maximized) return;
                  if (f.WindowState == FormWindowState.Minimized) return;
-                 NativeMethods.ReleaseCapture();
+                NativeMethods.ReleaseCapture();
                  NativeMethods.SendMessage(
                      f.Handle,
                      NativeMethods.WM_NCLBUTTONDOWN,

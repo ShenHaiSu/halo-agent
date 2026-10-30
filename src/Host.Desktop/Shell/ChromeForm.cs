@@ -101,8 +101,10 @@ namespace HaloAgent.Desktop.Shell;
                 m.Result = IntPtr.Zero;
                 return;
             }
-            // 普通状态：交还 DefWindowProc，让 DWM 重算 frame，否则还原后残留非客户区黑条。
-            base.WndProc(ref m);
+            // 普通状态：同样去掉系统 frame（真无边框），绝不能交还 DefWindowProc ——
+            // 配合 WS_THICKFRAME 会重建非客户区 frame，顶部留一条不受 Web 主题影响的系统色带。
+            // 还原黑条已由上面的 IsZoomed 时序修复解决，与此处无关。
+            m.Result = IntPtr.Zero;
             return;
         }
 
