@@ -5,6 +5,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import HInput from '@/components/base/HInput.vue';
 import HButton from '@/components/base/HButton.vue';
 import type { ProviderEdit } from '@/components/settings/providerEditing';
+import { isSupportedModelProtocol } from '@/components/settings/validators';
 
 const props = defineProps<{
   groups: ProviderEdit[];
@@ -64,7 +65,7 @@ const flatRows = computed<Row[]>(() => {
         providerId: g.id,
         modelId: m.id,
         protocol: m.protocol ?? 'chat',
-        disabled: (m.protocol ?? 'chat') !== 'chat',
+        disabled: !isSupportedModelProtocol(m.protocol ?? 'chat'),
         providerDisplay: g.displayName || g.id,
         modelDisplay: m.displayName || m.id,
       });
@@ -160,6 +161,19 @@ function onSearchKeydown(e: KeyboardEvent): void {
 function rowGlobalIdx(pid: string, mid: string): number {
   return flatRows.value.findIndex((r) => r.providerId === pid && r.modelId === mid);
 }
+function badgeTitle(proto: string): string {
+  if (!isSupportedModelProtocol(proto)) return '该协议暂不支持';
+  return proto === 'responses'
+    ? 'Responses 协议（走 /responses 路径）'
+    : 'Chat 协议（走 /chat/completions 路径）';
+}
+
+function rowTitle(gid: string, mid: string, proto: string): string {
+  if (!isSupportedModelProtocol(proto)) return `${gid}/${mid}（该协议暂不支持）`;
+  return proto === 'responses'
+    ? `${gid}/${mid} · Responses 协议（走 /responses 路径）`
+    : `${gid}/${mid} · Chat 协议`;
+}
 
 defineExpose({
   focusSearch: () => {
@@ -216,21 +230,21 @@ onMounted(() => {
           :data-idx="rowGlobalIdx(g.id, m.id)"
           role="option"
           :aria-selected="isActive(g.id, m.id)"
-          :aria-disabled="(m.protocol ?? 'chat') !== 'chat' || undefined"
+          :aria-disabled="!isSupportedModelProtocol(m.protocol ?? 'chat') || undefined"
           class="ms-row"
           :class="{
             current: isActive(g.id, m.id),
             focused: rowGlobalIdx(g.id, m.id) === activeIdx,
-            disabled: (m.protocol ?? 'chat') !== 'chat',
+            disabled: !isSupportedModelProtocol(m.protocol ?? 'chat'),
           }"
-          :title="(m.protocol ?? 'chat') !== 'chat' ? '即将支持，当前仅 chat 可用' : `${g.id}/${m.id}`"
-          @click="(m.protocol ?? 'chat') === 'chat' && emit('select', g.id, m.id)"
+          :title="rowTitle(g.id, m.id, m.protocol ?? 'chat')"
+          @click="isSupportedModelProtocol(m.protocol ?? 'chat') && emit('select', g.id, m.id)"
           @mouseenter="activeIdx = Math.max(0, rowGlobalIdx(g.id, m.id))"
         >
           <span v-if="isActive(g.id, m.id)" class="ms-cur" aria-hidden="true">●</span>
           <span class="ms-mmain">{{ m.displayName || m.id }}</span>
           <span v-if="m.displayName" class="ms-mid">{{ m.id }}</span>
-          <span class="ms-tag">{{ m.protocol ?? 'chat' }}</span>
+          <span class="proto-badge" :class="{ resp: (m.protocol ?? 'chat') === 'responses' }" :title="badgeTitle(m.protocol ?? 'chat')">{{ (m.protocol ?? 'chat') === 'responses' ? 'resp' : 'chat' }}</span>
           <span v-if="m.contextWindow" class="ms-ctx">{{ formatCtx(m.contextWindow) }}</span>
           <span v-if="m.acceptsImages" class="ms-img" aria-label="支持图片">图</span>
         </div>
@@ -345,14 +359,6 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.ms-tag {
-  font-size: var(--text-2xs);
-  background: hsl(var(--bg-muted));
-  color: hsl(var(--fg-muted));
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
 }
 .ms-ctx {
   font-size: var(--text-2xs);

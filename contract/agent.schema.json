@@ -165,6 +165,26 @@
             "string",
             "null"
           ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "unknown"
+          ]
+        },
+        "rawType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       },
       "required": [
@@ -207,6 +227,19 @@
         },
         "attachmentCount": {
           "type": "integer"
+        },
+        "reasoningKind": {
+          "type": "string",
+          "enum": [
+            "full",
+            "summary"
+          ]
+        },
+        "responseId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -2335,6 +2368,12 @@
               "string",
               "null"
             ]
+          },
+          "responseId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }
@@ -2355,6 +2394,13 @@
         "properties": {
           "text": {
             "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "full",
+              "summary"
+            ]
           }
         }
       }
@@ -2375,6 +2421,19 @@
           "idleMs": {
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "function",
+              "unknown"
+            ]
+          },
+          "rawType": {
+            "type": [
+              "string",
               "null"
             ]
           }

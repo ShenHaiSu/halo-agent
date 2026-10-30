@@ -1,5 +1,6 @@
 // src/Web.Client/src/components/settings/providerEditing.ts
 // P10 Provider 1—N Model 全量树纯函数（归一化/校验/dirty），可单测。
+import { isSupportedModelProtocol } from './validators';
 
 export interface ModelEdit {
   id: string;
@@ -112,7 +113,7 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
       if (!m.id.trim()) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 非空' });
       if (seenM.has(m.id)) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 重复' });
       seenM.add(m.id);
-      if ((m.protocol ?? 'chat') !== 'chat') errs.push({ provider: p.id, model: m.id, field: 'protocol', message: '仅 chat 可保存' });
+      if (!isSupportedModelProtocol(m.protocol ?? 'chat')) errs.push({ provider: p.id, model: m.id, field: 'protocol', message: '仅支持 chat/responses 协议' });
       if (m.contextWindow !== null && !(Number.isInteger(m.contextWindow) && m.contextWindow >= 1000 && m.contextWindow <= 2000000))
         errs.push({ provider: p.id, model: m.id, field: 'contextWindow', message: 'contextWindow 须为 null 或 1000~2000000' });
       if (m.maxTokens !== null && !(Number.isInteger(m.maxTokens) && m.maxTokens >= 1 && m.maxTokens <= 128000))

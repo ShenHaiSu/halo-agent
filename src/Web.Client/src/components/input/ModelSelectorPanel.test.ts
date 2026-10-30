@@ -76,7 +76,7 @@ describe('ModelSelectorPanel', () => {
     w.unmount();
   });
 
-  it('responses 行 disabled + 当前行高亮', () => {
+  it('responses 行可选 + 显示 resp 徽标', () => {
     const w = mount(ModelSelectorPanel, {
       props: {
         groups: [provider('a', 'A', [{ id: 'm1' }, { id: 'm2', protocol: 'responses' }])],
@@ -86,8 +86,24 @@ describe('ModelSelectorPanel', () => {
     });
     const options = w.findAll('[role="option"]');
     expect(options[0]!.classes()).toContain('current');
-    expect(options[1]!.classes()).toContain('disabled');
-    expect(options[1]!.attributes('aria-disabled')).toBe('true');
+    // P13：chat/responses 均放行，只有未知协议才 disabled。
+    expect(options[1]!.classes()).not.toContain('disabled');
+    expect(options[1]!.attributes('aria-disabled')).toBeUndefined();
+    expect(options[1]!.text()).toContain('resp');
+    w.unmount();
+  });
+
+  it('未知协议行仍 disabled', () => {
+    const w = mount(ModelSelectorPanel, {
+      props: {
+        groups: [provider('a', 'A', [{ id: 'm1', protocol: 'foo' }])],
+        activeProvider: '',
+        activeModel: '',
+      },
+    });
+    const options = w.findAll('[role="option"]');
+    expect(options[0]!.classes()).toContain('disabled');
+    expect(options[0]!.attributes('aria-disabled')).toBe('true');
     w.unmount();
   });
 

@@ -3,15 +3,16 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-export interface ActiveTool {
-  toolCallId: string;
-  messageId: string;
-  name: string;
-  arguments: string;
-  startedAt: number;
-  output: string;
-  alertLevel: number;
-}
+ export interface ActiveTool {
+   toolCallId: string;
+   messageId: string;
+   name: string;
+   arguments: string;
+   startedAt: number;
+   output: string;
+   alertLevel: number;
+   kind: 'function' | 'unknown';
+ }
 
 export interface NoticeState {
   level: 'info' | 'success' | 'warn' | 'error';
@@ -33,7 +34,7 @@ export const useStreamStore = defineStore('stream', () => {
   const resyncRequired = ref(false);
   const compactionStarted = ref(false);
   const round = ref({ used: 0, limit: 200 });
-  const usage = ref({ lastPromptTokens: 0, lastCompletionTokens: 0, dropped: 0 });
+   const usage = ref({ lastPromptTokens: 0, lastCompletionTokens: 0, dropped: false });
   const queueLength = ref(0);
 
   const activeToolList = computed(() => [...activeTools.value.values()]);

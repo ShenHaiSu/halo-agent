@@ -16,6 +16,10 @@ public sealed record MessageView
     public string Text { get; init; } = "";
     /// <summary>思考过程（可为空）。</summary>
     public string? Reasoning { get; init; }
+    /// <summary>推理种类：full(chat) | summary(responses)。缺省回落 full。</summary>
+    public string? ReasoningKind { get; init; }
+    /// <summary>诊断用 response.id，不做链逻辑依赖。</summary>
+    public string? ResponseId { get; init; }
     /// <summary>工具调用卡片（assistant 消息上合并携带）。</summary>
     public IReadOnlyList<ToolCallView>? ToolCalls { get; init; }
     /// <summary>是否是“排队插入”的用户消息（UI 上加特殊标记）。</summary>
@@ -41,4 +45,10 @@ public sealed record ToolCallView
     public bool? Ok { get; init; }
     /// <summary>工具输出（可能被截断）。</summary>
     public string? Output { get; init; }
+    /// <summary>工具种类：function | unknown。缺省 function。</summary>
+    public string? Kind { get; init; }
+    /// <summary>原生输出类型（unknown 时展示用）。</summary>
+    public string? RawType { get; init; }
+    /// <summary>结构载荷（C 预留，本次置 null，原样透传）。</summary>
+    public object? Payload { get; init; }
 }

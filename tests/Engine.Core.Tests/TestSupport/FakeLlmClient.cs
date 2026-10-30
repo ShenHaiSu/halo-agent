@@ -128,13 +128,38 @@ public sealed class FakeLlmClient : ILlmClient
     }
 
     public Task ValidateAsync(CancellationToken ct) => Task.CompletedTask;
-
     public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<string>>(new[] { Model });
-
     public void Reconfigure(LlmConfig cfg)
     {
         // 假客户端忽略重配置。
+    }
+    public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream)
+    {
+        var d = new Dictionary<string, object?>();
+        d["model"] = Model;
+        if (previousResponseId is not null) d["previous_response_id"] = previousResponseId;
+        if (instructions is not null) d["instructions"] = instructions;
+        d["input"] = input;
+        if (tools is { Count: > 0 }) d["tools"] = tools;
+        d["stream"] = stream;
+        d["store"] = false;
+        return d;
+    }
+    public Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
+    {
+        var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
+        if (reply.Throw is not null) throw reply.Throw;
+        return Task.FromResult(new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage });
+    }
+    public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
+    {
+        var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
+        if (reply.Throw is not null) throw reply.Throw;
+        if (!string.IsNullOrEmpty(reply.Reasoning)) foreach (var p in Slice(reply.Reasoning, reply.ChunkSize)) onEvent(new StreamEvent.ReasoningDelta(p));
+        if (!string.IsNullOrEmpty(reply.Content)) foreach (var p in Slice(reply.Content, reply.ChunkSize)) onEvent(new StreamEvent.TextDelta(p));
+        await Task.Yield();
+        return new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage };
     }
 
     private ScriptedReply Next(

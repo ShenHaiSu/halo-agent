@@ -13,13 +13,18 @@ import HaloIcon from '@/components/icons/HaloIcon.vue';
 import HBadge from '@/components/base/HBadge.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
 import ToolCardBody from './ToolCardBody.vue';
+import UnknownToolCard from './UnknownToolCard.vue';
 
 const props = defineProps<{ tool: ToolCallInfo; isLive: boolean }>();
 
 const perms = usePermissionsStore();
 
-const meta = computed(() => toolMeta(props.tool.name));
-const summary = computed(() => summarizeArgs(props.tool.name, props.tool.arguments));
+const kind = computed(() => (props.tool.kind === 'unknown' ? 'unknown' : 'function'));
+const meta = computed(() => toolMeta(props.tool.name, kind.value));
+const displayName = computed(() =>
+  kind.value === 'unknown' ? (props.tool.rawType ?? props.tool.name) : meta.value.label
+);
+const summary = computed(() => summarizeArgs(props.tool.name, props.tool.arguments, kind.value));
 
 // awaiting-user 判定：P2 单槽串行，最新 running 的卡片 + 有非 rounds 待答询问即视为等待授权
 const isAwaiting = computed(
@@ -110,12 +115,12 @@ const badgeVariant = computed(() => {
       class="tool-head"
       type="button"
       :aria-expanded="expanded"
-      :aria-label="`${meta.label}（${statusText}）：${summary}`"
+      :aria-label="`${displayName}（${statusText}）：${summary}`"
       @click="toggle"
       @keydown="onHeadKeydown"
     >
       <HaloIcon :name="meta.icon" :size="15" class="tool-icon" />
-      <span class="tool-name">{{ meta.label }}</span>
+      <span class="tool-name">{{ displayName }}</span>
       <span class="tool-summary" :title="summary">{{ summary }}</span>
       <span class="tool-spacer" />
       <HSpinner v-if="state === 'running'" size="xs" />
@@ -133,7 +138,8 @@ const badgeVariant = computed(() => {
       <span>该命令已运行较久，请耐心等待。</span>
     </div>
 
-    <ToolCardBody v-if="expanded" :tool="tool" />
+    <ToolCardBody v-if="expanded && kind === 'function'" :tool="tool" />
+    <UnknownToolCard v-if="expanded && kind === 'unknown'" :tool="tool" />
   </div>
 </template>
 

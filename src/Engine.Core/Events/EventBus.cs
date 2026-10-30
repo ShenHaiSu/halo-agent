@@ -59,6 +59,7 @@ public sealed class EventBus : IAsyncDisposable
     private readonly object _deltaLock = new();
     private readonly Dictionary<string, System.Text.StringBuilder> _deltaBuffers = new();
     private readonly Dictionary<string, string> _deltaToolCallIds = new();
+    private string _lastReasoningKind = "full";
     private DateTime _lastFlush = DateTime.UtcNow;
 
     private Task? _flushLoop;
@@ -113,9 +114,19 @@ public sealed class EventBus : IAsyncDisposable
     /// </summary>
     public void PublishDelta(string kind, string text, string? toolCallId = null)
     {
+        PublishDeltaWithKind(kind, text, null, toolCallId);
+    }
+    public void PublishReasoningDelta(string text, string? kind = null)
+    {
+        if (!string.IsNullOrEmpty(kind)) { lock (_deltaLock) _lastReasoningKind = kind; }
+        PublishDeltaWithKind(EventKinds.ReasoningDelta, text, kind, null);
+    }
+    private void PublishDeltaWithKind(string kind, string text, string? reasoningKind, string? toolCallId)
+    {
         if (string.IsNullOrEmpty(text)) return;
         lock (_deltaLock)
         {
+            if (!string.IsNullOrEmpty(reasoningKind)) _lastReasoningKind = reasoningKind;
             if (!_deltaBuffers.TryGetValue(kind, out var sb))
             {
                 sb = new System.Text.StringBuilder(256);
@@ -176,7 +187,8 @@ public sealed class EventBus : IAsyncDisposable
         {
             object payload = kind switch
             {
-                EventKinds.TextDelta or EventKinds.ReasoningDelta => new TextDeltaPayload { Text = text },
+                EventKinds.ReasoningDelta => new ReasoningDeltaPayload { Text = text, Kind = _lastReasoningKind },
+                EventKinds.TextDelta => new TextDeltaPayload { Text = text },
                 EventKinds.ToolOutputDelta => new ToolOutputDeltaPayload
                 {
                     ToolCallId = tcId ?? "",

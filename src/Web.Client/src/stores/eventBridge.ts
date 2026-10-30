@@ -17,24 +17,26 @@ function asRecord(p: unknown): Record<string, unknown> {
 }
 
  // P08-fix 02：与 messages.normalizeMessage 共用 normalizeToolCalls；过滤孤立 role=tool。
- function toMessageViews(list: unknown): Array<Record<string, unknown>> {
-   if (!Array.isArray(list)) return [];
-   const out: Array<Record<string, unknown>> = [];
-   for (const m of list) {
-     const o = (m ?? {}) as Record<string, unknown>;
-     if (String(o.role ?? '') === 'tool') continue;
-     out.push({
-       id: o.id,
-       role: o.role ?? 'assistant',
-       content: o.text ?? o.content ?? '',
-       reasoning: o.reasoning ?? undefined,
-       ts: o.tsMs ?? Date.now(),
-       injected: o.injected ?? false,
-       toolCalls: normalizeToolCalls(o.toolCalls) ?? undefined,
-     });
-   }
-   return out;
-}
+  function toMessageViews(list: unknown): Array<Record<string, unknown>> {
+    if (!Array.isArray(list)) return [];
+    const out: Array<Record<string, unknown>> = [];
+    for (const m of list) {
+      const o = (m ?? {}) as Record<string, unknown>;
+      if (String(o.role ?? '') === 'tool') continue;
+      out.push({
+        id: o.id,
+        role: o.role ?? 'assistant',
+        content: o.text ?? o.content ?? '',
+        reasoning: o.reasoning ?? undefined,
+        reasoningKind: o.reasoningKind ?? undefined,
+        responseId: o.responseId ?? undefined,
+        ts: o.tsMs ?? Date.now(),
+        injected: o.injected ?? false,
+        toolCalls: normalizeToolCalls(o.toolCalls) ?? undefined,
+      });
+    }
+    return out;
+  }
 // P09-fix2 B/C：切换中到达的历史变更帧一律丢弃（仍推进游标，避免 pump 反复拉取）。
 // 只保留会话元信息 / 状态类帧（session.info/usage/state.*/resync 等）。
 const DROP_DURING_SWITCH = new Set([
@@ -81,63 +83,73 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           stream.beginTurn(turnId, id);
           break;
         }
-        case 'turn.finished': {
-          const p = asRecord(f.p);
-          const stream = useStreamStore();
-          const id = messages.streamingId;
-          if (id) {
-            const truncated = p.truncated === true;
-            const reason = typeof p.reason === 'string' ? p.reason : '';
-            messages.patch(id, {
-              streaming: false,
-              truncatedByLength: truncated && reason !== 'user-abort',
-              truncatedByUser: p.byUser === true || reason === 'user-abort',
-            });
-            if (typeof p.text === 'string' && p.text.length > 0) {
-              const cur = messages.items.find((m) => m.id === id);
-              if (cur && cur.content.length === 0) cur.content = p.text as string;
-            }
-          }
-          stream.endTurn();
-          messages.streamingId = null;
-          break;
-        }
+         case 'turn.finished': {
+           const p = asRecord(f.p);
+           const stream = useStreamStore();
+           const id = messages.streamingId;
+           if (id) {
+             const truncated = p.truncated === true;
+             const reason = typeof p.reason === 'string' ? p.reason : '';
+             messages.patch(id, {
+               streaming: false,
+               truncatedByLength: truncated && reason !== 'user-abort',
+               truncatedByUser: p.byUser === true || reason === 'user-abort',
+               responseId: typeof p.responseId === 'string' ? (p.responseId as string) : undefined,
+             });
+             if (typeof p.text === 'string' && p.text.length > 0) {
+               const cur = messages.items.find((m) => m.id === id);
+               if (cur && cur.content.length === 0) cur.content = p.text as string;
+             }
+           }
+           stream.endTurn();
+           messages.streamingId = null;
+           break;
+         }
         case 'text.delta': {
           const p = asRecord(f.p);
           const id = messages.streamingId;
           if (id && typeof p.text === 'string') messages.appendDelta(id, p.text as string);
           break;
         }
-        case 'reasoning.delta': {
-          const p = asRecord(f.p);
-          const id = messages.streamingId;
-          if (id && typeof p.text === 'string') messages.appendReasoning(id, p.text as string);
-          break;
-        }
-        case 'tool.started': {
-          const p = asRecord(f.p);
-          const stream = useStreamStore();
-          const id = messages.streamingId;
-          const tcid = String(p.toolCallId ?? '');
-          if (tcid && id) {
-            messages.ensureToolCall(
-              id,
-              tcid,
-              String(p.name ?? ''),
-              String(p.args ?? p.arguments ?? '{}')
-            );
-            stream.addTool({
-              toolCallId: tcid,
-              messageId: id,
-              name: String(p.name ?? ''),
-              arguments: String(p.args ?? p.arguments ?? '{}'),
-              startedAt: Date.now(),
-              output: '',
-              alertLevel: Number(p.idleMs ?? 0) > 30000 ? 1 : 0,
-            });
-          }
-          break;
-        }
+         case 'reasoning.delta': {
+           const p = asRecord(f.p);
+           const id = messages.streamingId;
+           if (id && typeof p.text === 'string') messages.appendReasoning(id, p.text as string);
+           if (id && (p.kind === 'summary' || p.kind === 'full')) {
+             const cur = messages.items.find((m) => m.id === id);
+             if (cur) cur.reasoningKind = p.kind as 'summary' | 'full';
+           }
+           break;
+         }
+         case 'tool.started': {
+           const p = asRecord(f.p);
+           const stream = useStreamStore();
+           const id = messages.streamingId;
+           const tcid = String(p.toolCallId ?? '');
+           const kind = p.kind === 'unknown' ? 'unknown' : 'function';
+           const rawType = typeof p.rawType === 'string' ? (p.rawType as string) : undefined;
+           if (tcid && id) {
+             messages.ensureToolCall(
+               id,
+               tcid,
+               String(p.name ?? ''),
+               String(p.args ?? p.arguments ?? '{}'),
+               kind,
+               rawType
+             );
+             stream.addTool({
+               toolCallId: tcid,
+               messageId: id,
+               name: String(p.name ?? ''),
+               arguments: String(p.args ?? p.arguments ?? '{}'),
+               startedAt: Date.now(),
+               output: '',
+               alertLevel: Number(p.idleMs ?? 0) > 30000 ? 1 : 0,
+               kind,
+             });
+           }
+           break;
+         }
         case 'tool.finished': {
           const p = asRecord(f.p);
           const stream = useStreamStore();
@@ -195,16 +207,16 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           };
           break;
         }
-        case 'usage': {
-          const p = asRecord(f.p);
-          const stream = useStreamStore();
-          const session = useSessionStore();
-          stream.usage.lastPromptTokens = Number(p.prompt ?? 0);
-          stream.usage.lastCompletionTokens = Number(p.completion ?? 0);
-          stream.usage.dropped = Number((p as Record<string, unknown>).dropped ?? p.dropped ?? 0);
-          session.addUsage(Number(p.prompt ?? 0), Number(p.completion ?? 0));
-          break;
-        }
+         case 'usage': {
+           const p = asRecord(f.p);
+           const stream = useStreamStore();
+           const session = useSessionStore();
+           stream.usage.lastPromptTokens = Number(p.prompt ?? 0);
+           stream.usage.lastCompletionTokens = Number(p.completion ?? 0);
+           stream.usage.dropped = p.dropped === true;
+           session.addUsage(Number(p.prompt ?? 0), Number(p.completion ?? 0));
+           break;
+         }
         case 'notice': {
           const p = asRecord(f.p);
           const stream = useStreamStore();

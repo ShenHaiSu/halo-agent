@@ -57,10 +57,28 @@ public sealed class SessionStore : IDisposable
             _writer?.Flush();
             _writer?.Dispose();
             _writer = null;
+            try { if (_path is not null) { var old = ResponseIdPath(_path); if (File.Exists(old)) File.Delete(old); } } catch { }
             SessionId = NewSessionId();
             Directory.CreateDirectory(Paths.SessionsDir);
             _path = Path.Combine(Paths.SessionsDir, SessionId + ".jsonl");
         }
+    }
+    private static string ResponseIdPath(string historyPath) => Path.Combine(Path.GetDirectoryName(historyPath) ?? ".", Path.GetFileNameWithoutExtension(historyPath) + ".response_id");
+    public void SaveResponseId(string? id)
+    {
+        string? p;
+        lock (_lock) p = _path;
+        if (p is null) return;
+        var sp = ResponseIdPath(p);
+        try { if (id is null) { if (File.Exists(sp)) File.Delete(sp); } else File.WriteAllText(sp, id); } catch { }
+    }
+    public string? LoadResponseId()
+    {
+        string? p;
+        lock (_lock) p = _path;
+        if (p is null) return null;
+        var sp = ResponseIdPath(p);
+        try { if (!File.Exists(sp)) return null; var t = File.ReadAllText(sp).Trim(); return string.IsNullOrEmpty(t) ? null : t; } catch { return null; }
     }
 
     /// <summary>清空（截断文件，保留路径）。</summary>
@@ -73,10 +91,12 @@ public sealed class SessionStore : IDisposable
             _writer = null;
 
             if (_path is null) return;
+            var sp = ResponseIdPath(_path);
             try
             {
                 if (File.Exists(_path))
                     using (new FileStream(_path, FileMode.Truncate)) { }
+                if (File.Exists(sp)) File.Delete(sp);
             }
             catch { }
         }

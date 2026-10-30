@@ -88,7 +88,7 @@ async function retry(): Promise<void> {
 </header>
 
 <!-- 思考内容 -->
-<ReasoningBlock v-if="message.reasoning" :text="message.reasoning" :live="isStreaming" />
+<ReasoningBlock v-if="message.reasoning" :text="message.reasoning" :live="isStreaming" :kind="message.reasoningKind ?? 'full'" />
 
 <!-- 正文 -->
 <MessageBody

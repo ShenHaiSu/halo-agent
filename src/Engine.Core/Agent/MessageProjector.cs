@@ -37,6 +37,7 @@ public static class MessageProjector
                 Role = m.RoleWire,
                 Text = m.ContentParts is { Count: > 0 } ? string.Join("\n", m.ContentParts.Where(p => p.Type == "text").Select(p => p.Text ?? "")) : (m.Content ?? string.Empty),
                 Reasoning = m.ReasoningContent,
+                ReasoningKind = m.ReasoningContent is null ? "full" : "summary",
                 HasImages = m.HasImages,
                 AttachmentCount = m.ContentParts is null ? 0 : m.ContentParts.Count(p => p.Type == "image_url"),
                 TsMs = 0,
@@ -49,13 +50,17 @@ public static class MessageProjector
                 foreach (var tc in m.ToolCalls)
                 {
                     toolResults.TryGetValue(tc.Id, out var res);
+                    var (kind, rawType, args) = HaloAgent.Engine.Core.Llm.ResponsesTranslators.UnpackUnknownArgs(tc.Function.Arguments);
                     calls.Add(new HaloAgent.Engine.Abstractions.Types.ToolCallView
                     {
                         Id = tc.Id,
-                        Name = tc.Function.Name,
-                        Args = tc.Function.Arguments,
+                        Name = kind == "unknown" ? (rawType ?? tc.Function.Name) : tc.Function.Name,
+                        Args = args,
                         Ok = toolResults.ContainsKey(tc.Id) ? res.ok : null,
                         Output = toolResults.ContainsKey(tc.Id) ? res.output : null,
+                        Kind = kind,
+                        RawType = rawType,
+                        Payload = null,
                     });
                 }
                 view = view with { ToolCalls = calls };

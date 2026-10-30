@@ -51,8 +51,9 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     // ============================================================
     public void Reconfigure(LlmConfig cfg)
     {
-        EnsureProtocol(cfg);
-        // 代理换了必须重建 client（连接池绑在旧代理上）
+        // 两协议均允许（D6 一次性放开）
+        if (cfg.Protocol != LlmProtocol.Chat && cfg.Protocol != LlmProtocol.Responses)
+            throw new NotSupportedException("未知协议: " + cfg.Protocol);
         if (!string.Equals(cfg.ProxyUrl, _cfg.ProxyUrl, StringComparison.Ordinal))
         {
             _http.Dispose();
@@ -60,11 +61,20 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         }
         _cfg = cfg;
     }
-
-    private static void EnsureProtocol(LlmConfig cfg)
+    private static void EnsureChat(LlmConfig cfg)
     {
         if (cfg.Protocol != LlmProtocol.Chat)
-            throw new NotSupportedException("Responses 协议尚未支持（当前仅 chat 可用）。");
+            throw new NotSupportedException("当前为 Responses 协议，请调用 Responses* 方法。");
+    }
+    private static void EnsureResponses(LlmConfig cfg)
+    {
+        if (cfg.Protocol != LlmProtocol.Responses)
+            throw new NotSupportedException("当前为 Chat 协议，请调用 Chat* 方法。");
+    }
+    private static void EnsureProtocol(LlmConfig cfg)
+    {
+        if (cfg.Protocol != LlmProtocol.Chat && cfg.Protocol != LlmProtocol.Responses)
+            throw new NotSupportedException("未知协议: " + cfg.Protocol);
     }
 
 
@@ -73,6 +83,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         HttpClientFactory.Create(proxyUrl, timeoutSeconds: 600);
 
     private string ChatUrl() => _cfg.BaseUrl.TrimEnd('/') + "/chat/completions";
+    private string ResponsesUrl() => _cfg.BaseUrl.TrimEnd('/') + "/responses";
     private string ModelsUrl() => _cfg.BaseUrl.TrimEnd('/') + "/models";
 
     private HttpRequestMessage Prepare(HttpMethod method, string url, object? body = null, string? sessionId = null)
@@ -103,10 +114,10 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         CancellationToken ct,
         string? sessionId = null)
     {
+        EnsureChat(_cfg);
         using var req = Prepare(HttpMethod.Post, ChatUrl(),
             BuildBody(messages, tools, stream: false), sessionId);
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-
         var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
             throw new EndpointStatusException((int)resp.StatusCode, text);
@@ -125,6 +136,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         CancellationToken ct,
         string? sessionId = null)
     {
+        EnsureChat(_cfg);
         using var req = Prepare(HttpMethod.Post, ChatUrl(),
             BuildBody(messages, tools, stream: true), sessionId);
         using var resp = await _http.SendAsync(
@@ -284,8 +296,8 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     public object BuildBody(
         IReadOnlyList<ChatMessage> messages, IReadOnlyList<object>? tools, bool stream)
     {
-        EnsureProtocol(_cfg);
-        // 发送前：strip reasoning（拷贝投影，不 mutate 落盘）
+        EnsureChat(_cfg);
+        if (stream && _cfg.Protocol != LlmProtocol.Chat) throw new NotSupportedException("协议不匹配");
         var outgoing = MessageAdapters.StripReasoning(messages, _cfg.IncludeReasoningHistory);
         // 图片强校验（false 硬拦，不静默丢图）
         foreach (var m in outgoing) MessageAdapters.ValidateImages(m, _cfg.AcceptsImages);
@@ -442,6 +454,208 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     }
 
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n] + "…";
+    // ============================================================
+    //  Responses 协议
+    // ============================================================
+    public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream)
+    {
+        EnsureResponses(_cfg);
+        if (instructions is not null && input.Count > 0)
+        {
+            foreach (var it in input)
+            {
+                try
+                {
+                    var j = System.Text.Json.JsonSerializer.Serialize(it);
+                    using var d = System.Text.Json.JsonDocument.Parse(j);
+                    if (d.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && d.RootElement.TryGetProperty("role", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.String && string.Equals(r.GetString(), "system", System.StringComparison.OrdinalIgnoreCase))
+                        throw new System.InvalidOperationException("system 不得同时进 instructions 与 input");
+                }
+                catch (System.InvalidOperationException) { throw; }
+                catch { }
+            }
+        }
+        var body = new System.Collections.Generic.Dictionary<string, object?>();
+        body["model"] = _cfg.Model;
+        if (previousResponseId is not null) body["previous_response_id"] = previousResponseId;
+        if (instructions is not null) body["instructions"] = instructions;
+        body["input"] = input;
+        if (tools is { Count: > 0 }) body["tools"] = tools;
+        body["stream"] = stream;
+        if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
+        body["user"] = ReqUser;
+        body["store"] = false;
+        return body;
+    }
+    public async Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
+    {
+        EnsureResponses(_cfg);
+        using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: false), sessionId);
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode) throw new EndpointStatusException((int)resp.StatusCode, text);
+        return ParseResponsesResponse(text);
+    }
+    public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
+    {
+        EnsureResponses(_cfg);
+        using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: true), sessionId);
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode) { var b = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false); throw new EndpointStatusException((int)resp.StatusCode, b); }
+        var content = new StringBuilder();
+        var reasoning = new StringBuilder();
+        var usage = new Usage();
+        var acc = new FunctionCallAccumulator();
+        var unknowns = new List<UnknownOutput>();
+        string? responseId = null;
+        string? incompleteReason = null;
+        bool truncated = false;
+        var sse = new SseParser();
+        using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var chunk = new byte[8192];
+        bool done = false;
+        while (!done)
+        {
+            int n = await stream.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false);
+            if (n == 0) { foreach (var line in sse.Finish()) { if (ApplyResponsesLine(line, content, reasoning, ref usage, acc, unknowns, ref responseId, ref incompleteReason, ref truncated, onEvent)) { done = true; break; } } break; }
+            foreach (var line in sse.Push(chunk, n)) { if (ApplyResponsesLine(line, content, reasoning, ref usage, acc, unknowns, ref responseId, ref incompleteReason, ref truncated, onEvent)) { done = true; break; } }
+        }
+        if (incompleteReason == "max_output_tokens" || truncated) throw new InvalidOperationException("模型输出超过上下文长度被截断(max_output_tokens)");
+        if (incompleteReason is not null && incompleteReason != "completed") throw new InvalidOperationException("Responses incomplete: " + incompleteReason);
+        return new ResponsesReply { ResponseId = responseId, Content = content.Length == 0 ? null : content.ToString(), ReasoningContent = reasoning.Length == 0 ? null : reasoning.ToString(), ReasoningKind = "summary", ToolCalls = acc.Finish(), UnknownOutputs = unknowns, Usage = usage, TruncatedByLength = truncated, IncompleteReason = incompleteReason };
+    }
+    private static bool ApplyResponsesLine(string line, StringBuilder content, StringBuilder reasoning, ref Usage usage, FunctionCallAccumulator acc, List<UnknownOutput> unknowns, ref string? responseId, ref string? incompleteReason, ref bool truncated, Action<StreamEvent> onEvent)
+    {
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(line); } catch (JsonException) { return false; }
+        using (doc)
+        {
+            var root = doc.RootElement;
+            string? type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+            if (type == "response.output_text.delta")
+            {
+                var s = root.TryGetProperty("delta", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+                if (!string.IsNullOrEmpty(s)) { content.Append(s); onEvent(new StreamEvent.TextDelta(s)); }
+                return false;
+            }
+            if (type == "response.reasoning_summary_text.delta")
+            {
+                var s = root.TryGetProperty("delta", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+                if (!string.IsNullOrEmpty(s)) { reasoning.Append(s); onEvent(new StreamEvent.ReasoningDelta(s)); }
+                return false;
+            }
+            if (type == "response.function_call_arguments.delta")
+            {
+                string? oi = root.TryGetProperty("output_index", out var o) ? o.ToString() : null;
+                string? iid = root.TryGetProperty("item_id", out var ii) && ii.ValueKind == JsonValueKind.String ? ii.GetString() : null;
+                string? cid = root.TryGetProperty("call_id", out var cc) && cc.ValueKind == JsonValueKind.String ? cc.GetString() : null;
+                string? nm = root.TryGetProperty("name", out var nn) && nn.ValueKind == JsonValueKind.String ? nn.GetString() : null;
+                string? frag = root.TryGetProperty("delta", out var dd) ? (dd.ValueKind == JsonValueKind.String ? dd.GetString() : dd.GetRawText()) : null;
+                if (string.IsNullOrEmpty(nm) && root.TryGetProperty("function_call", out var fc) && fc.ValueKind == JsonValueKind.Object)
+                {
+                    if (fc.TryGetProperty("name", out var fn2) && fn2.ValueKind == JsonValueKind.String) nm = fn2.GetString();
+                    if (fc.TryGetProperty("call_id", out var fc2) && fc2.ValueKind == JsonValueKind.String) cid ??= fc2.GetString();
+                }
+                acc.Merge(oi, iid, cid, nm, frag);
+                onEvent(new StreamEvent.ToolCallDelta(0, nm ?? "", frag ?? ""));
+                return false;
+            }
+            if (type == "response.completed" || type == "completed")
+            {
+                if (root.TryGetProperty("response", out var r2) && r2.ValueKind == JsonValueKind.Object)
+                {
+                    if (r2.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String) responseId = idEl.GetString();
+                    if (r2.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+                    {
+                        long gi(string n) => u.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
+                        long p = gi("input_tokens"), c = gi("output_tokens");
+                        if (p + c > 0) usage = new Usage(p, c);
+                    }
+                    if (r2.TryGetProperty("incomplete", out var inc) && inc.ValueKind == JsonValueKind.Object)
+                    {
+                        if (inc.TryGetProperty("reason", out var rr) && rr.ValueKind == JsonValueKind.String) incompleteReason = rr.GetString();
+                    }
+                    if (r2.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String && st.GetString() == "incomplete")
+                    {
+                        if (string.IsNullOrEmpty(incompleteReason)) incompleteReason = "incomplete";
+                    }
+                }
+                return true;
+            }
+            if (type == "response.incomplete")
+            {
+                if (root.TryGetProperty("response", out var r3) && r3.ValueKind == JsonValueKind.Object)
+                {
+                    if (r3.TryGetProperty("id", out var idEl2) && idEl2.ValueKind == JsonValueKind.String) responseId = idEl2.GetString();
+                    if (r3.TryGetProperty("incomplete", out var inc2) && inc2.ValueKind == JsonValueKind.Object && inc2.TryGetProperty("reason", out var rr2) && rr2.ValueKind == JsonValueKind.String) incompleteReason = rr2.GetString();
+                    else incompleteReason = "incomplete";
+                }
+                else incompleteReason = "incomplete";
+                truncated = string.Equals(incompleteReason, "max_output_tokens", StringComparison.Ordinal);
+                return true;
+            }
+            if (type == "response.failed" || type == "failed")
+            {
+                string body = root.GetRawText();
+                int st2 = 500;
+                if (root.TryGetProperty("response", out var rf) && rf.ValueKind == JsonValueKind.Object && rf.TryGetProperty("status_code", out var sc) && sc.ValueKind == JsonValueKind.Number) st2 = (int)sc.GetInt64();
+                throw new EndpointStatusException(st2, body);
+            }
+            if (root.TryGetProperty("response", out var rr3) && rr3.ValueKind == JsonValueKind.Object && rr3.TryGetProperty("id", out var rid) && rid.ValueKind == JsonValueKind.String && string.IsNullOrEmpty(responseId)) responseId = rid.GetString();
+            return false;
+        }
+    }
+    internal static ResponsesReply ParseResponsesResponse(string text)
+    {
+        using var doc = JsonDocument.Parse(text);
+        var root = doc.RootElement;
+        string? id = root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : null;
+        if (root.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.Object) { if (r.TryGetProperty("id", out var id2) && id2.ValueKind == JsonValueKind.String) id ??= id2.GetString(); }
+        var sb = new StringBuilder(); var rsb = new StringBuilder();
+        var calls = new List<ToolCall>(); var unknowns = new List<UnknownOutput>();
+        Usage usage = new();
+        bool trunc = false; string? incReason = null;
+        if (root.TryGetProperty("usage", out var u2) && u2.ValueKind == JsonValueKind.Object)
+        {
+            long g(string n) => u2.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
+            usage = new Usage(g("input_tokens"), g("output_tokens"));
+        }
+        else if (root.TryGetProperty("response", out var rr4) && rr4.ValueKind == JsonValueKind.Object && rr4.TryGetProperty("usage", out var u3) && u3.ValueKind == JsonValueKind.Object)
+        {
+            long g2(string n) => u3.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
+            usage = new Usage(g2("input_tokens"), g2("output_tokens"));
+        }
+        JsonElement output = default;
+        bool hasOutput = false;
+        if (root.TryGetProperty("output", out var o2) && o2.ValueKind == JsonValueKind.Array) { output = o2; hasOutput = true; }
+        else if (root.TryGetProperty("response", out var r5) && r5.ValueKind == JsonValueKind.Object && r5.TryGetProperty("output", out var o3) && o3.ValueKind == JsonValueKind.Array) { output = o3; hasOutput = true; }
+        if (hasOutput)
+        {
+            foreach (var item in output.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                string? ot = item.TryGetProperty("type", out var te) && te.ValueKind == JsonValueKind.String ? te.GetString() : null;
+                if (ot == "message" || ot == "output_text")
+                {
+                    if (item.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array)
+                        foreach (var p in c.EnumerateArray()) { if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.String) sb.Append(tx.GetString()); }
+                    else if (item.TryGetProperty("text", out var tx2) && tx2.ValueKind == JsonValueKind.String) sb.Append(tx2.GetString());
+                }
+                else if (ot == "reasoning") { if (item.TryGetProperty("summary", out var s2) && s2.ValueKind == JsonValueKind.Array) foreach (var p in s2.EnumerateArray()) { if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("text", out var tx3) && tx3.ValueKind == JsonValueKind.String) rsb.Append(tx3.GetString()); } }
+                else if (ot == "function_call")
+                {
+                    string? nm = item.TryGetProperty("name", out var ne) && ne.ValueKind == JsonValueKind.String ? ne.GetString() : null;
+                    string? cid = item.TryGetProperty("call_id", out var ce) && ce.ValueKind == JsonValueKind.String ? ce.GetString() : (item.TryGetProperty("id", out var ie2) && ie2.ValueKind == JsonValueKind.String ? ie2.GetString() : null);
+                    string args = item.TryGetProperty("arguments", out var ae) ? (ae.ValueKind == JsonValueKind.String ? ae.GetString() ?? "{}" : ae.GetRawText()) : "{}";
+                    if (!string.IsNullOrEmpty(nm)) calls.Add(new ToolCall { Id = string.IsNullOrEmpty(cid) ? "call_" + nm : cid!, Type = "function", Function = new FunctionCall { Name = nm!, Arguments = args } });
+                    else unknowns.Add(new UnknownOutput(ot ?? "unknown", item.Clone()));
+                }
+                else if (!string.IsNullOrEmpty(ot)) unknowns.Add(new UnknownOutput(ot!, item.Clone()));
+            }
+        }
+        if (root.TryGetProperty("incomplete", out var incEl) && incEl.ValueKind == JsonValueKind.Object && incEl.TryGetProperty("reason", out var ir) && ir.ValueKind == JsonValueKind.String) { incReason = ir.GetString(); trunc = string.Equals(incReason, "max_output_tokens", StringComparison.Ordinal); }
+        return new ResponsesReply { ResponseId = id, Content = sb.Length == 0 ? null : sb.ToString(), ReasoningContent = rsb.Length == 0 ? null : rsb.ToString(), ReasoningKind = "summary", ToolCalls = calls, UnknownOutputs = unknowns, Usage = usage, TruncatedByLength = trunc, IncompleteReason = incReason };
+    }
 
     // ============================================================
     //  辅助接口
@@ -449,7 +663,15 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
 
     public async Task ValidateAsync(CancellationToken ct)
     {
-        // 最短请求：只发一个 "hi"。有内容或无内容但请求成功都算可用
+        if (_cfg.Protocol == LlmProtocol.Responses)
+        {
+            var probe = BuildResponsesBody(null, null, new object[] { new Dictionary<string, object?> { ["type"] = "message", ["role"] = "user", ["content"] = new object[] { new Dictionary<string, object?> { ["type"] = "input_text", ["text"] = "ping" } } } }, null, stream: false);
+            using var req2 = Prepare(HttpMethod.Post, ResponsesUrl(), probe);
+            using var resp2 = await _http.SendAsync(req2, ct).ConfigureAwait(false);
+            var t2 = await resp2.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (!resp2.IsSuccessStatusCode) throw new EndpointStatusException((int)resp2.StatusCode, t2);
+            return;
+        }
         var messages = new[] { ChatMessage.User("hi") };
         await ChatAsync(messages, null, ct).ConfigureAwait(false);
     }

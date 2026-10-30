@@ -57,31 +57,46 @@ const SAMPLE_REPLY = [
  *   turn.started → text.delta × N → turn.finished
  * 每隔约 60ms 推一块。
  */
-function runMockTurn(): void {
-  if (busy) return;
-  busy = true;
+ function runMockTurn(): void {
+   if (busy) return;
+   busy = true;
 
-  const turnId = `mock-turn-${Date.now()}`;
-  emit('turn.started', { turnId });
+   const turnId = `mock-turn-${Date.now()}`;
+   emit('turn.started', { turnId });
 
-  const chunks = chunkText(SAMPLE_REPLY, 6);
-  let i = 0;
+   // P13 responses 示例序列：summary 推理 → unknown 原生工具 → 带 responseId 收尾。
+   later(40, () => emit('reasoning.delta', { text: '先整理思路，再动手。', kind: 'summary' }));
+   later(80, () =>
+     emit('tool.started', {
+       toolCallId: 'tc-mock-1',
+       name: 'web_search',
+       args: '{"query":"halo config"}',
+       kind: 'unknown',
+       rawType: 'web_search',
+     })
+   );
+   later(110, () =>
+     emit('tool.finished', { toolCallId: 'tc-mock-1', name: 'web_search', ok: true, output: 'mock output' })
+   );
 
-  const tick = () => {
-    if (i >= chunks.length) {
-      emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false });
-      // P09-fix2 D：用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
-      mockAppendMessage('assistant', SAMPLE_REPLY);
-      busy = false;
-      return;
-    }
-    emit('text.delta', { text: chunks[i]! });
-    i++;
-    later(40 + Math.random() * 40, tick);
-  };
+   const chunks = chunkText(SAMPLE_REPLY, 6);
+   let i = 0;
 
-  later(120, tick);
-}
+   const tick = () => {
+     if (i >= chunks.length) {
+       emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false, responseId: 'resp-mock-1' });
+       // P09-fix2 D：用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
+       mockAppendMessage('assistant', SAMPLE_REPLY);
+       busy = false;
+       return;
+     }
+     emit('text.delta', { text: chunks[i]! });
+     i++;
+     later(40 + Math.random() * 40, tick);
+   };
+
+   later(120, tick);
+ }
 
 function chunkText(s: string, size: number): string[] {
   const out: string[] = [];

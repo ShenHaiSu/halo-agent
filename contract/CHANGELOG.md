@@ -3,6 +3,16 @@
 > **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 `contractVersion` 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 
+ ## [2] — 2026-10-30 · P13 responses 协议（非破坏性）
+
+ **非破坏性增补**（`contractVersion` 保持 `2`，只加可选字段，缺字段回落旧语义）：
+
+ - `MessageView` 新增可选 `reasoningKind ("full"|"summary"，缺省回落 full)` / `responseId (string|null，仅诊断展示，不做快照主键)`
+ - `ToolCallView` 新增可选 `kind ("function"|"unknown"，缺省 function)` / `rawType (string|null)` / `payload (object|null，C 预留，本次置 null，原样透传，additionalProperties:true)`
+ - 事件载荷新增可选：`turn.finished.responseId` / `reasoning.delta.kind` / `tool.started.kind,rawType`
+ - `usage.dropped` 契约本就是 `boolean`；前端 `stream.usage.dropped:number` 混用清理为 `boolean`
+ - 前端跑 `node scripts/gen-contract-types.mjs` 重生成 `src/Web.Client/src/contract/agent.d.ts`
+
 ## [1] - 2026-10-27 · P3 增补（非破坏性）
 
 ## [2] - 2026-10-29 · P10 provider-model-rework（破坏性）

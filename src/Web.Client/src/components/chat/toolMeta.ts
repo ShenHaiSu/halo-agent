@@ -20,7 +20,11 @@ export interface ToolMeta {
  * 未知工具不翻译：看到 "mcp__github__create_issue" 显示原名，
  * 用户才知道危险度。显示"未知工具"会让用户无法判断，一律允许更危险。
  */
-export function toolMeta(name: string): ToolMeta {
+export function toolMeta(name: string, kind?: string): ToolMeta {
+  // P13：分流键 kind 优先于 name；unknown 短路不走任何名称映射（原名展示）。
+  if (kind === 'unknown') {
+    return { label: name, icon: 'info', badgeVariant: 'default', mutates: false };
+  }
   if (name.startsWith('mcp__')) {
     const parts = name.split('__');
     return {

@@ -6,12 +6,16 @@ export type MockBehavior =
   | { kind: 'throws'; code: string; message: string };
 
 // P09-fix2 D：Mock 多会话历史（?mock=1 下可复现切换，不再恒返空历史）。
-export interface MockChatMessage {
-  id: string;
-  role: string;
-  text: string;
-  tsMs: number;
-}
+ export interface MockChatMessage {
+   id: string;
+   role: string;
+   text: string;
+   tsMs: number;
+   reasoning?: string;
+   reasoningKind?: 'full' | 'summary';
+   responseId?: string;
+   toolCalls?: unknown[];
+ }
 
 interface MockSessionData {
   id: string;
@@ -23,11 +27,11 @@ interface MockSessionData {
   messages: MockChatMessage[];
 }
 
-let mockMsgSeq = 0;
-function mockMsg(role: string, text: string, tsMs: number): MockChatMessage {
-  mockMsgSeq += 1;
-  return { id: `m-mock-${mockMsgSeq}`, role, text, tsMs };
-}
+ let mockMsgSeq = 0;
+ function mockMsg(role: string, text: string, tsMs: number, extra?: Partial<MockChatMessage>): MockChatMessage {
+   mockMsgSeq += 1;
+   return { id: `m-mock-${mockMsgSeq}`, role, text, tsMs, ...extra };
+ }
 
 const mockNow = Date.now();
 const mockSessions = new Map<string, MockSessionData>([
@@ -42,7 +46,23 @@ const mockSessions = new Map<string, MockSessionData>([
       mtimeMs: mockNow - 3600000,
       messages: [
         mockMsg('user', '帮我看看这个项目用了哪些依赖', mockNow - 3600000),
-        mockMsg('assistant', '## 分析结果\n\n- 找到 3 个文件\n- 其中 `config.json` 需要修改', mockNow - 3590000),
+        mockMsg('assistant', '## 分析结果\n\n- 找到 3 个文件\n- 其中 `config.json` 需要修改', mockNow - 3590000, {
+          reasoning: '先列目录，再读 config。',
+          reasoningKind: 'summary',
+          responseId: 'resp-mock-1',
+          toolCalls: [
+            {
+              id: 'tc-mock-1',
+              name: 'web_search',
+              args: '{"query":"halo config"}',
+              ok: true,
+              output: 'mock output',
+              kind: 'unknown',
+              rawType: 'web_search',
+              payload: null,
+            },
+          ],
+        }),
       ],
     },
   ],
@@ -91,9 +111,21 @@ function mockSummary(s: MockSessionData): unknown {
   };
 }
 
-function mockMessageViews(s: MockSessionData): unknown[] {
-  return s.messages.map((m) => ({ id: m.id, role: m.role, text: m.text, tsMs: m.tsMs, hasImages: false, attachmentCount: 0 }));
-}
+ function mockMessageViews(s: MockSessionData): unknown[] {
+   return s.messages.map((m) => ({
+     id: m.id,
+     role: m.role,
+     text: m.text,
+     tsMs: m.tsMs,
+     hasImages: false,
+     attachmentCount: 0,
+     // P13 responses 示例字段：缺省回落由 normalizeMessage 保证（reasoningKind 缺省 full）。
+     ...(m.reasoning !== undefined ? { reasoning: m.reasoning } : {}),
+     ...(m.reasoningKind !== undefined ? { reasoningKind: m.reasoningKind } : {}),
+     ...(m.responseId !== undefined ? { responseId: m.responseId } : {}),
+     ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
+   }));
+ }
 
 /** Mock 用户发言 / 回放落盘：追加进当前会话，切走切回仍在。 */
 export function mockAppendMessage(role: string, text: string): void {
@@ -179,6 +211,15 @@ function mockSettings(): unknown {
             contextWindow: 128000,
             maxTokens: null,
             acceptsImages: true,
+            includeReasoningHistory: true,
+          },
+          {
+            id: 'deepseek-reasoner',
+            displayName: 'deepseek-reasoner',
+            protocol: 'responses',
+            contextWindow: 128000,
+            maxTokens: null,
+            acceptsImages: false,
             includeReasoningHistory: true,
           },
         ],

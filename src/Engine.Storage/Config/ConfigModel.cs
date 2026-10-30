@@ -44,7 +44,7 @@ public sealed class ModelConfig
 {
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("display_name")] public string? DisplayName { get; set; }
-    /// <summary>chat 可用；responses 保留枚举但前端 disabled、引擎拒绝执行。</summary>
+    /// <summary>chat / responses 均可用。</summary>
     [JsonPropertyName("protocol")] public string Protocol { get; set; } = "chat";
     [JsonPropertyName("context_window")] public int? ContextWindow { get; set; }
     [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }

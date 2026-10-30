@@ -47,7 +47,6 @@ const weakInfo = computed(() => {
   if (unconfigured.value) return '';
   const parts: string[] = [];
   if (session.contextWindow) parts.push(formatCtx(session.contextWindow));
-  if (session.protocol) parts.push(session.protocol);
   return parts.join(' · ');
 });
 
@@ -176,6 +175,12 @@ onBeforeUnmount(() => {
         </HButton>
       </HTooltip>
       <span v-if="weakInfo" class="trigger-weak">{{ weakInfo }}</span>
+      <span
+        v-if="!unconfigured && session.protocol"
+        class="proto-badge"
+        :class="{ resp: session.protocol === 'responses' }"
+        :title="session.protocol === 'responses' ? 'Responses 协议（走 /responses 路径）' : 'Chat 协议（走 /chat/completions 路径）'"
+      >{{ session.protocol === 'responses' ? 'resp' : 'chat' }}</span>
     </div>
     <div v-if="open" class="modelbar-pop">
       <ModelSelectorPanel

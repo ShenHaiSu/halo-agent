@@ -44,13 +44,21 @@ describe('validateProvidersTree', () => {
     const t = normalizeProvidersTree({ activeProvider: 'empty', activeModel: 'x', providers: RAW.providers });
     expect(validateProvidersTree(t).some((e) => e.field === 'active')).toBe(true);
   });
-  it('responses 直接 422（后端兜底，前端已 disabled）', () => {
-    const bad = normalizeProvidersTree({
+  it('responses 协议放行（chat/responses 均可保存）', () => {
+    const t = normalizeProvidersTree({
       activeProvider: 'deepseek',
       activeModel: 'm',
       providers: [{ id: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', models: [{ id: 'm', protocol: 'responses' }] }],
     });
-    expect(bad.providers[0]!.models[0]!.protocol).toBe('responses');
+    expect(t.providers[0]!.models[0]!.protocol).toBe('responses');
+    expect(validateProvidersTree(t).filter((e) => e.field === 'protocol')).toEqual([]);
+  });
+  it('未知协议仍拒绝保存', () => {
+    const bad = normalizeProvidersTree({
+      activeProvider: 'deepseek',
+      activeModel: 'm',
+      providers: [{ id: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', models: [{ id: 'm', protocol: 'grpc' }] }],
+    });
     expect(validateProvidersTree(bad).some((e) => e.field === 'protocol')).toBe(true);
   });
   it('左栏计数=providers 长度', () => {

@@ -20,6 +20,8 @@ public sealed record TurnFinishedPayload
     public bool Truncated { get; init; }
     /// <summary>结束原因（可为空）。</summary>
     public string? Reason { get; init; }
+    /// <summary>诊断用 response.id，不做链逻辑依赖。</summary>
+    public string? ResponseId { get; init; }
 }
 
 /// <summary>text.delta 载荷。</summary>
@@ -34,6 +36,8 @@ public sealed record ReasoningDeltaPayload
 {
     /// <summary>增量文本。</summary>
     public string Text { get; init; } = "";
+    /// <summary>推理种类：full | summary。缺省 full。</summary>
+    public string? Kind { get; init; }
 }
 
 /// <summary>tool.started 载荷。</summary>
@@ -47,6 +51,10 @@ public sealed record ToolStartedPayload
     public string Args { get; init; } = "";
     /// <summary>空闲毫秒数（可为空）。</summary>
     public long? IdleMs { get; init; }
+    /// <summary>工具种类：function | unknown。缺省 function。</summary>
+    public string? Kind { get; init; }
+    /// <summary>原生输出类型。</summary>
+    public string? RawType { get; init; }
 }
 
 /// <summary>tool.finished 载荷。</summary>

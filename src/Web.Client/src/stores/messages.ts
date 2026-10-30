@@ -8,40 +8,49 @@
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 
-export interface ToolCallInfo {
-  id: string;
-  name: string;
-  arguments: string;
-  result?: string;
-  ok?: boolean;
-  status: 'pending' | 'running' | 'awaiting-user' | 'done' | 'error' | 'cancelled';
-  output?: string;
-  alertLevel?: number;
-  startedAt?: number;
-  durationMs?: number;
-}
+ export type ToolCallKind = 'function' | 'unknown';
+ export type ReasoningKind = 'full' | 'summary';
 
-export interface MessageItem {
-  id: string;
-  role: MessageRole;
-  content: string;
-  reasoning?: string;
-  toolCalls?: ToolCallInfo[];
-  toolCallId?: string;
-  ts: number;
-  streaming?: boolean;
-  truncatedByLength?: boolean;
-  truncatedByUser?: boolean;
-  injected?: boolean;
-}
+ export interface ToolCallInfo {
+   id: string;
+   name: string;
+   arguments: string;
+   result?: string;
+   ok?: boolean;
+   status: 'pending' | 'running' | 'awaiting-user' | 'done' | 'error' | 'cancelled';
+   output?: string;
+   alertLevel?: number;
+   startedAt?: number;
+   durationMs?: number;
+   kind?: ToolCallKind;
+   rawType?: string | null;
+   payload?: Record<string, unknown> | null;
+ }
 
-/**
- * P08-fix 02 唯一适配函数：消化后端 ToolCallView{args,output} 与前端 ToolCallInfo{arguments,result} 的字段分歧。
- * - args ?? arguments → arguments（缺省 '{}'，保证 ToolCardBody 的 JSON.parse 与 summarizeArgs 不空）
- * - output → output + result 双写（result ?? output，保证历史卡片结果区有内容）
- * - ok 透传（boolean 才保留，否则 undefined，deriveState 才能正确判 error/done）
- * - status 恒 'done'，alertLevel 缺省 0
- */
+ export interface MessageItem {
+   id: string;
+   role: MessageRole;
+   content: string;
+   reasoning?: string;
+   reasoningKind?: ReasoningKind;
+   responseId?: string | null;
+   toolCalls?: ToolCallInfo[];
+   toolCallId?: string;
+   ts: number;
+   streaming?: boolean;
+   truncatedByLength?: boolean;
+   truncatedByUser?: boolean;
+   injected?: boolean;
+ }
+
+ /**
+  * P08-fix 02 唯一适配函数：消化后端 ToolCallView{args,output} 与前端 ToolCallInfo{arguments,result} 的字段分歧。
+  * - args ?? arguments → arguments（缺省 '{}'，保证 ToolCardBody 的 JSON.parse 与 summarizeArgs 不空）
+  * - output → output + result 双写（result ?? output，保证历史卡片结果区有内容）
+  * - ok 透传（boolean 才保留，否则 undefined，deriveState 才能正确判 error/done）
+  * - kind/rawType/payload 显式读取并原样透传（kind 缺省 'function'，rawType/payload 缺省 null）
+  * - status 恒 'done'，alertLevel 缺省 0
+  */
 export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   return (raw as Array<Record<string, unknown>>).map((tc) => {
@@ -67,16 +76,22 @@ export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
     if (!args) args = '{}';
     const output =
       typeof o.output === 'string' ? o.output : typeof o.result === 'string' ? (o.result as string) : undefined;
-    return {
-      id: String(o.id ?? ''),
-      name: String(o.name ?? ''),
-      arguments: args,
-      result: output,
-      ok: typeof o.ok === 'boolean' ? (o.ok as boolean) : undefined,
-      status: 'done' as const,
-      output,
-      alertLevel: typeof o.alertLevel === 'number' ? (o.alertLevel as number) : 0,
-    };
+     return {
+       id: String(o.id ?? ''),
+       name: String(o.name ?? ''),
+       arguments: args,
+       result: output,
+       ok: typeof o.ok === 'boolean' ? (o.ok as boolean) : undefined,
+       status: 'done' as const,
+       output,
+       alertLevel: typeof o.alertLevel === 'number' ? (o.alertLevel as number) : 0,
+       kind: o.kind === 'unknown' ? 'unknown' : 'function',
+       rawType: typeof o.rawType === 'string' ? (o.rawType as string) : null,
+       payload:
+         o.payload !== null && typeof o.payload === 'object' && !Array.isArray(o.payload)
+           ? (o.payload as Record<string, unknown>)
+           : null,
+     };
   });
 }
 
@@ -124,34 +139,37 @@ export const useMessagesStore = defineStore('messages', () => {
           : Array.isArray(m.content)
             ? (m.content as Array<{ text?: string }>).map((p) => p.text ?? '').join('')
             : '';
-    const toolCalls = Array.isArray(m.tool_calls)
-      ? (m.tool_calls as Array<Record<string, unknown>>).map((tc) => {
-          const fn = (tc.function ?? {}) as Record<string, unknown>;
-          return {
-            id: String(tc.id ?? ''),
-            name: String(fn.name ?? ''),
-            arguments:
-              typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
-            status: 'done' as const,
-          };
-        })
-      : normalizeToolCalls(m.toolCalls);
+     const toolCalls = Array.isArray(m.tool_calls)
+       ? (m.tool_calls as Array<Record<string, unknown>>).map((tc) => {
+           const fn = (tc.function ?? {}) as Record<string, unknown>;
+           return {
+             id: String(tc.id ?? ''),
+             name: String(fn.name ?? ''),
+             arguments:
+               typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
+             status: 'done' as const,
+             kind: 'function' as const,
+           };
+         })
+       : normalizeToolCalls(m.toolCalls);
 
-    return {
-      id: typeof m.id === 'string' ? m.id : nextId(role),
-      role,
-      content,
-      reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
-      toolCalls,
-      toolCallId: typeof m.tool_call_id === 'string' ? m.tool_call_id : undefined,
-      ts:
-        typeof m.ts === 'number'
-          ? m.ts
-          : typeof m.tsMs === 'number'
-            ? (m.tsMs as number)
-            : Date.now(),
-      injected: m.injected === true,
-    };
+     return {
+       id: typeof m.id === 'string' ? m.id : nextId(role),
+       role,
+       content,
+       reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
+       reasoningKind: m.reasoningKind === 'summary' ? 'summary' : 'full',
+       responseId: typeof m.responseId === 'string' ? (m.responseId as string) : undefined,
+       toolCalls,
+       toolCallId: typeof m.tool_call_id === 'string' ? m.tool_call_id : undefined,
+       ts:
+         typeof m.ts === 'number'
+           ? m.ts
+           : typeof m.tsMs === 'number'
+             ? (m.tsMs as number)
+             : Date.now(),
+       injected: m.injected === true,
+     };
   }
 
   function append(msg: Omit<MessageItem, 'id' | 'ts'> & { id?: string; ts?: number }): string {
@@ -179,22 +197,32 @@ export const useMessagesStore = defineStore('messages', () => {
     target.reasoning = (target.reasoning ?? '') + text;
   }
 
-  function ensureToolCall(messageId: string, toolCallId: string, name: string, args: string): void {
-    const msg = items.value.find((m) => m.id === messageId);
-    if (!msg) return;
-    msg.toolCalls ??= [];
-    if (!msg.toolCalls.some((t) => t.id === toolCallId)) {
-      msg.toolCalls.push({
-        id: toolCallId,
-        name,
-        arguments: args,
-        status: 'running',
-        output: '',
-        alertLevel: 0,
-        startedAt: Date.now(),
-      });
-    }
-  }
+   function ensureToolCall(
+     messageId: string,
+     toolCallId: string,
+     name: string,
+     args: string,
+     kind?: string,
+     rawType?: string,
+   ): void {
+     const msg = items.value.find((m) => m.id === messageId);
+     if (!msg) return;
+     msg.toolCalls ??= [];
+     if (!msg.toolCalls.some((t) => t.id === toolCallId)) {
+       msg.toolCalls.push({
+         id: toolCallId,
+         name,
+         arguments: args,
+         status: 'running',
+         output: '',
+         alertLevel: 0,
+         startedAt: Date.now(),
+         kind: kind === 'unknown' ? 'unknown' : 'function',
+         rawType: typeof rawType === 'string' ? rawType : null,
+         payload: null,
+       });
+     }
+   }
 
   function patchToolCall(messageId: string, toolCallId: string, p: Partial<ToolCallInfo>): void {
     const msg = items.value.find((m) => m.id === messageId);

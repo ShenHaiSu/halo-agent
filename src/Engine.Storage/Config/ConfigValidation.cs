@@ -77,8 +77,8 @@ public static class ConfigValidation
                 if (!mids.Add(m.Id))
                     errs.Add(new(pid, m.Id, "id", "model.id 在同一 provider 内必须唯一"));
                 var proto = (m.Protocol ?? "chat").ToLowerInvariant();
-                if (proto != "chat")
-                    errs.Add(new(pid, m.Id, "protocol", "仅 chat 可保存（responses 尚未支持）"));
+                if (proto != "chat" && proto != "responses")
+                    errs.Add(new(pid, m.Id, "protocol", "protocol 须为 chat 或 responses"));
                 if (m.ContextWindow is not null && (m.ContextWindow < 1000 || m.ContextWindow > 2_000_000))
                     errs.Add(new(pid, m.Id, "contextWindow", "contextWindow 须为 null 或 1000~2000000"));
                 if (m.MaxTokens is not null && (m.MaxTokens < 1 || m.MaxTokens > 128_000))

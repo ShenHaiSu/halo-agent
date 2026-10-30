@@ -201,7 +201,22 @@ public interface ILlmClient
         Action<StreamEvent> onEvent,
         CancellationToken ct,
         string? sessionId = null);
-
+    Task<ResponsesReply> ResponsesAsync(
+        string? previousResponseId,
+        string? instructions,
+        IReadOnlyList<object> input,
+        IReadOnlyList<ResponsesToolDef>? tools,
+        CancellationToken ct,
+        string? sessionId = null);
+    Task<ResponsesReply> ResponsesStreamAsync(
+        string? previousResponseId,
+        string? instructions,
+        IReadOnlyList<object> input,
+        IReadOnlyList<ResponsesToolDef>? tools,
+        Action<StreamEvent> onEvent,
+        CancellationToken ct,
+        string? sessionId = null);
+    object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream);
     Task ValidateAsync(CancellationToken ct);
     Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct);
     void Reconfigure(LlmConfig cfg);

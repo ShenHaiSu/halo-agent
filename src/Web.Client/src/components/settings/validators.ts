@@ -73,3 +73,12 @@ export function validateNetworkForm(f: { mode: string; url: string; retry: numbe
     errs.push({ field: 'retry', message: '重试次数需在 0 ~ 8 之间' });
   return errs;
 }
+
+ /** P13 responses：模型协议白名单（chat/responses 放行，其余禁用）。 */
+ export const SUPPORTED_MODEL_PROTOCOLS = ['chat', 'responses'] as const;
+ export type SupportedModelProtocol = (typeof SUPPORTED_MODEL_PROTOCOLS)[number];
+
+ /** 模型协议是否可选（缺省按 chat 理解）。 */
+ export function isSupportedModelProtocol(p: string): boolean {
+   return (SUPPORTED_MODEL_PROTOCOLS as readonly string[]).includes(p);
+ }

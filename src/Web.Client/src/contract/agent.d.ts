@@ -17,6 +17,9 @@ export interface ToolCallView {
   args?: string
   ok?: boolean | null
   output?: string | null
+  kind?: "function" | "unknown"
+  rawType?: string | null
+  payload?: Record<string, unknown> | null
 }
 
 /** MessageView */
@@ -30,6 +33,8 @@ export interface MessageView {
   tsMs?: number
   hasImages?: boolean
   attachmentCount?: number
+  reasoningKind?: "full" | "summary"
+  responseId?: string | null
 }
 
 /** SessionSummary */
@@ -634,6 +639,7 @@ export interface HaloEventPayloads {
   text?: string
   truncated?: boolean
   reason?: string | null
+  responseId?: string | null
 }
   /** text.delta */
   'text.delta': {
@@ -642,6 +648,7 @@ export interface HaloEventPayloads {
   /** reasoning.delta */
   'reasoning.delta': {
   text?: string
+  kind?: "full" | "summary"
 }
   /** tool.started */
   'tool.started': {
@@ -649,6 +656,8 @@ export interface HaloEventPayloads {
   name?: string
   args?: string
   idleMs?: number | null
+  kind?: "function" | "unknown"
+  rawType?: string | null
 }
   /** tool.finished */
   'tool.finished': {

@@ -4,7 +4,7 @@
 import { computed, ref } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 
-const props = defineProps<{ text: string; live: boolean }>();
+const props = defineProps<{ text: string; live: boolean; kind?: 'full' | 'summary' }>();
 
 const open = ref(false);
 
@@ -34,7 +34,7 @@ const meta = computed(() =>
       @click="open = !open"
     >
       <HaloIcon :name="open ? 'chevron-down' : 'chevron-right'" :size="14" />
-      <span class="reasoning-title">思考过程</span>
+      <span class="reasoning-title">{{ kind === 'summary' ? '思考摘要' : '思考过程' }}</span>
       <span class="reasoning-meta">{{ meta }}</span>
     </button>
     <div v-if="open" class="reasoning-body">

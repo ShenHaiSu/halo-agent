@@ -86,6 +86,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private long? _lastPromptTokens;
     private int _roundUsed;
     private int _roundLimit;
+    private string? _lastResponseId;
+    private int _responsesSentCount;
 
     private const int RepeatWarn = 3;
     private const int RepeatAbort = 6;
@@ -157,6 +159,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             AcceptsImages = resolved.AcceptsImages,
             IncludeReasoningHistory = resolved.IncludeReasoningHistory,
         });
+        string oldProto, oldModel, oldProv;
+        lock (_lock) { oldProto = _activeProtocol; oldModel = _activeModelId; oldProv = _activeProviderId; }
         lock (_lock)
         {
             _globalProxyUrl = resolved.GlobalProxyUrl;
@@ -176,12 +180,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             _maxTurns = resolved.MaxTurns;
             _retry = resolved.Retry;
             _persona = resolved.Persona ?? "";
-
             if (_messages.Count > 0 && _messages[0].Role == Role.System)
                 _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
                     _cwd, _mode, _store.SessionId, _persona, _dataDir));
-
         }
+        if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
+            ClearResponseChain();
     }
 
     /// <summary>设置全局代理（非模型链路用）。</summary>
@@ -208,7 +212,19 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeApiKeySet = false;
              _activeConfigured = false;
          }
+         ClearResponseChain();
      }
+    /// <summary>P13 链管理：清链（内存 + 落盘同步）。</summary>
+    public void ClearResponseChain()
+    {
+        lock (_lock) { _lastResponseId = null; _responsesSentCount = 0; }
+        try { _store.SaveResponseId(null); } catch { }
+    }
+    private void SetResponseId(string? id)
+    {
+        lock (_lock) { _lastResponseId = id; }
+        try { _store.SaveResponseId(id); } catch { }
+    }
      /// <summary>P12-02：setActive 成功后经存量 notice 事件提示（不新增事件 kind，不改契约）。</summary>
      public async Task PublishAgentChangedAsync(string text, CancellationToken ct)
      {
@@ -478,8 +494,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     Limit = _maxTurns == 0 ? 0 : (int)budget,
                 }, ct).ConfigureAwait(false);
 
-            // ===== 调模型（含弱网重试）=====
-            var reply = await ChatWithRetryAsync(tools, ct).ConfigureAwait(false);
+            // ===== 调模型（含弱网重试，D2=B 按协议显式分流）=====
+            bool isResponses;
+            lock (_lock) isResponses = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
+            var reply = isResponses ? await ResponsesWithRetryAsync(tools, ct).ConfigureAwait(false) : await ChatWithRetryAsync(tools, ct).ConfigureAwait(false);
 
             // ===== 累积用量 =====
             if (!reply.Usage.IsEmpty)
@@ -638,6 +656,110 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             _bus.FlushNow();   // 保证最后一个 token 不丢
             return reply;
         }
+    }
+    private async Task<AssistantReply> ResponsesWithRetryAsync(List<object> chatTools, CancellationToken ct)
+    {
+        int attempt = 0;
+        bool rebuilt = false;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            string? prev;
+            List<ChatMessage> snap;
+            bool includeReasoning;
+            bool acceptsImages;
+            lock (_lock) { prev = _lastResponseId; snap = _messages.ToList(); includeReasoning = _activeIncludeReasoning; acceptsImages = _activeAcceptsImages; }
+            var stripped = MessageAdapters.StripReasoning(snap, includeReasoning).ToList();
+            foreach (var m in stripped) MessageAdapters.ValidateImages(m, acceptsImages);
+            var (instructions, fullInput) = ResponsesTranslators.TranslateMessages(stripped);
+            List<object> input;
+            string? sendPrev = prev;
+            int sent;
+            lock (_lock) sent = _responsesSentCount;
+            if (sendPrev is null) { input = fullInput; }
+            else
+            {
+                int total = stripped.Count;
+                int from = System.Math.Min(sent, total);
+                var delta = stripped.Skip(from).ToList();
+                var inc = new List<object>();
+                foreach (var m in delta)
+                {
+                    if (m.Role == Role.User) { var (_, one) = ResponsesTranslators.TranslateMessages(new[] { m }); inc.AddRange(one); }
+                    else if (m.Role == Role.Tool) { var (_, one) = ResponsesTranslators.TranslateMessages(new[] { m }); inc.AddRange(one); }
+                }
+                input = inc.Count > 0 ? inc : fullInput.TakeLast(1).ToList();
+                if (instructions is not null && from == 0) { }
+                else instructions = null;
+            }
+            var respTools = ResponsesTranslators.TranslateToolDefs(chatTools);
+            ResponsesReply r;
+            try
+            {
+                r = await _llm.ResponsesStreamAsync(sendPrev, instructions, input, respTools, evt =>
+                {
+                    switch (evt)
+                    {
+                        case StreamEvent.TextDelta td: _bus.PublishDelta(EventKinds.TextDelta, td.Text); break;
+                        case StreamEvent.ReasoningDelta rd: _bus.PublishReasoningDelta(rd.Text, "summary"); break;
+                        default: break;
+                    }
+                }, ct, _store.SessionId).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { _bus.FlushNow(); throw; }
+            catch (EndpointStatusException ese) when (!rebuilt && ese.Status == 404 && (ese.Body.Contains("response_not_found") || ese.Body.Contains("expired") || ese.Body.Contains("invalid_previous_response")))
+            {
+                ClearResponseChain();
+                rebuilt = true;
+                continue;
+            }
+            catch (Exception ex)
+            {
+                var reason = RetryPolicy.GetRetryReason(ex);
+                if (reason is null || attempt >= _retry) throw;
+                attempt++;
+                await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
+                continue;
+            }
+            if (r.ResponseId is null)
+            {
+                SetResponseId(null);
+                lock (_lock) _responsesSentCount = snap.Count;
+                try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "服务端未返回 response.id，已断链重建", Level = "info" }, ct).ConfigureAwait(false); } catch { }
+            }
+            else
+            {
+                SetResponseId(r.ResponseId);
+                lock (_lock) _responsesSentCount = snap.Count + 1;
+                try
+                {
+                    var hist = _store.LoadResponseId();
+                    if (string.IsNullOrEmpty(hist)) { try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "已重建上下文链", Level = "info" }, ct).ConfigureAwait(false); } catch { } }
+                }
+                catch { }
+            }
+            var reply = ToAssistantReply(r);
+            if (RetryPolicy.IsEmptyReply(reply))
+            {
+                if (attempt >= _retry) { _bus.FlushNow(); return reply; }
+                attempt++;
+                await HandleRetryAsync(attempt, "空回复（模型没吐任何内容）", ct).ConfigureAwait(false);
+                continue;
+            }
+            _bus.FlushNow();
+            return reply;
+        }
+    }
+    private static AssistantReply ToAssistantReply(ResponsesReply r)
+    {
+        var calls = new List<ToolCall>(r.ToolCalls);
+        foreach (var u in r.UnknownOutputs)
+        {
+            var id = "call_" + Guid.NewGuid().ToString("N")[..8];
+            var packed = ResponsesTranslators.PackUnknownArgs(u.RawType, u.RawJson.GetRawText());
+            calls.Add(new ToolCall { Id = id, Type = "function", Function = new FunctionCall { Name = u.RawType, Arguments = packed } });
+        }
+        return new AssistantReply { Content = r.Content, ReasoningContent = r.ReasoningContent, ToolCalls = calls, Usage = r.Usage, TruncatedByLength = r.TruncatedByLength };
     }
 
     private async Task HandleRetryAsync(int attempt, string reason, CancellationToken ct)
@@ -882,11 +1004,22 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             ChatMessage.User(body),
         };
 
-        var reply = await _llm.ChatAsync(summaryMessages, null, ct, _store.SessionId).ConfigureAwait(false);
-        var summary = reply.Content?.Trim();
+        string? summary;
+        bool isResp;
+        lock (_lock) isResp = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
+        if (isResp)
+        {
+            var (instr, inp) = ResponsesTranslators.TranslateMessages(new[] { ChatMessage.System("你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n- 任务目标与当前进展到哪一步\n- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n- 用户的明确决定、偏好与要求\n- 尚未完成、需要继续处理的事项\n只输出要点，不要复述对话原文，不要添加对话里没有的内容。"), ChatMessage.User(body) });
+            var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId).ConfigureAwait(false);
+            summary = rr.Content?.Trim();
+        }
+        else
+        {
+            var reply = await _llm.ChatAsync(summaryMessages, null, ct, _store.SessionId).ConfigureAwait(false);
+            summary = reply.Content?.Trim();
+        }
         if (string.IsNullOrEmpty(summary))
             throw new InvalidOperationException("压缩模型没返回内容，请再试一次");
-
         var newMessages = new List<ChatMessage>
         {
             system,
@@ -901,6 +1034,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             _messages.Clear();
             _messages.AddRange(newMessages);
         }
+        ClearResponseChain();
 
         await _bus.PublishStateAsync(EventKinds.SessionCompacted,
             new SessionCompactedPayload
@@ -926,6 +1060,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             PushSystemPromptLocked();
         }
         _store.Clear();
+        ClearResponseChain();
         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
     }
 
@@ -938,8 +1073,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             _commandAlways = false;
         }
         _store.StartNew();
+        ClearResponseChain();
         lock (_lock) PushSystemPromptLocked();
-
         _ = PublishSessionInfoAsync(CancellationToken.None);
         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
     }
@@ -947,17 +1082,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     public (int count, int repaired) LoadHistory(string path)
     {
         var (meta, messages, repaired) = SessionStore.ReadHistory(path);
-
         _store.AttachTo(path);
-
         lock (_lock)
         {
             _messages.Clear();
             PushSystemPromptLocked();
             _messages.AddRange(MessageAdapters.ToChatMessages(messages));
         }
+        ClearResponseChain();
         _ = PublishSessionInfoAsync(CancellationToken.None);
-
         return (messages.Count, repaired);
     }
 
@@ -1111,13 +1244,17 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private async Task EmitToolStartedAsync(
         string callId, string name, string args, long? idleMs, CancellationToken ct)
     {
+        var (k, rt, _) = HaloAgent.Engine.Core.Llm.ResponsesTranslators.UnpackUnknownArgs(args);
+        bool isUnknown = k == "unknown";
         await _bus.PublishStateAsync(EventKinds.ToolStarted,
             new ToolStartedPayload
             {
                 ToolCallId = callId,
-                Name = name,
+                Name = isUnknown ? (rt ?? name) : name,
                 Args = args,
                 IdleMs = idleMs,
+                Kind = isUnknown ? "unknown" : "function",
+                RawType = rt,
             }, ct).ConfigureAwait(false);
     }
 
@@ -1136,12 +1273,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct)
     {
+        string? rid;
+        lock (_lock) rid = _lastResponseId;
         await _bus.PublishStateAsync(EventKinds.TurnFinished,
             new TurnFinishedPayload
             {
                 TurnId = turnId,
                 Text = text,
                 Truncated = truncated,
+                ResponseId = rid,
             }, ct).ConfigureAwait(false);
 
         await PublishBusyAsync(false, ct).ConfigureAwait(false);

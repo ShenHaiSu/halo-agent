@@ -109,7 +109,7 @@ public static class EngineAssembly
         if (resolved is not null)
         {
             try { session.ReconfigureActive(resolved); }
-            catch (NotSupportedException) { /* responses 种子不出现；启动容错 */ }
+            catch (NotSupportedException) { session.ClearActive(); }
         }
         else
         {

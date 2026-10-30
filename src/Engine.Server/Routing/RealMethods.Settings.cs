@@ -161,13 +161,13 @@ public sealed partial class RealMethods
          // active 指针沿用旧值；Resolve 失败（删了 active 目标/旧形状）则显式置未配置并 warning。
          try
          {
-             var resolvedSave = ConfigStore.Resolve(next);
-             try { _session.ReconfigureActive(resolvedSave); }
-             catch (NotSupportedException)
-             {
-                 _session.ClearActive();
-                 warnings.Add("已保存，但生效模型协议暂不支持，已置为未配置态，请重选 chat 模型");
-             }
+            var resolvedSave = ConfigStore.Resolve(next);
+            try { _session.ReconfigureActive(resolvedSave); }
+            catch (NotSupportedException ex)
+            {
+                _session.ClearActive();
+                warnings.Add("已保存，但生效模型协议暂不支持，已置为未配置态（" + ex.Message + "）");
+            }
          }
          catch (Exception ex)
          {
@@ -264,8 +264,6 @@ public sealed partial class RealMethods
         var mdef = pdef.Models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.Ordinal));
         if (mdef is null)
             throw RpcException.ParamsInvalid($"服务商「{providerId}」下未知模型: {modelId}");
-        if (string.Equals((mdef.Protocol ?? "chat").ToLowerInvariant(), "responses", StringComparison.Ordinal))
-            throw new RpcException(RpcError.NotSupported, "Responses 协议尚未支持（当前仅 chat 可用）。");
 
         cfg.ActiveProvider = providerId;
         cfg.ActiveModel = modelId;

@@ -29,12 +29,18 @@ public class P10LlmTests
     [Fact]
     public void Protocol_responses_throws_NotSupported()
     {
-        Assert.Throws<NotSupportedException>(() => Client(new LlmConfig
+        // P13 D6 一次性放开：构造允许 responses；按协议显式分流，错配才抛。
+        using var c = Client(new LlmConfig
         {
             BaseUrl = "http://localhost:11434/v1", Model = "m", Protocol = LlmProtocol.Responses,
-        }));
+        });
+        Assert.Throws<NotSupportedException>(() => c.BuildBody(new[] { ChatMessage.User("hi") }, null, stream: false));
+        var rb = c.BuildResponsesBody(null, null, Array.Empty<object>(), null, stream: false);
+        Assert.NotNull(rb);
+        // chat 协议调 Responses* 应抛
+        using var c2 = Client(new LlmConfig { BaseUrl = "http://x/v1", Model = "m", Protocol = LlmProtocol.Chat });
+        Assert.Throws<NotSupportedException>(() => c2.BuildResponsesBody(null, null, Array.Empty<object>(), null, stream: false));
     }
-
     [Fact]
     public void BuildBody_max_tokens_present_and_absent()
     {

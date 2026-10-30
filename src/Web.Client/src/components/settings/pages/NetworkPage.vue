@@ -110,6 +110,13 @@ onMounted(() => void load());
           <HRadio value="manual" label="自定义" />
         </HRadioGroup>
       </SettingRow>
+      <SettingRow label="协议" desc="chat 与 responses 均可用；responses 在各接口地址下走 /responses 路径">
+        <div class="prov-proto">
+          <span class="proto-badge">chat</span>
+          <span class="proto-badge resp">resp</span>
+          <span class="hint">模型协议在“模型”页按模型设置（radio），此处仅展示两种协议均已放行</span>
+        </div>
+      </SettingRow>
       <SettingRow v-if="mode === 'manual'" label="代理地址" desc="仅自定义模式需要，http(s):// 开头" required :error="fieldErrors['url'] ?? null">
         <HInput :model-value="url" placeholder="http://127.0.0.1:7890" :error="!!fieldErrors['url']" @update:model-value="(v: string) => { url = v; markDirty(); }" />
       </SettingRow>
@@ -144,6 +151,8 @@ onMounted(() => void load());
 .prov-sub { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
 .tag { font-size: var(--text-xs); background: hsl(var(--bg-muted)); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
 .prov-empty { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
+ .prov-proto { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+ .prov-proto .hint { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
 .page-actions { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; position: sticky; bottom: 0; background: hsl(var(--bg)); border-top: 1px solid hsl(var(--border-subtle)); }
 .dirty-hint { font-size: var(--text-xs); color: hsl(var(--warning)); }
 </style>

@@ -27,7 +27,7 @@ const PRIORITY: Record<string, string[]> = {
 
 const MAX_SUMMARY = 80;
 
-export function summarizeArgs(name: string, rawArgs: string): string {
+export function summarizeArgs(name: string, rawArgs: string, kind?: string): string {
   let obj: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(rawArgs || '{}');
@@ -40,7 +40,9 @@ export function summarizeArgs(name: string, rawArgs: string): string {
 
   if (!obj) return truncate(rawArgs || '（无参数）', MAX_SUMMARY);
 
-  const keys = PRIORITY[name] ?? [];
+  // unknown 工具短路：不走名称映射（否则如 web_search 会命中中文“联网搜索”并与“标题=rawType”矛盾）。
+  // 分流键优先级：kind 优先于 name。
+  const keys = kind === 'unknown' ? [] : (PRIORITY[name] ?? []);
   for (const k of keys) {
     const v = obj[k];
     if (typeof v === 'string' && v.trim()) return truncate(v, MAX_SUMMARY);

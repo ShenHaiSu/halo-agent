@@ -9,7 +9,8 @@ import SecretField from '../fields/SecretField.vue';
 import HeadersEditor, { type HeaderRow } from '../fields/HeadersEditor.vue';
 import ModelProbe from '../fields/ModelProbe.vue';
 import HInput from '@/components/base/HInput.vue';
-import HSelect from '@/components/base/HSelect.vue';
+import HRadioGroup from '@/components/base/HRadioGroup.vue';
+import HRadio from '@/components/base/HRadio.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
 import HSwitch from '@/components/base/HSwitch.vue';
@@ -293,7 +294,7 @@ async function save(force = false): Promise<void> {
      tree.value.activeProvider = pid;
      tree.value.activeModel = mid;
      // P12-02：setActive 无事件推送，成功后主动拉快照同步 session（切换器高亮源），
-     // responses 模型保持禁用态、后端 NotSupported 原文透传，不另做引导。
+     // P13：chat/responses 均可设 active（保存校验已放开）。
      try {
        const snap = await transport.request<{ agent?: Record<string, unknown> }>('state.snapshot', null);
        if (snap?.agent && typeof snap.agent === 'object') useSessionStore().applySnapshotAgent(snap.agent);
@@ -356,7 +357,7 @@ onMounted(() => void load());
              <section class="prov-group">
                <SettingRow compact label="注册名称" desc="不可改"><HInput :model-value="selected.id" :disabled="true" @update:model-value="() => {}" /></SettingRow>
                <SettingRow compact label="别称" desc="展示用，可空回落 id"><HInput :model-value="selected.displayName" placeholder="回落 id" @update:model-value="(v: string) => { selected!.displayName = v; markDirty(); }" /></SettingRow>
-            <SettingRow compact label="接口地址" desc="绝对 http(s)，保存时 Trim 并去尾 /" required :error="fieldErrors[`${selected.id}/-.baseUrl`] ?? null">
+            <SettingRow compact label="接口地址" desc="绝对 http(s)，保存时 Trim 并去尾 /；responses 协议在该地址下走 /responses 路径" required :error="fieldErrors[`${selected.id}/-.baseUrl`] ?? null">
               <HInput :model-value="selected.baseUrl" placeholder="https://" @update:model-value="(v: string) => { selected!.baseUrl = v; markDirty(); }" />
             </SettingRow>
             <SettingRow compact label="API Key" desc="保存后不再回显；留空=不改">
@@ -386,18 +387,18 @@ onMounted(() => void load());
               <button class="model-head" @click="m.expanded = !m.expanded">
                 <span>{{ m.id || '(未命名)' }}</span>
                 <span class="prov-sub">{{ m.displayName }}</span>
-                <span class="tag">{{ m.protocol }}</span>
+                <span class="proto-badge" :class="{ resp: m.protocol === 'responses' }">{{ m.protocol === 'responses' ? 'resp' : 'chat' }}</span>
                 <span v-if="selected.id === tree.activeProvider && m.id === tree.activeModel" class="active-dot">●</span>
               </button>
               <div v-if="m.expanded" class="model-body">
-                <SettingRow compact label="实际请求名称" desc="发给 /chat/completions 的 model 字段" required>
+                <SettingRow compact label="实际请求名称" desc="发给模型端点的 model 字段（chat 走 /chat/completions，responses 走 /responses）" required>
                   <HInput :model-value="m.id" placeholder="如 deepseek-chat" @update:model-value="(v: string) => { m.id = v; markDirty(); }" />
                 </SettingRow>
-                <SettingRow compact label="协议" desc="当前仅 chat 可用">
-                  <HSelect :model-value="m.protocol" @update:model-value="(v: string) => { m.protocol = v; markDirty(); }">
-                    <option value="chat">chat</option>
-                    <option value="responses" disabled title="Responses 协议即将支持，当前仅 chat 可用">responses（即将支持）</option>
-                  </HSelect>
+                <SettingRow compact label="协议" desc="chat 与 responses 均可用；responses 在接口地址下走 /responses 路径">
+                  <HRadioGroup :model-value="m.protocol" direction="horizontal" @update:model-value="(v: string | number) => { m.protocol = String(v); markDirty(); }">
+                    <HRadio value="chat" label="chat" />
+                    <HRadio value="responses" label="responses" />
+                  </HRadioGroup>
                 </SettingRow>
                 <SettingRow compact label="别称"><HInput :model-value="m.displayName" @update:model-value="(v: string) => { m.displayName = v; markDirty(); }" /></SettingRow>
                 <SettingRow compact label="上下文最大值" desc="空=未知；点预设或手动输入">
