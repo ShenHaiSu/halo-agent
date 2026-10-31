@@ -120,30 +120,80 @@ public sealed class SessionStore : IDisposable
         }
     }
 
-    private void EnsureWriter(bool headless, string cwd)
-    {
-        if (_writer is not null) return;
-        if (_path is null)
-        {
-            Directory.CreateDirectory(Paths.SessionsDir);
-            _path = Path.Combine(Paths.SessionsDir, SessionId + ".jsonl");
-        }
+     private void EnsureWriter(bool headless, string cwd)
+     {
+         if (_writer is not null) return;
+         if (_path is null)
+         {
+             Directory.CreateDirectory(Paths.SessionsDir);
+             _path = Path.Combine(Paths.SessionsDir, SessionId + ".jsonl");
+         }
 
-        var fresh = !File.Exists(_path) || new FileInfo(_path).Length == 0;
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
-        _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+         var fresh = !File.Exists(_path) || new FileInfo(_path).Length == 0;
+         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+         var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
+         _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
-        if (fresh)
-        {
-            var meta = JsonSerializer.Serialize(new
-            {
-                meta = new { headless, schema = HistorySchema, cwd },
-            }, StorageJson.Compact);
-            _writer.WriteLine(meta);
-            _writer.Flush();
-        }
-    }
+         if (fresh)
+         {
+             var meta = JsonSerializer.Serialize(new
+             {
+                 meta = new { headless, schema = HistorySchema, cwd },
+             }, StorageJson.Compact);
+             _writer.WriteLine(meta);
+             _writer.Flush();
+         }
+     }
+
+     /// <summary>P10-fix3 D2：只换首行 meta.cwd（原子替换）。无文件/0字节则跳过，下次 Record 自然带新 cwd。</summary>
+     public void UpdateCwdAtomic(string newCwd)
+     {
+         string? path;
+         lock (_lock)
+         {
+             path = _path;
+             try { _writer?.Flush(); } catch { }
+             try { _writer?.Dispose(); } catch { }
+             _writer = null;
+         }
+         if (string.IsNullOrEmpty(path)) return;
+         try
+         {
+             if (!File.Exists(path)) return;
+             if (new FileInfo(path).Length == 0) return;
+             var lines = File.ReadAllLines(path, new UTF8Encoding(false));
+             if (lines.Length == 0) return;
+             bool hasMeta = false;
+             try
+             {
+                 using var doc = JsonDocument.Parse(lines[0].Trim());
+                 hasMeta = doc.RootElement.ValueKind == JsonValueKind.Object
+                     && doc.RootElement.TryGetProperty("meta", out _);
+             }
+             catch { }
+             if (!hasMeta) return;
+             HistoryMeta? parsed = null;
+             try { parsed = JsonSerializer.Deserialize<HistoryMeta>(lines[0].Trim(), StorageJson.Compact); } catch { }
+             var headless = parsed?.Meta?.Headless ?? false;
+             var schema = parsed?.Meta?.Schema ?? HistorySchema;
+             var newMeta = JsonSerializer.Serialize(new
+             {
+                 meta = new { headless, schema, cwd = newCwd },
+             }, StorageJson.Compact);
+             lines[0] = newMeta;
+             var dir = Path.GetDirectoryName(path) ?? ".";
+             var tmp = Path.Combine(dir, Path.GetFileName(path) + ".tmp");
+             File.WriteAllLines(tmp, lines, new UTF8Encoding(false));
+             try
+             {
+                 using var fs = new FileStream(tmp, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                 fs.Flush(true);
+             }
+             catch { }
+             File.Replace(tmp, path, null);
+         }
+         catch { }
+     }
 
     /// <summary>
     /// 读取历史文件。返回 (meta, messages)。
@@ -155,11 +205,19 @@ public sealed class SessionStore : IDisposable
         HistoryMeta? meta = null;
         var messages = new List<StoredMessage>();
 
-        if (!File.Exists(path)) return (null, messages, 0);
+         if (!File.Exists(path)) return (null, messages, 0);
 
-        foreach (var rawLine in File.ReadLines(path))
-        {
-            var line = rawLine.Trim();
+         // P10-fix3：允许与追加写句柄并发读（writer 以 FileShare.Read 打开，读端需 ReadWrite 共享）。
+         IEnumerable<string> ReadAllLinesShared(string p)
+         {
+             using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+             using var sr = new StreamReader(fs, new UTF8Encoding(false));
+             string? line;
+             while ((line = sr.ReadLine()) is not null) yield return line;
+         }
+         foreach (var rawLine in ReadAllLinesShared(path))
+         {
+             var line = rawLine.Trim();
             if (line.Length == 0) continue;
 
             JsonDocument? doc = null;

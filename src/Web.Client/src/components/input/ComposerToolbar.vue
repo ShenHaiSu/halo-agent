@@ -11,12 +11,13 @@ defineProps<{
   cwd: string;
 }>();
 
-defineEmits<{
-  mention: [];
-  slash: [];
-  submit: [];
-  cancel: [];
-}>();
+ defineEmits<{
+   mention: [];
+   slash: [];
+   submit: [];
+   cancel: [];
+   pickCwd: [];
+ }>();
 </script>
 
 <template>
@@ -35,7 +36,7 @@ defineEmits<{
       :disabled="askPending"
       @click="$emit('slash')"
     />
-    <span class="cwd" :title="cwd">{{ cwd || '未选择工作目录' }}</span>
+     <button type="button" class="cwd" :title="cwd || '未选择工作目录'" :disabled="busy || askPending" @click="$emit('pickCwd')">{{ cwd || '未选择工作目录' }}</button>
     <span class="bottom-spacer" />
     <StopButton v-if="busy" @click="$emit('cancel')" />
     <HButton
@@ -51,21 +52,39 @@ defineEmits<{
 </template>
 
 <style scoped>
-.composer-bottom {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.cwd {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 40%;
-}
+ .composer-bottom {
+   display: flex;
+   align-items: center;
+   gap: var(--space-1);
+   min-width: 0;
+ }
+ .cwd {
+   font-size: var(--text-2xs);
+   color: hsl(var(--fg-subtle));
+   font-family: var(--font-mono);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+   max-width: 40%;
+   background: transparent;
+   border: 1px solid transparent;
+   border-radius: var(--radius-sm);
+   padding: 2px 6px;
+   cursor: pointer;
+   text-align: left;
+ }
+ .cwd:hover:not(:disabled) {
+   border-color: hsl(var(--border-strong));
+   color: hsl(var(--fg));
+ }
+ .cwd:disabled {
+   cursor: not-allowed;
+   opacity: 0.6;
+ }
+  .cwd:focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 1px;
+  }
 .bottom-spacer {
   flex: 1;
   min-width: 0;

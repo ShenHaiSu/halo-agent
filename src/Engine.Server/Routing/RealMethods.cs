@@ -268,18 +268,42 @@ public sealed partial class RealMethods
         return Task.FromResult<object?>(new OkResult { Ok = true });
     }
 
-    public Task<object?> SessionSetCwdAsync(JsonElement? p, CancellationToken ct)
-    {
-        var path = p?.TryGetProperty("path", out var v) == true ? v.GetString() : null;
-        if (string.IsNullOrWhiteSpace(path)) throw RpcException.ParamsInvalid("path 不能为空");
+     public Task<object?> SessionSetCwdAsync(JsonElement? p, CancellationToken ct)
+     {
+         var path = p?.TryGetProperty("path", out var v) == true ? v.GetString() : null;
+         if (string.IsNullOrWhiteSpace(path)) throw RpcException.ParamsInvalid("path 不能为空");
+         if (_session.IsBusy)
+             throw RpcException.Busy("有回合正在执行，暂不能切换工作目录");
+         var unquoted = UnquoteCwd(path!);
+         if (string.IsNullOrWhiteSpace(unquoted)) throw RpcException.ParamsInvalid("path 不能为空");
+         try { _session.SetCwd(unquoted); }
+         catch (DirectoryNotFoundException ex)
+         {
+             throw new RpcException(RpcError.FsNotFound, ex.Message);
+         }
+         catch (UnauthorizedAccessException ex)
+         {
+             throw new RpcException(RpcError.FsNotFound, "无权限访问: " + ex.Message);
+         }
+         catch (ArgumentException ex)
+         {
+             throw RpcException.ParamsInvalid(ex.Message);
+         }
+         return Task.FromResult<object?>(new { cwd = _session.Cwd });
+     }
 
-        try { _session.SetCwd(path!); }
-        catch (DirectoryNotFoundException ex)
-        {
-            throw new RpcException(RpcError.FsNotFound, ex.Message);
-        }
-        return Task.FromResult<object?>(new { cwd = _session.Cwd });
-    }
+     /// <summary>P10-fix3：去首尾配对引号 + Trim（与前端 unquoteArgs 同口径，后端再兜底一次）。</summary>
+     public static string UnquoteCwd(string raw)
+     {
+         var s = (raw ?? "").Trim();
+         if (s.Length >= 2)
+         {
+             var f = s[0]; var l = s[^1];
+             if ((f == '"' && l == '"') || (f == '\'' && l == '\''))
+                 s = s[1..^1].Trim();
+         }
+         return s;
+     }
 
     public Task<object?> StateSetModeAsync(JsonElement? p, CancellationToken ct)
     {

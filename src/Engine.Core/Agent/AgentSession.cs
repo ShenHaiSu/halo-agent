@@ -258,12 +258,53 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     public void SetMaxTurns(int value) => _maxTurns = Math.Max(0, value);
     public void SetRetry(int value) => _retry = Math.Clamp(value, 0, 8);
 
-    public void SetCwd(string path)
-    {
-        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("目录不存在: " + path);
-        _cwd = Path.GetFullPath(path);
-        lock (_lock) RefreshSystemPrompt();
-    }
+     public void SetCwd(string path)
+     {
+         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path 不能为空");
+         if (path.Contains('\0')) throw new ArgumentException("path 含非法字符");
+         string full;
+         lock (_lock) full = ToolPaths.Resolve(_cwd, path);
+         // GetFullPath 非法输入直接上抛（RealMethods 转 paramsInvalid），见 05。
+         ThrowIfProtectedCwd(full);
+         if (!Directory.Exists(full)) throw new DirectoryNotFoundException("目录不存在: " + path);
+         lock (_lock)
+         {
+             _cwd = full;
+             _fileAlways = false;
+             _commandAlways = false;
+             RefreshSystemPrompt();
+         }
+         try { _store.UpdateCwdAtomic(full); } catch { }
+         _ = _bus.PublishStateAsync(EventKinds.Notice,
+             new NoticePayload { Text = "已切换工作目录，之前的“总是允许”已失效", Level = "info" },
+             CancellationToken.None);
+         _ = PublishSessionInfoAsync(CancellationToken.None);
+     }
+
+     /// <summary>P10-fix3 E：拒绝裸盘符根与系统目录做 cwd（与 ToolPaths.ResolveChecked 同口径）。</summary>
+     internal static void ThrowIfProtectedCwd(string full)
+     {
+         if (full.Length is 2 or 3 && full.Length >= 2 && full[1] == ':')
+             throw new ArgumentException("拒绝将工作目录设到此处: " + full);
+         try
+         {
+             var root = Path.GetPathRoot(full);
+             if (!string.IsNullOrEmpty(root) && string.Equals(root, full, StringComparison.OrdinalIgnoreCase))
+                 throw new ArgumentException("拒绝将工作目录设到此处: " + full);
+         }
+         catch (ArgumentException) { throw; }
+         catch { }
+         var sysRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+         if (!string.IsNullOrEmpty(sysRoot) &&
+             full.StartsWith(sysRoot, StringComparison.OrdinalIgnoreCase))
+             throw new ArgumentException("拒绝将工作目录设到此处: " + full);
+     }
+
+     /// <summary>P10-fix3 C：公开广播（RealMethods 不直接调私有方法）。</summary>
+     public void PublishSessionInfo()
+     {
+         _ = PublishSessionInfoAsync(CancellationToken.None);
+     }
 
 
 
@@ -1079,20 +1120,53 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
     }
 
-    public (int count, int repaired) LoadHistory(string path)
-    {
-        var (meta, messages, repaired) = SessionStore.ReadHistory(path);
-        _store.AttachTo(path);
-        lock (_lock)
-        {
-            _messages.Clear();
-            PushSystemPromptLocked();
-            _messages.AddRange(MessageAdapters.ToChatMessages(messages));
-        }
-        ClearResponseChain();
-        _ = PublishSessionInfoAsync(CancellationToken.None);
-        return (messages.Count, repaired);
-    }
+     public (int count, int repaired) LoadHistory(string path)
+     {
+         var (meta, messages, repaired) = SessionStore.ReadHistory(path);
+         _store.AttachTo(path);
+         var metaCwd = meta?.Meta?.Cwd;
+         bool restored = false;
+         bool metaMissingDir = false;
+         if (!string.IsNullOrWhiteSpace(metaCwd))
+         {
+             string full;
+             try { full = Path.GetFullPath(metaCwd); } catch { full = ""; }
+             if (!string.IsNullOrEmpty(full) && Directory.Exists(full))
+             {
+                 try { ThrowIfProtectedCwd(full); } catch { full = ""; }
+                 if (!string.IsNullOrEmpty(full))
+                 {
+                     lock (_lock)
+                     {
+                         _cwd = full;
+                         _fileAlways = false;
+                         _commandAlways = false;
+                     }
+                     restored = true;
+                 }
+             }
+             else
+             {
+                 metaMissingDir = true;
+             }
+         }
+         lock (_lock)
+         {
+             _messages.Clear();
+             PushSystemPromptLocked();
+             _messages.AddRange(MessageAdapters.ToChatMessages(messages));
+             if (restored) RefreshSystemPrompt();
+         }
+         ClearResponseChain();
+         if (metaMissingDir)
+         {
+             _ = _bus.PublishStateAsync(EventKinds.Notice,
+                 new NoticePayload { Text = "该会话记录的目录已不存在，保持当前目录", Level = "warn" },
+                 CancellationToken.None);
+         }
+         _ = PublishSessionInfoAsync(CancellationToken.None);
+         return (messages.Count, repaired);
+     }
 
     // ============================================================
     //  快照

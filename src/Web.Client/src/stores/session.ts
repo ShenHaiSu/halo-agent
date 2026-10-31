@@ -128,16 +128,18 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  async function setCwd(path: string): Promise<void> {
-    const prev = cwd.value;
-    cwd.value = path;
-    try {
-      await transport.request('session.setCwd', { path });
-    } catch (e) {
-      cwd.value = prev;
-      throw e;
-    }
-  }
+   async function setCwd(path: string): Promise<void> {
+     const prev = cwd.value;
+     cwd.value = path;
+     try {
+       const r = await transport.request<{ cwd?: string }>('session.setCwd', { path });
+       // P10-fix3 02：用引擎返回的规范化路径回填，而非输入原文。
+       if (r && typeof r.cwd === 'string' && r.cwd) cwd.value = r.cwd;
+     } catch (e) {
+       cwd.value = prev;
+       throw e;
+     }
+   }
 
   function restoreMode(): void {
     try {
