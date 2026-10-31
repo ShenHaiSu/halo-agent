@@ -123,10 +123,13 @@ describe('P12 表格结构', () => {
 
 describe('P12 import 治理', () => {
   const root = resolve(__dirname, '../../styles');
-  it('index.css 接回 chat.css；chat.css 无 .md-table-wrap 重复', () => {
+  it('index.css 接回 chat.css；chat.css 基座无 .md-table-wrap 重复（P15 compact 覆盖除外）', () => {
     const index = readFileSync(resolve(root, 'index.css'), 'utf-8');
     const chat = readFileSync(resolve(root, 'chat.css'), 'utf-8');
     expect(index).toContain(`@import './chat.css';`);
-    expect(chat).not.toContain('.md-table-wrap');
+    const base = chat.split('P15 chat-compact')[0]!;
+    expect(base).not.toContain('.md-table-wrap');
+    // P15 compact 段允许覆盖（方案 A，.density-compact 下）。
+    expect(chat).toContain('.msg-inner.density-compact .md-table-wrap');
   });
 });

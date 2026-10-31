@@ -79,83 +79,6 @@ html[data-no-blur='true'] .msg-inner * {
   }
 }
 
-/* ============ P13 responses：原生工具卡（unknown）+ 协议徽标 ============ */
-.unk-card {
-  border: 1px dashed hsl(var(--border));
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: hsl(var(--bg-elevated));
-}
-.unk-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  color: hsl(var(--fg));
-  font-size: var(--text-sm);
-  min-width: 0;
-}
-.unk-head:hover {
-  background: hsl(var(--bg-subtle));
-}
-.unk-icon {
-  color: hsl(var(--fg-muted));
-  flex: none;
-}
-.unk-title {
-  font-weight: 500;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.unk-spacer {
-  flex: 1;
-  min-width: 0;
-}
-.unk-duration {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
-  flex: none;
-}
-.unk-body {
-  border-top: 1px dashed hsl(var(--border));
-  padding: var(--space-2) var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.unk-section-title {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: var(--space-1);
-}
-.unk-pre {
-  margin: 0;
-  padding: var(--space-2);
-  background: hsl(var(--bg-subtle));
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  max-height: 260px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.unk-pending {
-  color: hsl(var(--warning));
-  font-size: var(--text-xs);
-}
 /* 协议徽标：chat/resp（ModelSelector 触发器 + 选择器行共用，变量沿用现有 token） */
 .proto-badge {
   font-size: var(--text-2xs);
@@ -170,4 +93,130 @@ html[data-no-blur='true'] .msg-inner * {
 .proto-badge.resp {
   background: hsl(var(--accent-subtle));
   color: hsl(var(--accent));
+}
+
+/* ============ P15 chat-compact（方案 A：默认态零改动，去类即回滚） ============
+ * 挂载点：MessageList.vue .msg-inner.density-compact（默认挂载）。
+ * 选择器一律 .msg-inner.density-compact 后代三段式（0,3,0），压过 scoped .x[data-v]（0,2,0）。
+ * 自身容器用 .msg-scroll .msg-inner.density-compact（0,3,0）提权；滚动余量用 :has 向上覆盖。
+ * 已删 P13 .unk-* 全局双定义（UnknownToolCard.vue scoped 胜出，只改全局无效），覆盖改走本段。
+ * 无裸 px（除 1px 边框），无硬编码颜色；行高下限 1.5。
+ */
+
+/* ---- 1.1 消息间（主收益）：gap 16px→8px，padding 16/24/24→8/16/16 ---- */
+.msg-scroll .msg-inner.density-compact {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+.msg-scroll .msg-inner.density-compact .msg-loading-list {
+  gap: var(--space-2);
+}
+/* 锚点余量 24px→12px：父级 .msg-scroll 经 :has 覆盖（子带类时生效） */
+.msg-scroll:has(> .msg-inner.density-compact) {
+  scroll-padding-bottom: var(--space-3); /* 12px */
+}
+
+/* ---- 1.2 条内纵向 ---- */
+.msg-inner.density-compact .msg-main {
+  gap: var(--space-1);
+}
+.msg-inner.density-compact .msg-item {
+  gap: var(--space-2);
+}
+.msg-inner.density-compact .msg-tools {
+  gap: var(--space-1);
+}
+/* 去双重叠加：全局 .msg-tools > * + * margin-top 8px 与 gap 叠加成 16px，compact 下清零只留 gap */
+.msg-inner.density-compact .msg-tools > * + * {
+  margin-top: 0;
+}
+.msg-inner.density-compact .msg-head {
+  gap: var(--space-1);
+}
+
+/* ---- 1.3 行高（下限 1.5） ---- */
+.msg-inner.density-compact .md-body {
+  line-height: 1.5;
+}
+.msg-inner.density-compact .user-plain {
+  line-height: 1.5;
+}
+.msg-inner.density-compact .md-h {
+  line-height: 1.3;
+}
+.msg-inner.density-compact .code-pre {
+  line-height: 1.5;
+}
+.msg-inner.density-compact .md-table {
+  line-height: 1.5;
+}
+
+/* ---- 1.4 Markdown 块边距 + 末块清零 ---- */
+.msg-inner.density-compact .md-p {
+  margin: 0 0 var(--space-1);
+}
+.msg-inner.density-compact .md-h {
+  margin: var(--space-3) 0 var(--space-1);
+}
+.msg-inner.density-compact .md-list {
+  margin: 0 0 var(--space-1);
+}
+.msg-inner.density-compact .md-li {
+  margin: 0;
+}
+.msg-inner.density-compact .md-li-task {
+  gap: var(--space-1);
+}
+.msg-inner.density-compact .md-quote {
+  padding: var(--space-1) var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.msg-inner.density-compact .md-hr {
+  margin: var(--space-2) 0;
+}
+.msg-inner.density-compact .md-table-wrap {
+  margin: 0 0 var(--space-2);
+}
+.msg-inner.density-compact .md-table th,
+.msg-inner.density-compact .md-table td {
+  padding: var(--space-1) var(--space-2);
+}
+.msg-inner.density-compact .code-block {
+  margin: 0 0 var(--space-2);
+}
+.msg-inner.density-compact .code-pre {
+  padding: var(--space-1) var(--space-2);
+}
+/* 末块兜底：否则与 .msg-main gap 叠加 */
+.msg-inner.density-compact .md-list:last-child,
+.msg-inner.density-compact .md-quote:last-child,
+.msg-inner.density-compact .md-table-wrap:last-child,
+.msg-inner.density-compact .md-hr:last-child,
+.msg-inner.density-compact .code-block:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- 1.5 工具卡 / 思考块 / 气泡 ---- */
+.msg-inner.density-compact .tool-head {
+  padding: var(--space-1) var(--space-2);
+}
+.msg-inner.density-compact .tool-alert {
+  padding: var(--space-1) var(--space-2);
+}
+.msg-inner.density-compact .tool-body {
+  gap: var(--space-2);
+}
+.msg-inner.density-compact .args-pre {
+  padding: var(--space-1) var(--space-2);
+}
+.msg-inner.density-compact .reasoning-body {
+  padding: var(--space-1) var(--space-2);
+}
+.msg-inner.density-compact .role-user .user-plain,
+.msg-inner.density-compact .role-user .md-body {
+  padding: var(--space-1) var(--space-2);
+}
+/* .unk-* 全局双定义已删：此处覆盖组件 scoped（gap 12px→8px，padding 不动） */
+.msg-inner.density-compact .unk-body {
+  gap: var(--space-2);
 }

@@ -88,7 +88,7 @@ const samples = [
 <template>
   <!-- 滚动只发生在消息区：HScroll 内层容器是唯一 overflow-y:auto（auto-follow 由 followIfNeeded 显式触发） -->
   <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
-    <div class="msg-inner">
+    <div class="msg-inner density-compact">
       <!-- 压缩摘要卡（在消息最上方） -->
       <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" />
 
