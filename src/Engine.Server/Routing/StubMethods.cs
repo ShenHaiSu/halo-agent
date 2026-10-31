@@ -2,7 +2,7 @@ using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Abstractions.Methods;
 using HaloAgent.Engine.Abstractions.Types;
-
+using HaloAgent.Engine.Storage;
 namespace HaloAgent.Engine.Server.Routing;
 
 /// <summary>
@@ -237,8 +237,9 @@ public sealed class StubMethods
         var raw = p?.TryGetProperty("mode", out var m) == true ? m.GetString() : null;
         if (!PermissionModeExtensions.TryParseWire(raw, out var mode))
             throw RpcException.ParamsInvalid($"mode 只能是 ask/acceptEdits/bypassPermissions/yolo（收到 {raw}）");
-
         _state.Mode = mode;
+        // 回落路径同样落盘，保持与 RealMethods 一致（best-effort，不影响应答）。
+        PrefsStore.SavePermissionMode(mode);
         return Task.FromResult<object?>(new
         {
             mode = mode.ToWire(),

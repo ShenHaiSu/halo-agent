@@ -14,7 +14,7 @@ import { useComposition } from '@/composables/useComposition';
 import { useAutoResize } from '@/composables/useAutoResize';
 import { useFileDrop } from '@/composables/useFileDrop';
 import { copyText } from '@/utils/clipboard';
-import HBadge from '@/components/base/HBadge.vue';
+import ModeSelector from './ModeSelector.vue';
 import HTag from '@/components/base/HTag.vue';
 import PermissionCard from '@/components/ask/PermissionCard.vue';
 import RoundsCard from '@/components/ask/RoundsCard.vue';
@@ -25,11 +25,11 @@ import QueueList from './QueueList.vue';
 import ComposerToolbar from './ComposerToolbar.vue';
 import ModelSelector from './ModelSelector.vue';
 import { useMention } from './useMention';
- import { useSlash } from './useSlash';
- import { createInputHandler } from './composerInput';
- import { handleComposerKeydown } from './composerKeys';
- import { pasteImages } from './pasteImage';
- import { parseSlashCommand, unquoteArgs } from '@/utils/slash';
+import { useSlash } from './useSlash';
+import { createInputHandler } from './composerInput';
+import { handleComposerKeydown } from './composerKeys';
+import { pasteImages } from './pasteImage';
+import { parseSlashCommand, unquoteArgs } from '@/utils/slash';
 
 const messages = useMessagesStore();
 const stream = useStreamStore();
@@ -75,28 +75,6 @@ const canSend = computed(() => {
   if (!hasContent) return false;
   if (stream.busy) return queue.value.length < MAX_QUEUE;
   return true;
-});
-
-/** 模式徽章：danger / warning / default（default 即中性） */
-const modeVariant = computed<'default' | 'warning' | 'danger'>(() => {
-  if (session.mode === 'yolo' || session.mode === 'bypassPermissions') return 'danger';
-  if (session.mode === 'acceptEdits') return 'warning';
-  return 'default';
-});
-
-const modeLabel = computed(() => {
-  switch (session.mode) {
-    case 'ask':
-      return '询问模式';
-    case 'acceptEdits':
-      return '自动接受编辑';
-    case 'bypassPermissions':
-      return '自动放行';
-    case 'yolo':
-      return '完全放行';
-    default:
-      return '询问模式';
-  }
 });
 
 const totalUsage = computed(() => session.usage.input + session.usage.output);
@@ -154,22 +132,22 @@ async function stepSession(delta: -1 | 1): Promise<void> {
     toast.error(`切换会话失败：${(e as Error).message}`);
   }
 }
- async function submit(): Promise<void> {
-   const rawInput = text.value;
-   const t = rawInput.trim();
-   if (!t && attachments.value.length === 0) return;
-   if (askPending.value) return;
-   // P10-fix3 01：斜杠白名单拦截（askPending 之后、附件拼接/排队/乐观 append 之前）。
-   // 斜杠命令不进 messages.append、不进 agent.queue、不进 ↑ 历史。
-   const slashCmd = parseSlashCommand(rawInput);
-   if (slashCmd) {
-     text.value = '';
-     slash.close();
-     // 附件已选时：忽略附件并执行（见 01 §2.4）。
-     if (attachments.value.length) attachments.value = [];
-     await runCommand(slashCmd.name, unquoteArgs(slashCmd.args));
-     return;
-   }
+async function submit(): Promise<void> {
+  const rawInput = text.value;
+  const t = rawInput.trim();
+  if (!t && attachments.value.length === 0) return;
+  if (askPending.value) return;
+  // P10-fix3 01：斜杠白名单拦截（askPending 之后、附件拼接/排队/乐观 append 之前）。
+  // 斜杠命令不进 messages.append、不进 agent.queue、不进 ↑ 历史。
+  const slashCmd = parseSlashCommand(rawInput);
+  if (slashCmd) {
+    text.value = '';
+    slash.close();
+    // 附件已选时：忽略附件并执行（见 01 §2.4）。
+    if (attachments.value.length) attachments.value = [];
+    await runCommand(slashCmd.name, unquoteArgs(slashCmd.args));
+    return;
+  }
 
   const finalText = attachments.value.length
     ? `${t}\n\n[引用文件]\n${attachments.value.map((p) => `- ${p}`).join('\n')}`
@@ -274,85 +252,85 @@ function insertAtCursor(s: string): void {
   });
 }
 
- async function onPaste(e: ClipboardEvent): Promise<void> {
-   const items = e.clipboardData?.items;
-   if (!items) return;
-   const hasImage = [...items].some((i) => i.type.startsWith('image/'));
-   if (!hasImage) return; // 普通文本粘贴不拦
+async function onPaste(e: ClipboardEvent): Promise<void> {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const hasImage = [...items].some((i) => i.type.startsWith('image/'));
+  if (!hasImage) return; // 普通文本粘贴不拦
 
-   e.preventDefault();
-   const r = await pasteImages(items);
-   if (r.savedPaths.length) {
-     addAttachments(r.savedPaths);
-     toast.success(`已添加 ${r.savedPaths.length} 张图片`);
-   }
-   if (r.skipped.length) {
-     toast.warning(`${r.skipped.length} 张图片未保存（${r.skipped[0] ?? ''}）`);
-   }
- }
+  e.preventDefault();
+  const r = await pasteImages(items);
+  if (r.savedPaths.length) {
+    addAttachments(r.savedPaths);
+    toast.success(`已添加 ${r.savedPaths.length} 张图片`);
+  }
+  if (r.skipped.length) {
+    toast.warning(`${r.skipped.length} 张图片未保存（${r.skipped[0] ?? ''}）`);
+  }
+}
 
- async function pickCwd(): Promise<void> {
-   if (stream.busy || askPending.value) return;
-   let dir: string | null = null;
-   try {
-     dir = await transport.request<string | null>('fs.browse', { initialDir: session.cwd || null });
-   } catch {
-     toast.info('当前环境不支持目录选择，请手动输入 /cwd 路径');
-     return;
-   }
-   if (typeof dir !== 'string' || !dir) return;
-   try {
-     await session.setCwd(dir);
-   } catch (e) {
-     toast.error(`切换目录失败：${(e as Error).message}`);
-   }
- }
+async function pickCwd(): Promise<void> {
+  if (stream.busy || askPending.value) return;
+  let dir: string | null = null;
+  try {
+    dir = await transport.request<string | null>('fs.browse', { initialDir: session.cwd || null });
+  } catch {
+    toast.info('当前环境不支持目录选择，请手动输入 /cwd 路径');
+    return;
+  }
+  if (typeof dir !== 'string' || !dir) return;
+  try {
+    await session.setCwd(dir);
+  } catch (e) {
+    toast.error(`切换目录失败：${(e as Error).message}`);
+  }
+}
 
- async function runCommand(name: string, args: string): Promise<void> {
-   try {
-     switch (name) {
-       case 'new':
-         await transport.request('session.new', null);
-         break;
-       case 'clear':
-         await transport.request('session.clear', null);
-         break;
-       case 'compact':
-         await transport.request('session.compact', null);
-         break;
-       case 'undo':
-         toast.info('撤销面板尚未接入，请稍候');
-         break;
-       case 'model':
-       case 'mcp':
-       case 'mode':
-         ui.openSettings();
-         break;
-       case 'persona':
-         if (args) await session.setPersona(args);
-         else toast.info('用法：/persona <名称>');
-         break;
-       case 'cwd':
-         if (args) await session.setCwd(args);
-         else toast.info(`用法：/cwd <目录路径>（当前：${session.cwd || '未选择工作目录'}）`);
-         break;
-       case 'diagnostics': {
-         const d = await transport.request<unknown>('system.diagnostics', null);
-         const ok = await copyText(JSON.stringify(d, null, 2));
-         toast[ok ? 'success' : 'error'](ok ? '诊断信息已复制' : '复制失败');
-         break;
-       }
-       case 'help':
-         window.dispatchEvent(new CustomEvent('halo:shortcut-help'));
-         toast.info('快捷键：Enter 发送，Shift+Enter 换行，Esc 中断，Alt+↑↓ 切换会话');
-         break;
-       default:
-         toast.warning(`未知命令：/${name}`);
-     }
-   } catch (e) {
-     toast.error(`执行 /${name} 失败：${(e as Error).message}`);
-   }
- }
+async function runCommand(name: string, args: string): Promise<void> {
+  try {
+    switch (name) {
+      case 'new':
+        await transport.request('session.new', null);
+        break;
+      case 'clear':
+        await transport.request('session.clear', null);
+        break;
+      case 'compact':
+        await transport.request('session.compact', null);
+        break;
+      case 'undo':
+        toast.info('撤销面板尚未接入，请稍候');
+        break;
+      case 'model':
+      case 'mcp':
+      case 'mode':
+        ui.openSettings();
+        break;
+      case 'persona':
+        if (args) await session.setPersona(args);
+        else toast.info('用法：/persona <名称>');
+        break;
+      case 'cwd':
+        if (args) await session.setCwd(args);
+        else toast.info(`用法：/cwd <目录路径>（当前：${session.cwd || '未选择工作目录'}）`);
+        break;
+      case 'diagnostics': {
+        const d = await transport.request<unknown>('system.diagnostics', null);
+        const ok = await copyText(JSON.stringify(d, null, 2));
+        toast[ok ? 'success' : 'error'](ok ? '诊断信息已复制' : '复制失败');
+        break;
+      }
+      case 'help':
+        window.dispatchEvent(new CustomEvent('halo:shortcut-help'));
+        toast.info('快捷键：Enter 发送，Shift+Enter 换行，Esc 中断，Alt+↑↓ 切换会话');
+        break;
+      default:
+        toast.warning(`未知命令：/${name}`);
+    }
+  } catch (e) {
+    toast.error(`执行 /${name} 失败：${(e as Error).message}`);
+  }
+}
 
 onMounted(() => ta.value?.focus());
 
@@ -392,51 +370,50 @@ defineExpose({
 
     <div class="composer-box">
       <div class="composer-top">
-        <HBadge :content="modeLabel" :variant="modeVariant" />
+        <ModeSelector />
+        <ModelSelector class="top-model" />
         <HTag v-if="session.persona" size="sm">{{ session.persona }}</HTag>
         <span class="top-spacer" />
         <span v-if="totalUsage > 0" class="top-tokens">累计 {{ totalUsage }} tokens</span>
       </div>
 
-       <textarea
-         ref="ta"
-         v-model="text"
-         class="composer-input"
-         rows="1"
-         aria-label="消息输入框"
-         :disabled="askPending"
-         :placeholder="askPending ? '请先处理上方的确认' : '输入消息，Enter 发送，Shift+Enter 换行'"
-         @input="onInput"
-         @keydown="onKeydown"
-         @paste="onPaste"
-       />
+      <textarea
+        ref="ta"
+        v-model="text"
+        class="composer-input"
+        rows="1"
+        aria-label="消息输入框"
+        :disabled="askPending"
+        :placeholder="askPending ? '请先处理上方的确认' : '输入消息，Enter 发送，Shift+Enter 换行'"
+        @input="onInput"
+        @keydown="onKeydown"
+        @paste="onPaste"
+      />
 
-       <div v-if="attachments.length" class="composer-attach">
-         <HTag
-           v-for="(a, i) in attachments"
-           :key="a"
-           closable
-           size="sm"
-           @close="attachments.splice(i, 1)"
-         >
-           {{ a }}
-         </HTag>
-       </div>
+      <div v-if="attachments.length" class="composer-attach">
+        <HTag
+          v-for="(a, i) in attachments"
+          :key="a"
+          closable
+          size="sm"
+          @close="attachments.splice(i, 1)"
+        >
+          {{ a }}
+        </HTag>
+      </div>
 
-       <ComposerToolbar
-         :busy="stream.busy"
-         :can-send="canSend"
-         :ask-pending="askPending"
-         :cwd="session.cwd"
-         @mention="mention.triggerManually()"
-         @slash="slash.triggerManually()"
-         @submit="submit"
-         @cancel="cancel"
-         @pick-cwd="pickCwd"
-       />
+      <ComposerToolbar
+        :busy="stream.busy"
+        :can-send="canSend"
+        :ask-pending="askPending"
+        :cwd="session.cwd"
+        @mention="mention.triggerManually()"
+        @slash="slash.triggerManually()"
+        @submit="submit"
+        @cancel="cancel"
+        @pick-cwd="pickCwd"
+      />
     </div>
-
-    <ModelSelector />
 
     <MentionPopover
       v-if="mention.open.value"
@@ -469,23 +446,23 @@ defineExpose({
   gap: var(--space-2);
   min-width: 0;
 }
- .composer-box {
-   border: 2px solid hsl(var(--border-strong));
-   border-radius: var(--radius-md);
-   background: hsl(var(--bg-elevated));
-   padding: var(--space-2);
-   display: flex;
-   flex-direction: column;
-   gap: var(--space-1);
-   min-width: 0;
- }
- .composer-box:hover {
-   border-color: hsl(var(--fg-subtle));
- }
- .composer-box:focus-within {
-   box-shadow: var(--shadow-focus);
-   border-color: hsl(var(--accent));
- }
+.composer-box {
+  border: 2px solid hsl(var(--border-strong));
+  border-radius: var(--radius-md);
+  background: hsl(var(--bg-elevated));
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.composer-box:hover {
+  border-color: hsl(var(--fg-subtle));
+}
+.composer-box:focus-within {
+  box-shadow: var(--shadow-focus);
+  border-color: hsl(var(--accent));
+}
 .composer-top {
   display: flex;
   align-items: center;
@@ -495,6 +472,13 @@ defineExpose({
 .top-spacer {
   flex: 1;
   min-width: 0;
+}
+.top-model {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.top-model :deep(.trigger-label) {
+  max-width: 200px;
 }
 .top-tokens {
   font-size: var(--text-2xs);
@@ -514,22 +498,22 @@ defineExpose({
   outline: none;
   margin-bottom: 8px; /* 坑 8：候选框不压住按钮栏 */
 }
- .composer-input:focus-visible {
-   outline: none;
-   box-shadow: none;
-   border-color: transparent;
- }
- .composer-input::placeholder {
-   color: hsl(var(--fg-subtle));
- }
- .composer-input::selection {
-   background: hsl(var(--accent) / 0.35);
-   color: hsl(var(--fg));
- }
- .composer-input:disabled {
-   cursor: not-allowed;
-   opacity: 0.6;
- }
+.composer-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+.composer-input::placeholder {
+  color: hsl(var(--fg-subtle));
+}
+.composer-input::selection {
+  background: hsl(var(--accent) / 0.35);
+  color: hsl(var(--fg));
+}
+.composer-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 .composer-attach {
   display: flex;
   flex-wrap: wrap;

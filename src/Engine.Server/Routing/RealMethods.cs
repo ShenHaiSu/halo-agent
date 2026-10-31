@@ -310,8 +310,17 @@ public sealed partial class RealMethods
         var raw = p?.TryGetProperty("mode", out var m) == true ? m.GetString() : null;
         if (!PermissionModeExtensions.TryParseWire(raw, out var mode))
             throw RpcException.ParamsInvalid("mode 只能是 ask/acceptEdits/bypassPermissions/yolo（收到 " + raw + "）");
-
         _session.SetMode(mode);
+        // 选择即落盘：切换结果立刻写回 prefs.json；失败只记日志，不影响切换本身。
+        try
+        {
+            if (!PrefsStore.SavePermissionMode(mode))
+                _log.LogWarning("权限模式已切换但 prefs.json 落盘失败");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "权限模式已切换但 prefs.json 落盘异常");
+        }
         return Task.FromResult<object?>(new
         {
             mode = mode.ToWire(),

@@ -42,6 +42,8 @@ public sealed class AssembledEngine : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // 退出再落盘一次：把本次运行最后的权限模式写回 prefs.json（best-effort，不阻塞退出）。
+        try { PrefsStore.SavePermissionMode(Session.Mode); } catch { }
         await Session.DisposeAsync().ConfigureAwait(false);
         Store.Dispose();
     }
@@ -101,9 +103,10 @@ public static class EngineAssembly
 
         // 4) 建通道总线 + 会话（有管道 = 有 UI，可交互确认）
         var bus = new EventBus(channel, busLogger);
+        var initialMode = PrefsStore.LoadPermissionMode() ?? PermissionMode.Ask;
         var session = new AgentSession(
             llm, tools, store, bus,
-            Paths.DataDir, Environment.CurrentDirectory, PermissionMode.Ask, resolved?.Persona ?? "",
+            Paths.DataDir, Environment.CurrentDirectory, initialMode, resolved?.Persona ?? "",
             resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
             askInteractive: true);
         if (resolved is not null)
@@ -120,6 +123,7 @@ public static class EngineAssembly
         var router = new MethodRouter();
         var state = new EngineState(Paths.DataDir, router)
         {
+            Mode = initialMode,
             Provider = resolved?.ProviderId ?? "",
             ProviderDisplay = resolved?.ProviderDisplay ?? "",
             Model = resolved?.ModelId ?? "",
