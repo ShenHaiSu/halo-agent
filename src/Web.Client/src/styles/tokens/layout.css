@@ -11,12 +11,12 @@
   --layout-detail-width-min: 280px;
   --layout-detail-width-max: 640px;
 
-   /* ---- 内容区 ---- */
-   --layout-composer-min-height: 88px;
-   --layout-composer-max-height: 320px;
-   /* P07-Enhance 03：消息区默认占满模式，--layout-message-max-width 当前未被消息区使用（保留供将来“阅读宽度”开关）；误引用会导致 820px 居中回退。 */
-   --layout-message-max-width: 820px;
-   --layout-content-max-width: 1200px;
+  /* ---- 内容区 ---- */
+  --layout-composer-min-height: 88px;
+  --layout-composer-max-height: 320px;
+  /* P07-Enhance 03：消息区默认占满模式，--layout-message-max-width 当前未被消息区使用（保留供将来“阅读宽度”开关）；误引用会导致 820px 居中回退。 */
+  --layout-message-max-width: 820px;
+  --layout-content-max-width: 1200px;
 
   /* ---- z-index（只有 7 档，不要新增） ---- */
   --z-base: 0;
@@ -37,6 +37,6 @@
    ============================================================ */
 :root {
   --bp-compact: 900px; /* 窄：自动折叠侧栏 */
-  --bp-narrow: 700px; /* 极窄：强制关闭右栏 */
-  --bp-wide: 1440px; /* 宽：可以同时开侧栏与右栏 */
+  --bp-narrow: 700px; /* 极窄：右抽屉为浮层不再强制关闭，仅收窄宽度（保留兼容） */
+  --bp-wide: 1440px; /* 宽：可以同时开侧栏与右抽屉 */
 }

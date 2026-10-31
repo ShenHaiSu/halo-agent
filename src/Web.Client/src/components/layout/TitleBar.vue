@@ -14,7 +14,7 @@ import { useSessionStore } from '@/stores/session';
  * ============ 三块区域的职责 ============
  *  左：侧栏开关 + 应用名
  *  中：当前会话标题（可点击重命名）
- *  右：右栏开关 + 最小化/最大化/关闭
+ *  右：详情抽屉开关 + 最小化/最大化/关闭
  *
  * ============ 与 P3 宿主的分工（B 方案：显式拖拽） ============
  *  - CEF 铺满客户区后 WM_NCHITTEST 到不了窗体，宿主无法靠 hit-test 识别标题栏，
@@ -128,7 +128,7 @@ function onTitleBarDblClick(e: MouseEvent) {
       </span>
     </div>
 
-    <!-- 右：引擎指示灯 + 右栏开关 + 窗口按钮 -->
+    <!-- 右：引擎指示灯 + 详情抽屉开关 + 窗口按钮 -->
     <div class="app-region-no-drag flex shrink-0 items-center gap-0.5">
       <EngineStatusDot />
       <HIconButton

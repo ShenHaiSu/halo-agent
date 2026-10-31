@@ -137,11 +137,11 @@ function onSplitterKey(e: KeyboardEvent) {
         </p>
         <p>
           <code class="inline-block w-40 font-mono">--bp-narrow</code> 700px ——
-          低于此值时右栏强制关闭
+          右抽屉为浮层，窄窗口下仅收窄宽度、不再强制关闭
         </p>
         <p>
           <code class="inline-block w-40 font-mono">--bp-wide</code> 1440px ——
-          高于此值时三栏可同时打开
+          高于此值时侧栏与右抽屉可同时打开
         </p>
       </div>
       <p class="mt-3 text-xs text-fg-subtle">把窗口拖窄到 900px 以下试试：侧栏会自动隐藏。</p>

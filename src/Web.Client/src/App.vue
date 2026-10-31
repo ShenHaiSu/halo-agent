@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/App.vue -->
-<!-- P5 应用根：AppShell 三栏 + 设置页 + 命令面板 + 快捷键帮助 + Toast + 错误边界 + 全局快捷键。 -->
+<!-- P5 应用根：AppShell 两栏 + 右抽屉 + 设置页 + 命令面板 + 快捷键帮助 + Toast + 错误边界 + 全局快捷键。 -->
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue';
 import AppShell from './components/layout/AppShell.vue';
