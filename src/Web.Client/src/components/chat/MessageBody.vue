@@ -207,108 +207,42 @@ function renderAll(): VNode[] {
   overflow-wrap: anywhere; /* 长 URL / 长单词不撑破容器 */
   word-break: break-word;
 }
-.md-p {
-  margin: 0 0 var(--space-3) 0;
-}
-.md-p:last-child {
-  margin-bottom: 0;
-}
-.md-h {
-  font-weight: 600;
-  line-height: 1.35;
-  margin: var(--space-5) 0 var(--space-2);
-}
-.md-h1 {
-  font-size: var(--text-xl);
-}
-.md-h2 {
-  font-size: var(--text-lg);
-}
-.md-h3 {
-  font-size: var(--text-base);
-}
-.md-h4,
-.md-h5,
-.md-h6 {
-  font-size: var(--text-sm);
-}
-.md-list {
-  margin: 0 0 var(--space-3);
-  padding-left: 1.4em;
-}
-.md-list ul,
-.md-list ol {
-  margin: var(--space-1) 0;
-}
-.md-li {
-  margin: var(--space-1) 0;
-}
-.md-li-task {
-  list-style: none;
-  margin-left: -1.2em;
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-start;
-}
-.md-task {
-  margin-top: 0.3em;
-  accent-color: hsl(var(--accent));
-}
-.md-quote {
-  margin: 0 0 var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-left: 3px solid hsl(var(--border-strong));
-  color: hsl(var(--fg-muted));
-  background: hsl(var(--bg-subtle));
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-.md-inline-code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  padding: 0.1em 0.35em;
-  border-radius: var(--radius-xs);
-  background: hsl(var(--bg-muted));
-  color: hsl(var(--fg));
-}
-.md-hr {
-  border: 0;
-  border-top: 1px solid hsl(var(--border));
-  margin: var(--space-4) 0;
-}
-.md-link {
-  color: hsl(var(--accent));
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.md-link:hover {
-  color: hsl(var(--accent-hover));
-}
-.md-img {
-  max-width: 100%;
-  border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--border-subtle));
-}
-.md-table-wrap {
-  overflow-x: auto;
-  margin: 0 0 var(--space-3);
-}
-.md-table {
-  border-collapse: collapse;
-  font-size: var(--text-sm);
-  min-width: 100%;
-}
-.md-table th,
-.md-table td {
-  border: 1px solid hsl(var(--border));
-  padding: var(--space-1) var(--space-2);
-  text-align: left;
-}
-.md-table th {
-  background: hsl(var(--bg-subtle));
-  font-weight: 600;
-}
-.md-pending {
-  white-space: pre-wrap;
-}
+ /* 注意：渲染体 VNode 由 h() 在 computed + <component :is> 函数式边界内创建，
+  * 拿不到本组件 scopeId（实测内层 ul/table 无 data-v，只有根 div 有）。
+  * 因此内层选择器必须用 :deep()（编译为 [data-v] 后代选择），裸写 scoped 必失效。根 .md-body 自身在模板内，保持原样。 */
+ :deep(.md-p){margin:0 0 var(--space-3) 0;}
+ :deep(.md-p:last-child){margin-bottom:0;}
+ :deep(.md-h){font-weight:600;line-height:1.35;margin:var(--space-5) 0 var(--space-2);}
+ :deep(.md-h1){font-size:var(--text-xl);}
+ :deep(.md-h2){font-size:var(--text-lg);}
+ :deep(.md-h3){font-size:var(--text-base);}
+ :deep(.md-h4),:deep(.md-h5),:deep(.md-h6){font-size:var(--text-sm);}
+ :deep(.md-list){margin:0 0 var(--space-3);padding-inline-start:1.6em;list-style:disc outside none;}
+ :deep(ol.md-list){list-style-type:decimal;}
+ :deep(.md-list .md-list){margin-block:var(--space-1);padding-inline-start:1.6em;}
+ :deep(.md-list .md-list){list-style-type:circle;}
+ :deep(.md-list .md-list .md-list){list-style-type:square;}
+ :deep(ol.md-list ol.md-list){list-style-type:lower-alpha;}
+ :deep(ol.md-list ol.md-list ol.md-list){list-style-type:lower-roman;}
+ /* ul⊂ol / ol⊂ul 混排回落：后代命中已有，只显式托底二级 ol 在 ul 下的形态 */
+ :deep(ul.md-list ol.md-list){list-style-type:lower-alpha;}
+ :deep(.md-li){margin:var(--space-1) 0;}
+ :deep(.md-li)::marker{color:hsl(var(--fg-muted));}
+ :deep(.md-li-task){list-style:none;margin-inline-start:-1.6em;display:flex;gap:var(--space-2);align-items:flex-start;}
+ :deep(.md-task){margin-top:0.3em;accent-color:hsl(var(--accent));}
+ :deep(.md-quote){margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid hsl(var(--border-strong));color:hsl(var(--fg-muted));background:hsl(var(--bg-subtle));border-radius:0 var(--radius-sm) var(--radius-sm) 0;}
+ :deep(.md-inline-code){font-family:var(--font-mono);font-size:0.92em;padding:0.1em 0.35em;border-radius:var(--radius-xs);background:hsl(var(--bg-muted));color:hsl(var(--fg));}
+ :deep(.md-hr){border:0;border-top:1px solid hsl(var(--border));margin:var(--space-4) 0;}
+ :deep(.md-link){color:hsl(var(--accent));text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+ :deep(.md-link:hover){color:hsl(var(--accent-hover));}
+ :deep(.md-img){max-width:100%;border-radius:var(--radius-sm);border:1px solid hsl(var(--border-subtle));}
+ :deep(.md-table-wrap){overflow-x:auto;margin:0 0 var(--space-3);max-width:100%;border:1px solid hsl(var(--border));border-radius:var(--radius-md);}
+ :deep(.md-table){border-collapse:collapse;width:100%;min-width:100%;font-size:var(--text-sm);line-height:1.55;border:0;}
+ :deep(.md-table th),:deep(.md-table td){border:1px solid hsl(var(--border));padding:var(--space-2) var(--space-3);text-align:left;vertical-align:top;}
+ :deep(.md-table thead tr:first-child th){border-top:0;}
+ :deep(.md-table tr th:first-child),:deep(.md-table tr td:first-child){border-left:0;}
+ :deep(.md-table tr th:last-child),:deep(.md-table tr td:last-child){border-right:0;}
+ :deep(.md-table tbody tr:last-child td){border-bottom:0;}
+ :deep(.md-table th){background:hsl(var(--bg-subtle));font-weight:600;}
+ :deep(.md-pending){white-space:pre-wrap;}
 </style>

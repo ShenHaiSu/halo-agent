@@ -31,3 +31,4 @@
 
 /* ④ 自定义 utility（最后，才能覆盖 Tailwind 的 utility） */
 @import './utilities.css';
+ @import './chat.css';
