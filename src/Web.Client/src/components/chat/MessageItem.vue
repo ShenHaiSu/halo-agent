@@ -23,15 +23,17 @@ const props = defineProps<{
 
 const messages = useMessagesStore();
 
-// 只有 assistant + 流式中才走增量解析；用户消息/历史消息一次性解析
-const isLive = computed(() => props.isStreaming && props.message.role === 'assistant');
+ // A：只有 assistant + 流式中才走增量解析；用户消息纯文本气泡（不走 Markdown），
+ // 历史/系统消息一次性解析。user 不挂 useStreamingMarkdown（无流式）。
+ const isUser = computed(() => props.message.role === 'user');
+ const isLive = computed(() => props.isStreaming && props.message.role === 'assistant');
 
-const md = useStreamingMarkdown(() => props.message.content);
+ const md = useStreamingMarkdown(() => (isUser.value ? '' : props.message.content));
 
-// 非流式：直接完整解析（内容已完整，用 lenient=false）
-const finalNodes = computed(() => parseMarkdown(props.message.content));
+ // 非流式：直接完整解析（内容已完整，用 lenient=false）；user 返回空数组（模板走纯文本分支）
+ const finalNodes = computed(() => (isUser.value ? [] : parseMarkdown(props.message.content)));
 
-const nodes = computed(() => (isLive.value ? md.committed.value : finalNodes.value));
+ const nodes = computed(() => (isLive.value ? md.committed.value : finalNodes.value));
 
 // 流结束时做一次完整解析并替换
 watch(
@@ -87,15 +89,16 @@ async function retry(): Promise<void> {
 <MessageActions v-if="!isStreaming" :message="message" @retry="retry" />
 </header>
 
-<!-- 思考内容 -->
-<ReasoningBlock v-if="message.reasoning" :text="message.reasoning" :live="isStreaming" :kind="message.reasoningKind ?? 'full'" />
+ <!-- 思考内容 -->
+ <ReasoningBlock v-if="message.reasoning" :text="message.reasoning" :live="isStreaming" :kind="message.reasoningKind ?? 'full'" />
 
-<!-- 正文 -->
-<MessageBody
-        v-if="message.content"
-:nodes="nodes"
-:pending="isLive ? md.pendingText.value : ''"
-      />
+ <!-- 正文：user 纯文本气泡（所见即所得，不走 Markdown）；其余走 MessageBody -->
+ <div v-if="message.role === 'user' && message.content" class="md-body user-plain">{{ message.content }}</div>
+ <MessageBody
+   v-else-if="message.content"
+   :nodes="nodes"
+   :pending="isLive ? md.pendingText.value : ''"
+ />
 
 <!-- 流式光标 -->
 <StreamingCursor v-if="isStreaming && !message.content" />
@@ -172,12 +175,21 @@ padding: var(--space-1) var(--space-2);
 background: hsl(var(--warning-subtle));
 border-radius: var(--radius-sm);
 }
-/* 用户消息气泡：限宽 560px（与 chat.css 全局一致），行占满但气泡右对齐收敛 */
-.role-user :deep(.md-body) {
-background: hsl(var(--accent-subtle));
-border: 1px solid hsl(var(--border-subtle));
-border-radius: var(--radius-md);
-padding: var(--space-2) var(--space-3);
-max-width: min(100%, 560px);
-}
+ /* 用户消息气泡：限宽 560px（与 chat.css 全局一致），行占满但气泡右对齐收敛。
+    A：纯文本块与 Markdown 共用气泡视觉，white-space 仅纯文本需要（换行保留）。 */
+ .role-user :deep(.md-body),
+ .role-user .user-plain {
+ background: hsl(var(--accent-subtle));
+ border: 1px solid hsl(var(--border-subtle));
+ border-radius: var(--radius-md);
+ padding: var(--space-2) var(--space-3);
+ max-width: min(100%, 560px);
+ }
+ .role-user .user-plain {
+ white-space: pre-wrap;
+ overflow-wrap: anywhere;
+ font-size: var(--text-base);
+ line-height: 1.65;
+ color: hsl(var(--fg));
+ }
 </style>

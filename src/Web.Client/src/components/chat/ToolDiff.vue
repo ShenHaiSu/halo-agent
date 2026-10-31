@@ -1,57 +1,18 @@
 <!-- src/Web.Client/src/components/chat/ToolDiff.vue -->
-<!-- P5 D5-4 文件改动的 diff 预览：从 output 里提取 ```diff 围栏，按行级渲染；
-     无 diff 块时不渲染。加/删行分别用 success/danger-subtle 着色。 -->
+<!-- P5 D5-4 文件改动的 diff 预览：从 output 提取 diff 块，按行级渲染；
+     无 diff 块时不渲染。P11-F：提取放宽（围栏优先，其次裸 unified diff，
+     见 ./toolDiff），合并后超 400 行截断 + “展开全部”按钮。
+     加/删行分别用 success/danger-subtle 着色。 -->
 <script setup lang="ts">
-import { computed } from 'vue';
-import { diffLines, type DiffLine } from '@/utils/diff';
+import { computed, ref } from 'vue';
+import type { DiffLine } from '@/utils/diff';
+import { blockToLines, DIFF_MAX_LINES, extractDiffBlocks } from './toolDiff';
 
 const props = defineProps<{ output: string }>();
 
-/**
- * 从 unified diff 文本还原 before/after，再走 diffLines 行级渲染。
- * 跳过 diff/index/---/+++/@@ 头行与 "\ No newline" 标记。
- */
-function blockToLines(block: string): DiffLine[] {
-  const before: string[] = [];
-  const after: string[] = [];
-  for (const raw of block.split('\n')) {
-    if (
-      raw.startsWith('diff ') ||
-      raw.startsWith('index ') ||
-      raw.startsWith('+++ ') ||
-      raw.startsWith('--- ') ||
-      raw.startsWith('@@ ') ||
-      raw.startsWith('\\ No newline')
-    ) {
-      continue;
-    }
-    if (raw.startsWith('+') && !raw.startsWith('+++')) {
-      after.push(raw.slice(1));
-    } else if (raw.startsWith('-') && !raw.startsWith('---')) {
-      before.push(raw.slice(1));
-    } else if (raw.startsWith(' ')) {
-      before.push(raw.slice(1));
-      after.push(raw.slice(1));
-    } else if (raw === '') {
-      continue;
-    } else {
-      before.push(raw);
-      after.push(raw);
-    }
-  }
-  if (before.length === 0 && after.length === 0) return [];
-  return diffLines(before.join('\n'), after.join('\n'));
-}
+const diffBlocks = computed<string[]>(() => extractDiffBlocks(props.output));
 
-const diffBlocks = computed<string[]>(() => {
-  const out: string[] = [];
-  const re = /```diff\r?\n([\s\S]*?)```/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(props.output)) !== null) {
-    if (m[1] && m[1].trim()) out.push(m[1]);
-  }
-  return out;
-});
+const expanded = ref(false);
 
 const lines = computed<DiffLine[] | null>(() => {
   if (diffBlocks.value.length === 0) return null;
@@ -59,6 +20,13 @@ const lines = computed<DiffLine[] | null>(() => {
   for (const b of diffBlocks.value) merged.push(...blockToLines(b));
   return merged.length > 0 ? merged : null;
 });
+
+const truncated = computed(() => (lines.value?.length ?? 0) > DIFF_MAX_LINES);
+const shownLines = computed(() =>
+  lines.value && truncated.value && !expanded.value
+    ? lines.value.slice(0, DIFF_MAX_LINES)
+    : (lines.value ?? [])
+);
 
 function opClass(type: DiffLine['type']): string {
   if (type === 'add') return 'op-add';
@@ -79,10 +47,13 @@ function prefix(type: DiffLine['type']): string {
       <span class="diff-title">文件改动</span>
     </div>
     <div class="diff-body">
-      <div v-for="(l, i) in lines" :key="i" class="diff-line" :class="opClass(l.type)">
+      <div v-for="(l, i) in shownLines" :key="i" class="diff-line" :class="opClass(l.type)">
         {{ prefix(l.type) }}{{ l.text || '' }}
       </div>
     </div>
+    <button v-if="truncated && !expanded" type="button" class="diff-more" @click="expanded = true">
+      展开全部（共 {{ lines.length }} 行）
+    </button>
   </section>
 </template>
 
@@ -126,5 +97,17 @@ function prefix(type: DiffLine['type']): string {
 }
 .op-same {
   color: hsl(var(--fg-muted));
+}
+.diff-more {
+  margin-top: var(--space-1);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: hsl(var(--accent));
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.diff-more:hover {
+  text-decoration: underline;
 }
 </style>

@@ -1,13 +1,14 @@
 <!-- src/Web.Client/src/components/chat/ToolCard.vue -->
 <!-- P5 D5-4 工具卡片：6 状态（pending/running/awaiting-user/done/error/cancelled），
      状态从 ToolCallInfo 派生（优先级 cancelled > error > awaiting-user > running >
-     pending > done）；默认展开规则 + 用户折叠记忆（本模块 collapsedToolIds，
-     语义同 ui.collapsedTools）；silentAlert 黄/红预警条。 -->
+     pending > done）；默认展开规则 + 用户折叠记忆（P11-E 单源 ui.collapsedTools，
+     本模块 collapsedToolIds 为其薄代理）；silentAlert 黄/红预警条。
+     P11-D：头部唯一一份，kind 只切换正文区（ToolCardBody vs 未知工具正文）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { ToolCallInfo } from '@/stores/messages';
 import { usePermissionsStore } from '@/stores/permissions';
-import { collapsedToolIds, deriveState, toolMeta } from './toolMeta';
+import { collapsedToolIds, deriveState, toolMeta, toolStatusText } from './toolMeta';
 import { summarizeArgs } from './toolArgs';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import HBadge from '@/components/base/HBadge.vue';
@@ -70,24 +71,17 @@ function onHeadKeydown(e: KeyboardEvent): void {
   }
 }
 
-const statusText = computed(() => {
-  switch (state.value) {
-    case 'pending':
-      return '排队中';
-    case 'running':
-      return '执行中';
-    case 'awaiting-user':
-      return '等待授权';
-    case 'done':
-      return '成功';
-    case 'error':
-      return '失败';
-    case 'cancelled':
-      return '已中断';
-    default:
-      return '未知';
-  }
-});
+// P11-D：状态文案共用 toolMeta.toolStatusText（与未知工具链同一份实现）。
+const statusText = computed(() => toolStatusText(state.value));
+
+// P11-D：时长 Chip 上移到 ToolCard 头部（普通/未知工具一致）。
+const durationText = computed(() =>
+  typeof props.tool.durationMs === 'number'
+    ? props.tool.durationMs >= 1000
+      ? `${(props.tool.durationMs / 1000).toFixed(1)}s`
+      : `${props.tool.durationMs}ms`
+    : ''
+);
 
 const badgeVariant = computed(() => {
   switch (state.value) {
@@ -123,6 +117,7 @@ const badgeVariant = computed(() => {
       <span class="tool-name">{{ displayName }}</span>
       <span class="tool-summary" :title="summary">{{ summary }}</span>
       <span class="tool-spacer" />
+      <span v-if="durationText" class="tool-duration">{{ durationText }}</span>
       <HSpinner v-if="state === 'running'" size="xs" />
       <HBadge :variant="badgeVariant" :content="statusText" />
       <HaloIcon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
@@ -138,6 +133,7 @@ const badgeVariant = computed(() => {
       <span>该命令已运行较久，请耐心等待。</span>
     </div>
 
+    <!-- P11-D：去嵌套。头部唯一，正文按 kind 切换（未知工具为纯正文组件，无二级折叠）。 -->
     <ToolCardBody v-if="expanded && kind === 'function'" :tool="tool" />
     <UnknownToolCard v-if="expanded && kind === 'unknown'" :tool="tool" />
   </div>
@@ -189,6 +185,12 @@ const badgeVariant = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tool-duration {
+  color: hsl(var(--fg-subtle));
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  flex: none;
 }
 .tool-spacer {
   flex: 1;

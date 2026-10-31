@@ -12,7 +12,7 @@ export type MdInline =
   | { type: 'strong'; children: MdInline[] }
   | { type: 'em'; children: MdInline[] }
   | { type: 'del'; children: MdInline[] }
-  | { type: 'link'; href: string; title?: string; children: MdInline[]; isImage?: boolean }
+   | { type: 'link'; href: string; title?: string; alt?: string; children: MdInline[]; isImage?: boolean }
   | { type: 'br' };
 
 export type MdNode =
@@ -605,29 +605,31 @@ export function parseInline(raw: string): MdInline[] {
       continue;
     }
 
-    /* ---------- 图片 ---------- */
-    if (ch === '!' && src[i + 1] === '[') {
-      const m = /^!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)/.exec(src.slice(i));
-      if (m) {
-        flush();
-        const href = m[2]!;
-        const alt = restoreEscapes(m[1] ?? '');
-        if (isSafeUrl(href, 'img')) {
-          out.push({
-            type: 'link',
-            href,
-            title: alt || undefined,
-            children: alt ? [{ type: 'text', value: alt }] : [],
-            isImage: true,
-          });
-        } else {
-          // 不安全：只渲染 alt 文字
-          if (alt) out.push({ type: 'text', value: alt });
-        }
-        i += m[0].length;
-        continue;
-      }
-    }
+     if (ch === '!' && src[i + 1] === '[') {
+       const m = /^!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)/.exec(src.slice(i));
+       if (m) {
+         flush();
+         const href = m[2]!;
+         // P11-G3：alt 归 alt（无障碍），title 归还悬停；旧快照只有 title 时由渲染层回填 alt。
+         const alt = restoreEscapes(m[1] ?? '') || undefined;
+         const title = m[3] ? restoreEscapes(m[3]) : undefined;
+         if (isSafeUrl(href, 'img')) {
+           out.push({
+             type: 'link',
+             href,
+             title,
+             alt,
+             children: alt ? [{ type: 'text', value: alt }] : [],
+             isImage: true,
+           });
+         } else {
+           // 不安全：只渲染 alt 文字
+           if (alt) out.push({ type: 'text', value: alt });
+         }
+         i += m[0].length;
+         continue;
+       }
+     }
 
     /* ---------- 链接 ---------- */
     if (ch === '[') {
@@ -788,11 +790,13 @@ function mergeAdjacentText(nodes: MdInline[]): MdInline[] {
 
 /* ============================================================================
  * 导出（供测试与外部使用）
- * ========================================================================== */
-
-export const __internal = {
-  splitRow,
-  parseInline: (s: string) => parseInline(s),
-  trimIndent,
-  isBlockStart,
-};
+  * ========================================================================== */
+ export const __internal = {
+   splitRow,
+   parseInline: (s: string) => parseInline(s),
+   trimIndent,
+   isBlockStart,
+   /** P11-G1：列表项 / 引用起始行（流式提交边界回溯用） */
+   isListOrQuoteStart: (line: string): boolean =>
+     UL_RE.test(line) || OL_RE.test(line) || QUOTE_RE.test(line),
+ };

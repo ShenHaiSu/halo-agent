@@ -4,9 +4,10 @@
 <script setup lang="ts">
 import { computed, h, type VNode } from 'vue';
 import type { MdInline, MdNode } from './MarkdownRenderer';
-import { isExternal } from './sanitize';
+import { classifyLink } from './sanitize';
 import CodeBlock from './CodeBlock.vue';
 import { transport } from '@/transport';
+import { useToast } from '@/composables/useToast';
 
 const props = withDefaults(
   defineProps<{
@@ -17,15 +18,22 @@ const props = withDefaults(
   { pending: '' }
 );
 
-/** 外部链接走宿主打开（默认浏览器），避免 CefSharp 内部导航 */
+/** 链接点击三档策略：外部走宿主打开；mailto 放行默认行为；
+ * 相对路径阻止导航 + toast；非安全协议解析层已降级为纯文本，到不了这里 */
 async function openLink(e: MouseEvent, href: string): Promise<void> {
+  const kind = classifyLink(href);
+  if (kind === 'mailto') return;
   e.preventDefault();
-  if (!isExternal(href)) return;
-  try {
-    await transport.host.openExternal(href);
-  } catch {
-    /* 宿主不可用时忽略（已阻止默认导航） */
+  if (kind === 'unsafe') return;
+  if (kind === 'external') {
+    try {
+      await transport.host.openExternal(href);
+    } catch {
+      /* 宿主不可用时忽略（已阻止默认导航） */
+    }
+    return;
   }
+  useToast().info('历史中的相对链接不可跳转');
 }
 
 function renderInline(nodes: MdInline[]): VNode[] {
@@ -49,7 +57,8 @@ function renderInline(nodes: MdInline[]): VNode[] {
           return h('img', {
             key: i,
             src: n.href,
-            alt: n.title ?? '',
+            alt: n.alt ?? n.title ?? '',
+            title: n.alt ?? undefined,
             class: 'md-img',
             loading: 'lazy',
             // 图片加载失败不要破图 icon

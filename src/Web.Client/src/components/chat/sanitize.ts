@@ -39,7 +39,22 @@ export function isSafeUrl(raw: string, kind: 'a' | 'img'): boolean {
   return true;
 }
 
-/** 是否外部链接（走宿主打开默认浏览器，避免 CefSharp 内部导航） */
-export function isExternal(raw: string): boolean {
-  return /^https?:/i.test(normalizeUrl(raw));
-}
+ /** 是否外部链接（走宿主打开默认浏览器，避免 CefSharp 内部导航） */
+ export function isExternal(raw: string): boolean {
+   return /^https?:/i.test(normalizeUrl(raw));
+ }
+
+ /** 是否邮件链接（允许默认行为，交 OS 邮件客户端） */
+ export function isMailto(raw: string): boolean {
+   return /^mailto:/i.test(normalizeUrl(raw));
+ }
+
+ export type LinkKind = 'external' | 'mailto' | 'relative' | 'unsafe';
+
+ /** 点击策略三档收敛到一处：外部 / mailto / 相对路径 / 非安全协议 */
+ export function classifyLink(raw: string): LinkKind {
+   if (!isSafeUrl(raw, 'a')) return 'unsafe';
+   if (isMailto(raw)) return 'mailto';
+   if (isExternal(raw)) return 'external';
+   return 'relative';
+ }

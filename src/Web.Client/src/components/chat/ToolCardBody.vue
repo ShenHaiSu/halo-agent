@@ -1,9 +1,12 @@
 <!-- src/Web.Client/src/components/chat/ToolCardBody.vue -->
 <!-- P5 D5-4 工具卡片正文：参数区（JSON 美化，失败则原文，超 2000 字符折叠）
-     + 结果区（ToolOutput 纯文本输出 + ToolDiff 行级改动预览）。 -->
+     + 结果区（ToolOutput 纯文本输出 + ToolDiff 行级改动预览）。
+     P11-F：mutates 仅用于排序（改动类工具 diff 置顶，非改动类结果置顶），
+     不改变折叠默认；无 diff 时 ToolDiff 返回 null，不留空标题。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { ToolCallInfo } from '@/stores/messages';
+import { toolMeta } from './toolMeta';
 import ToolOutput from './ToolOutput.vue';
 import ToolDiff from './ToolDiff.vue';
 
@@ -34,6 +37,9 @@ const liveOutput = computed(() =>
 );
 const result = computed(() => props.tool.result ?? '');
 const isError = computed(() => props.tool.ok === false);
+
+/** P11-F：改动类工具（write/edit/delete/run_shell 等）diff 置于输出之上；只读工具结果优先。 */
+const diffFirst = computed(() => toolMeta(props.tool.name, props.tool.kind).mutates);
 </script>
 
 <template>
@@ -60,13 +66,14 @@ const isError = computed(() => props.tool.ok === false);
       正在执行，等待输出…
     </section>
 
-    <!-- 最终结果：diff 预览 + 纯文本输出 -->
+    <!-- 最终结果：diff 预览 + 纯文本输出（顺序按 mutates；无 diff 时不留空标题） -->
     <template v-if="result">
-      <ToolDiff :output="result" />
+      <ToolDiff v-if="diffFirst" :output="result" />
       <section class="body-section">
         <div class="section-title">{{ isError ? '错误' : '结果' }}</div>
         <ToolOutput :output="result" />
       </section>
+      <ToolDiff v-if="!diffFirst" :output="result" />
     </template>
 
     <section v-else-if="tool.status === 'pending'" class="body-section pending-hint">

@@ -1,6 +1,7 @@
 // src/Web.Client/src/stores/eventBridge.ts
 // P5：24 事件 → UI 唯一映射（I-1 铁律）。
-import { normalizeToolCalls, useMessagesStore } from './messages';
+ import { buildToolContentMap, normalizeOpenAiToolCalls, normalizeToolCalls, useMessagesStore } from './messages';
+ import { clearCollapsedTools } from '@/components/chat/toolMeta';
 import { useStreamStore } from './stream';
 import { usePermissionsStore } from './permissions';
 import { useSessionStore } from './session';
@@ -16,27 +17,47 @@ function asRecord(p: unknown): Record<string, unknown> {
   return (p ?? {}) as Record<string, unknown>;
 }
 
- // P08-fix 02：与 messages.normalizeMessage 共用 normalizeToolCalls；过滤孤立 role=tool。
-  function toMessageViews(list: unknown): Array<Record<string, unknown>> {
-    if (!Array.isArray(list)) return [];
-    const out: Array<Record<string, unknown>> = [];
-    for (const m of list) {
-      const o = (m ?? {}) as Record<string, unknown>;
-      if (String(o.role ?? '') === 'tool') continue;
-      out.push({
-        id: o.id,
-        role: o.role ?? 'assistant',
-        content: o.text ?? o.content ?? '',
-        reasoning: o.reasoning ?? undefined,
-        reasoningKind: o.reasoningKind ?? undefined,
-        responseId: o.responseId ?? undefined,
-        ts: o.tsMs ?? Date.now(),
-        injected: o.injected ?? false,
-        toolCalls: normalizeToolCalls(o.toolCalls) ?? undefined,
-      });
-    }
-    return out;
-  }
+ // P11-C/E：与 messages.normalizeMessage 共用回填函数；role=tool 不再这里过滤，
+ // 透传给 applySnapshot（过滤前先建 tool_call_id → content 表做 join）。
+ // 输入已是压平 MessageView 时 toolCalls 透传（normalizeToolCalls 双写）；
+ // 输入是 OpenAI 历史形状时 tool_calls 同样回填（normalizeOpenAiToolCalls）。
+ export function toMessageViews(list: unknown): Array<Record<string, unknown>> {
+   if (!Array.isArray(list)) return [];
+   const raw = list as Array<Record<string, unknown>>;
+   const toolContentById = buildToolContentMap(raw);
+   const out: Array<Record<string, unknown>> = [];
+   for (const m of raw) {
+     const o = ((m ?? {}) as Record<string, unknown>);
+     if (String(o.role ?? '') === 'tool') {
+       out.push({
+         role: 'tool',
+         tool_call_id: o.tool_call_id ?? o.toolCallId ?? '',
+         content: o.content ?? o.text ?? '',
+         text: o.text ?? o.content ?? '',
+       });
+       continue;
+     }
+     const openAiJoined = Array.isArray(o.tool_calls)
+       ? normalizeOpenAiToolCalls(o.tool_calls, toolContentById)
+       : undefined;
+     out.push({
+       id: o.id,
+       role: o.role ?? 'assistant',
+       content: o.text ?? o.content ?? '',
+       text: o.text ?? o.content ?? '',
+       reasoning: o.reasoning ?? undefined,
+       reasoningKind: o.reasoningKind ?? undefined,
+       responseId: o.responseId ?? undefined,
+       ts: o.tsMs ?? (o.ts as number | undefined) ?? Date.now(),
+       tsMs: o.tsMs ?? (o.ts as number | undefined) ?? undefined,
+       injected: o.injected ?? false,
+       tool_calls: o.tool_calls,
+       tool_call_id: o.tool_call_id ?? undefined,
+       toolCalls: normalizeToolCalls(o.toolCalls) ?? openAiJoined ?? undefined,
+     });
+   }
+   return out;
+ }
 // P09-fix2 B/C：切换中到达的历史变更帧一律丢弃（仍推进游标，避免 pump 反复拉取）。
 // 只保留会话元信息 / 状态类帧（session.info/usage/state.*/resync 等）。
 const DROP_DURING_SWITCH = new Set([
@@ -266,12 +287,13 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           messages.setLastSeq(seq);
           break;
         }
-        case 'session.contextCleared': {
-          messages.clear();
-          messages.setLastSeq(seq);
-          useUiStore().toast.info('已清除上下文（历史文件保留）');
-          break;
-        }
+         case 'session.contextCleared': {
+           messages.clear();
+           messages.setLastSeq(seq);
+           clearCollapsedTools();
+           useUiStore().toast.info('已清除上下文（历史文件保留）');
+           break;
+         }
         case 'session.compactionStarted': {
           useStreamStore().compactionStarted = true;
           useStreamStore().notice = { level: 'info', text: '正在压缩上下文…' };
@@ -354,7 +376,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
                 } catch {
                   /* 会话元信息同步失败不影响重载 */
                 }
-                useUiStore().collapsedTools.clear();
+                 clearCollapsedTools();
                 stream.resyncRequired = false;
                 stream.notice = { level: 'success', text: '已重新载入' };
              } catch {

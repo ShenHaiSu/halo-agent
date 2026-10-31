@@ -58,13 +58,13 @@ export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
     let args: string;
     if (typeof o.args === 'string') args = o.args;
     else if (typeof o.arguments === 'string') args = o.arguments;
-    else if (o.args != null && typeof o.args === 'object') {
+     else if (o.args !== null && o.args !== undefined && typeof o.args === 'object') {
       try {
         args = JSON.stringify(o.args);
       } catch {
         args = '{}';
       }
-    } else if (o.arguments != null && typeof o.arguments === 'object') {
+     } else if (o.arguments !== null && o.arguments !== undefined && typeof o.arguments === 'object') {
       try {
         args = JSON.stringify(o.arguments);
       } catch {
@@ -93,7 +93,46 @@ export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
            : null,
      };
   });
-}
+ }
+
+ // P11-C：OpenAI 历史格式 tool_calls 结果回填。快照里 tool 结果是独立的 role=tool
+ // 消息（tool_call_id 关联），过滤前先建表，回填到对应 toolCall 的 output/result。
+ // ok 缺省 undefined（不谎报成功，deriveState 保持 done 而非臆测 error）；
+ // 找不到的孤儿调用保持仅参数卡，不编造输出。
+ export function buildToolContentMap(raw: Array<Record<string, unknown>>): Map<string, string> {
+   const map = new Map<string, string>();
+   for (const m of raw) {
+     if (String(m?.role ?? '') !== 'tool') continue;
+     const id = m?.tool_call_id;
+     if (typeof id !== 'string' || !id || map.has(id)) continue;
+     const c = m?.content;
+     if (typeof c === 'string') map.set(id, c);
+     else if (typeof m?.text === 'string') map.set(id, String(m.text));
+     else if (Array.isArray(c))
+       map.set(id, (c as Array<{ text?: string }>).map((p) => p.text ?? '').join(''));
+   }
+   return map;
+ }
+
+ export function normalizeOpenAiToolCalls(raw: unknown, toolContentById?: Map<string, string>): ToolCallInfo[] {
+   if (!Array.isArray(raw)) return [];
+   return (raw as Array<Record<string, unknown>>).map((tc) => {
+     const fn = ((tc as Record<string, unknown>)?.function ?? {}) as Record<string, unknown>;
+     const id = String((tc as Record<string, unknown>)?.id ?? '');
+     const output = toolContentById?.get(id);
+     return {
+       id,
+       name: String(fn.name ?? ''),
+       arguments: typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
+       result: output,
+       ok: undefined,
+       status: 'done' as const,
+       output,
+       kind: 'function' as const,
+     };
+   });
+ }
+
 
 export const useMessagesStore = defineStore('messages', () => {
   const items = ref<MessageItem[]>([]);
@@ -121,36 +160,29 @@ export const useMessagesStore = defineStore('messages', () => {
     seq?: number;
     messages?: Array<Record<string, unknown>>;
   }): void {
-    if (typeof snapshot.seq === 'number') setLastSeq(snapshot.seq);
-    const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
-    // P08-fix 02：快照中残留的孤立 role=tool 消息直接过滤，不再渲染为正文。
-    const filtered = raw.filter((m) => String((m as Record<string, unknown>)?.role ?? '') !== 'tool');
-    items.value = filtered.map(normalizeMessage);
-    streamingId.value = null;
-  }
+     if (typeof snapshot.seq === 'number') setLastSeq(snapshot.seq);
+     const raw = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+     // P11-C：过滤 role=tool 之前先建 tool_call_id → content 表做结果回填。
+     const toolContentById = buildToolContentMap(raw);
+     // P08-fix 02：快照中残留的孤立 role=tool 消息直接过滤，不再渲染为正文。
+     const filtered = raw.filter((m) => String((m as Record<string, unknown>)?.role ?? '') !== 'tool');
+     items.value = filtered.map((m) => normalizeMessage(m, toolContentById));
+     streamingId.value = null;
+   }
 
-  function normalizeMessage(m: Record<string, unknown>): MessageItem {
-    const role = String(m.role ?? 'user') as MessageRole;
-    const content =
-      typeof m.content === 'string'
-        ? m.content
-        : typeof m.text === 'string'
-          ? String(m.text)
-          : Array.isArray(m.content)
-            ? (m.content as Array<{ text?: string }>).map((p) => p.text ?? '').join('')
-            : '';
+   function normalizeMessage(m: Record<string, unknown>, toolContentById?: Map<string, string>): MessageItem {
+     const role = String(m.role ?? 'user') as MessageRole;
+     const content =
+       typeof m.content === 'string'
+         ? m.content
+         : typeof m.text === 'string'
+           ? String(m.text)
+           : Array.isArray(m.content)
+             ? (m.content as Array<{ text?: string }>).map((p) => p.text ?? '').join('')
+             : '';
+     // P11-C：OpenAI 历史 tool_calls 分支同样走结果回填（与 normalizeToolCalls 双写语义对齐）。
      const toolCalls = Array.isArray(m.tool_calls)
-       ? (m.tool_calls as Array<Record<string, unknown>>).map((tc) => {
-           const fn = (tc.function ?? {}) as Record<string, unknown>;
-           return {
-             id: String(tc.id ?? ''),
-             name: String(fn.name ?? ''),
-             arguments:
-               typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
-             status: 'done' as const,
-             kind: 'function' as const,
-           };
-         })
+       ? normalizeOpenAiToolCalls(m.tool_calls, toolContentById)
        : normalizeToolCalls(m.toolCalls);
 
      return {

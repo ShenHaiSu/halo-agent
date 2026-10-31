@@ -7,7 +7,8 @@ import { useMessagesStore } from './messages';
 import { useStreamStore } from './stream';
 import { usePermissionsStore } from './permissions';
 import { useQueueStore } from './queue';
-import { useSessionStore } from './session';
+ import { useSessionStore } from './session';
+ import { clearCollapsedTools } from '@/components/chat/toolMeta';
 import { useToast } from '@/composables/useToast';
 import { formatRelativeTime } from '@/utils/format';
 import type { SessionSummary } from '@/contract/agent';
@@ -140,11 +141,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     const token = ++switchToken;
     switchDepth++;
     messages.loading = true;
-    // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡。
-    stream.endTurn();
-    messages.streamingId = null;
-    perms.clear();
-    queue.clear();
+     // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
+     stream.endTurn();
+     messages.streamingId = null;
+     perms.clear();
+     queue.clear();
+     clearCollapsedTools();
     try {
       let resumed: { count?: number; messages?: unknown } | null = null;
       try {
@@ -228,12 +230,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
-    messages.loading = true;
-    stream.endTurn();
-    messages.streamingId = null;
-    perms.clear();
-    queue.clear();
-    sessionInfo.compactionSummary = null;
+     messages.loading = true;
+     stream.endTurn();
+     messages.streamingId = null;
+     perms.clear();
+     queue.clear();
+     clearCollapsedTools();
+     sessionInfo.compactionSummary = null;
     try {
       const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
       if (token !== switchToken) return;

@@ -1,10 +1,11 @@
 // src/Web.Client/src/components/chat/toolMeta.ts
 // P5 D5-4 工具名中文映射 + 可视状态派生 + 折叠记忆。
 // 参数摘要见 ./toolArgs（summarizeArgs）。
-// 说明：ui store 暂无 collapsedTools 字段（不改 stores），折叠记忆放在本模块的
-// 响应式 Set 中，会话内有效，刷新即清空（与 03 §7.2 的语义一致）。
+// P11-E：折叠记忆单源化。以 ui.collapsedTools 为准，本模块的 collapsedToolIds
+// 改为其薄代理（引用点零变更）；三处清空点统一调 clearCollapsedTools()。
 
 import { reactive } from 'vue';
+import { useUiStore } from '@/stores/ui';
 import type { IconName } from '@/components/icons/paths';
 import type { ToolCallInfo } from '@/stores/messages';
 
@@ -82,5 +83,66 @@ export function deriveState(tool: ToolCallInfo, awaitingUser: boolean): ToolVisu
   return 'pending';
 }
 
-/** 会话内折叠记忆（Set<toolCallId>）。刷新即清空，语义同 ui.collapsedTools。 */
-export const collapsedToolIds = reactive(new Set<string>());
+/** P11-D：状态文案唯一实现（ToolCard 头部与未知工具链共用）。 */
+export function toolStatusText(state: ToolVisualState): string {
+  switch (state) {
+    case 'pending':
+      return '排队中';
+    case 'running':
+      return '执行中';
+    case 'awaiting-user':
+      return '等待授权';
+    case 'done':
+      return '成功';
+    case 'error':
+      return '失败';
+    case 'cancelled':
+      return '已中断';
+    default:
+      return '未知';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P11-E：折叠记忆单源（ui.collapsedTools 为准）。
+// collapsedToolIds 为其薄代理：ToolCard 引用点零变更；pinia 未挂载时回退本地 Set。
+// 会话内有效、刷新清空语义不变（不持久化）。
+// ---------------------------------------------------------------------------
+
+/** pinia 未就绪时的回退（导入期/单测直引 toolMeta 不崩）。 */
+const fallbackCollapsed = reactive(new Set<string>());
+
+function collapsedSet(): Set<string> {
+  try {
+    return useUiStore().collapsedTools as unknown as Set<string>;
+  } catch {
+    return fallbackCollapsed;
+  }
+}
+
+/** 会话内折叠记忆（Set<toolCallId>）。单源代理至 ui.collapsedTools。 */
+export const collapsedToolIds = {
+  has: (id: string): boolean => collapsedSet().has(id),
+  add: (id: string): Set<string> => {
+    collapsedSet().add(id);
+    return collapsedSet();
+  },
+  delete: (id: string): boolean => collapsedSet().delete(id),
+  clear: (): void => collapsedSet().clear(),
+  get size(): number {
+    return collapsedSet().size;
+  },
+  values: (): IterableIterator<string> => collapsedSet().values(),
+  [Symbol.iterator]: function* (): IterableIterator<string> {
+    yield* collapsedSet();
+  },
+  forEach: (
+    cb: (value: string, value2: string, set: Set<string>) => void,
+    thisArg?: unknown
+  ): void => collapsedSet().forEach(cb, thisArg),
+};
+
+/** 三处清空点（resync / contextCleared / 切换会话）统一调此函数。 */
+export function clearCollapsedTools(): void {
+  collapsedSet().clear();
+}

@@ -1,13 +1,14 @@
 <!-- src/Web.Client/src/components/chat/MessageList.vue -->
 <!-- P5 D5-3 消息列表（见 03 §5.2 最终版）：窗口化渲染 + 顶部/底部折叠提示 +
      压缩摘要卡 + 空态示例 + 加载骨架 + 自动跟随到底。 -->
-<script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
-import { useMessagesStore } from '@/stores/messages';
-import { useStreamStore } from '@/stores/stream';
-import { useSessionStore } from '@/stores/session';
-import { useSessionsStore } from '@/stores/sessions';
-import { useMessageWindow } from '@/composables/useMessageWindow';
+ <script setup lang="ts">
+ import { computed, nextTick, ref, watch } from 'vue';
+ import { throttle } from '@/utils/throttle';
+ import { useMessagesStore } from '@/stores/messages';
+ import { useStreamStore } from '@/stores/stream';
+ import { useSessionStore } from '@/stores/session';
+ import { useSessionsStore } from '@/stores/sessions';
+ import { useMessageWindow } from '@/composables/useMessageWindow';
 import HScroll from '@/components/base/HScroll.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
 import HButton from '@/components/base/HButton.vue';
@@ -38,23 +39,34 @@ const visible = computed(() =>
   showAll.value ? { items: messages.items, hiddenTop: 0, hiddenBottom: 0 } : win.value
 );
 
-/** 自动滚动的唯一判据：只在本来就在底部时跟随（调 HScroll.isAtBottom 方法，避免直接读 Ref 误判） */
-function followIfNeeded(): void {
-  void nextTick(() => {
-    const s = scroller.value as unknown as {
-      isAtBottom: () => boolean;
-      scrollToBottom: (smooth?: boolean) => void;
-    } | null;
-    if (!s) return;
-    if (typeof s.isAtBottom === 'function') {
-      if (!s.isAtBottom()) return;
-    }
-    s.scrollToBottom(false);
-  });
-}
+ /** 自动滚动的唯一判据：只在本来就在底部时跟随（调 HScroll.isAtBottom 方法，避免直接读 Ref 误判） */
+ function followIfNeeded(): void {
+   void nextTick(() => {
+     const s = scroller.value as unknown as {
+       isAtBottom: () => boolean;
+       scrollToBottom: (smooth?: boolean) => void;
+     } | null;
+     if (!s) return;
+     if (typeof s.isAtBottom === 'function') {
+       if (!s.isAtBottom()) return;
+     }
+     s.scrollToBottom(false);
+   });
+ }
 
-watch(() => messages.items.length, followIfNeeded);
-watch(() => messages.items[messages.items.length - 1]?.content.length ?? 0, followIfNeeded);
+ // P11-G4：节流跟随（阈值节流，复用 utils/throttle，与现有 nextTick 跟随同路径，避免抖动）
+ const throttledFollow = throttle(() => followIfNeeded(), 150);
+
+ watch(() => messages.items.length, followIfNeeded);
+ watch(() => messages.items[messages.items.length - 1]?.content.length ?? 0, followIfNeeded);
+ // P11-G4：工具输出不跟随滚动——监听末条消息工具输出总长（聚合 computed）
+ const lastToolOutputLen = computed(() =>
+   (messages.items[messages.items.length - 1]?.toolCalls ?? []).reduce(
+     (n, t) => n + (t.output?.length ?? 0) + (t.result?.length ?? 0),
+     0
+   )
+ );
+ watch(lastToolOutputLen, throttledFollow);
 
 // P09-fix2 C：切会话即重置展开态并回顶，避免小会话沿用大会话的 showAll。
 watch(
