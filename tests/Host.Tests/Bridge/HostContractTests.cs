@@ -175,14 +175,14 @@ public sealed class HostContractTests
      }
 
      [Fact]
-     public void HaloHost_exposes_exactly_twelve_bridge_methods()
+     public void HaloHost_exposes_exactly_thirteen_bridge_methods()
      {
          // 与 scripts/p3-diag.html 的 HOST_METHODS / 前端 HaloHost 接口保持一致。
-         // windowDragStart 是自绘标题栏 B 方案的显式拖拽入口（CEF 铺满客户区后
+         // windowDragStart / windowResizeStart 是自绘标题栏 B 方案的显式拖拽/缩放入口（CEF 铺满客户区后
          // WM_NCHITTEST 到不了窗体，前端 mousedown 直调，宿主做 ReleaseCapture+SendMessage）。
          var expected = new[]
          {
-             "WindowMinimize", "WindowDragStart", "WindowMaximizeOrRestore", "WindowClose",
+             "WindowMinimize", "WindowDragStart", "WindowResizeStart", "WindowMaximizeOrRestore", "WindowClose",
              "WindowState", "SystemInfo", "OpenExternal", "ShowItemInFolder",
              "CopyText", "ReadClipboardImage", "ToggleDevTools", "RestartEngine",
          };
