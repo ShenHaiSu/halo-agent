@@ -71,33 +71,55 @@ describe('P12 表格结构', () => {
   });
 });
 
-describe('P12 CSS 文本（作用域自闭环）', () => {
-  const vue = readFileSync(resolve(__dirname, 'MessageBody.vue'), 'utf-8');
-  const css = vue.slice(vue.indexOf('<style'));
-   it('列表：disc/decimal + 1.6em 基数 + task -1.6em（:deep 生效）', () => {
-     // 渲染体 VNode 拿不到 scopeId（computed + <component :is> 函数式边界），内层规则必须 :deep()
-     expect(css).toContain(':deep(.md-list){margin:0 0 var(--space-3);padding-inline-start:1.6em;list-style:disc outside none;}');
-     expect(css).toContain(':deep(ol.md-list){list-style-type:decimal;}');
+ describe('P12 CSS 文本（作用域自闭环）', () => {
+   const vue = readFileSync(resolve(__dirname, 'MessageBody.vue'), 'utf-8');
+   const css = vue.slice(vue.indexOf('<style'));
+   it('源码无 deep 写法', () => {
+     expect(css).not.toContain(':deep(');
+   });
+   it('列表：disc/decimal + 1.6em 基数 + task -1.6em（裸 scoped）', () => {
+     // P13：pushScopeId 绑定后内层自带 data-v，裸写 scoped 即可。
+     expect(css).toContain('.md-list{margin:0 0 var(--space-3);padding-inline-start:1.6em;list-style:disc outside none;}');
+     expect(css).toContain('ol.md-list{list-style-type:decimal;}');
      expect(css).toContain('margin-inline-start:-1.6em');
      expect(css).toContain('lower-alpha');
      expect(css).toContain('lower-roman');
    });
-   it('表格：wrap 外框 + 去边 + 8px/12px 内边距（:deep 生效）', () => {
-     expect(css).toContain(':deep(.md-table-wrap){overflow-x:auto;');
+   it('表格：wrap 外框 + 去边 + 8px/12px 内边距（裸 scoped）', () => {
+     expect(css).toContain('.md-table-wrap{overflow-x:auto;');
      expect(css).toContain('max-width:100%');
      expect(css).toContain('padding:var(--space-2) var(--space-3)');
      expect(css).toContain('border-top:0');
      expect(css).toContain('border-bottom:0');
    });
-   it('内层元素落在 [data-v] 根之下，:deep 后代选择可命中', () => {
+   it('内层 ul/table 自带 scopeId 且与根一致（R2 核心）', () => {
      const w = mount(MessageBody, { props: { nodes: parseMarkdown('- a\n\n| x |\n|---|\n| 1 |\n') } });
      const root = w.find('.md-body');
-     expect(Object.keys(root.attributes()).some((k) => k.startsWith('data-v'))).toBe(true);
-     expect(root.find('ul.md-list').exists()).toBe(true);
-     expect(root.find('.md-table-wrap > table.md-table').exists()).toBe(true);
+     const rootAttrs = root.attributes();
+     const scopeKey = Object.keys(rootAttrs).find((k) => k.startsWith('data-v'));
+     expect(scopeKey).toBeDefined();
+     const scopeVal = rootAttrs[scopeKey!] ?? '';
+     const ul = root.find('ul.md-list');
+     expect(ul.exists()).toBe(true);
+     expect(ul.attributes()[scopeKey!]).toBe(scopeVal);
+     const table = root.find('.md-table-wrap > table.md-table');
+     expect(table.exists()).toBe(true);
+     expect(table.attributes()[scopeKey!]).toBe(scopeVal);
      w.unmount();
    });
-});
+   it('fence CodeBlock 根继承父 scope 属预期', () => {
+     const w = mount(MessageBody, { props: { nodes: parseMarkdown('```js\nconst a = 1;\n```\n') } });
+     const root = w.find('.md-body');
+     const scopeKey = Object.keys(root.attributes()).find((k) => k.startsWith('data-v'));
+     expect(scopeKey).toBeDefined();
+     const scopeVal = root.attributes()[scopeKey!] ?? '';
+     const codeRoot = root.find('.code-block');
+     expect(codeRoot.exists()).toBe(true);
+     // 父 scope 以 slot-scope 形式继承到子组件根，属标准行为；子组件自身 scoped 不受影响。
+     expect(codeRoot.attributes()[scopeKey!]).toBe(scopeVal);
+     w.unmount();
+   });
+ });
 
 describe('P12 import 治理', () => {
   const root = resolve(__dirname, '../../styles');
