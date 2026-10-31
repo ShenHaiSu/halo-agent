@@ -32,7 +32,7 @@ async function create(): Promise<void> {
 </template>
 
 <style scoped>
-.new-wrap {
-  padding: var(--space-2);
-}
+ .new-wrap {
+   padding: var(--space-1) var(--space-2) var(--space-2);
+ }
 </style>

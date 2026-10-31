@@ -193,9 +193,11 @@ async function createNew(): Promise<void> {
 }
 </script>
 
-<template>
-  <div class="sess-pane" data-sidebar>
+ <template>
+   <div class="sess-pane" data-sidebar>
     <SessionSearch v-model="query" />
+
+    <NewSessionButton />
 
     <div
       ref="viewport"
@@ -225,7 +227,7 @@ async function createNew(): Promise<void> {
         v-else
         icon="message"
         :title="query ? `没有匹配「${query}」的会话` : '还没有对话'"
-        :description="query ? '试试其他关键词' : '点击下方按钮开始第一次对话'"
+        :description="query ? '试试其他关键词' : '点击上方按钮开始第一次对话'"
         size="sm"
       >
         <template #action>
@@ -234,8 +236,6 @@ async function createNew(): Promise<void> {
         </template>
       </HEmpty>
     </div>
-
-    <NewSessionButton />
   </div>
 </template>
 

@@ -79,7 +79,7 @@ html[data-no-blur='true'] .msg-inner * {
   }
 }
 
-/* 协议徽标：chat/resp（ModelSelector 触发器 + 选择器行共用，变量沿用现有 token） */
+/* 协议徽标：chat/resp 统一灰底（按协议变色已取消；颜色跟随主题 token）。resp 类保留仅作标识，无视觉差异。 */
 .proto-badge {
   font-size: var(--text-2xs);
   font-family: var(--font-mono);
@@ -89,10 +89,6 @@ html[data-no-blur='true'] .msg-inner * {
   border-radius: var(--radius-sm);
   flex-shrink: 0;
   white-space: nowrap;
-}
-.proto-badge.resp {
-  background: hsl(var(--accent-subtle));
-  color: hsl(var(--accent));
 }
 
 /* ============ P15 chat-compact（方案 A：默认态零改动，去类即回滚） ============

@@ -3,10 +3,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import HInput from '@/components/base/HInput.vue';
- import HButton from '@/components/base/HButton.vue';
- import type { ProviderEdit } from '@/components/settings/providerEditing';
- import { hasAlias, mainName } from '@/components/settings/providerEditing';
- import { isSupportedModelProtocol } from '@/components/settings/validators';
+import HButton from '@/components/base/HButton.vue';
+import type { ProviderEdit } from '@/components/settings/providerEditing';
+import { hasAlias, mainName } from '@/components/settings/providerEditing';
+import { isSupportedModelProtocol } from '@/components/settings/validators';
 
 const props = defineProps<{
   groups: ProviderEdit[];
@@ -45,14 +45,14 @@ const filteredGroups = computed(() => {
           g.id.toLowerCase().includes(q) ||
           (g.displayName ?? '').toLowerCase().includes(q) ||
           m.id.toLowerCase().includes(q) ||
-          (m.displayName ?? '').toLowerCase().includes(q),
+          (m.displayName ?? '').toLowerCase().includes(q)
       ),
     }))
     .filter(
       (g) =>
         g.id.toLowerCase().includes(q) ||
         (g.displayName ?? '').toLowerCase().includes(q) ||
-        g.models.length > 0,
+        g.models.length > 0
     );
 });
 
@@ -67,8 +67,8 @@ const flatRows = computed<Row[]>(() => {
         modelId: m.id,
         protocol: m.protocol ?? 'chat',
         disabled: !isSupportedModelProtocol(m.protocol ?? 'chat'),
-         providerDisplay: mainName(g.id, g.displayName),
-         modelDisplay: mainName(m.id, m.displayName),
+        providerDisplay: mainName(g.id, g.displayName),
+        modelDisplay: mainName(m.id, m.displayName),
       });
     }
   }
@@ -85,7 +85,7 @@ watch(
   () => props.groups,
   () => {
     if (activeIdx.value >= flatRows.value.length) activeIdx.value = 0;
-  },
+  }
 );
 
 function isActive(pid: string, mid: string): boolean {
@@ -144,13 +144,21 @@ function onKeydown(e: KeyboardEvent): void {
 
 function scrollActiveIntoView(): void {
   void nextTick(() => {
-    listRef.value?.querySelector(`[data-idx="${activeIdx.value}"]`)?.scrollIntoView({ block: 'nearest' });
+    listRef.value
+      ?.querySelector(`[data-idx="${activeIdx.value}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
   });
 }
 
 function onSearchKeydown(e: KeyboardEvent): void {
   // 搜索框聚焦时上下键仍可切到列表。
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End' || e.key === 'Enter') {
+  if (
+    e.key === 'ArrowDown' ||
+    e.key === 'ArrowUp' ||
+    e.key === 'Home' ||
+    e.key === 'End' ||
+    e.key === 'Enter'
+  ) {
     onKeydown(e);
   } else if (e.key === 'Escape') {
     e.preventDefault();
@@ -217,10 +225,16 @@ onMounted(() => {
       <HButton size="sm" variant="ghost" @click="query = ''">清空搜索</HButton>
     </div>
     <div v-else ref="listRef" class="ms-list">
-       <div v-for="g in filteredGroups" :key="g.id" role="group" :aria-label="mainName(g.id, g.displayName)" class="ms-group">
-         <div class="ms-grouphead">
-           <span class="ms-gname">{{ mainName(g.id, g.displayName) }}</span>
-           <span v-if="hasAlias(g.id, g.displayName)" class="ms-gid">{{ g.id }}</span>
+      <div
+        v-for="g in filteredGroups"
+        :key="g.id"
+        role="group"
+        :aria-label="mainName(g.id, g.displayName)"
+        class="ms-group"
+      >
+        <div class="ms-grouphead">
+          <span class="ms-gname">{{ mainName(g.id, g.displayName) }}</span>
+          <span v-if="hasAlias(g.id, g.displayName)" class="ms-gid">{{ g.id }}</span>
           <span class="ms-gcount">{{ g.models.length }}</span>
           <span v-if="g.id === activeProvider" class="ms-active-dot" aria-label="使用中">●</span>
         </div>
@@ -243,9 +257,13 @@ onMounted(() => {
           @mouseenter="activeIdx = Math.max(0, rowGlobalIdx(g.id, m.id))"
         >
           <span v-if="isActive(g.id, m.id)" class="ms-cur" aria-hidden="true">●</span>
-           <span class="ms-mmain">{{ mainName(m.id, m.displayName) }}</span>
-           <span v-if="hasAlias(m.id, m.displayName)" class="ms-mid">{{ m.id }}</span>
-          <span class="proto-badge" :class="{ resp: (m.protocol ?? 'chat') === 'responses' }" :title="badgeTitle(m.protocol ?? 'chat')">{{ (m.protocol ?? 'chat') === 'responses' ? 'resp' : 'chat' }}</span>
+          <span class="ms-mmain">{{ mainName(m.id, m.displayName) }}</span>
+          <span
+            class="proto-badge"
+            :class="{ resp: (m.protocol ?? 'chat') === 'responses' }"
+            :title="badgeTitle(m.protocol ?? 'chat')"
+            >{{ (m.protocol ?? 'chat') === 'responses' ? 'resp' : 'chat' }}</span
+          >
           <span v-if="m.contextWindow" class="ms-ctx">{{ formatCtx(m.contextWindow) }}</span>
           <span v-if="m.acceptsImages" class="ms-img" aria-label="支持图片">图</span>
         </div>
@@ -258,19 +276,19 @@ onMounted(() => {
 </template>
 
 <style scoped>
- .ms-panel {
-   min-width: 320px;
-   width: 380px;
-   max-width: calc(100vw - 32px);
-   max-height: min(320px, 50vh);
-   display: flex;
-   flex-direction: column;
-   background: hsl(var(--bg-elevated));
-   border: 1px solid hsl(var(--border));
-   border-radius: var(--radius-md);
-   box-shadow: var(--shadow-lg);
-   overflow: hidden;
- }
+.ms-panel {
+  min-width: 320px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: min(320px, 50vh);
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--bg-elevated));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
 .ms-search {
   padding: var(--space-2);
   border-bottom: 1px solid hsl(var(--border-subtle));
@@ -341,22 +359,14 @@ onMounted(() => {
   cursor: not-allowed;
   opacity: 0.55;
 }
- .ms-cur {
-   color: hsl(var(--accent));
-   font-size: var(--text-2xs);
-   flex-shrink: 0;
- }
+.ms-cur {
+  color: hsl(var(--accent));
+  font-size: var(--text-2xs);
+  flex-shrink: 0;
+}
 .ms-mmain {
   font-size: var(--text-sm);
   color: hsl(var(--fg));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ms-mid {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

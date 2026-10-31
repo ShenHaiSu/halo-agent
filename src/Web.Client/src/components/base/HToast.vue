@@ -11,8 +11,8 @@ import type { IconName } from '@/components/icons/paths';
  *  toast 是全局的。多处挂载会出现重复显示。
  *  所以在 App.vue 里挂一个，其他地方只调 useToast()。
  * ============ 位置 ============
- *  右上角（避免遮挡左下角的输入框）。
- *  堆叠从上往下，最新的在最上方。
+ * 左上角（右上角会挡住窗口关闭按钮）。
+ * 堆叠从上往下，最新的在最上方。
  * ============ ============
  */
 const { toasts, dismiss } = useToast();
@@ -35,7 +35,7 @@ const styleMap: Record<ToastItem['level'], string> = {
 <template>
   <Teleport to="body">
     <div
-      class="pointer-events-none fixed right-4 top-4 z-toast flex w-80 flex-col gap-2"
+      class="pointer-events-none fixed left-4 top-4 z-toast flex w-80 flex-col gap-2"
       aria-live="polite"
       aria-atomic="false"
     >
@@ -84,11 +84,11 @@ const styleMap: Record<ToastItem['level'], string> = {
 }
 .h-toast-enter-from {
   opacity: 0;
-  transform: translateX(16px);
+  transform: translateX(-16px);
 }
 .h-toast-leave-to {
   opacity: 0;
-  transform: translateX(16px);
+  transform: translateX(-16px);
 }
 .h-toast-move {
   transition: transform var(--duration-base) var(--ease-out);
