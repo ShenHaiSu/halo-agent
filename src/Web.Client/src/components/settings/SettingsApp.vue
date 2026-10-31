@@ -196,11 +196,11 @@ function requestClose(): void {
   flex: 1;
   min-width: 0;
 }
-.close-btn {
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-xs);
-  padding: 4px;
+ .close-btn {
+   background: transparent;
+   border: 0;
+   border-radius: var(--radius-xs);
+   padding: var(--space-1);
   cursor: pointer;
   color: hsl(var(--fg-subtle));
 }
@@ -208,29 +208,30 @@ function requestClose(): void {
   background: hsl(var(--bg-muted));
   color: hsl(var(--fg));
 }
-.settings-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  overflow: hidden;
-}
-.settings-body > nav {
-  flex: none;
-  width: 148px;
-}
-.settings-page {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-}
-.dlg-p {
-  margin: 0;
-  font-size: var(--text-sm);
-  line-height: 1.6;
-}
-@media (max-width: 900px) {
+ .settings-body {
+   flex: 1;
+   min-height: 0;
+   display: flex;
+   gap: var(--space-2);
+   padding: var(--space-2);
+   overflow: hidden;
+ }
+ .settings-body > nav {
+   flex: none;
+   width: 148px;
+ }
+ .settings-page {
+   --settings-page-max: 860px;
+   flex: 1;
+   min-width: 0;
+   overflow-y: auto;
+ }
+ .dlg-p {
+   margin: 0;
+   font-size: var(--text-sm);
+   line-height: 1.6;
+ }
+ @media (max-width: 900px) { /* P14：与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
   .settings-overlay {
     justify-content: stretch;
   }

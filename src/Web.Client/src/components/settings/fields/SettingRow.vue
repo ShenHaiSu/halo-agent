@@ -48,14 +48,14 @@ withDefaults(
 </template>
 
 <style scoped>
-.srow {
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr) minmax(0, 1.4fr);
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid hsl(var(--border-subtle));
-  align-items: start;
-}
+ .srow {
+   display: grid;
+   grid-template-columns: 168px minmax(0, 1fr) minmax(0, 1.4fr);
+   gap: var(--space-2);
+   padding: var(--space-2) 0;
+   border-bottom: 1px solid hsl(var(--border-subtle));
+   align-items: start;
+ }
 .srow:last-child {
   border-bottom: 0;
 }
@@ -101,12 +101,12 @@ withDefaults(
   color: hsl(var(--danger));
   line-height: 1.4;
 }
-.srow.compact {
-  grid-template-columns: minmax(0, 150px) minmax(0, 1fr);
-  gap: var(--space-2);
-  padding: var(--space-1-5) 0;
-  border-bottom: 0;
-}
+ .srow.compact {
+   grid-template-columns: minmax(0, 132px) minmax(0, 1fr);
+   gap: var(--space-2);
+   padding: var(--space-1) 0;
+   border-bottom: 0;
+ }
 .srow.compact .srow-name {
   font-size: var(--text-sm);
 }
@@ -133,7 +133,7 @@ withDefaults(
   visibility: hidden;
   width: 13px;
 }
-@media (max-width: 700px) {
+ @media (max-width: 700px) { /* P14：与 var(--bp-narrow) 同值；var() 不可用于 @media 条件 */
   .srow {
     grid-template-columns: 1fr;
     gap: var(--space-1);

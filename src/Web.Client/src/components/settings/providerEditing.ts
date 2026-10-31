@@ -33,7 +33,23 @@ export interface ProvidersTree {
   providers: ProviderEdit[];
 }
 
-export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
+ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
+ /** P14 别名原则：前后端统一用区分大小写精确相等(Ordinal)判定 alias==id，大小写变体视为有效别名。 */
+ export const hasAlias = (id: string, dn: string | null | undefined): boolean =>
+   dn != null && dn.trim() !== '' && dn.trim() !== id;
+ export const mainName = (id: string, dn: string | null | undefined): string =>
+   hasAlias(id, dn) ? dn!.trim() : id;
+ export const trimOrNull = (s: string | null | undefined): string | null => {
+   if (s == null) return null;
+   const t = s.trim();
+   return t === '' ? null : t;
+ };
+ /** 落盘归一化：空白/与 id 精确相等一律视为无别名（null）。 */
+ export const normalizeAlias = (id: string, dn: string | null | undefined): string | null => {
+   const t = trimOrNull(dn);
+   if (t === null) return null;
+   return t === id ? null : t;
+ };
 
 export function normalizeProvidersTree(raw: unknown): ProvidersTree {
   const r = (raw ?? {}) as Record<string, unknown>;
@@ -98,7 +114,7 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
     if (!PROVIDER_ID_RE.test(p.id)) errs.push({ provider: p.id, field: 'id', message: 'provider.id 非法' });
     if (seenP.has(p.id)) errs.push({ provider: p.id, field: 'id', message: 'provider.id 重复' });
     seenP.add(p.id);
-    if (p.displayName.length > 64) errs.push({ provider: p.id, field: 'displayName', message: '别称不超过 64 字' });
+     if (p.displayName.trim().length > 64) errs.push({ provider: p.id, field: 'displayName', message: '别称不超过 64 字' });
     if (!p.baseUrl.trim()) errs.push({ provider: p.id, field: 'baseUrl', message: 'baseUrl 必填' });
     else {
       try {
@@ -109,10 +125,11 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
       }
     }
     const seenM = new Set<string>();
-    for (const m of p.models) {
-      if (!m.id.trim()) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 非空' });
-      if (seenM.has(m.id)) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 重复' });
-      seenM.add(m.id);
+     for (const m of p.models) {
+       // P14：model.id 首尾空格仍先报错（与后端 ValidateTree 同口径，不静默 trim）。
+       if (!m.id || m.id.trim() !== m.id) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 非空且首尾非空白' });
+       if (seenM.has(m.id)) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 重复' });
+       seenM.add(m.id);
       if (!isSupportedModelProtocol(m.protocol ?? 'chat')) errs.push({ provider: p.id, model: m.id, field: 'protocol', message: '仅支持 chat/responses 协议' });
       if (m.contextWindow !== null && !(Number.isInteger(m.contextWindow) && m.contextWindow >= 1000 && m.contextWindow <= 2000000))
         errs.push({ provider: p.id, model: m.id, field: 'contextWindow', message: 'contextWindow 须为 null 或 1000~2000000' });

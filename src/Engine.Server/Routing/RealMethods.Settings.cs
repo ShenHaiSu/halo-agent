@@ -23,29 +23,29 @@ public sealed partial class RealMethods
 
         var providers = cfg.Providers
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => new ProviderView
-            {
-                Id = kv.Key,
-                DisplayName = string.IsNullOrWhiteSpace(kv.Value.DisplayName) ? kv.Key : kv.Value.DisplayName!.Trim(),
-                BaseUrl = kv.Value.BaseUrl ?? "",
-                ApiKeySet = !string.IsNullOrEmpty(kv.Value.ApiKey),
-                HeadersEnabled = kv.Value.HeadersEnabled,
-                Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
-                    .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
-                    .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
-                UseProxy = kv.Value.UseProxy,
-                ModelCount = kv.Value.Models.Count,
-                Models = kv.Value.Models.Select(m => new ModelView
-                {
-                    Id = m.Id,
-                    DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id : m.DisplayName!.Trim(),
-                    Protocol = (m.Protocol ?? "chat").ToLowerInvariant(),
-                    ContextWindow = m.ContextWindow,
-                    MaxTokens = m.MaxTokens,
-                    AcceptsImages = m.AcceptsImages,
-                    IncludeReasoningHistory = m.IncludeReasoningHistory,
-                }).ToList(),
-            })
+             .Select(kv => new ProviderView
+             {
+                 Id = kv.Key,
+                 DisplayName = NormalizeAlias(kv.Key, kv.Value.DisplayName),
+                 BaseUrl = kv.Value.BaseUrl ?? "",
+                 ApiKeySet = !string.IsNullOrEmpty(kv.Value.ApiKey),
+                 HeadersEnabled = kv.Value.HeadersEnabled,
+                 Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
+                     .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                     .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
+                 UseProxy = kv.Value.UseProxy,
+                 ModelCount = kv.Value.Models.Count,
+                 Models = kv.Value.Models.Select(m => new ModelView
+                 {
+                     Id = m.Id,
+                     DisplayName = NormalizeAlias(m.Id, m.DisplayName),
+                     Protocol = (m.Protocol ?? "chat").ToLowerInvariant(),
+                     ContextWindow = m.ContextWindow,
+                     MaxTokens = m.MaxTokens,
+                     AcceptsImages = m.AcceptsImages,
+                     IncludeReasoningHistory = m.IncludeReasoningHistory,
+                 }).ToList(),
+             })
             .ToList();
 
         return Task.FromResult<object?>(new SettingsGetResult
@@ -111,25 +111,25 @@ public sealed partial class RealMethods
             var entry = ParseProviderEntry(prop.Value);
             cfg.Providers.TryGetValue(pid, out var existing);
 
-            var pcfg = new ProviderConfig
-            {
-                DisplayName = entry.DisplayName ?? existing?.DisplayName,
-                BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
-                ApiKey = existing?.ApiKey,
-                HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
-                Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
-                UseProxy = entry.UseProxy ?? existing?.UseProxy ?? true,
-                Models = entry.Models?.Select(m => new ModelConfig
-                {
-                    Id = m.Id.Trim(),
-                    DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? null : m.DisplayName!.Trim(),
-                    Protocol = ((m.Protocol ?? "chat").Trim().ToLowerInvariant()),
-                    ContextWindow = m.ContextWindow,
-                    MaxTokens = m.MaxTokens,
-                    AcceptsImages = m.AcceptsImages ?? false,
-                    IncludeReasoningHistory = m.IncludeReasoningHistory ?? true,
-                }).ToList() ?? new List<ModelConfig>(),
-            };
+             var pcfg = new ProviderConfig
+             {
+                 DisplayName = entry.HasDisplayName ? NormalizeAlias(pid, entry.DisplayName) : existing?.DisplayName,
+                 BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
+                 ApiKey = existing?.ApiKey,
+                 HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
+                 Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
+                 UseProxy = entry.UseProxy ?? existing?.UseProxy ?? true,
+                 Models = entry.Models?.Select(m => new ModelConfig
+                 {
+                     Id = m.Id.Trim(),
+                     DisplayName = NormalizeAlias(m.Id.Trim(), m.DisplayName),
+                     Protocol = ((m.Protocol ?? "chat").Trim().ToLowerInvariant()),
+                     ContextWindow = m.ContextWindow,
+                     MaxTokens = m.MaxTokens,
+                     AcceptsImages = m.AcceptsImages ?? false,
+                     IncludeReasoningHistory = m.IncludeReasoningHistory ?? true,
+                 }).ToList() ?? new List<ModelConfig>(),
+             };
 
             if (entry.ClearKey)
             {
@@ -183,14 +183,15 @@ public sealed partial class RealMethods
          });
     }
 
-    private sealed record ParsedProvider(
-        string? DisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
-        bool? HeadersEnabled, Dictionary<string, string>? Headers, bool? UseProxy,
-        List<ModelSaveEntry>? Models);
+     private sealed record ParsedProvider(
+         string? DisplayName, bool HasDisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
+         bool? HeadersEnabled, Dictionary<string, string>? Headers, bool? UseProxy,
+         List<ModelSaveEntry>? Models);
 
     private static ParsedProvider ParseProviderEntry(JsonElement el)
     {
-        string? displayName = el.TryGetProperty("displayName", out var dn) ? dn.GetString() : null;
+         bool hasDisplayName = el.TryGetProperty("displayName", out var dn);
+         string? displayName = hasDisplayName ? dn.GetString() : null;
         string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
         string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
         bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
@@ -233,9 +234,17 @@ public sealed partial class RealMethods
                         ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
                 });
             }
-        }
-        return new ParsedProvider(displayName, baseUrl, apiKey, clearKey, headersEnabled, headers, useProxy, models);
-    }
+         }
+         return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, useProxy, models);
+     }
+
+     /// <summary>P14 别名原则：无别名一律存 null。空白/与 id 精确相等(Ordinal)均视为无别名。</summary>
+     private static string? NormalizeAlias(string id, string? displayName)
+     {
+         if (string.IsNullOrWhiteSpace(displayName)) return null;
+         var t = displayName.Trim();
+         return string.Equals(t, id, StringComparison.Ordinal) ? null : t;
+     }
 
     public Task<object?> SettingsSetActiveAsync(JsonElement? p, CancellationToken ct)
     {

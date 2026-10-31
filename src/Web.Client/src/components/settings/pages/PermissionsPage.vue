@@ -135,14 +135,14 @@ defineExpose({ isDirty, resetToSaved });
 </template>
 
 <style scoped>
-.page {
-  max-width: 760px;
-}
-.page-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0 0 var(--space-4);
-}
+ .page {
+   max-width: var(--settings-page-max, 860px);
+ }
+ .page-title {
+   font-size: var(--text-base);
+   font-weight: 600;
+   margin: 0 0 var(--space-2);
+ }
 .mode-label {
   font-size: var(--text-sm);
   color: hsl(var(--fg));

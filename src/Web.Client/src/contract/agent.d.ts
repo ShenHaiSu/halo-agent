@@ -372,6 +372,7 @@ export interface HaloMethods {
   migrationRequired?: boolean
   providers?: {
   id?: string
+  /** P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
   displayName?: string
   baseUrl?: string
   apiKeySet?: boolean
@@ -381,6 +382,7 @@ export interface HaloMethods {
   modelCount?: number
   models?: {
   id?: string
+  /** P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
   displayName?: string
   protocol?: "chat" | "responses"
   contextWindow?: number | null

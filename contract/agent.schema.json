@@ -1313,9 +1313,10 @@
                 "id": {
                   "type": "string"
                 },
-                "displayName": {
-                  "type": "string"
-                },
+                 "displayName": {
+                   "type": "string",
+                   "description": "P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
+                 },
                 "baseUrl": {
                   "type": "string"
                 },
@@ -1345,9 +1346,10 @@
                       "id": {
                         "type": "string"
                       },
-                      "displayName": {
-                        "type": "string"
-                      },
+                       "displayName": {
+                         "type": "string",
+                         "description": "P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
+                       },
                       "protocol": {
                         "type": "string",
                         "enum": [

@@ -20,8 +20,9 @@ public static class ConfigValidation
         {
             if (string.IsNullOrWhiteSpace(pid) || !ProviderIdRe.IsMatch(pid))
                 errs.Add(new(pid, null, "id", "provider.id 非法：^[a-z0-9][a-z0-9-_]{0,63}$"));
-            if (p.DisplayName is not null && p.DisplayName.Length > 64)
-                errs.Add(new(pid, null, "displayName", "别称不超过 64 字"));
+             // P14 别名原则：null/空/与 id 精确相等(Ordinal)均视为无别名，不报错；长度仍 ≤64。
+             if (p.DisplayName is not null && p.DisplayName.Length > 64)
+                 errs.Add(new(pid, null, "displayName", "别称不超过 64 字"));
             if (string.IsNullOrWhiteSpace(p.BaseUrl))
                 errs.Add(new(pid, null, "baseUrl", "baseUrl 必填"));
             else
@@ -110,26 +111,31 @@ public static class ConfigValidation
         return errs;
     }
 
-    /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。</summary>
-    public static List<string> Warnings(ConfigModel cfg)
-    {
-        var w = new List<string>();
-        foreach (var (pid, p) in cfg.Providers)
-        {
-            if (p.Models.Count > 50)
-                w.Add($"服务商「{pid}」模型数 {p.Models.Count} 超过 50（建议精简）");
-            foreach (var m in p.Models)
-            {
-                if (m.ContextWindow is not null && m.MaxTokens is not null && m.MaxTokens > m.ContextWindow)
-                    w.Add($"模型 {pid}/{m.Id} 的 maxTokens 大于 contextWindow（仅提示，不拦截）");
-            }
-            if (p.UseProxy)
-            {
-                var (avail, _) = ConfigStore.GlobalProxy(cfg);
-                if (!avail)
-                    w.Add($"服务商「{pid}」useProxy=true，但全局无可用代理（direct/auto 下直连）");
-            }
-        }
-        return w;
-    }
+     /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。P14：alias==id 聚合为单条提示。</summary>
+     public static List<string> Warnings(ConfigModel cfg)
+     {
+         var w = new List<string>();
+         int aliasEqId = 0;
+         foreach (var (pid, p) in cfg.Providers)
+         {
+             if (string.Equals(p.DisplayName?.Trim(), pid, StringComparison.Ordinal)) aliasEqId++;
+             if (p.Models.Count > 50)
+                 w.Add($"服务商「{pid}」模型数 {p.Models.Count} 超过 50（建议精简）");
+             foreach (var m in p.Models)
+             {
+                 if (string.Equals(m.DisplayName?.Trim(), m.Id, StringComparison.Ordinal)) aliasEqId++;
+                 if (m.ContextWindow is not null && m.MaxTokens is not null && m.MaxTokens > m.ContextWindow)
+                     w.Add($"模型 {pid}/{m.Id} 的 maxTokens 大于 contextWindow（仅提示，不拦截）");
+             }
+             if (p.UseProxy)
+             {
+                 var (avail, _) = ConfigStore.GlobalProxy(cfg);
+                 if (!avail)
+                     w.Add($"服务商「{pid}」useProxy=true，但全局无可用代理（direct/auto 下直连）");
+             }
+         }
+         if (aliasEqId > 0)
+             w.Add($"有 {aliasEqId} 个别名与 id 相同，已视为无别名（仅提示，不拦截）");
+         return w;
+     }
 }

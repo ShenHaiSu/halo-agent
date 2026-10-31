@@ -48,18 +48,18 @@ defineExpose({ isDirty, resetToSaved });
 </template>
 
 <style scoped>
-.assets-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  gap: var(--space-2);
-}
-.page-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0;
-}
+ .assets-page {
+   display: flex;
+   flex-direction: column;
+   height: 100%;
+   min-height: 0;
+   gap: var(--space-1-5);
+ }
+ .page-title {
+   font-size: var(--text-base);
+   font-weight: 600;
+   margin: 0 0 var(--space-2);
+ }
 .tab-body {
   flex: 1;
   min-height: 0;

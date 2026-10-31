@@ -19,29 +19,31 @@ public sealed record SettingsGetResult
     public string ConfigPath { get; init; } = "";
 }
 
-public sealed record ProviderView
-{
-    public string Id { get; init; } = "";
-    public string DisplayName { get; init; } = "";
-    public string BaseUrl { get; init; } = "";
-    public bool ApiKeySet { get; init; }
-    public bool HeadersEnabled { get; init; } = true;
-    public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
-    public bool UseProxy { get; init; } = true;
-    public int ModelCount { get; init; }
-    public IReadOnlyList<ModelView> Models { get; init; } = Array.Empty<ModelView>();
-}
+ public sealed record ProviderView
+ {
+     public string Id { get; init; } = "";
+     /// <summary>别称（P14 别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
+     public string? DisplayName { get; init; }
+     public string BaseUrl { get; init; } = "";
+     public bool ApiKeySet { get; init; }
+     public bool HeadersEnabled { get; init; } = true;
+     public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
+     public bool UseProxy { get; init; } = true;
+     public int ModelCount { get; init; }
+     public IReadOnlyList<ModelView> Models { get; init; } = Array.Empty<ModelView>();
+ }
 
-public sealed record ModelView
-{
-    public string Id { get; init; } = "";
-    public string DisplayName { get; init; } = "";
-    public string Protocol { get; init; } = "chat";
-    public int? ContextWindow { get; init; }
-    public int? MaxTokens { get; init; }
-    public bool AcceptsImages { get; init; }
-    public bool IncludeReasoningHistory { get; init; } = true;
-}
+ public sealed record ModelView
+ {
+     public string Id { get; init; } = "";
+     /// <summary>别称（P14 别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
+     public string? DisplayName { get; init; }
+     public string Protocol { get; init; } = "chat";
+     public int? ContextWindow { get; init; }
+     public int? MaxTokens { get; init; }
+     public bool AcceptsImages { get; init; }
+     public bool IncludeReasoningHistory { get; init; } = true;
+ }
 
 /// <summary>代理设置。</summary>
 public sealed record ProxySettings

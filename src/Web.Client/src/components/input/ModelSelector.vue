@@ -11,7 +11,7 @@ import HButton from '@/components/base/HButton.vue';
 import HTooltip from '@/components/base/HTooltip.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import ModelSelectorPanel from './ModelSelectorPanel.vue';
-import { normalizeProvidersTree, type ProvidersTree } from '@/components/settings/providerEditing';
+ import { normalizeProvidersTree, mainName, type ProvidersTree } from '@/components/settings/providerEditing';
 import { openSettings } from '@/components/settings/SettingsApp.vue';
 
 const session = useSessionStore();
@@ -38,8 +38,8 @@ const unconfigured = computed(
 
 const triggerLabel = computed(() => {
   if (unconfigured.value) return '未配置模型 → 去设置';
-  const p = session.providerDisplay || session.provider;
-  const m = session.modelDisplay || session.model;
+   const p = mainName(session.provider, session.providerDisplay);
+   const m = mainName(session.model, session.modelDisplay);
   return `${p} / ${m}`;
 });
 
@@ -209,11 +209,11 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   min-width: 0;
 }
-.trigger-dot {
-  color: hsl(var(--accent));
-  font-size: 10px;
-}
-.trigger-dot.off {
+ .trigger-dot {
+   color: hsl(var(--accent));
+   font-size: var(--text-2xs);
+ }
+ .trigger-dot.off {
   color: hsl(var(--fg-subtle));
 }
 .trigger-label {

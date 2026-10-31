@@ -147,13 +147,13 @@ onMounted(() => void load());
         >
       </div>
 
-      <HTextarea
-        v-model="text"
-        class="editor font-mono"
-        :rows="18"
-        spellcheck="false"
-        :placeholder="mcpPlaceholder"
-      />
+       <HTextarea
+         v-model="text"
+         class="editor font-mono"
+         :rows="16"
+         spellcheck="false"
+         :placeholder="mcpPlaceholder"
+       />
 
       <div v-if="jsonError" class="err" role="alert">{{ jsonError }}</div>
       <div v-for="(n, i) in notes" :key="i" class="note" :class="n.level" role="status">
@@ -181,14 +181,14 @@ onMounted(() => void load());
 </template>
 
 <style scoped>
-.page {
-  max-width: 900px;
-}
-.page-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0 0 var(--space-2);
-}
+ .page {
+   max-width: var(--settings-page-max, 860px);
+ }
+ .page-title {
+   font-size: var(--text-base);
+   font-weight: 600;
+   margin: 0 0 var(--space-2);
+ }
 .page-desc {
   font-size: var(--text-sm);
   color: hsl(var(--fg-muted));
@@ -199,12 +199,12 @@ onMounted(() => void load());
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-.editor-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
+ .editor-head {
+   display: flex;
+   align-items: center;
+   gap: var(--space-2);
+   margin-bottom: var(--space-1-5);
+ }
 .spacer {
   flex: 1;
   min-width: 0;
@@ -255,19 +255,19 @@ onMounted(() => void load());
   color: hsl(var(--fg-muted));
   font-size: var(--text-sm);
 }
-.srv {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  min-width: 0;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
+ .srv {
+   display: flex;
+   align-items: center;
+   gap: var(--space-2);
+   padding: var(--space-0-5) 0;
+   min-width: 0;
+ }
+ .dot {
+   width: 6px;
+   height: 6px;
+   border-radius: 50%;
+   flex: none;
+ }
 .dot.ok {
   background: hsl(var(--success));
 }
@@ -278,12 +278,12 @@ onMounted(() => void load());
   font-size: var(--text-sm);
   font-family: var(--font-mono);
 }
-.srv-badge {
-  flex: none;
-  font-size: var(--text-2xs);
-  padding: 0 6px;
-  border-radius: var(--radius-xs);
-}
+ .srv-badge {
+   flex: none;
+   font-size: var(--text-2xs);
+   padding: 0 var(--space-1);
+   border-radius: var(--radius-xs);
+ }
 .srv-badge.ok {
   background: hsl(var(--success-subtle));
   color: hsl(var(--success));

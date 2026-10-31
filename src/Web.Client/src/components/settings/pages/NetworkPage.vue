@@ -11,7 +11,8 @@ import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
 import HRadioGroup from '@/components/base/HRadioGroup.vue';
 import HRadio from '@/components/base/HRadio.vue';
-import { validateNetworkForm } from '../validators';
+ import { validateNetworkForm } from '../validators';
+ import { hasAlias, mainName } from '../providerEditing';
 
 const toast = useToast();
 type ProxyMode = 'auto' | 'direct' | 'manual';
@@ -20,8 +21,8 @@ const saving = ref(false);
 const loadError = ref<string | null>(null);
 const mode = ref<ProxyMode>('auto');
 const url = ref('');
-const retry = ref(0);
-const providers = ref<Array<{ id: string; displayName: string; useProxy: boolean; baseUrl: string }>>([]);
+ const retry = ref(0);
+ const providers = ref<Array<{ id: string; displayName: string; hasAlias: boolean; useProxy: boolean; baseUrl: string }>>([]);
 const original = ref({ mode: 'auto' as ProxyMode, url: '', retry: 0 });
 const fieldErrors = ref<Record<string, string>>({});
 
@@ -42,12 +43,13 @@ async function load(): Promise<void> {
     mode.value = m === 'manual' ? 'manual' : m === 'direct' ? 'direct' : 'auto';
     url.value = typeof s.proxy?.url === 'string' ? s.proxy.url : '';
     retry.value = typeof s.retry === 'number' ? s.retry : 0;
-    providers.value = (s.providers ?? []).map((p) => ({
-      id: p.id ?? '',
-      displayName: p.displayName ?? p.id ?? '',
-      useProxy: p.useProxy !== false,
-      baseUrl: p.baseUrl ?? '',
-    })).filter((p) => p.id);
+     providers.value = (s.providers ?? []).map((p) => ({
+       id: p.id ?? '',
+       displayName: mainName(p.id ?? '', p.displayName ?? ''),
+       hasAlias: hasAlias(p.id ?? '', p.displayName ?? ''),
+       useProxy: p.useProxy !== false,
+       baseUrl: p.baseUrl ?? '',
+     })).filter((p) => p.id);
     original.value = { mode: mode.value, url: url.value, retry: retry.value };
     fieldErrors.value = {};
   } catch (e) {
@@ -126,8 +128,8 @@ onMounted(() => void load());
       <SettingRow label="各 Provider 是否走代理" desc="只读一览（去模型页修改 useProxy）">
         <div class="prov">
           <p v-for="p in providers" :key="p.id" class="prov-row">
-            <span>{{ p.displayName }}</span>
-            <span class="prov-sub">{{ p.id }}</span>
+             <span>{{ p.displayName }}</span>
+             <span v-if="p.hasAlias" class="prov-sub">{{ p.id }}</span>
             <span class="tag">{{ p.useProxy ? (mode === 'direct' ? 'useProxy=true（全局 direct 下直连）' : '走代理') : '直连' }}</span>
           </p>
           <p v-if="providers.length === 0" class="prov-empty">还没有 Provider（先在“模型”页配置）。</p>
@@ -139,20 +141,26 @@ onMounted(() => void load());
       </div>
     </template>
   </div>
-</template>
+ </template>
 
-<style scoped>
-.page { max-width: 760px; }
-.page-title { font-size: var(--text-lg); font-weight: 600; margin: 0 0 var(--space-4); }
-.page-state { display: flex; align-items: center; gap: var(--space-2); color: hsl(var(--fg-muted)); font-size: var(--text-sm); padding: var(--space-4) 0; }
-.page-state.err { color: hsl(var(--danger)); flex-direction: column; align-items: flex-start; }
-.prov { display: flex; flex-direction: column; gap: var(--space-1); }
-.prov-row { display: flex; gap: var(--space-2); align-items: center; font-size: var(--text-sm); }
-.prov-sub { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
-.tag { font-size: var(--text-xs); background: hsl(var(--bg-muted)); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
-.prov-empty { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
+ <style scoped>
+ .page {
+   max-width: var(--settings-page-max, 860px);
+ }
+ .page-title {
+   font-size: var(--text-base);
+   font-weight: 600;
+   margin: 0 0 var(--space-2);
+ }
+ .page-state { display: flex; align-items: center; gap: var(--space-2); color: hsl(var(--fg-muted)); font-size: var(--text-sm); padding: var(--space-4) 0; }
+ .page-state.err { color: hsl(var(--danger)); flex-direction: column; align-items: flex-start; }
+ .prov { display: flex; flex-direction: column; gap: var(--space-1); }
+ .prov-row { display: flex; gap: var(--space-2); align-items: center; font-size: var(--text-sm); }
+ .prov-sub { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
+ .tag { font-size: var(--text-xs); background: hsl(var(--bg-muted)); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+ .prov-empty { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
  .prov-proto { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
  .prov-proto .hint { font-size: var(--text-xs); color: hsl(var(--fg-subtle)); }
-.page-actions { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; position: sticky; bottom: 0; background: hsl(var(--bg)); border-top: 1px solid hsl(var(--border-subtle)); }
+ .page-actions { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; position: sticky; bottom: 0; background: hsl(var(--bg)); border-top: 1px solid hsl(var(--border-subtle)); }
 .dirty-hint { font-size: var(--text-xs); color: hsl(var(--warning)); }
 </style>

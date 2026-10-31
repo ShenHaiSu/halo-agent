@@ -3,9 +3,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import HInput from '@/components/base/HInput.vue';
-import HButton from '@/components/base/HButton.vue';
-import type { ProviderEdit } from '@/components/settings/providerEditing';
-import { isSupportedModelProtocol } from '@/components/settings/validators';
+ import HButton from '@/components/base/HButton.vue';
+ import type { ProviderEdit } from '@/components/settings/providerEditing';
+ import { hasAlias, mainName } from '@/components/settings/providerEditing';
+ import { isSupportedModelProtocol } from '@/components/settings/validators';
 
 const props = defineProps<{
   groups: ProviderEdit[];
@@ -66,8 +67,8 @@ const flatRows = computed<Row[]>(() => {
         modelId: m.id,
         protocol: m.protocol ?? 'chat',
         disabled: !isSupportedModelProtocol(m.protocol ?? 'chat'),
-        providerDisplay: g.displayName || g.id,
-        modelDisplay: m.displayName || m.id,
+         providerDisplay: mainName(g.id, g.displayName),
+         modelDisplay: mainName(m.id, m.displayName),
       });
     }
   }
@@ -216,10 +217,10 @@ onMounted(() => {
       <HButton size="sm" variant="ghost" @click="query = ''">清空搜索</HButton>
     </div>
     <div v-else ref="listRef" class="ms-list">
-      <div v-for="g in filteredGroups" :key="g.id" role="group" :aria-label="g.displayName || g.id" class="ms-group">
-        <div class="ms-grouphead">
-          <span class="ms-gname">{{ g.displayName || g.id }}</span>
-          <span v-if="g.displayName" class="ms-gid">{{ g.id }}</span>
+       <div v-for="g in filteredGroups" :key="g.id" role="group" :aria-label="mainName(g.id, g.displayName)" class="ms-group">
+         <div class="ms-grouphead">
+           <span class="ms-gname">{{ mainName(g.id, g.displayName) }}</span>
+           <span v-if="hasAlias(g.id, g.displayName)" class="ms-gid">{{ g.id }}</span>
           <span class="ms-gcount">{{ g.models.length }}</span>
           <span v-if="g.id === activeProvider" class="ms-active-dot" aria-label="使用中">●</span>
         </div>
@@ -242,8 +243,8 @@ onMounted(() => {
           @mouseenter="activeIdx = Math.max(0, rowGlobalIdx(g.id, m.id))"
         >
           <span v-if="isActive(g.id, m.id)" class="ms-cur" aria-hidden="true">●</span>
-          <span class="ms-mmain">{{ m.displayName || m.id }}</span>
-          <span v-if="m.displayName" class="ms-mid">{{ m.id }}</span>
+           <span class="ms-mmain">{{ mainName(m.id, m.displayName) }}</span>
+           <span v-if="hasAlias(m.id, m.displayName)" class="ms-mid">{{ m.id }}</span>
           <span class="proto-badge" :class="{ resp: (m.protocol ?? 'chat') === 'responses' }" :title="badgeTitle(m.protocol ?? 'chat')">{{ (m.protocol ?? 'chat') === 'responses' ? 'resp' : 'chat' }}</span>
           <span v-if="m.contextWindow" class="ms-ctx">{{ formatCtx(m.contextWindow) }}</span>
           <span v-if="m.acceptsImages" class="ms-img" aria-label="支持图片">图</span>
@@ -340,11 +341,11 @@ onMounted(() => {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.ms-cur {
-  color: hsl(var(--accent));
-  font-size: 10px;
-  flex-shrink: 0;
-}
+ .ms-cur {
+   color: hsl(var(--accent));
+   font-size: var(--text-2xs);
+   flex-shrink: 0;
+ }
 .ms-mmain {
   font-size: var(--text-sm);
   color: hsl(var(--fg));
