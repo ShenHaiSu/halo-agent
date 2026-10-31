@@ -234,8 +234,10 @@ public sealed record LlmConfig
     public LlmProtocol Protocol { get; init; } = LlmProtocol.Chat;
     public int? MaxTokens { get; init; }
     public bool AcceptsImages { get; init; }
-    public bool IncludeReasoningHistory { get; init; } = true;
-}
+     public bool IncludeReasoningHistory { get; init; } = true;
+     /// <summary>P16-F2：responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
+     public bool StoreResponses { get; init; } = true;
+ }
 
 /// <summary>发给模型的工具定义（OpenAI tools 格式）。</summary>
 public sealed record ToolDef

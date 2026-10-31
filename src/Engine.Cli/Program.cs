@@ -108,11 +108,9 @@ catch (Exception ex)
     return 3;
 }
 
-if (string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase))
-{
-    Console.Error.WriteLine("配置未就绪: Responses 协议尚未支持（当前仅 chat 可用）。");
-    return 3;
-}
+ // P16-F3：CLI 与 Server 同链路，responses 不再硬拦（ReconfigureActive 已有 responses 分流）。
+ var llmProto = string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase)
+     ? LlmProtocol.Responses : LlmProtocol.Chat;
 
 if (!PermissionModeExtensions.TryParseWire(opts.Permission, out var mode))
 {
@@ -128,20 +126,18 @@ if (!Directory.Exists(cwd))
     return 2;
 }
 
-using var llm = new OpenAiCompatibleClient(new LlmConfig
-{
-    BaseUrl = resolved.BaseUrl,
-    Model = resolved.ModelId,
-    ApiKey = resolved.ApiKey,
-    ProxyUrl = resolved.ProxyUrl,
-    Headers = resolved.Headers,
-    Protocol = LlmProtocol.Chat,
-    MaxTokens = resolved.MaxTokens,
-    AcceptsImages = resolved.AcceptsImages,
-    IncludeReasoningHistory = resolved.IncludeReasoningHistory,
-});
-
-
+ using var llm = new OpenAiCompatibleClient(new LlmConfig
+ {
+     BaseUrl = resolved.BaseUrl,
+     Model = resolved.ModelId,
+     ApiKey = resolved.ApiKey,
+     ProxyUrl = resolved.ProxyUrl,
+     Headers = resolved.Headers,
+     Protocol = llmProto,
+     MaxTokens = resolved.MaxTokens,
+     AcceptsImages = resolved.AcceptsImages,
+     IncludeReasoningHistory = resolved.IncludeReasoningHistory,
+ });
 var tools = ToolRegistry.CreateBuiltin();
 var store = new SessionStore();
 store.StartNew();

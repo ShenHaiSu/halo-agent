@@ -42,5 +42,35 @@ public sealed class FunctionCallAccumulator
         return result;
     }
 
-    public void Clear() { _cells.Clear(); _byItem.Clear(); }
+ ///
+ /// <summary>权威设置某调用的参数（.done / 快照用，直接替换，不追加）。无 cell 时按 key 建一个。</summary>
+ public void SetArguments(string? outputIndex, string? itemId, string args)
+ {
+     string key = itemId ?? ("idx:" + (outputIndex ?? _cells.Count.ToString()));
+     if (!_byItem.TryGetValue(key, out var idx))
+     {
+         idx = _cells.Count;
+         _cells.Add(new Cell { ItemId = itemId ?? "" });
+         _byItem[key] = idx;
+     }
+     _cells[idx].Arguments.Clear();
+     if (!string.IsNullOrEmpty(args)) _cells[idx].Arguments.Append(args);
+ }
+ ///
+ /// <summary>权威设置某调用的名字/callId（.added / .done 用；非空才覆盖）。</summary>
+ public void SetIdentity(string? outputIndex, string? itemId, string? callId, string? name)
+ {
+     if (string.IsNullOrEmpty(itemId) && string.IsNullOrEmpty(callId) && string.IsNullOrEmpty(name)) return;
+     string key = itemId ?? ("idx:" + (outputIndex ?? _cells.Count.ToString()));
+     if (!_byItem.TryGetValue(key, out var idx))
+     {
+         idx = _cells.Count;
+         _cells.Add(new Cell { ItemId = itemId ?? "" });
+         _byItem[key] = idx;
+     }
+     var c = _cells[idx];
+     if (!string.IsNullOrEmpty(callId)) c.CallId = callId;
+     if (!string.IsNullOrEmpty(name)) c.Name = name;
+ }
+     public void Clear() { _cells.Clear(); _byItem.Clear(); }
 }

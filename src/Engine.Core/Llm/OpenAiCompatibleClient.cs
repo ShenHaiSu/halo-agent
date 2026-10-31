@@ -482,9 +482,10 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         body["input"] = input;
         if (tools is { Count: > 0 }) body["tools"] = tools;
         body["stream"] = stream;
-        if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
-        body["user"] = ReqUser;
-        body["store"] = false;
+         if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
+         body["user"] = ReqUser;
+         // P16-F2：store 可配置（默认 true，服务端持久化才能多轮链；网关不支持时靠重建兜底）。
+         body["store"] = _cfg.StoreResponses;
         return body;
     }
     public async Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
@@ -560,6 +561,53 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                 onEvent(new StreamEvent.ToolCallDelta(0, nm ?? "", frag ?? ""));
                 return false;
             }
+             // P16-F1：function_call 种子（名字/callId 第一次出现的位置；必须先判 type==function_call）。
+             if (type == "response.output_item.added")
+             {
+                 if (root.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object
+                     && item.TryGetProperty("type", out var it) && it.GetString() == "function_call")
+                 {
+                     string? oi = root.TryGetProperty("output_index", out var o) ? o.ToString() : null;
+                     string? iid = item.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString() : null;
+                     string? cid = item.TryGetProperty("call_id", out var cc) && cc.ValueKind == JsonValueKind.String ? cc.GetString()
+                         : (item.TryGetProperty("id", out var i2) && i2.ValueKind == JsonValueKind.String ? i2.GetString() : null);
+                     string? nm = item.TryGetProperty("name", out var nn) && nn.ValueKind == JsonValueKind.String ? nn.GetString() : null;
+                     string? ag = item.TryGetProperty("arguments", out var aa)
+                         ? (aa.ValueKind == JsonValueKind.String ? aa.GetString() : aa.GetRawText()) : null;
+                     acc.SetIdentity(oi, iid, cid, nm);
+                     if (!string.IsNullOrEmpty(ag)) acc.SetArguments(oi, iid, ag);
+                 }
+                 return false;
+             }
+             // P16-F1：全量权威替换（防与 delta 片段重复拼接）。
+             if (type == "response.function_call_arguments.done")
+             {
+                 string? oi = root.TryGetProperty("output_index", out var o) ? o.ToString() : null;
+                 string? iid = root.TryGetProperty("item_id", out var ii) && ii.ValueKind == JsonValueKind.String ? ii.GetString() : null;
+                 string? nm = root.TryGetProperty("name", out var nn) && nn.ValueKind == JsonValueKind.String ? nn.GetString() : null;
+                 string? ag = root.TryGetProperty("arguments", out var aa)
+                     ? (aa.ValueKind == JsonValueKind.String ? aa.GetString() : aa.GetRawText()) : null;
+                 acc.SetIdentity(oi, iid, null, nm);
+                 if (!string.IsNullOrEmpty(ag)) acc.SetArguments(oi, iid, ag);
+                 return false;
+             }
+             // P16-F1：最终快照兜底。
+             if (type == "response.output_item.done")
+             {
+                 if (root.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object
+                     && item.TryGetProperty("type", out var it) && it.GetString() == "function_call")
+                 {
+                     string? oi = root.TryGetProperty("output_index", out var o) ? o.ToString() : null;
+                     string? iid = item.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString() : null;
+                     string? cid = item.TryGetProperty("call_id", out var cc) && cc.ValueKind == JsonValueKind.String ? cc.GetString() : null;
+                     string? nm = item.TryGetProperty("name", out var nn) && nn.ValueKind == JsonValueKind.String ? nn.GetString() : null;
+                     string? ag = item.TryGetProperty("arguments", out var aa)
+                         ? (aa.ValueKind == JsonValueKind.String ? aa.GetString() : aa.GetRawText()) : null;
+                     acc.SetIdentity(oi, iid, cid, nm);
+                     if (!string.IsNullOrEmpty(ag)) acc.SetArguments(oi, iid, ag);
+                 }
+                 return false;
+             }
             if (type == "response.completed" || type == "completed")
             {
                 if (root.TryGetProperty("response", out var r2) && r2.ValueKind == JsonValueKind.Object)

@@ -447,26 +447,76 @@ public sealed partial class RealMethods
             Headers = headers,
         });
 
-        try
-        {
-            var models = await client.ListModelsAsync(cts.Token).ConfigureAwait(false);
-            return new SettingsProbeModelsResult { Models = models.ToList() };
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new RpcException(RpcError.LlmTimeout,
-                "探测模型超时（10 秒）", "检查网络或服务地址");
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new RpcException(RpcError.LlmError,
-                "探测失败：" + ex.Message, "检查 BaseUrl 与 API Key");
-        }
-        finally
-        {
-            client.Dispose();
-        }
+         try
+         {
+             var models = await client.ListModelsAsync(cts.Token).ConfigureAwait(false);
+             // P16-F3：responses 协议加带会话实调 ping（GET /models 不需要 session 头，绿了也可能是假绿）。
+             // 只在库中该 provider 已配 responses 模型时才 ping（新 provider 无模型可参照时沿用旧行为，不改契约）。
+             string? responsesModel = null;
+             try
+             {
+                 var cfgModels = ConfigStore.Load();
+                 if (!string.IsNullOrWhiteSpace(providerId)
+                     && cfgModels.Providers.TryGetValue(providerId.Trim(), out var pd)
+                     && pd.Models is { Count: > 0 })
+                     responsesModel = pd.Models
+                         .FirstOrDefault(m => string.Equals(m.Protocol, "responses", StringComparison.OrdinalIgnoreCase))?.Id;
+             }
+             catch { }
+             if (!string.IsNullOrWhiteSpace(responsesModel))
+             {
+                 using var rclient = new OpenAiCompatibleClient(new LlmConfig
+                 {
+                     BaseUrl = baseUrl!.Trim(),
+                     Model = responsesModel!.Trim(),
+                     ApiKey = apiKey,
+                     ProxyUrl = proxyUrl,
+                     Headers = headers,
+                     Protocol = LlmProtocol.Responses,
+                 });
+                 try
+                 {
+                     // 注意传非空 sessionId，否则模板头被跳过、ping 了个寂寞。
+                     var pingInput = new object[]
+                     {
+                         new Dictionary<string, object?>
+                         {
+                             ["type"] = "message",
+                             ["role"] = "user",
+                             ["content"] = new object[]
+                             {
+                                 new Dictionary<string, object?> { ["type"] = "input_text", ["text"] = "ping" },
+                             },
+                         },
+                     };
+                     await rclient.ResponsesAsync(null, "ping", pingInput, null,
+                         cts.Token, "probe-" + Guid.NewGuid().ToString("N")).ConfigureAwait(false);
+                 }
+                 catch (EndpointStatusException ex)
+                 {
+                     throw new RpcException(RpcError.LlmError,
+                         "模型可用但 responses 不通(" + ex.Status + ")：检查 x-opencode-session 头",
+                         TruncateForProbe(ex.Body));
+                 }
+             }
+             return new SettingsProbeModelsResult { Models = models.ToList() };
+         }
+         catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+         {
+             throw new RpcException(RpcError.LlmTimeout,
+                 "探测模型超时（10 秒）", "检查网络或服务地址");
+         }
+         catch (HttpRequestException ex)
+         {
+             throw new RpcException(RpcError.LlmError,
+                 "探测失败：" + ex.Message, "检查 BaseUrl 与 API Key");
+         }
+         finally
+         {
+             client.Dispose();
+         }
     }
+     private static string TruncateForProbe(string s) => s.Length <= 300 ? s : s[..300] + "…";
 
     public Task<object?> SettingsMcpGetAsync(JsonElement? p, CancellationToken ct)
     {

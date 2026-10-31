@@ -446,19 +446,21 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
-        catch (Exception ex)
-        {
-            await _bus.PublishStateAsync(EventKinds.Notice,
-                new NoticePayload { Text = "⚠ 请求失败: " + ex.Message, Level = "error" },
-                CancellationToken.None).ConfigureAwait(false);
-
-            await _bus.PublishStateAsync(EventKinds.TurnFinished,
-                new TurnFinishedPayload { TurnId = turnId, Text = "", Truncated = false, Reason = ex.Message },
-                CancellationToken.None).ConfigureAwait(false);
-
-            await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+         catch (Exception ex)
+         {
+             // P16-F3：异常出口不再哑巴空帧——Text 带上错误文本（与 notice 同一串文案），前端回填后气泡可见。
+             var msg = "⚠ 请求失败: " + ex.Message;
+             await _bus.PublishStateAsync(EventKinds.Notice,
+                 new NoticePayload { Text = msg, Level = "error" },
+                 CancellationToken.None).ConfigureAwait(false);
+ 
+             await _bus.PublishStateAsync(EventKinds.TurnFinished,
+                 new TurnFinishedPayload { TurnId = turnId, Text = msg, Truncated = false, Reason = ex.Message },
+                 CancellationToken.None).ConfigureAwait(false);
+ 
+             await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+             throw;
+         }
         finally
         {
             _busy = false;
@@ -698,6 +700,19 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             return reply;
         }
     }
+     /// <summary>P16-F2：断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。</summary>
+     internal static bool IsBrokenChain(EndpointStatusException ese)
+     {
+         if (ese.Status != 400 && ese.Status != 404) return false;
+         var b = ese.Body ?? "";
+         return b.Contains("previous_response_id", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("response not found", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("not_found", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("expired", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("invalid format", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("invalid_previous_response", StringComparison.OrdinalIgnoreCase);
+     }
+ 
     private async Task<AssistantReply> ResponsesWithRetryAsync(List<object> chatTools, CancellationToken ct)
     {
         int attempt = 0;
@@ -747,13 +762,14 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     }
                 }, ct, _store.SessionId).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) { _bus.FlushNow(); throw; }
-            catch (EndpointStatusException ese) when (!rebuilt && ese.Status == 404 && (ese.Body.Contains("response_not_found") || ese.Body.Contains("expired") || ese.Body.Contains("invalid_previous_response")))
-            {
-                ClearResponseChain();
-                rebuilt = true;
-                continue;
-            }
+             catch (OperationCanceledException) { _bus.FlushNow(); throw; }
+             // P16-F2：断链重建（400/404 + 毒 id 文案即重建；网关文案随时会变，宁宽勿严）。
+             catch (EndpointStatusException ese) when (!rebuilt && IsBrokenChain(ese))
+             {
+                 ClearResponseChain();
+                 rebuilt = true;
+                 continue;
+             }
             catch (Exception ex)
             {
                 var reason = RetryPolicy.GetRetryReason(ex);
