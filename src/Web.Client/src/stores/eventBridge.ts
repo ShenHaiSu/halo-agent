@@ -1,4 +1,4 @@
-// src/Web.Client/src/stores/eventBridge.ts
+﻿// src/Web.Client/src/stores/eventBridge.ts
 // P15：按 (used,kind) 路由 + 轮级搬运 + 双草稿 + 三态折叠。
 import { normalizeToolCalls, useMessagesStore } from './messages';
 import { clearCollapsedTools } from '@/components/chat/toolMeta';
@@ -340,9 +340,10 @@ export function dispatchFrames(frames: HaloFrame[]): void {
            session.compactionRemoved = removed;
            session.compactionKept = typeof p.totalAfter === 'number' ? Math.max(0, (p.totalAfter as number) - 2) : null;
            stream.compactionStarted = false;
+           const seqNum = typeof p.seq === 'number' ? (p.seq as number) : 1;
            stream.notice = removed === 0
              ? { level: 'info', text: '消息太少，无需压缩' }
-             : { level: 'info', text: `已压缩上下文，移除 ${String(removed)} 条` };
+             : { level: 'info', text: `已完成第 ${seqNum} 次压缩，历史记录已就地折叠` };
            const turns = (p.turns ?? null) as unknown;
            if (Array.isArray(turns) && turns.length > 0) {
              messages.applySnapshot({ seq, turns: turns as never });

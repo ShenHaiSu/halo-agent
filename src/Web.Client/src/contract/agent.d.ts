@@ -184,6 +184,15 @@ export interface ThemeFile {
   tokens: Record<string, unknown>
 }
 
+/** 上下文压缩分隔栏视图数据 */
+export interface CompactDividerView {
+  seq: number
+  summary: string
+  removedTurns: number
+  keptTurns: number
+  tsMs: number
+}
+
 /** TurnView */
 export interface TurnView {
   turnId: string
@@ -191,6 +200,7 @@ export interface TurnView {
   injected?: MessageView[]
   process?: MessageView[]
   final: MessageView
+  dividerBefore?: CompactDividerView
 }
 
 /** 用量明细行 */
@@ -393,6 +403,9 @@ export interface HaloMethods {
   totalBefore?: number
   totalAfter?: number
   keptCount?: number
+  seq?: number
+  removedTurns?: number
+  keptTurns?: number
 } }
   /** session.setCwd */
   'session.setCwd': { params: {
@@ -890,6 +903,9 @@ export interface HaloEventPayloads {
   turns?: TurnView[]
   totalBefore?: number
   totalAfter?: number
+  seq?: number
+  removedTurns?: number
+  keptTurns?: number
 }
   /** user.injected */
   'user.injected': {

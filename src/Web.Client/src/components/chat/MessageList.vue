@@ -1,11 +1,10 @@
-<!-- src/Web.Client/src/components/chat/MessageList.vue -->
+﻿<!-- src/Web.Client/src/components/chat/MessageList.vue -->
 <!-- P15：渲染 TurnCard 列表，窗口化以 currentTurn.turnId 为中心 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { throttle } from '@/utils/throttle';
 import { useMessagesStore } from '@/stores/messages';
 import { useStreamStore } from '@/stores/stream';
-import { useSessionStore } from '@/stores/session';
 import { useSessionsStore } from '@/stores/sessions';
 import { useMessageWindow } from '@/composables/useMessageWindow';
 import HScroll from '@/components/base/HScroll.vue';
@@ -13,13 +12,12 @@ import HEmpty from '@/components/base/HEmpty.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSkeleton from '@/components/base/HSkeleton.vue';
 import TurnCard from './TurnCard.vue';
-import CompactionCard from './CompactionCard.vue';
+import CompactDivider from './CompactDivider.vue';
 
 const emit = defineEmits<{ (e: 'use-sample', text: string): void }>();
 
 const messages = useMessagesStore();
 const stream = useStreamStore();
-const session = useSessionStore();
 const sessions = useSessionsStore();
 
 const currentTurnId = computed(() => stream.currentTurn?.turnId ?? null);
@@ -84,15 +82,16 @@ const samples = [
 <template>
   <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
     <div class="msg-inner density-compact">
-       <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" :removed="session.compactionRemoved" :kept-count="session.compactionKept" />
-
       <div v-if="visible.hiddenTop > 0 && !showAll" class="msg-fold">
         <HButton variant="ghost" size="sm" @click="showAll = true">
           显示更早的 {{ visible.hiddenTop }} 条
         </HButton>
       </div>
 
-      <TurnCard v-for="t in visible.items" :key="t.turnId" :turn="t" />
+      <template v-for="t in visible.items" :key="t.turnId">
+        <CompactDivider v-if="t.dividerBefore" :divider="t.dividerBefore" />
+        <TurnCard :turn="t" />
+      </template>
 
       <div v-if="visible.hiddenBottom > 0 && !showAll" class="msg-fold">
         <HButton variant="ghost" size="sm" @click="showAll = true">

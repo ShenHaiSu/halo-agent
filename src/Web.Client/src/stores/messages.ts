@@ -1,10 +1,11 @@
-// src/Web.Client/src/stores/messages.ts
+﻿// src/Web.Client/src/stores/messages.ts
 // P15 TurnCard 三段式：turns 为唯一真相，drafts 按 (turnId:used,kind) 分槽。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
- import { useSessionStore } from '@/stores/session';
- import { useStreamStore } from './stream';
+import { useSessionStore } from '@/stores/session';
+import { useStreamStore } from './stream';
+import type { CompactDividerView } from '@/contract/agent';
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 
@@ -54,6 +55,7 @@ export interface TurnView {
   injected: MessageItem[];
   process: MessageItem[];
   final: MessageItem;
+  dividerBefore?: CompactDividerView | null;
 }
 
 export interface Drafts {
@@ -188,7 +190,8 @@ function normalizeTurn(t: Record<string, unknown>): TurnView {
   const injected = Array.isArray(t.injected) ? (t.injected as Array<Record<string, unknown>>).map((m) => normalizeMessage(m, toolMap)) : [];
   const process = Array.isArray(t.process) ? (t.process as Array<Record<string, unknown>>).map((m) => normalizeMessage(m, toolMap)) : [];
   const final = t.final && typeof t.final === 'object' ? normalizeMessage(t.final as Record<string, unknown>, toolMap) : { id: `m-${turnId}-f`, role: 'assistant' as const, content: '', ts: Date.now(), ord: 0 };
-  return { turnId, user, injected, process, final };
+  const dividerBefore = t.dividerBefore && typeof t.dividerBefore === 'object' ? (t.dividerBefore as CompactDividerView) : undefined;
+  return { turnId, user, injected, process, final, dividerBefore };
 }
 
 /** 旧扁平 messages → TurnView[] 回填（不写回文件，只重排内存）。 */
@@ -269,11 +272,14 @@ export const useMessagesStore = defineStore('messages', () => {
      }
      drafts.value = {};
      toolTail.value = new Map();
-     // P18：快照后若首轮含上下文摘要前缀，回填 compactionSummary（刷新/重连后卡片不丢）
+     // 向下兼容：若首轮含旧格式上下文摘要前缀且没有任何 dividerBefore，才回填 compactionSummary
      try {
-       const first = turns.value[0]?.user?.content ?? '';
-       if (typeof first === 'string' && first.includes('【上下文摘要')) {
-         useSessionStore().compactionSummary = first;
+       const hasAnyDivider = turns.value.some((t) => !!t.dividerBefore);
+       if (!hasAnyDivider) {
+         const first = turns.value[0]?.user?.content ?? '';
+         if (typeof first === 'string' && first.includes('【上下文摘要')) {
+           useSessionStore().compactionSummary = first;
+         }
        }
      } catch {
        /* store 未挂载时忽略 */
