@@ -1,7 +1,14 @@
-// src/Web.Client/src/components/usage/usagePresets.test.ts
+﻿// src/Web.Client/src/components/usage/usagePresets.test.ts
 // P16：8 预设期望值表（周日/月初一/跨月/闰日）。
 import { describe, expect, it } from 'vitest';
-import { daysAgoMidnightMs, getPresetRange, startOfTodayMs } from './usagePresets';
+import {
+  daysAgoMidnightMs,
+  fromInputValue,
+  getPresetRange,
+  startOfTodayMs,
+  toEndInputValue,
+  toInputValue,
+} from './usagePresets';
 
 const DAY = 86400000;
 
@@ -64,5 +71,28 @@ describe('usagePresets', () => {
   it('daysAgoMidnightMs：90 天前本地 00:00', () => {
     const now = new Date(2026, 9, 30, 15, 0);
     expect(daysAgoMidnightMs(90, now)).toBe(startOfTodayMs(now) - 90 * DAY);
+  });
+
+  it('toInputValue / toEndInputValue / fromInputValue 互转与分钟+1逻辑', () => {
+    expect(toInputValue()).toBe('');
+    expect(toEndInputValue()).toBe('');
+    expect(fromInputValue('')).toBeUndefined();
+
+    // 2026-10-30 14:35:20
+    const d = new Date(2026, 9, 30, 14, 35, 20);
+    const ms = d.getTime();
+
+    // toInputValue 截断秒
+    expect(toInputValue(ms)).toBe('2026-10-30T14:35');
+    // toEndInputValue 分钟+1
+    expect(toEndInputValue(ms)).toBe('2026-10-30T14:36');
+
+    // 跨小时与跨天进位
+    const endOfHour = new Date(2026, 9, 30, 23, 59, 10).getTime();
+    expect(toEndInputValue(endOfHour)).toBe('2026-10-31T00:00');
+
+    // fromInputValue 解析回时间戳并对齐到 00 秒
+    const parsed = fromInputValue('2026-10-30T14:36');
+    expect(parsed).toBe(new Date(2026, 9, 30, 14, 36, 0).getTime());
   });
 });

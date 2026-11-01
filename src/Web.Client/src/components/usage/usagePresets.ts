@@ -1,4 +1,4 @@
-// src/Web.Client/src/components/usage/usagePresets.ts
+﻿// src/Web.Client/src/components/usage/usagePresets.ts
 // P16 用量筛选：8 预设精确语义（本地日历 → UTC ms，前端换算）。
 
 export type UsagePresetKey =
@@ -73,6 +73,14 @@ export function toInputValue(ms?: number): string {
   const d = new Date(ms);
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 结束时间输入值专用转换：在原毫秒上增加 60 秒（+1 分钟），再转为 datetime-local 格式。
+ * 避免因 input 截断秒且反解析对齐到 00 秒导致漏掉当前分钟内的记录。
+ */
+export function toEndInputValue(ms?: number): string {
+  if (ms === undefined || ms === null) return '';
+  return toInputValue(ms + 60_000);
 }
 
 /** datetime-local 输入值 → 本地毫秒（空串返回 undefined）。 */

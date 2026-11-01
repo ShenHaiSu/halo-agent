@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/settings/pages/UsageAnalyticsPage.vue -->
+﻿<!-- src/Web.Client/src/components/settings/pages/UsageAnalyticsPage.vue -->
 <!-- P17 用量页：筛选表单 + 预设 + 汇总卡 + 主图（双轴） + 饼图 + 明细表 + 治理区（三子卡 + 危险区）。查询态，isDirty 恒 false。 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
@@ -31,6 +31,7 @@ import {
   getPresetRange,
   daysAgoMidnightMs,
   toInputValue,
+  toEndInputValue,
   type UsagePresetKey,
 } from '@/components/usage/usagePresets';
 import {
@@ -166,7 +167,7 @@ async function onPreset(key: UsagePresetKey): Promise<void> {
   const prevSession = sessionId.value;
   const r = getPresetRange(key);
   fromInput.value = toInputValue(r.fromMs);
-  toInput.value = toInputValue(r.toMs);
+  toInput.value = toEndInputValue(r.toMs);
   activePreset.value = key;
   if (keepDims) {
     providerId.value = prevProvider;
@@ -437,7 +438,7 @@ onMounted(async () => {
   // 默认近七日
   const r = getPresetRange('last7');
   fromInput.value = toInputValue(r.fromMs);
-  toInput.value = toInputValue(r.toMs);
+  toInput.value = toEndInputValue(r.toMs);
   activePreset.value = 'last7';
   await runQuery();
 });
