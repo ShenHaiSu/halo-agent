@@ -1,4 +1,4 @@
-namespace HaloAgent.Engine.Core.Agent;
+﻿namespace HaloAgent.Engine.Core.Agent;
 
 /// <summary>
 /// 把 OpenAI 格式的 ChatMessage 投影成渲染友好的 MessageView。
@@ -36,6 +36,7 @@ public static class MessageProjector
         {
             if (m.Role == HaloAgent.Engine.Core.Llm.Role.System) continue;
             if (m.Role == HaloAgent.Engine.Core.Llm.Role.Tool) continue;
+            if (m.IsCompactMarker) continue;
 
             var view = new HaloAgent.Engine.Abstractions.Types.MessageView
             {
@@ -160,6 +161,7 @@ public static class MessageProjector
         var curInjected = new List<HaloAgent.Engine.Abstractions.Types.MessageView>();
         var curAssistants = new List<HaloAgent.Engine.Abstractions.Types.MessageView>();
         string? curTurnId = null;
+        HaloAgent.Engine.Abstractions.Types.CompactDividerView? curDividerBefore = null;
         var turnSeq = 0;
 
         void FlushTurn()
@@ -195,37 +197,61 @@ public static class MessageProjector
                 Injected = curInjected.ToList(),
                 Process = process,
                 Final = final,
+                DividerBefore = curDividerBefore,
             });
             curUser = null;
             curInjected = new List<HaloAgent.Engine.Abstractions.Types.MessageView>();
             curAssistants = new List<HaloAgent.Engine.Abstractions.Types.MessageView>();
             curTurnId = null;
+            curDividerBefore = null;
         }
 
-        // 取 TurnId：从原始 ChatMessage 按顺序映射。flat 与 messages（过滤后）顺序一致但 system/tool 被跳过，
-        // 故用队列按序消费非 system/tool 的 TurnId。
+        // 取 TurnId 与前置 CompactMarker：从原始 ChatMessage 按顺序映射。
         var turnIdQueue = new Queue<string?>();
+        var dividerQueue = new Queue<HaloAgent.Engine.Abstractions.Types.CompactDividerView?>();
+        HaloAgent.Engine.Abstractions.Types.CompactDividerView? pendingDivider = null;
+
         foreach (var m in messages)
         {
             if (m.Role == HaloAgent.Engine.Core.Llm.Role.System) continue;
             if (m.Role == HaloAgent.Engine.Core.Llm.Role.Tool) continue;
+
+            if (m is HaloAgent.Engine.Core.Llm.CompactMarkerMessage marker)
+            {
+                pendingDivider = new HaloAgent.Engine.Abstractions.Types.CompactDividerView
+                {
+                    Seq = marker.Seq,
+                    Summary = marker.Summary,
+                    RemovedTurns = marker.RemovedTurns,
+                    KeptTurns = marker.KeptTurns,
+                    TsMs = marker.TsMs,
+                };
+                continue;
+            }
+
             turnIdQueue.Enqueue(m.TurnId);
+            dividerQueue.Enqueue(pendingDivider);
+            pendingDivider = null;
         }
 
         foreach (var v in flat)
         {
             var tid = turnIdQueue.Count > 0 ? turnIdQueue.Dequeue() : null;
+            var div = dividerQueue.Count > 0 ? dividerQueue.Dequeue() : null;
+
             if (v.Role == "user")
             {
                 if (curUser is null)
                 {
                     curUser = v;
                     curTurnId = tid;
+                    if (div != null) curDividerBefore = div;
                 }
                 else if (tid is not null && curTurnId is not null && string.Equals(tid, curTurnId, StringComparison.Ordinal))
                 {
                     // 同回合后续 user → Injected
                     curInjected.Add(v with { Injected = true });
+                    if (div != null) curDividerBefore ??= div;
                 }
                 else
                 {
@@ -233,6 +259,7 @@ public static class MessageProjector
                     FlushTurn();
                     curUser = v;
                     curTurnId = tid;
+                    if (div != null) curDividerBefore = div;
                     turnSeq = turns.Count; // 保持 t-hist 连续（FlushTurn 内 ++）
                 }
             }
@@ -243,12 +270,17 @@ public static class MessageProjector
                     // 孤儿 assistant（无 user 先行）：合成空 user 开新回合
                     curUser = new HaloAgent.Engine.Abstractions.Types.MessageView { Id = v.Id + "-u", Role = "user", Text = "", TsMs = v.TsMs, Ord = 0 };
                     curTurnId = tid;
+                    if (div != null) curDividerBefore = div;
+                }
+                else
+                {
+                    if (div != null) curDividerBefore ??= div;
                 }
                 curAssistants.Add(v);
             }
             else
             {
-                // system/tool 孤儿丢弃（flat 已无 system/tool，此分支仅防御）
+                // system/tool 孤儿丢弃
             }
         }
         FlushTurn();

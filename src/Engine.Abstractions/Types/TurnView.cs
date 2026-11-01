@@ -1,4 +1,4 @@
-namespace HaloAgent.Engine.Abstractions.Types;
+﻿namespace HaloAgent.Engine.Abstractions.Types;
 
 /// <summary>P15：回合视图。用户消息 + 同回合排队插入 + 中途产出 + 末轮正文。</summary>
 public sealed record TurnView
@@ -13,4 +13,6 @@ public sealed record TurnView
     public IReadOnlyList<MessageView> Process { get; init; } = Array.Empty<MessageView>();
     /// <summary>末轮正文（必有 assistant 占位，无 null）。</summary>
     public MessageView Final { get; init; } = new();
+    /// <summary>回合正前方的压缩分隔栏视图（若有）。</summary>
+    public CompactDividerView? DividerBefore { get; init; }
 }

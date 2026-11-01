@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HaloAgent.Engine.Core.Llm;
@@ -30,7 +30,7 @@ public sealed record ChatImageUrl
 /// Content 纯文本快车道保留；有图时使用 ContentParts（序列化为 content 数组）。
 /// </summary>
 [JsonConverter(typeof(ChatMessageJsonConverter))]
-public sealed record ChatMessage
+public record ChatMessage
 {
     public string RoleWire { get; init; } = "user";
     public string? Content { get; init; }
@@ -44,6 +44,9 @@ public sealed record ChatMessage
     [JsonIgnore] public int Ord { get; init; }
     /// <summary>P15 TurnId</summary>
     [JsonIgnore] public string? TurnId { get; init; }
+
+    /// <summary>是否为上下文压缩标记消息。</summary>
+    [JsonIgnore] public virtual bool IsCompactMarker => false;
 
     public static ChatMessage System(string content, long tsMs = 0) =>
         new() { RoleWire = "system", Content = content, TsMs = tsMs };
@@ -258,3 +261,16 @@ public sealed record FunctionDef
     [JsonPropertyName("description")] public string Description { get; init; } = "";
     [JsonPropertyName("parameters")] public object? Parameters { get; init; }
 }
+
+/// <summary>
+/// 上下文压缩标记消息（纯逻辑节点，不直接进 LLM 请求体）。
+/// </summary>
+public sealed record CompactMarkerMessage : ChatMessage
+{
+    public int Seq { get; init; }
+    public string Summary { get; init; } = "";
+    public int RemovedTurns { get; init; }
+    public int KeptTurns { get; init; }
+    public override bool IsCompactMarker => true;
+}
+

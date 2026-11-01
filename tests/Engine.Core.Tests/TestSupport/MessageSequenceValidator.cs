@@ -1,4 +1,4 @@
-using HaloAgent.Engine.Core.Llm;
+﻿using HaloAgent.Engine.Core.Llm;
 
 namespace HaloAgent.Engine.Core.Tests.TestSupport;
 
@@ -24,6 +24,8 @@ public static class MessageSequenceValidator
         foreach (var m in messages)
         {
             i++;
+            if (m.IsCompactMarker) continue;
+
             if (m.Role != Role.Tool && pending.Count > 0)
             {
                 violations.Add($"#{i} 出现 role={m.RoleWire}，但仍有未响应的 tool_calls: " +

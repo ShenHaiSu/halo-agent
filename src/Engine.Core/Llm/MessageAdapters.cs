@@ -1,4 +1,4 @@
-using HaloAgent.Engine.Storage.Sessions;
+﻿using HaloAgent.Engine.Storage.Sessions;
 
 namespace HaloAgent.Engine.Core.Llm;
 
@@ -11,6 +11,18 @@ public static class MessageAdapters
 {
     public static ChatMessage ToChatMessage(StoredMessage m)
     {
+        if (m.IsCompactMarker)
+        {
+            return new CompactMarkerMessage
+            {
+                Seq = m.Seq,
+                Summary = m.Summary ?? "",
+                RemovedTurns = m.RemovedTurns,
+                KeptTurns = m.KeptTurns,
+                TsMs = m.TsMs,
+            };
+        }
+
         List<ChatContentPart>? parts = null;
         var sparts = m.ContentParts;
         if (sparts is { Count: > 0 })
@@ -38,6 +50,19 @@ public static class MessageAdapters
 
     public static StoredMessage ToStoredMessage(ChatMessage m)
     {
+        if (m is CompactMarkerMessage marker)
+        {
+            return new StoredMessage
+            {
+                Marker = "compact",
+                Seq = marker.Seq,
+                Summary = marker.Summary,
+                RemovedTurns = marker.RemovedTurns,
+                KeptTurns = marker.KeptTurns,
+                TsMs = marker.TsMs,
+            };
+        }
+
         var s = new StoredMessage
         {
             RoleWire = m.RoleWire,

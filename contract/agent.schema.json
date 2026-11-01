@@ -748,6 +748,34 @@
         "tokens"
       ]
     },
+    "CompactDividerView": {
+      "type": "object",
+      "description": "上下文压缩分隔栏视图数据",
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "removedTurns": {
+          "type": "integer"
+        },
+        "keptTurns": {
+          "type": "integer"
+        },
+        "tsMs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "summary",
+        "removedTurns",
+        "keptTurns",
+        "tsMs"
+      ]
+    },
     "TurnView": {
       "type": "object",
       "properties": {
@@ -771,6 +799,9 @@
         },
         "final": {
           "$ref": "#/types/MessageView"
+        },
+        "dividerBefore": {
+          "$ref": "#/types/CompactDividerView"
         }
       },
       "required": [
@@ -1351,7 +1382,16 @@
            },
            "keptCount": {
              "type": "integer"
-           }
+           },
+          "seq": {
+            "type": "integer"
+          },
+          "removedTurns": {
+            "type": "integer"
+          },
+          "keptTurns": {
+            "type": "integer"
+          }
          }
        },
        "implementedIn": "engine"
@@ -3220,7 +3260,16 @@
            },
            "totalAfter": {
              "type": "integer"
-           }
+           },
+          "seq": {
+            "type": "integer"
+          },
+          "removedTurns": {
+            "type": "integer"
+          },
+          "keptTurns": {
+            "type": "integer"
+          }
          }
        }
      },

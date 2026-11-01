@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HaloAgent.Engine.Storage;
@@ -142,6 +142,18 @@ public sealed class SessionStore : IDisposable
              }, StorageJson.Compact);
              _writer.WriteLine(meta);
              _writer.Flush();
+         }
+     }
+
+     /// <summary>向历史文件末尾单向追加一条上下文压缩标记记录。</summary>
+     public void RecordCompactMarker(StoredCompactMarker marker, bool headless = false, string cwd = "")
+     {
+         lock (_lock)
+         {
+             EnsureWriter(headless, cwd);
+             var line = JsonSerializer.Serialize(marker, StorageJson.Compact);
+             _writer!.WriteLine(line);
+             _writer!.Flush();
          }
      }
 
@@ -310,6 +322,29 @@ public sealed class SessionStore : IDisposable
                 if (root.TryGetProperty("meta", out _))
                 {
                     try { meta = JsonSerializer.Deserialize<HistoryMeta>(line, StorageJson.Compact); }
+                    catch { }
+                    continue;
+                }
+
+                if (root.TryGetProperty("marker", out var markerProp) &&
+                    string.Equals(markerProp.GetString(), "compact", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var marker = JsonSerializer.Deserialize<StoredCompactMarker>(line, StorageJson.Compact);
+                        if (marker != null)
+                        {
+                            messages.Add(new StoredMessage
+                            {
+                                Marker = "compact",
+                                Seq = marker.Seq,
+                                Summary = marker.Summary,
+                                RemovedTurns = marker.RemovedTurns,
+                                KeptTurns = marker.KeptTurns,
+                                TsMs = marker.TsMs,
+                            });
+                        }
+                    }
                     catch { }
                     continue;
                 }

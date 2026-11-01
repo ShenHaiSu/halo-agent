@@ -1,4 +1,4 @@
- using System.Text.Json;
+﻿ using System.Text.Json;
  using Microsoft.Extensions.Logging;
  using Microsoft.Extensions.Logging.Abstractions;
 using HaloAgent.Engine.Abstractions;
@@ -34,7 +34,7 @@ public sealed class PendingAskSlot
 
 public sealed record AskAnswer(bool Allow, bool Always);
  /// <summary>P18：压缩结果（含对账字段）。提供 2 元解构以兼容旧调用方。</summary>
- public sealed record CompactResult(int Removed, string Summary, int TotalBefore, int TotalAfter)
+ public sealed record CompactResult(int Removed, string Summary, int TotalBefore, int TotalAfter, int Seq = 0, int RemovedTurns = 0, int KeptTurns = 0)
  {
      public void Deconstruct(out int removed, out string summary)
      {
@@ -119,7 +119,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private const int RepeatWarn = 3;
     private const int RepeatAbort = 6;
     private const int ContextMaxChars = 20_000;
-    private const int KeepTailForCompact = 4;
+    public const int KeepTailTurns = 2;
+    public const int KeepTailForCompact = 4;
 
 
       public AgentSession(
@@ -804,7 +805,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              bool includeReasoning;
              bool acceptsImages;
              bool stateless;
-             lock (_lock) { prev = _lastResponseId; snap = _messages.ToList(); includeReasoning = _activeIncludeReasoning; acceptsImages = _activeAcceptsImages; stateless = _responsesStateless; }
+             lock (_lock) { prev = _lastResponseId; includeReasoning = _activeIncludeReasoning; acceptsImages = _activeAcceptsImages; stateless = _responsesStateless; }
+             snap = BuildLlmContext();
              if (stateless) prev = null;
              var stripped = MessageAdapters.StripReasoning(snap, includeReasoning).ToList();
              foreach (var m in stripped) MessageAdapters.ValidateImages(m, acceptsImages);
@@ -1129,36 +1131,50 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              List<ChatMessage> snapshot;
              lock (_lock) snapshot = _messages.ToList();
              int totalBefore = snapshot.Count;
-             if (snapshot.Count <= KeepTailForCompact + 1)
+
+             var nonSystem = snapshot.Count > 0 && snapshot[0].Role == Role.System
+                 ? snapshot.Skip(1).ToList()
+                 : snapshot;
+
+             var (oldTurns, keepTurns) = TurnSegmenter.Segment(nonSystem, KeepTailTurns);
+             if (oldTurns.Count == 0)
              {
                  try { _log.LogInformation("compact noop session={Sid} count={Count}", _store.SessionId, totalBefore); } catch { }
                  try
                  {
                      await _bus.PublishStateAsync(EventKinds.Notice,
-                         new NoticePayload { Text = "消息太少，无需压缩", Level = "info" }, ct).ConfigureAwait(false);
+                         new NoticePayload { Text = "回合太少，无需压缩", Level = "info" }, ct).ConfigureAwait(false);
                  }
                  catch { }
-                 return new CompactResult(0, "", totalBefore, totalBefore);
+                 return new CompactResult(0, "", totalBefore, totalBefore, 0, 0, keepTurns.Count);
              }
+
              await _bus.PublishStateAsync(EventKinds.SessionCompactionStarted, null, ct).ConfigureAwait(false);
-             var system = snapshot[0];
-             var tail = snapshot.Skip(1).ToList();
-             var splitAt = tail.Count - KeepTailForCompact;
-             var old = tail.Take(splitAt).ToList();
-             var keep = tail.Skip(splitAt).ToList();
-             var body = string.Join("\n", old.Select(m =>
-                 "[" + RoleLabel(m.Role) + "] " + Truncate(MessageAdapters.StripImagesForSummary(m).Content ?? "", 2000)));
+
+             var oldMessages = oldTurns.SelectMany(t => t).ToList();
+             var body = string.Join("\n", oldMessages.Select(m =>
+             {
+                 if (m is CompactMarkerMessage cm)
+                 {
+                     return "[此前历史浓缩摘要]\n" + cm.Summary;
+                 }
+                 return "[" + RoleLabel(m.Role) + "] " + Truncate(MessageAdapters.StripImagesForSummary(m).Content ?? "", 2000);
+             }));
+
+             var summaryPrompt =
+                 "你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n" +
+                 "- 任务目标与当前进展到哪一步\n" +
+                 "- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n" +
+                 "- 用户的明确决定、偏好与要求\n" +
+                 "- 尚未完成、需要继续处理的事项\n" +
+                 "只输出要点，不要复述对话原文，不要添加对话里没有的内容。";
+
              var summaryMessages = new[]
              {
-                 ChatMessage.System(
-                     "你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n" +
-                     "- 任务目标与当前进展到哪一步\n" +
-                     "- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n" +
-                     "- 用户的明确决定、偏好与要求\n" +
-                     "- 尚未完成、需要继续处理的事项\n" +
-                     "只输出要点，不要复述对话原文，不要添加对话里没有的内容。"),
+                 ChatMessage.System(summaryPrompt),
                  ChatMessage.User(body),
              };
+
              string? summary;
              bool isResp;
              lock (_lock) isResp = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
@@ -1166,7 +1182,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              {
                  if (isResp)
                  {
-                     var (instr, inp) = ResponsesTranslators.TranslateMessages(new[] { ChatMessage.System("你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n- 任务目标与当前进展到哪一步\n- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n- 用户的明确决定、偏好与要求\n- 尚未完成、需要继续处理的事项\n只输出要点，不要复述对话原文，不要添加对话里没有的内容。"), ChatMessage.User(body) });
+                     var (instr, inp) = ResponsesTranslators.TranslateMessages(summaryMessages);
                      var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId).ConfigureAwait(false);
                      summary = rr.Content?.Trim();
                  }
@@ -1187,36 +1203,38 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  catch { }
                  throw;
              }
+
              if (string.IsNullOrEmpty(summary))
              {
                  try { _log.LogWarning("compact failed session={Sid} reason=empty fileUnchanged=true memUnchanged=true", _store.SessionId); } catch { }
                  throw new InvalidOperationException("压缩模型没返回内容，请再试一次");
              }
-             ChatMessage summaryMsg;
+
+             int seq;
+             long tsMs;
              lock (_lock)
              {
-                 var now = _clock.UtcNowMs();
-                 var stamped = Math.Max(now, _lastTsMs + 1);
-                 if (keep.Count > 0 && keep[0].TsMs > 0 && stamped > keep[0].TsMs)
-                     stamped = keep[0].TsMs;
-                 summaryMsg = ChatMessage.User(
-                     "【上下文摘要: 压缩自此前 " + old.Count + " 条消息，由模型自动生成，细节以历史文件为准】\n" + summary,
-                     stamped);
+                 seq = _messages.OfType<CompactMarkerMessage>().Count() + 1;
+                 tsMs = _clock.UtcNowMs();
              }
-             var newMessages = new List<ChatMessage>
+
+             int removedTurns = oldTurns.Count;
+             int keptTurns = keepTurns.Count;
+
+             var storedMarker = new StoredCompactMarker
              {
-                 system,
-                 summaryMsg,
+                 Marker = "compact",
+                 Seq = seq,
+                 Summary = summary,
+                 RemovedTurns = removedTurns,
+                 KeptTurns = keptTurns,
+                 TsMs = tsMs,
              };
-             newMessages.AddRange(keep);
-             int totalAfter = newMessages.Count;
-             // P18：先写文件后换内存，避免分裂
-             int fileBefore = -1;
+
+             // 单向追加落盘
              try
              {
-                 fileBefore = CountHistoryLines();
-                 var stored = MessageAdapters.ToStoredMessages(newMessages.Skip(1).ToList());
-                 _store.RewriteAfterCompact(stored);
+                 _store.RecordCompactMarker(storedMarker, headless: !_askInteractive, cwd: _cwd);
              }
              catch (Exception ex)
              {
@@ -1224,39 +1242,67 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  try
                  {
                      await _bus.PublishStateAsync(EventKinds.Notice,
-                         new NoticePayload { Text = "压缩落盘失败: " + ex.Message, Level = "error" }, CancellationToken.None).ConfigureAwait(false);
+                         new NoticePayload { Text = "压缩标记落盘失败: " + ex.Message, Level = "error" }, CancellationToken.None).ConfigureAwait(false);
                  }
                  catch { }
-                 throw new InvalidOperationException("压缩落盘失败: " + ex.Message, ex);
+                 throw new InvalidOperationException("压缩标记落盘失败: " + ex.Message, ex);
              }
-             int fileAfter = CountHistoryLines();
-             string? prevChain;
-             int sentChain;
-             lock (_lock) { prevChain = _lastResponseId; sentChain = _responsesSentCount; }
+
+             var markerMsg = new CompactMarkerMessage
+             {
+                 Seq = seq,
+                 Summary = summary,
+                 RemovedTurns = removedTurns,
+                 KeptTurns = keptTurns,
+                 TsMs = tsMs,
+             };
+
+             // 内存更新：在 oldTurns 与 keepTurns 之间插入 marker，完整保留历史
+             var newMessages = new List<ChatMessage>();
+             if (snapshot.Count > 0 && snapshot[0].Role == Role.System)
+             {
+                 newMessages.Add(snapshot[0]);
+             }
+             newMessages.AddRange(oldTurns.SelectMany(t => t));
+             newMessages.Add(markerMsg);
+             newMessages.AddRange(keepTurns.SelectMany(t => t));
+
+             int totalAfter = newMessages.Count;
+
              lock (_lock)
              {
                  _messages.Clear();
                  _messages.AddRange(newMessages);
                  _lastTsMs = _messages.Count == 0 ? 0 : _messages.Max(m => m.TsMs);
-                 _lastCompactRemoved = old.Count;
+                 _lastCompactRemoved = oldMessages.Count;
                  _lastCompactBefore = totalBefore;
                  _lastCompactAfter = totalAfter;
-                 _lastCompactTsMs = _clock.UtcNowMs();
+                 _lastCompactTsMs = tsMs;
              }
-             ClearResponseChain();
-             try { _log.LogInformation("compact done session={Sid} removed={Removed} before={Before} after={After} file={Fb}->{Fa} chain={Prev}->null", _store.SessionId, old.Count, totalBefore, totalAfter, fileBefore, fileAfter, ShortId(prevChain)); } catch { }
+
+             // Responses 协议链强制重置
+             ResetResponsesChainAfterCompact();
+
+             try { _log.LogInformation("compact done session={Sid} seq={Seq} removedTurns={Rt} keptTurns={Kt} before={Before} after={After}", _store.SessionId, seq, removedTurns, keptTurns, totalBefore, totalAfter); } catch { }
+
              var turns = MessageProjector.ProjectSnapshotTurns(newMessages);
+             var keptViews = MessageProjector.ProjectSnapshotTurns(keepTurns.SelectMany(t => t).ToList());
+
              await _bus.PublishStateAsync(EventKinds.SessionCompacted,
                  new SessionCompactedPayload
                  {
-                     Removed = old.Count,
+                     Removed = oldMessages.Count,
                      Summary = summary,
-                     Kept = MessageProjector.ProjectSnapshotTurns(keep),
+                     Kept = keptViews,
                      Turns = turns,
                      TotalBefore = totalBefore,
                      TotalAfter = totalAfter,
+                     Seq = seq,
+                     RemovedTurns = removedTurns,
+                     KeptTurns = keptTurns,
                  }, ct).ConfigureAwait(false);
-             return new CompactResult(old.Count, summary, totalBefore, totalAfter);
+
+             return new CompactResult(oldMessages.Count, summary, totalBefore, totalAfter, seq, removedTurns, keptTurns);
          }
          finally
          {
@@ -1471,9 +1517,61 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  内部辅助
     // ============================================================
 
+    /// <summary>
+    /// 构造发送给大模型的上下文切片。
+    /// 从后往前找到最新的 CompactMarker，仅拼接 System Prompt + 摘要A + 截断点之后的完整回合。
+    /// </summary>
+    public List<ChatMessage> BuildLlmContext()
+    {
+        lock (_lock)
+        {
+            int lastMarkerIdx = _messages.FindLastIndex(m => m.IsCompactMarker);
+            if (lastMarkerIdx == -1)
+            {
+                return _messages.ToList();
+            }
+
+            var marker = (CompactMarkerMessage)_messages[lastMarkerIdx];
+            var context = new List<ChatMessage>();
+            if (_messages.Count > 0)
+            {
+                context.Add(_messages[0]);
+            }
+
+            context.Add(ChatMessage.User(
+                "【此前会话背景与进展摘要 (细节以历史归档为准)】\n" + marker.Summary,
+                marker.TsMs));
+
+            for (int i = lastMarkerIdx + 1; i < _messages.Count; i++)
+            {
+                if (!_messages[i].IsCompactMarker)
+                {
+                    context.Add(_messages[i]);
+                }
+            }
+
+            return context;
+        }
+    }
+
+    private void ResetResponsesChainAfterCompact()
+    {
+        lock (_lock)
+        {
+            _lastResponseId = null;
+            _responsesSentCount = 0;
+        }
+        ClearResponseChain();
+        try
+        {
+            _log.LogInformation("Responses chain successfully reset due to context compaction. Next turn will force full context sync.");
+        }
+        catch { }
+    }
+
     private List<ChatMessage> MessagesSnapshot()
     {
-        lock (_lock) return _messages.ToList();
+        return BuildLlmContext();
     }
 
     private void Record(ChatMessage msg)

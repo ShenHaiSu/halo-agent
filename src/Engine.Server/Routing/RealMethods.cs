@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Abstractions.Methods;
 using HaloAgent.Engine.Abstractions.Types;
@@ -142,6 +142,9 @@ public sealed partial class RealMethods
              TotalBefore = r.TotalBefore,
              TotalAfter = r.TotalAfter,
              KeptCount = Math.Max(0, r.TotalAfter - 2),
+             Seq = r.Seq,
+             RemovedTurns = r.RemovedTurns,
+             KeptTurns = r.KeptTurns,
          };
      }
     public Task<object?> SessionClearAsync(JsonElement? p, CancellationToken ct)

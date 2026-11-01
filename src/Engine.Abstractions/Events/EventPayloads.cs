@@ -1,4 +1,4 @@
-using HaloAgent.Engine.Abstractions.Types;
+﻿using HaloAgent.Engine.Abstractions.Types;
 
 namespace HaloAgent.Engine.Abstractions.Events;
 
@@ -190,6 +190,12 @@ public sealed record SessionHistoryLoadedPayload
      public int TotalBefore { get; init; }
      /// <summary>P18：压缩后消息数（含 system）。</summary>
      public int TotalAfter { get; init; }
+     /// <summary>本会话内压缩序号。</summary>
+     public int Seq { get; init; }
+     /// <summary>本次折叠的回合数。</summary>
+     public int RemovedTurns { get; init; }
+     /// <summary>本次保留的回合数。</summary>
+     public int KeptTurns { get; init; }
  }
 
 /// <summary>user.injected 载荷。</summary>

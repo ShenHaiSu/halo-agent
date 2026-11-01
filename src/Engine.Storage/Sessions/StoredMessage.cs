@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HaloAgent.Engine.Storage.Sessions;
@@ -89,6 +89,29 @@ public sealed record StoredMessage
 
     /// <summary>P14-D1：UTC ms 时间戳，SSOT。0 = 未知（旧数据）。加性可选字段，不升 HistorySchema。</summary>
     [JsonPropertyName("ts_ms")] public long TsMs { get; init; }
+
+    [JsonPropertyName("marker")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Marker { get; init; }
+
+    [JsonPropertyName("seq")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int Seq { get; init; }
+
+    [JsonPropertyName("summary")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Summary { get; init; }
+
+    [JsonPropertyName("removedTurns")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int RemovedTurns { get; init; }
+
+    [JsonPropertyName("keptTurns")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int KeptTurns { get; init; }
+
+    [JsonIgnore]
+    public bool IsCompactMarker => string.Equals(Marker, "compact", StringComparison.OrdinalIgnoreCase);
 
     public static StoredMessage System(string content, long tsMs = 0) =>
         FromContent("system", content, null, null, null, tsMs);

@@ -1,15 +1,15 @@
- using System.Reflection;
- using HaloAgent.Engine.Core.Tests.TestSupport;
- using HaloAgent.Engine.Storage.Sessions;
- using Xunit;
+﻿using System.Reflection;
+using HaloAgent.Engine.Core.Tests.TestSupport;
+using HaloAgent.Engine.Storage.Sessions;
+using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>S18/S19：上下文压缩（保尾 4 条逐字 + 失败不变）。P18：落盘同步 + 并发拒绝 + 文件原子性。</summary>
+/// <summary>上下文压缩：保留尾部完整回合、追加标记落盘、失败不变、并发互斥与对账校验。</summary>
 public sealed class CompactTests
 {
     [Fact]
-    public async Task S18_compact_keeps_last_four_verbatim()
+    public async Task Compact_keeps_tail_turns_and_history_verbatim()
     {
         using var f = new AgentFixture();
         for (int i = 0; i < 5; i++)
@@ -24,9 +24,10 @@ public sealed class CompactTests
         f.Llm.EnqueueContent("这是摘要");
         var (removed, summary) = await f.Session.CompactAsync(CancellationToken.None);
 
-        Assert.True(removed > 0, "压缩应删掉旧消息");
+        Assert.True(removed > 0, "压缩应折叠旧消息进摘要");
         Assert.Equal("这是摘要", summary);
 
+        // 内存中尾部保留的完整回合依然逐字完全一致
         var after = f.MemoryMessages().TakeLast(4).Select(m => m.Content).ToArray();
         Assert.Equal(tail, after);
 
@@ -34,7 +35,7 @@ public sealed class CompactTests
     }
 
     [Fact]
-    public async Task S19_compact_failure_leaves_history_untouched()
+    public async Task Compact_failure_leaves_history_untouched()
     {
         using var f = new AgentFixture();
         for (int i = 0; i < 3; i++)
@@ -52,13 +53,12 @@ public sealed class CompactTests
 
         var after = f.MemoryMessages().Select(m => m.RoleWire + "|" + m.Content).ToArray();
         Assert.Equal(before, after);
-        // P18：文件也不动
+        // 失败时文件保持原状
         if (path is not null && File.Exists(path))
             Assert.Equal(lenBefore, new FileInfo(path).Length);
 
         f.AssertInvariants(f.MemoryMessages());
     }
-
 
     private static string[] ReadLinesShared(string path)
     {
@@ -69,6 +69,7 @@ public sealed class CompactTests
         while ((line = sr.ReadLine()) is not null) list.Add(line);
         return list.ToArray();
     }
+
     private static string ReadTextShared(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -77,7 +78,7 @@ public sealed class CompactTests
     }
 
     [Fact]
-    public async Task P18_compact_rewrites_file_and_snapshot_shrinks()
+    public async Task Compact_appends_marker_and_preserves_history()
     {
         using var f = new AgentFixture();
         for (int i = 0; i < 6; i++)
@@ -92,20 +93,36 @@ public sealed class CompactTests
         int memBefore = f.MemoryMessages().Count;
         int snapBefore = f.Session.BuildSnapshot().Turns.Count;
 
-        f.Llm.EnqueueContent("这是摘要");
+        f.Llm.EnqueueContent("这是要点浓缩");
         var r = await f.Session.CompactAsync(CancellationToken.None);
 
         Assert.True(r.Removed > 0);
         Assert.Equal(memBefore, r.TotalBefore);
-        Assert.True(r.TotalAfter < r.TotalBefore);
+        // 单向追加了一行 marker，总条数 +1
+        Assert.Equal(memBefore + 1, r.TotalAfter);
+
         int linesAfter = ReadLinesShared(path!).Length;
-        Assert.True(linesAfter < linesBefore);
-        // 文件回读 == 内存（除 system）
+        // 文件恢复 Append-Only，增加 1 行 marker
+        Assert.Equal(linesBefore + 1, linesAfter);
+
+        // 文件回读 == 内存消息数（除 system）
         var (_, fileMsgs, _) = SessionStore.ReadHistory(path!);
         Assert.Equal(f.MemoryMessages().Count(m => m.RoleWire != "system"), fileMsgs.Count);
-        Assert.True(f.Session.BuildSnapshot().Turns.Count <= snapBefore);
-        // 摘要落盘：文件含摘要前缀
-        Assert.Contains("上下文摘要", ReadTextShared(path!));
+
+        // 历史回合全部无损保留
+        var snapshot = f.Session.BuildSnapshot();
+        Assert.Equal(snapBefore, snapshot.Turns.Count);
+
+        // 第 5 回合前面挂上了 CompactDivider
+        Assert.NotNull(snapshot.Turns[4].DividerBefore);
+        Assert.Equal("这是要点浓缩", snapshot.Turns[4].DividerBefore!.Summary);
+        Assert.Equal(1, snapshot.Turns[4].DividerBefore!.Seq);
+        Assert.Equal(4, snapshot.Turns[4].DividerBefore!.RemovedTurns);
+        Assert.Equal(2, snapshot.Turns[4].DividerBefore!.KeptTurns);
+
+        // 文件中包含 compact marker 字段
+        Assert.Contains("\"marker\":\"compact\"", ReadTextShared(path!));
+
         // 诊断对账字段
         Assert.Equal(r.Removed, f.Session.LastCompactRemoved);
         Assert.Equal(r.TotalBefore, f.Session.LastCompactBefore);
@@ -114,7 +131,7 @@ public sealed class CompactTests
     }
 
     [Fact]
-    public async Task P18_compact_noop_returns_zero_with_notice()
+    public async Task Compact_noop_returns_zero_with_notice()
     {
         using var f = new AgentFixture();
         f.Llm.EnqueueContent("回复0");
@@ -128,7 +145,7 @@ public sealed class CompactTests
     }
 
     [Fact]
-    public async Task P18_compact_rejected_when_busy_and_prompt_rejected_when_compacting()
+    public async Task Compact_rejected_when_busy_and_prompt_rejected_when_compacting()
     {
         using var f = new AgentFixture();
         for (int i = 0; i < 6; i++)
@@ -137,7 +154,6 @@ public sealed class CompactTests
             await f.Session.RunTurnAsync("第" + i + "条", CancellationToken.None);
         }
 
-        // busy 时压缩拒绝：用反射置 _busy
         var busyField = typeof(HaloAgent.Engine.Core.Agent.AgentSession)
             .GetField("_busy", BindingFlags.NonPublic | BindingFlags.Instance)!;
         busyField.SetValue(f.Session, true);
@@ -150,7 +166,6 @@ public sealed class CompactTests
             busyField.SetValue(f.Session, false);
         }
 
-        // compacting 时开轮拒绝：用反射置 _compacting
         var compactingField = typeof(HaloAgent.Engine.Core.Agent.AgentSession)
             .GetField("_compacting", BindingFlags.NonPublic | BindingFlags.Instance)!;
         compactingField.SetValue(f.Session, true);

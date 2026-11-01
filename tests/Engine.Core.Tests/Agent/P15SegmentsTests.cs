@@ -1,4 +1,4 @@
-using HaloAgent.Engine.Abstractions.Events;
+﻿using HaloAgent.Engine.Abstractions.Events;
 using HaloAgent.Engine.Core.Agent;
 using HaloAgent.Engine.Core.Llm;
 using HaloAgent.Engine.Core.Tests.TestSupport;
@@ -18,6 +18,7 @@ public sealed class P15SegmentsTests
         fx.Llm.Enqueue(r => { r.Content = "final2"; });
         // 注册一个假工具避免 unknown 分支（用内置 read_file 真执行会失败，改用 stub 工具）
         var result = await fx.Session.RunTurnAsync("hi", CancellationToken.None);
+        await fx.WaitForKindAsync(EventKinds.TurnFinished);
         // 事件序：started → delta(1) → ended{1,true} → delta(2) → finished{finalUsed=2}
         var kinds = fx.EventTrace();
         Assert.Contains(EventKinds.RoundStarted, kinds);
