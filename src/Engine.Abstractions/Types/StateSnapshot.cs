@@ -21,8 +21,8 @@ public sealed record StateSnapshot
     public IReadOnlyList<string> Queue { get; init; } = Array.Empty<string>();
     /// <summary>待回答的询问（同一时刻最多一个）。</summary>
     public PendingAsk? PendingAsk { get; init; }
-    /// <summary>全部消息。</summary>
-    public IReadOnlyList<MessageView> Messages { get; init; } = Array.Empty<MessageView>();
+    /// <summary>P15：回合视图（替代扁平 Messages）。</summary>
+    public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
     /// <summary>备注（info/warn/error）。</summary>
     public IReadOnlyList<Note> Notes { get; init; } = Array.Empty<Note>();
     /// <summary>更新状态。</summary>

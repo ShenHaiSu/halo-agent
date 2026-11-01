@@ -1,7 +1,18 @@
 # 契约变更记录
 
-> **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 `contractVersion` 并写迁移说明。
+> **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 contractVersion 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
+
+## [3] — P15 回合渲染重构（破坏性）
+
+**破坏性**（contractVersion 2 → 3，不向后兼容；frame.Protocol 仍 1；旧历史打开即重排为 TurnView，不写回）：
+
+- 新增事件 round.ended {used,hasTools}（State 类，不合并、不丢）；text.delta/reasoning.delta 新增 used>=1；tool.started/finished 新增 used/argsTotal|outputTotal/truncated（头部 2k）；turn.finished 新增 FinalUsed>=1 必需。
+- StateSnapshot.messages → turns: TurnView[]；session.historyLoaded.messages → turns；session.compacted.kept MessageView[] → TurnView[]；session.resume {count,messages} → {count,turns}。
+- MessageView 新增 ord；ToolCallView 新增 argsTotal/outputTotal/truncated。
+- 新增 tool.result {toolCallId,offset,limit} → {toolCallId,argsSlice,outputSlice,argsTotal,outputTotal,found,reason}（running→Found=false reason=running；释放后 Found=false）。
+- 转写：旧 v2 messages/resync 快照打开走 resync→turns 强制路径；删除 stream.streamingMessageId（改 currentTurn{turnId,activeOrd}）、committed/mergeAdjacent 增量分支。
+- 前端跑 node scripts/gen-contract-types.mjs 重生成 src/Web.Client/src/contract/agent.d.ts。
 
  ## [2] — 2026-10-30 · P13 responses 协议（非破坏性）
 

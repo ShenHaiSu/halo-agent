@@ -752,7 +752,7 @@ export function parseInline(raw: string): MdInline[] {
   }
 
   flush();
-  return mergeAdjacentText(out);
+  return combineAdjacentText(out);
 }
 
 /**
@@ -773,7 +773,7 @@ function findEmClose(src: string, from: number, mark: string): number {
   return -1;
 }
 
-function mergeAdjacentText(nodes: MdInline[]): MdInline[] {
+function combineAdjacentText(nodes: MdInline[]): MdInline[] {
   const out: MdInline[] = [];
   for (const n of nodes) {
     const prev = out[out.length - 1];

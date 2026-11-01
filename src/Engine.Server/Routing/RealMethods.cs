@@ -171,7 +171,7 @@ public sealed partial class RealMethods
                 return Task.FromResult<object?>(new
                 {
                     count = emptyCount,
-                    messages = emptySnap.Messages,
+                    turns = emptySnap.Turns,
                 });
             }
             throw new RpcException(RpcError.SessionNotFound, "会话不存在: " + safeId);
@@ -187,7 +187,7 @@ public sealed partial class RealMethods
         return Task.FromResult<object?>(new
         {
             count,
-            messages = snapshot.Messages,
+            turns = snapshot.Turns,
         });
     }
 
@@ -373,6 +373,18 @@ public sealed partial class RealMethods
 
         var snap = UndoStore.RollbackByIndex(index);
         return Task.FromResult<object?>(new { ok = true, orig = snap.Orig });
+    }
+
+    public async Task<object?> ToolResultAsync(JsonElement? p, CancellationToken ct)
+    {
+        var toolCallId = p?.TryGetProperty("toolCallId", out var t) == true ? t.GetString() ?? "" : "";
+        var offset = p?.TryGetProperty("offset", out var o) == true && o.ValueKind == JsonValueKind.Number ? o.GetInt32() : 0;
+        var limit = p?.TryGetProperty("limit", out var l) == true && l.ValueKind == JsonValueKind.Number ? l.GetInt32() : 8000;
+        if (string.IsNullOrWhiteSpace(toolCallId)) throw RpcException.ParamsInvalid("toolCallId 不能为空");
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit <= 0 ? 8000 : limit, 1, 32768);
+        var r = await _session.ToolResultAsync(toolCallId, offset, limit, _session.SessionId, ct).ConfigureAwait(false);
+        return (object?)r;
     }
 
     public Task<object?> ToolListAsync(JsonElement? p, CancellationToken ct)

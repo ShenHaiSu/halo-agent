@@ -1,19 +1,18 @@
 <!-- src/Web.Client/src/components/chat/MessageList.vue -->
-<!-- P5 D5-3 消息列表（见 03 §5.2 最终版）：窗口化渲染 + 顶部/底部折叠提示 +
-     压缩摘要卡 + 空态示例 + 加载骨架 + 自动跟随到底。 -->
- <script setup lang="ts">
- import { computed, nextTick, ref, watch } from 'vue';
- import { throttle } from '@/utils/throttle';
- import { useMessagesStore } from '@/stores/messages';
- import { useStreamStore } from '@/stores/stream';
- import { useSessionStore } from '@/stores/session';
- import { useSessionsStore } from '@/stores/sessions';
- import { useMessageWindow } from '@/composables/useMessageWindow';
+<!-- P15：渲染 TurnCard 列表，窗口化以 currentTurn.turnId 为中心 -->
+<script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue';
+import { throttle } from '@/utils/throttle';
+import { useMessagesStore } from '@/stores/messages';
+import { useStreamStore } from '@/stores/stream';
+import { useSessionStore } from '@/stores/session';
+import { useSessionsStore } from '@/stores/sessions';
+import { useMessageWindow } from '@/composables/useMessageWindow';
 import HScroll from '@/components/base/HScroll.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSkeleton from '@/components/base/HSkeleton.vue';
-import MessageItem from './MessageItem.vue';
+import TurnCard from './TurnCard.vue';
 import CompactionCard from './CompactionCard.vue';
 
 const emit = defineEmits<{ (e: 'use-sample', text: string): void }>();
@@ -23,52 +22,49 @@ const stream = useStreamStore();
 const session = useSessionStore();
 const sessions = useSessionsStore();
 
-// messages store 暂无 streamingId 字段（不改 stores）：用 stream.streamingMessageId 判定
-const streamingId = computed(() => stream.streamingMessageId);
+const currentTurnId = computed(() => stream.currentTurn?.turnId ?? null);
 
 const scroller = ref<InstanceType<typeof HScroll> | null>(null);
 
 const win = useMessageWindow(
-  computed(() => messages.items),
-  streamingId
+  computed(() => messages.turns),
+  currentTurnId
 );
 
-/** 展开全部（用户点"显示前 N 条"时） */
+/** 展开全部（用户点“显示前 N 条”时） */
 const showAll = ref(false);
 const visible = computed(() =>
-  showAll.value ? { items: messages.items, hiddenTop: 0, hiddenBottom: 0 } : win.value
+  showAll.value ? { items: messages.turns, hiddenTop: 0, hiddenBottom: 0 } : win.value
 );
 
- /** 自动滚动的唯一判据：只在本来就在底部时跟随（调 HScroll.isAtBottom 方法，避免直接读 Ref 误判） */
- function followIfNeeded(): void {
-   void nextTick(() => {
-     const s = scroller.value as unknown as {
-       isAtBottom: () => boolean;
-       scrollToBottom: (smooth?: boolean) => void;
-     } | null;
-     if (!s) return;
-     if (typeof s.isAtBottom === 'function') {
-       if (!s.isAtBottom()) return;
-     }
-     s.scrollToBottom(false);
-   });
- }
+/** 自动滚动的唯一判据：只在本来就在底部时跟随 */
+function followIfNeeded(): void {
+  void nextTick(() => {
+    const s = scroller.value as unknown as {
+      isAtBottom: () => boolean;
+      scrollToBottom: (smooth?: boolean) => void;
+    } | null;
+    if (!s) return;
+    if (typeof s.isAtBottom === 'function') {
+      if (!s.isAtBottom()) return;
+    }
+    s.scrollToBottom(false);
+  });
+}
 
- // P11-G4：节流跟随（阈值节流，复用 utils/throttle，与现有 nextTick 跟随同路径，避免抖动）
- const throttledFollow = throttle(() => followIfNeeded(), 150);
+const throttledFollow = throttle(() => followIfNeeded(), 150);
 
- watch(() => messages.items.length, followIfNeeded);
- watch(() => messages.items[messages.items.length - 1]?.content.length ?? 0, followIfNeeded);
- // P11-G4：工具输出不跟随滚动——监听末条消息工具输出总长（聚合 computed）
- const lastToolOutputLen = computed(() =>
-   (messages.items[messages.items.length - 1]?.toolCalls ?? []).reduce(
-     (n, t) => n + (t.output?.length ?? 0) + (t.result?.length ?? 0),
-     0
-   )
- );
- watch(lastToolOutputLen, throttledFollow);
+watch(() => messages.turns.length, followIfNeeded);
+watch(() => messages.turns[messages.turns.length - 1]?.final.content.length ?? 0, followIfNeeded);
+const lastToolOutputLen = computed(() =>
+  (messages.turns[messages.turns.length - 1]?.final.toolCalls ?? []).reduce(
+    (n, t) => n + (t.output?.length ?? 0) + (t.result?.length ?? 0),
+    0
+  )
+);
+watch(lastToolOutputLen, throttledFollow);
 
-// P09-fix2 C：切会话即重置展开态并回顶，避免小会话沿用大会话的 showAll。
+// 切会话即重置展开态并回顶
 watch(
   () => sessions.currentId,
   () => {
@@ -86,42 +82,30 @@ const samples = [
 </script>
 
 <template>
-  <!-- 滚动只发生在消息区：HScroll 内层容器是唯一 overflow-y:auto（auto-follow 由 followIfNeeded 显式触发） -->
   <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
     <div class="msg-inner density-compact">
-      <!-- 压缩摘要卡（在消息最上方） -->
       <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" />
 
-      <!-- 顶部折叠提示 -->
       <div v-if="visible.hiddenTop > 0 && !showAll" class="msg-fold">
         <HButton variant="ghost" size="sm" @click="showAll = true">
-          显示更早的 {{ visible.hiddenTop }} 条消息
+          显示更早的 {{ visible.hiddenTop }} 条
         </HButton>
       </div>
 
-      <!-- 消息列表（:key 用 id，流式期间 id 不变，DOM 不重建） -->
-      <MessageItem
-        v-for="m in visible.items"
-        :key="m.id"
-        :message="m"
-        :is-streaming="m.id === streamingId"
-      />
+      <TurnCard v-for="t in visible.items" :key="t.turnId" :turn="t" />
 
-      <!-- 底部折叠提示 -->
       <div v-if="visible.hiddenBottom > 0 && !showAll" class="msg-fold">
         <HButton variant="ghost" size="sm" @click="showAll = true">
-          显示更新的 {{ visible.hiddenBottom }} 条消息
+          显示更新的 {{ visible.hiddenBottom }} 条
         </HButton>
       </div>
 
-      <!-- 加载中：3 个骨架屏 -->
       <div v-if="messages.loading" class="msg-loading-list">
         <HSkeleton shape="block" height="72px" />
         <HSkeleton shape="block" height="120px" />
         <HSkeleton shape="block" height="56px" />
       </div>
 
-      <!-- 空态 -->
       <div v-if="messages.isEmpty && !messages.loading" class="msg-empty">
         <HEmpty
           icon="message"
@@ -144,7 +128,6 @@ const samples = [
         </HEmpty>
       </div>
 
-      <!-- 底部锚点：HScroll 内部自带 IntersectionObserver 锚点 -->
       <div data-scroll-anchor class="msg-anchor" />
     </div>
   </HScroll>
@@ -153,7 +136,7 @@ const samples = [
 <style scoped>
 .msg-scroll {
   flex: 1;
-  min-height: 0; /* 否则 flex 容器被内容撑开；滚动行为见 chat.css 全局 .msg-scroll */
+  min-height: 0;
   height: 100%;
 }
 .msg-inner {

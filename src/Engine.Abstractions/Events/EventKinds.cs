@@ -21,6 +21,8 @@ public static class EventKinds
     public const string ToolSilentAlert = "tool.silentAlert";
     /// <summary>round.started。</summary>
     public const string RoundStarted = "round.started";
+    /// <summary>P15：round.ended。</summary>
+    public const string RoundEnded = "round.ended";
     /// <summary>llm.retrying。</summary>
     public const string LlmRetrying = "llm.retrying";
     /// <summary>usage。</summary>
@@ -57,7 +59,7 @@ public static class EventKinds
     {
         TurnStarted, TurnFinished, TextDelta, ReasoningDelta,
         ToolStarted, ToolFinished, ToolOutputDelta, ToolSilentAlert,
-        RoundStarted, LlmRetrying, Usage, Notice,
+        RoundStarted, RoundEnded, LlmRetrying, Usage, Notice,
         AskPermission, AskRounds,
         SessionInfo, SessionHistoryLoaded, SessionContextCleared,
         SessionCompactionStarted, SessionCompacted, UserInjected,

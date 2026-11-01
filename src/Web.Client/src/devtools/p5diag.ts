@@ -51,7 +51,7 @@ async function withStoreSnapshot<T>(fn: () => Promise<T>): Promise<T> {
   const snap = {
     items: JSON.parse(JSON.stringify(m.items)) as unknown,
     lastSeq: m.lastSeq,
-    streamingId: m.streamingId,
+    currentTurn: JSON.parse(JSON.stringify(s.currentTurn)) as unknown,
     busy: s.busy,
     notice: s.notice,
     retrying: s.retrying,
@@ -62,9 +62,9 @@ async function withStoreSnapshot<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } finally {
-    m.items = snap.items as never;
+    m.turns = snap.items as never;
     m.lastSeq = snap.lastSeq;
-    m.streamingId = snap.streamingId;
+    s.currentTurn = (snap as unknown as {currentTurn: never}).currentTurn;
     s.busy = snap.busy;
     s.notice = snap.notice;
     s.retrying = snap.retrying;
@@ -119,18 +119,18 @@ async function events(): Promise<void> {
     const p = usePermissionsStore();
 
     await emit('turn.started', { turnId: 't1' });
-    a.ok('1 turn.started → busy + 插入 assistant', s.busy && m.streamingId !== null);
+    a.ok('1 turn.started → busy + 插入 assistant', s.busy && s.currentTurn !== null);
 
-    const before = m.items.find((x) => x.id === m.streamingId)?.content.length ?? 0;
-    await emit('text.delta', { text: '你' });
-    await emit('text.delta', { text: '好' });
-    const after = m.items.find((x) => x.id === m.streamingId)?.content.length ?? 0;
+    const before = (m.drafts['t1:1']?.text ?? '').length;
+    await emit('text.delta', { text: '你', used: 1 });
+    await emit('text.delta', { text: '好', used: 1 });
+    const after = (m.drafts['t1:1']?.text ?? '').length;
     a.ok('3 text.delta → 追加文本', after === before + 2, `${before}→${after}`);
 
-    await emit('reasoning.delta', { text: '思考中' });
+    await emit('reasoning.delta', { text: '思考中', used: 1 });
     a.ok(
       '4 reasoning.delta → reasoning 有值',
-      !!m.items.find((x) => x.id === m.streamingId)?.reasoning
+      !!m.drafts['t1:1']?.reasoning
     );
 
     await emit('tool.started', {
@@ -201,7 +201,7 @@ async function events(): Promise<void> {
     p.clear();
 
     await emit('turn.finished', { turnId: 't1', text: '你好', truncated: false });
-    a.ok('2 turn.finished → busy=false + streamingId 清空', !s.busy && m.streamingId === null);
+    a.ok('2 turn.finished → busy=false + currentTurn 清空', !s.busy && s.currentTurn === null);
 
     await emit('session.info', { id: 's1', cwd: 'C:\\work', historyPath: 'C:\\work\\s1.jsonl' });
     const { useSessionStore } = await import('@/stores/session');

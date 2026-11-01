@@ -107,7 +107,7 @@ public class SchemaConformanceTests
         // 顶层必填字段（与 schema 的 required 一致）
         foreach (var required in new[]
         {
-            "protocol", "engine", "session", "agent", "usage", "queue", "messages",
+            "protocol", "engine", "session", "agent", "usage", "queue", "turns",
         })
         {
             Assert.True(root.TryGetProperty(required, out _),
@@ -145,7 +145,9 @@ public class SchemaConformanceTests
     {
         var cases = new (string kind, object payload)[]
         {
-            (EventKinds.TextDelta, new TextDeltaPayload { Text = "你好" }),
+            (EventKinds.TextDelta, new TextDeltaPayload { Text = "你好", Used = 1 }),
+            (EventKinds.RoundEnded, new RoundEndedPayload { Used = 1, HasTools = true }),
+            (EventKinds.TurnFinished, new TurnFinishedPayload { TurnId = "t-1", Text = "hi", FinalUsed = 1 }),
             (EventKinds.ToolStarted, new ToolStartedPayload
             {
                 ToolCallId = "c1", Name = "read_file", Args = "{}", IdleMs = null,
@@ -203,7 +205,7 @@ internal static class KnownMethods
         "asset.personas.list", "asset.personas.get", "asset.personas.save",
         "asset.memory.list", "asset.memory.get", "asset.memory.save", "asset.memory.delete",
         // tool
-        "tool.list", "tool.undoList", "tool.undoRollback", "tool.mcpStatus",
+        "tool.list", "tool.undoList", "tool.undoRollback", "tool.mcpStatus", "tool.result",
         // fs
         "fs.listDir", "fs.completePaths", "fs.validatePath",
         "fs.browse", "fs.pickFiles", "fs.pickSavePath", "fs.readImageAsBase64",

@@ -457,9 +457,18 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  new NoticePayload { Text = msg, Level = "error" },
                  CancellationToken.None).ConfigureAwait(false);
  
-             await _bus.PublishStateAsync(EventKinds.TurnFinished,
-                 new TurnFinishedPayload { TurnId = turnId, Text = msg, Truncated = false, Reason = ex.Message },
-                 CancellationToken.None).ConfigureAwait(false);
+             try {
+                 int fu;
+                 lock (_lock) fu = Math.Max(_roundUsed, 1);
+                 try {
+                     Record(ChatMessage.Assistant(msg) with { TurnId = turnId, Ord = fu });
+                 } catch { }
+                 _bus.FlushDeltasBlocking();
+                 try { await _bus.PublishStateAsync(EventKinds.RoundEnded, new RoundEndedPayload { Used = fu, HasTools = true }, CancellationToken.None).ConfigureAwait(false); } catch { }
+                 await _bus.PublishStateAsync(EventKinds.TurnFinished,
+                     new TurnFinishedPayload { TurnId = turnId, Text = msg, Truncated = true, Reason = ex.Message, FinalUsed = fu },
+                     CancellationToken.None).ConfigureAwait(false);
+             } catch { }
  
              await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
              throw;
@@ -489,7 +498,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         }
 
         // ---------- ② 记录用户消息 + turn.started ----------
-        Record(ChatMessage.User(expanded));
+        Record(ChatMessage.User(expanded) with { TurnId = turnId, Ord = 0 });
         await _bus.PublishStateAsync(EventKinds.TurnStarted,
             new TurnStartedPayload { TurnId = turnId }, ct).ConfigureAwait(false);
         await PublishBusyAsync(true, ct).ConfigureAwait(false);
@@ -525,7 +534,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                         : "⚠ 已达 " + used + " 轮上限，任务可能没干完。用 --max-turns N 调大上限，"
                           + "--max-turns 0 表示不限";
 
-                    await FinishAsync(turnId, text, truncated: true, ct).ConfigureAwait(false);
+                    await FinishAsync(turnId, text, truncated: true, ct, finalUsed: Math.Max(used, 1)).ConfigureAwait(false);
                     return new TurnResult(text, toolCallCount, true, _usageIn, _usageOut);
                 }
                 budget = Math.Min(budget + batch, int.MaxValue);
@@ -543,7 +552,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             // ===== 调模型（含弱网重试，D2=B 按协议显式分流）=====
             bool isResponses;
             lock (_lock) isResponses = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
-            var reply = isResponses ? await ResponsesWithRetryAsync(tools, ct).ConfigureAwait(false) : await ChatWithRetryAsync(tools, ct).ConfigureAwait(false);
+            var reply = isResponses ? await ResponsesWithRetryAsync(tools, ct, used).ConfigureAwait(false) : await ChatWithRetryAsync(tools, ct, used).ConfigureAwait(false);
 
             // ===== 累积用量 =====
             if (!reply.Usage.IsEmpty)
@@ -562,13 +571,17 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }
 
             // ===== 记录助手消息 =====
-            Record(ToChatMessage(reply, interrupted: false));
+            Record(ToChatMessage(reply, interrupted: false, ord: used, turnId: turnId));
+            _bus.FlushDeltasBlocking();
+            await _bus.PublishStateAsync(EventKinds.RoundEnded,
+                new RoundEndedPayload { Used = used, HasTools = reply.ToolCalls.Count > 0 }, ct).ConfigureAwait(false);
 
             // ===== 无工具调用 → 回合结束 =====
             if (reply.ToolCalls.Count == 0)
             {
+                var isTrunc = reply.TruncatedByLength;
                 var text = reply.Content ?? reply.ReasoningContent ?? "(模型无文本输出)";
-                await FinishAsync(turnId, text, truncated: false, ct).ConfigureAwait(false);
+                await FinishAsync(turnId, text, truncated: isTrunc, ct, finalUsed: used).ConfigureAwait(false);
                 return new TurnResult(text, toolCallCount, false, _usageIn, _usageOut);
             }
 
@@ -577,11 +590,14 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             {
                 if (ct.IsCancellationRequested)
                 {
-                    // I-3：给剩余 tool_calls 补占位
+                    // I-3/P15-1.7：给剩余 tool_calls 补占位 + 合成 assistant 占位
                     for (int j = i; j < reply.ToolCalls.Count; j++)
-                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply));
-
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, CancellationToken.None)
+                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply) with { TurnId = turnId, Ord = used });
+                    Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
+                    _bus.FlushDeltasBlocking();
+                    await _bus.PublishStateAsync(EventKinds.RoundEnded,
+                        new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
+                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used)
                         .ConfigureAwait(false);
                     return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
                 }
@@ -589,7 +605,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 var tc = reply.ToolCalls[i];
                 toolCallCount++;
 
-                var output = await ExecuteToolCallAsync(tc, ct).ConfigureAwait(false);
+                var output = await ExecuteToolCallAsync(tc, ct, used).ConfigureAwait(false);
 
                 // ===== 重复刹车：提醒 =====
                 var sig = tc.Function.Name + "|" + tc.Function.Arguments;
@@ -603,14 +619,17 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                               + "再重复到 " + RepeatAbort + " 次本轮会被中止。";
                 }
 
-                Record(ChatMessage.Tool(tc.Id, output));
+                Record(ChatMessage.Tool(tc.Id, output) with { TurnId = turnId, Ord = used });
 
                 if (ct.IsCancellationRequested)
                 {
                     for (int j = i + 1; j < reply.ToolCalls.Count; j++)
-                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply));
-
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, CancellationToken.None)
+                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply) with { TurnId = turnId, Ord = used });
+                    Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
+                    _bus.FlushDeltasBlocking();
+                    await _bus.PublishStateAsync(EventKinds.RoundEnded,
+                        new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
+                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used)
                         .ConfigureAwait(false);
                     return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
                 }
@@ -620,8 +639,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             var injected = TryDrain();
             if (injected is not null)
             {
-                repeatCounts.Clear();   // 新意图 → 重置重复计数
-                Record(ChatMessage.User(injected));
+                repeatCounts.Clear();
+                Record(ChatMessage.User(injected) with { TurnId = turnId, Ord = used });
                 await _bus.PublishStateAsync(EventKinds.UserInjected,
                     new UserInjectedPayload { Text = injected }, ct).ConfigureAwait(false);
             }
@@ -633,7 +652,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 var toolName = worst.Key.Split('|')[0];
                 var text = "⚠ 检测到原地打转：工具 `" + toolName + "` 用完全相同的参数重复了 " + worst.Value + " 次，"
                            + "已中止本轮。换个思路再来，或直接告诉我要什么。";
-                await FinishAsync(turnId, text, truncated: true, ct).ConfigureAwait(false);
+                Record(ChatMessage.Assistant(text) with { TurnId = turnId, Ord = used });
+                _bus.FlushDeltasBlocking();
+                await _bus.PublishStateAsync(EventKinds.RoundEnded,
+                    new RoundEndedPayload { Used = used, HasTools = true }, ct).ConfigureAwait(false);
+                await FinishAsync(turnId, text, truncated: true, ct, finalUsed: used).ConfigureAwait(false);
                 return new TurnResult(text, toolCallCount, true, _usageIn, _usageOut);
             }
         }
@@ -644,7 +667,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     // ============================================================
 
     private async Task<AssistantReply> ChatWithRetryAsync(
-        List<object> tools, CancellationToken ct)
+        List<object> tools, CancellationToken ct, int used = 1)
     {
         int attempt = 0;
 
@@ -663,10 +686,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                         switch (evt)
                         {
                             case StreamEvent.TextDelta td:
-                                _bus.PublishDelta(EventKinds.TextDelta, td.Text);
+                                _bus.PublishDelta(EventKinds.TextDelta, td.Text, used);
                                 break;
                             case StreamEvent.ReasoningDelta rd:
-                                _bus.PublishDelta(EventKinds.ReasoningDelta, rd.Text);
+                                _bus.PublishReasoningDelta(rd.Text, null, used);
                                 break;
                             default:
                                 break;
@@ -716,7 +739,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              || b.Contains("invalid_previous_response", StringComparison.OrdinalIgnoreCase);
      }
  
-    private async Task<AssistantReply> ResponsesWithRetryAsync(List<object> chatTools, CancellationToken ct)
+    private async Task<AssistantReply> ResponsesWithRetryAsync(List<object> chatTools, CancellationToken ct, int used = 1)
     {
         int attempt = 0;
         bool rebuilt = false;
@@ -759,8 +782,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 {
                     switch (evt)
                     {
-                        case StreamEvent.TextDelta td: _bus.PublishDelta(EventKinds.TextDelta, td.Text); break;
-                        case StreamEvent.ReasoningDelta rd: _bus.PublishReasoningDelta(rd.Text, "summary"); break;
+                        case StreamEvent.TextDelta td: _bus.PublishDelta(EventKinds.TextDelta, td.Text, used); break;
+                        case StreamEvent.ReasoningDelta rd: _bus.PublishReasoningDelta(rd.Text, "summary", used); break;
                         default: break;
                     }
                 }, ct, _store.SessionId).ConfigureAwait(false);
@@ -837,7 +860,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  工具执行（权限 + 分发）
     // ============================================================
 
-    private async Task<string> ExecuteToolCallAsync(ToolCall tc, CancellationToken ct)
+    private async Task<string> ExecuteToolCallAsync(ToolCall tc, CancellationToken ct, int used = 1)
     {
         var callId = tc.Id;
         var name = tc.Function.Name;
@@ -853,8 +876,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         {
             var msg = "工具参数解析失败: " + ex.Message + "\n"
                       + "请按工具定义的 JSON Schema 重新构造 arguments 后再次调用。";
-            await EmitToolStartedAsync(callId, name, "", null, ct).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, msg, ct).ConfigureAwait(false);
+            await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
+            await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
             return msg;
         }
 
@@ -877,8 +900,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 var avail = string.Join(", ", _tools.Names);
                 friendly = "未知工具: " + name + "。可用工具: " + avail;
             }
-            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, friendly, ct).ConfigureAwait(false);
+            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+            await EmitToolFinishedAsync(callId, name, false, friendly, ct, used).ConfigureAwait(false);
             return friendly;
         }
 
@@ -895,8 +918,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             if (string.IsNullOrWhiteSpace(command))
             {
                 var msg = "command 不能为空: 请传入要执行的完整命令字符串，如 {\"command\": \"ls -la\"}";
-                await EmitToolStartedAsync(callId, name, "", null, ct).ConfigureAwait(false);
-                await EmitToolFinishedAsync(callId, name, false, msg, ct).ConfigureAwait(false);
+                await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
+                await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
                 return msg;
             }
 
@@ -929,8 +952,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
         if (decision.Kind == PermDecisionKind.Deny)
         {
-            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, decision.Reason ?? "已拒绝", ct)
+            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+            await EmitToolFinishedAsync(callId, name, false, decision.Reason ?? "已拒绝", ct, used)
                 .ConfigureAwait(false);
             return "操作未执行: " + decision.Reason;
         }
@@ -949,8 +972,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
             if (!answer.Allow)
             {
-                await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct).ConfigureAwait(false);
-                await EmitToolFinishedAsync(callId, name, false, PermissionPolicies.UserDenied, ct)
+                await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+                await EmitToolFinishedAsync(callId, name, false, PermissionPolicies.UserDenied, ct, used)
                     .ConfigureAwait(false);
                 return "操作未执行: " + PermissionPolicies.UserDenied;
             }
@@ -978,7 +1001,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             idleMs = idleEl.GetInt64();
         }
 
-        await EmitToolStartedAsync(callId, name, ArgsPreview(args), idleMs, ct).ConfigureAwait(false);
+        await EmitToolStartedAsync(callId, name, ArgsPreview(args), idleMs, ct, used).ConfigureAwait(false);
 
         try
         {
@@ -991,21 +1014,21 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 ToolCallId = callId,
             }, ct).ConfigureAwait(false);
 
-            var output = TruncateForContext(result.Output);
-            await EmitToolFinishedAsync(callId, name, result.Ok, output, ct).ConfigureAwait(false);
+            var output = result.Output ?? "";
+            await EmitToolFinishedAsync(callId, name, result.Ok, output, ct, used).ConfigureAwait(false);
             return output;
         }
         catch (OperationCanceledException)
         {
             var msg = "⏹ 用户中断，该工具调用未执行。";
-            await EmitToolFinishedAsync(callId, name, false, msg, CancellationToken.None)
+            await EmitToolFinishedAsync(callId, name, false, msg, CancellationToken.None, used)
                 .ConfigureAwait(false);
             return msg;
         }
         catch (Exception ex)
         {
             var msg = "工具 " + name + " 执行失败: " + ex.Message;
-            await EmitToolFinishedAsync(callId, name, false, msg, ct).ConfigureAwait(false);
+            await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
             return msg;
         }
     }
@@ -1113,8 +1136,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             {
                 Removed = old.Count,
                 Summary = summary,
-                 // P08-fix 01：快照投影统一走 ProjectSnapshot（合并 tool 结果 + 稳定 Id/TsMs）。
-                 Kept = MessageProjector.ProjectSnapshot(keep),
+                 Kept = MessageProjector.ProjectSnapshotTurns(keep),
             }, ct).ConfigureAwait(false);
 
         return (old.Count, summary);
@@ -1273,8 +1295,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 },
                  Queue = _inbox.ToArray(),
                  PendingAsk = _pendingAsk?.Ask,
-                 // P08-fix 01：快照同源生成，统一走 ProjectSnapshot（合并 + 跳过 system/tool + 稳定 Id/TsMs）。
-                 Messages = MessageProjector.ProjectSnapshot(_messages),
+                 Turns = MessageProjector.ProjectSnapshotTurns(_messages),
                  Notes = Array.Empty<Note>(),
                  Update = new UpdateState(),
              };
@@ -1300,7 +1321,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     public void PublishToolOutput(string toolCallId, string delta)
     {
-        _bus.PublishDelta(EventKinds.ToolOutputDelta, delta, toolCallId);
+        _bus.PublishDelta(EventKinds.ToolOutputDelta, delta, 0, toolCallId);
     }
 
     public void PublishSilentAlert(string toolCallId, int level)
@@ -1357,22 +1378,22 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             _cwd, _mode, _store.SessionId, _persona, _dataDir));
     }
 
-    private static ChatMessage ToChatMessage(AssistantReply reply, bool interrupted)
+    private static ChatMessage ToChatMessage(AssistantReply reply, bool interrupted, int ord = 0, string? turnId = null)
     {
         var content = reply.Content;
         if (interrupted)
             content = (content ?? "") + "\n[⏹ 生成被用户中断]";
 
         if (reply.ToolCalls.Count == 0)
-            return ChatMessage.Assistant(content ?? "");
+            return ChatMessage.Assistant(content ?? "") with { Ord = ord, TurnId = turnId };
 
         return ChatMessage.AssistantWithToolCalls(
             string.IsNullOrEmpty(content) ? null : content,
-            reply.ToolCalls);
+            reply.ToolCalls) with { Ord = ord, TurnId = turnId };
     }
 
     private async Task EmitToolStartedAsync(
-        string callId, string name, string args, long? idleMs, CancellationToken ct)
+        string callId, string name, string args, long? idleMs, CancellationToken ct, int used = 1)
     {
         var (k, rt, _) = HaloAgent.Engine.Core.Llm.ResponsesTranslators.UnpackUnknownArgs(args);
         bool isUnknown = k == "unknown";
@@ -1381,15 +1402,18 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             {
                 ToolCallId = callId,
                 Name = isUnknown ? (rt ?? name) : name,
-                Args = args,
+                Args = TruncateHead(args),
                 IdleMs = idleMs,
                 Kind = isUnknown ? "unknown" : "function",
                 RawType = rt,
+                Used = used,
+                ArgsTotal = args.Length,
+                Truncated = args.Length > MessageProjector.ParamHead,
             }, ct).ConfigureAwait(false);
     }
 
     private async Task EmitToolFinishedAsync(
-        string callId, string name, bool ok, string output, CancellationToken ct)
+        string callId, string name, bool ok, string output, CancellationToken ct, int used = 1)
     {
         await _bus.PublishStateAsync(EventKinds.ToolFinished,
             new ToolFinishedPayload
@@ -1397,12 +1421,16 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 ToolCallId = callId,
                 Name = name,
                 Ok = ok,
-                Output = output,
+                Output = TruncateHead(output),
+                Used = used,
+                OutputTotal = output.Length,
+                Truncated = output.Length > MessageProjector.ParamHead,
             }, ct).ConfigureAwait(false);
     }
 
-    private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct)
+    private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null)
     {
+        _bus.FlushDeltasBlocking();
         string? rid;
         lock (_lock) rid = _lastResponseId;
         await _bus.PublishStateAsync(EventKinds.TurnFinished,
@@ -1412,6 +1440,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 Text = text,
                 Truncated = truncated,
                 ResponseId = rid,
+                FinalUsed = finalUsed,
+                Reason = reason,
             }, ct).ConfigureAwait(false);
 
         await PublishBusyAsync(false, ct).ConfigureAwait(false);
@@ -1450,11 +1480,99 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         _ => "?",
     };
 
+    private static string TruncateHead(string s) =>
+        s.Length <= MessageProjector.ParamHead ? s : s[..MessageProjector.ParamHead];
+
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
 
     private static string TruncateForContext(string s) =>
         TextUtil.TruncateChars(s, ContextMaxChars, "\n…(结果过长已截断)");
+
+    /// <summary>P15-D8 tool.result：头部推送后按需拉尾部。只读快照，不记内容日志。</summary>
+    public Task<HaloAgent.Engine.Abstractions.Events.ToolResultResult> ToolResultAsync(string toolCallId, int offset, int limit, string sessionId, CancellationToken ct)
+    {
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit <= 0 ? 8000 : limit, 1, 32768);
+        if (!string.Equals(sessionId, _store.SessionId, StringComparison.Ordinal))
+            return Task.FromResult(new HaloAgent.Engine.Abstractions.Events.ToolResultResult { ToolCallId = toolCallId, Found = false, Reason = "released" });
+        List<ChatMessage> snap;
+        string? runningId;
+        lock (_lock) { snap = _messages.ToList(); runningId = _currentToolCallId; }
+        string? argsFull = null;
+        string? outFull = null;
+        foreach (var m in snap)
+        {
+            if (m.Role == Role.Assistant && m.ToolCalls is { Count: > 0 })
+            {
+                foreach (var tc in m.ToolCalls)
+                {
+                    if (string.Equals(tc.Id, toolCallId, StringComparison.Ordinal))
+                    {
+                        var (_, _, args) = HaloAgent.Engine.Core.Llm.ResponsesTranslators.UnpackUnknownArgs(tc.Function.Arguments);
+                        argsFull = args ?? "";
+                    }
+                }
+            }
+            if (m.Role == Role.Tool && string.Equals(m.ToolCallId, toolCallId, StringComparison.Ordinal))
+                outFull = m.Content ?? "";
+        }
+        if (argsFull is null && outFull is null)
+        {
+            // running 中：assistant 已有 call 但 tool 结果未落 → 看直播
+            bool hasCall = false;
+            foreach (var m in snap)
+            {
+                if (m.Role == Role.Assistant && m.ToolCalls is { Count: > 0 })
+                    foreach (var tc in m.ToolCalls)
+                        if (string.Equals(tc.Id, toolCallId, StringComparison.Ordinal)) hasCall = true;
+            }
+            if (hasCall || string.Equals(runningId, toolCallId, StringComparison.Ordinal))
+                return Task.FromResult(new HaloAgent.Engine.Abstractions.Events.ToolResultResult { ToolCallId = toolCallId, Found = false, Reason = "running" });
+            // fallback 历史文件（compact/clear 后文件亦无 → released）
+            try
+            {
+                var path = _store.HistoryPath;
+                if (path is not null && File.Exists(path))
+                {
+                    var (_, msgs, _) = SessionStore.ReadHistory(path);
+                    string? fArgs = null; string? fOut = null;
+                    foreach (var sm in msgs)
+                    {
+                        if (sm.ToolCalls is { Count: > 0 })
+                            foreach (var tc in sm.ToolCalls)
+                                if (string.Equals(tc.Id, toolCallId, StringComparison.Ordinal))
+                                    fArgs = tc.Function.Arguments ?? "";
+                        if (string.Equals(sm.ToolCallId, toolCallId, StringComparison.Ordinal))
+                            fOut = sm.Content ?? "";
+                    }
+                    if (fArgs is not null || fOut is not null)
+                    {
+                        argsFull = fArgs ?? ""; outFull = fOut ?? "";
+                    }
+                }
+            }
+            catch { }
+        }
+        if (argsFull is null && outFull is null)
+            return Task.FromResult(new HaloAgent.Engine.Abstractions.Events.ToolResultResult { ToolCallId = toolCallId, Found = false, Reason = "released" });
+        argsFull ??= ""; outFull ??= "";
+        static string Slice(string src, int off, int lim)
+        {
+            if (off >= src.Length) return "";
+            var len = Math.Min(lim, src.Length - off);
+            return src.Substring(off, len);
+        }
+        return Task.FromResult(new HaloAgent.Engine.Abstractions.Events.ToolResultResult
+        {
+            ToolCallId = toolCallId,
+            ArgsSlice = Slice(argsFull, offset, limit),
+            OutputSlice = Slice(outFull, offset, limit),
+            ArgsTotal = argsFull.Length,
+            OutputTotal = outFull.Length,
+            Found = true,
+        });
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

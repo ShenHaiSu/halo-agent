@@ -1,18 +1,18 @@
 // src/Web.Client/src/stores/stream.ts
-// P5 扩展：notice / retrying / resync / compaction / round / usage。
+// P15：streamingMessageId 删除，改 currentTurn{turnId,activeOrd} + mismatch。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
- export interface ActiveTool {
-   toolCallId: string;
-   messageId: string;
-   name: string;
-   arguments: string;
-   startedAt: number;
-   output: string;
-   alertLevel: number;
-   kind: 'function' | 'unknown';
- }
+export interface ActiveTool {
+  toolCallId: string;
+  messageId: string;
+  name: string;
+  arguments: string;
+  startedAt: number;
+  output: string;
+  alertLevel: number;
+  kind: 'function' | 'unknown';
+}
 
 export interface NoticeState {
   level: 'info' | 'success' | 'warn' | 'error';
@@ -24,34 +24,41 @@ export interface RetryingState {
   reason: string;
 }
 
+export interface CurrentTurn {
+  turnId: string;
+  activeOrd: number;
+}
+
 export const useStreamStore = defineStore('stream', () => {
   const busy = ref(false);
-  const currentTurnId = ref<string | null>(null);
-  const streamingMessageId = ref<string | null>(null);
+  const currentTurn = ref<CurrentTurn | null>(null);
   const activeTools = ref(new Map<string, ActiveTool>());
   const notice = ref<NoticeState | null>(null);
   const retrying = ref<RetryingState | null>(null);
   const resyncRequired = ref(false);
   const compactionStarted = ref(false);
   const round = ref({ used: 0, limit: 200 });
-   const usage = ref({ lastPromptTokens: 0, lastCompletionTokens: 0, dropped: false });
+  const usage = ref({ lastPromptTokens: 0, lastCompletionTokens: 0, dropped: false });
   const queueLength = ref(0);
+  const mismatch = ref(0);
 
   const activeToolList = computed(() => [...activeTools.value.values()]);
   const hasActiveTools = computed(() => activeTools.value.size > 0);
 
-  function beginTurn(turnId: string, messageId: string): void {
+  function beginTurn(turnId: string): void {
     busy.value = true;
-    currentTurnId.value = turnId;
-    streamingMessageId.value = messageId;
+    currentTurn.value = { turnId, activeOrd: 1 };
     activeTools.value.clear();
     retrying.value = null;
   }
 
+  function setActiveOrd(ord: number): void {
+    if (currentTurn.value) currentTurn.value.activeOrd = ord;
+  }
+
   function endTurn(): void {
     busy.value = false;
-    currentTurnId.value = null;
-    streamingMessageId.value = null;
+    currentTurn.value = null;
     activeTools.value.clear();
     retrying.value = null;
   }
@@ -71,8 +78,7 @@ export const useStreamStore = defineStore('stream', () => {
 
   return {
     busy,
-    currentTurnId,
-    streamingMessageId,
+    currentTurn,
     activeTools,
     activeToolList,
     hasActiveTools,
@@ -83,7 +89,9 @@ export const useStreamStore = defineStore('stream', () => {
     round,
     usage,
     queueLength,
+    mismatch,
     beginTurn,
+    setActiveOrd,
     endTurn,
     addTool,
     patchTool,

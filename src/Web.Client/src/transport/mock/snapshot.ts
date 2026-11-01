@@ -44,7 +44,7 @@ export function buildEmptySnapshot(): StateSnapshot {
     },
     queue: [],
     pendingAsk: null,
-    messages: [],
+    turns: [],
     notes: [],
     update: { available: false, latestVersion: null },
   };

@@ -8,7 +8,8 @@
 import { computed, type ComputedRef } from 'vue';
 
 export interface WindowItem {
-  id: string;
+  turnId: string;
+  id?: string;
 }
 
 export interface WindowSlice<T extends WindowItem = WindowItem> {
@@ -22,14 +23,14 @@ export interface WindowSlice<T extends WindowItem = WindowItem> {
 
 // 三条规则：
 //  ① 消息数 <= 120：全部渲染（消息少时窗口化反而增加复杂度）
-//  ② 有 streamingId：以它为中心（用户正在看的地方）
+//  ② 有 currentTurn：以它为中心
 //  ③ 否则：以最后一条为中心（最新消息）
 const FULL_RENDER_LIMIT = 120;
 const HALF_WINDOW = 15;
 
 export function useMessageWindow<T extends WindowItem>(
   items: ComputedRef<T[]>,
-  streamingId: ComputedRef<string | null>
+  turnId: ComputedRef<string | null>
 ): ComputedRef<WindowSlice<T>> {
   return computed(() => {
     const all = items.value;
@@ -40,8 +41,8 @@ export function useMessageWindow<T extends WindowItem>(
     }
 
     let center = n - 1;
-    if (streamingId.value) {
-      const idx = all.findIndex((m) => m.id === streamingId.value);
+    if (turnId.value) {
+      const idx = all.findIndex((m) => m.turnId === turnId.value);
       if (idx >= 0) center = idx;
     }
 

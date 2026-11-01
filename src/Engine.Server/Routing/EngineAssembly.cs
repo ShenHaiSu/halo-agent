@@ -202,6 +202,7 @@ public static class EngineAssembly
             ("tool.undoList", real.ToolUndoListAsync),
             ("tool.undoRollback", real.ToolUndoRollbackAsync),
             ("tool.mcpStatus", real.ToolMcpStatusAsync),
+            ("tool.result", real.ToolResultAsync),
 
             ("fs.listDir", real.FsListDirAsync),
             ("fs.completePaths", real.FsCompletePathsAsync),

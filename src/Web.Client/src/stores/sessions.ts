@@ -143,14 +143,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     messages.loading = true;
      // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
      stream.endTurn();
-     messages.streamingId = null;
+     /* P15: turns store */
      perms.clear();
      queue.clear();
      clearCollapsedTools();
     try {
       let resumed: { count?: number; messages?: unknown } | null = null;
       try {
-        resumed = await transport.request<{ count?: number; messages?: unknown }>('session.resume', { id });
+        resumed = await transport.request<{ count?: number; messages?: unknown; turns?: unknown }>('session.resume', { id });
       } catch (e) {
         const code = rpcCodeOf(e);
         // busy：直接抛 + Toast，不切 currentId、不清空当前页。
@@ -186,9 +186,13 @@ export const useSessionsStore = defineStore('sessions', () => {
       if (token !== switchToken) return;
       currentId.value = id;
       // 复用 resume.messages 直接绘制（无 seq 不回退游标，见 01）；缺字段才回退 loadSnapshot。
-      const resumedMessages = Array.isArray(resumed?.messages) ? resumed!.messages as Array<Record<string, unknown>> : null;
-      if (resumedMessages) {
-        messages.applySnapshot({ messages: resumedMessages });
+      const rawTurns = (resumed as Record<string,unknown>)?.turns as unknown;
+      const rawMsgs = (resumed as Record<string,unknown>)?.messages as unknown;
+      const isTurnShape = Array.isArray(rawTurns) && (rawTurns.length===0 || (typeof rawTurns[0]==="object" && rawTurns[0] !== null && ("turnId" in (rawTurns[0] as object) || "final" in (rawTurns[0] as object))));
+      const resumedTurns = isTurnShape ? rawTurns as Array<Record<string, unknown>> : Array.isArray(rawMsgs) ? rawMsgs as Array<Record<string, unknown>> : null;
+      const resumedIsFlat = !isTurnShape && Array.isArray(rawMsgs);
+      if (resumedTurns) {
+        messages.applySnapshot(resumedIsFlat ? { messages: resumedTurns as never } : { turns: resumedTurns as never });
       } else {
         await messages.loadSnapshot();
         if (token !== switchToken) return;
@@ -232,7 +236,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const sessionInfo = useSessionStore();
      messages.loading = true;
      stream.endTurn();
-     messages.streamingId = null;
+     /* P15: turns store */
      perms.clear();
      queue.clear();
      clearCollapsedTools();

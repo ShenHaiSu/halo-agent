@@ -33,7 +33,7 @@ const messages = useMessagesStore();
  // 非流式：直接完整解析（内容已完整，用 lenient=false）；user 返回空数组（模板走纯文本分支）
  const finalNodes = computed(() => (isUser.value ? [] : parseMarkdown(props.message.content)));
 
- const nodes = computed(() => (isLive.value ? md.committed.value : finalNodes.value));
+ const nodes = computed(() => (isLive.value ? md.nodes.value : finalNodes.value));
 
 // 流结束时做一次完整解析并替换
 watch(
@@ -65,8 +65,9 @@ const userAborted = computed(() => props.message.truncatedByUser === true);
 
 async function retry(): Promise<void> {
   // 找到该 assistant 消息前最近的一条 user 消息，重发
-  const idx = messages.items.findIndex((m) => m.id === props.message.id);
-  const user = [...messages.items.slice(0, idx)].reverse().find((m) => m.role === 'user');
+  const allUsers = messages.turns.flatMap((t) => [t.user, ...t.injected]);
+  const idx = allUsers.findIndex((m) => m.id === props.message.id);
+  const user = idx >= 0 ? allUsers[idx] : [...allUsers].reverse().find((m) => m.role === 'user');
   if (!user) return;
   await transport.request('agent.prompt', { text: user.content });
 }

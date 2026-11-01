@@ -12,7 +12,7 @@ import {
   useMessagesStore,
 } from '@/stores/messages';
 import { useUiStore } from '@/stores/ui';
-import { toMessageViews } from '@/stores/eventBridge';
+
 import {
   clearCollapsedTools,
   collapsedToolIds,
@@ -103,8 +103,8 @@ describe('C 历史 OpenAI tool_calls 结果回填', () => {
         { role: 'tool', tool_call_id: 't1', content: 'out' },
       ],
     });
-    expect(messages.items).toHaveLength(1);
-    const tc = messages.items[0]!.toolCalls![0]!;
+    expect(messages.turns).toHaveLength(1);
+    const tc = messages.turns[0]!.final.toolCalls![0]!;
     expect(tc.result).toBe('out');
     expect(tc.output).toBe('out');
     expect(tc.ok).toBeUndefined();
@@ -127,7 +127,7 @@ describe('C 历史 OpenAI tool_calls 结果回填', () => {
         { role: 'tool', tool_call_id: 't1', content: 'out1' },
       ],
     });
-    const calls = messages.items[0]!.toolCalls!;
+    const calls = messages.turns[0]!.final.toolCalls!;
     expect(calls).toHaveLength(2);
     expect(calls[0]!.result).toBe('out1');
     expect(calls[1]!.result).toBeUndefined();
@@ -148,18 +148,13 @@ describe('C 历史 OpenAI tool_calls 结果回填', () => {
   });
 
   it('toMessageViews 透传 role=tool，后续 applySnapshot 可 join', () => {
-    const views = toMessageViews([
-      {
-        role: 'assistant',
-        content: '',
-        tool_calls: [{ id: 't1', function: { name: 'read_file', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 't1', content: 'joined' },
-    ]);
     const messages = useMessagesStore();
-    messages.applySnapshot({ messages: views });
-    expect(messages.items).toHaveLength(1);
-    expect(messages.items[0]!.toolCalls![0]!.result).toBe('joined');
+    messages.applySnapshot({ messages: [
+      { role: 'assistant', content: '', tool_calls: [{ id: 't1', function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 't1', content: 'joined' },
+    ] });
+    expect(messages.turns).toHaveLength(1);
+    expect(messages.turns[0]!.final.toolCalls![0]!.result).toBe('joined');
   });
 });
 
@@ -265,17 +260,17 @@ describe('F 工具结果 diff 可见性', () => {
 
    it('G1 列表跨块 holdback，块结束（空行）后一次提交', async () => {
      const src = ref('intro\n');
-     const { committed, pendingText } = useStreamingMarkdown(() => src.value);
+     const { nodes, pendingText } = useStreamingMarkdown(() => src.value);
      await nextTick();
      src.value = 'intro\n- a\n- b\n';
      await nextTick();
      // 列表未完：committed 仍只有 intro 段落，无 list 闪烁
-     expect(committed.value.map((n) => n.type)).toEqual(['paragraph']);
+     expect(nodes.value.map((n: { type: string }) => n.type)).toEqual(['paragraph']);
      expect(pendingText.value).toContain('- a');
      // 空行到达 → 列表与后续一次提交（无跨块闪烁，单次更新成形）
      src.value = 'intro\n- a\n- b\n\nmore\n';
      await nextTick();
-     expect(committed.value.map((n) => n.type)).toEqual(['paragraph', 'list', 'paragraph']);
+     expect(nodes.value.map((n: { type: string }) => n.type)).toEqual(['paragraph', 'list', 'paragraph']);
      expect(pendingText.value).toBe('');
    });
 

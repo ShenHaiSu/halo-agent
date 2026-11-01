@@ -59,3 +59,25 @@ public sealed record McpServerStatus
     /// <summary>错误信息（可为空）。</summary>
     public string? Error { get; init; }
 }
+
+// ============================ tool.result (P15-D8) ============================
+
+/// <summary>tool.result 参数。</summary>
+public sealed record ToolResultParams
+{
+    public string ToolCallId { get; init; } = "";
+    public int Offset { get; init; }
+    public int Limit { get; init; } = 8000;
+}
+
+/// <summary>tool.result 结果。</summary>
+public sealed record ToolResultResult
+{
+    public string ToolCallId { get; init; } = "";
+    public string ArgsSlice { get; init; } = "";
+    public string OutputSlice { get; init; } = "";
+    public int ArgsTotal { get; init; }
+    public int OutputTotal { get; init; }
+    public bool Found { get; init; }
+    public string? Reason { get; init; }
+}

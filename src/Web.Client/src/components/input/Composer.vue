@@ -182,7 +182,7 @@ async function submit(): Promise<void> {
 
   // 空闲 → 发送（乐观追加，失败恢复草稿，I-7）
   const draftBackup = { text: t, attachments: [...attachments.value] };
-  messages.append({ role: 'user', content: finalText });
+  messages.appendOptimisticUser(finalText);
   text.value = '';
   attachments.value = [];
   if (t) pushHistory(t);

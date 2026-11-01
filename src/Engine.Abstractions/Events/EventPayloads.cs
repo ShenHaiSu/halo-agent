@@ -22,6 +22,8 @@ public sealed record TurnFinishedPayload
     public string? Reason { get; init; }
     /// <summary>诊断用 response.id，不做链逻辑依赖。</summary>
     public string? ResponseId { get; init; }
+    /// <summary>P15：末轮序号（>=1 必需）。</summary>
+    public int FinalUsed { get; init; }
 }
 
 /// <summary>text.delta 载荷。</summary>
@@ -29,6 +31,8 @@ public sealed record TextDeltaPayload
 {
     /// <summary>增量文本。</summary>
     public string Text { get; init; } = "";
+    /// <summary>P15：归属轮序号（>=1）。</summary>
+    public int Used { get; init; } = 1;
 }
 
 /// <summary>reasoning.delta 载荷。</summary>
@@ -38,6 +42,8 @@ public sealed record ReasoningDeltaPayload
     public string Text { get; init; } = "";
     /// <summary>推理种类：full | summary。缺省 full。</summary>
     public string? Kind { get; init; }
+    /// <summary>P15：归属轮序号（>=1）。</summary>
+    public int Used { get; init; } = 1;
 }
 
 /// <summary>tool.started 载荷。</summary>
@@ -55,6 +61,12 @@ public sealed record ToolStartedPayload
     public string? Kind { get; init; }
     /// <summary>原生输出类型。</summary>
     public string? RawType { get; init; }
+    /// <summary>P15：归属轮序号。</summary>
+    public int Used { get; init; } = 1;
+    /// <summary>P15-D8：截断前参数总长。</summary>
+    public int ArgsTotal { get; init; }
+    /// <summary>P15-D8：是否截断。</summary>
+    public bool Truncated { get; init; }
 }
 
 /// <summary>tool.finished 载荷。</summary>
@@ -68,6 +80,12 @@ public sealed record ToolFinishedPayload
     public bool Ok { get; init; }
     /// <summary>输出。</summary>
     public string Output { get; init; } = "";
+    /// <summary>P15：归属轮序号。</summary>
+    public int Used { get; init; } = 1;
+    /// <summary>P15-D8：截断前输出总长。</summary>
+    public int OutputTotal { get; init; }
+    /// <summary>P15-D8：是否截断。</summary>
+    public bool Truncated { get; init; }
 }
 
 /// <summary>tool.outputDelta 载荷。</summary>
@@ -86,6 +104,15 @@ public sealed record ToolSilentAlertPayload
     public string ToolCallId { get; init; } = "";
     /// <summary>级别：0~2。</summary>
     public int Level { get; init; }
+}
+
+/// <summary>round.ended 载荷（P15）。</summary>
+public sealed record RoundEndedPayload
+{
+    /// <summary>轮序号。</summary>
+    public int Used { get; init; }
+    /// <summary>是否有工具调用（true=中途轮，false=末轮）。</summary>
+    public bool HasTools { get; init; }
 }
 
 /// <summary>round.started 载荷。</summary>
@@ -144,8 +171,8 @@ public sealed record SessionHistoryLoadedPayload
 {
     /// <summary>消息条数。</summary>
     public int Count { get; init; }
-    /// <summary>消息。</summary>
-    public IReadOnlyList<MessageView> Messages { get; init; } = Array.Empty<MessageView>();
+    /// <summary>P15：回合视图。</summary>
+    public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
 }
 
 /// <summary>session.compacted 载荷。</summary>
@@ -155,8 +182,8 @@ public sealed record SessionCompactedPayload
     public int Removed { get; init; }
     /// <summary>摘要。</summary>
     public string Summary { get; init; } = "";
-    /// <summary>保留的消息。</summary>
-    public IReadOnlyList<MessageView> Kept { get; init; } = Array.Empty<MessageView>();
+    /// <summary>P15：保留的回合视图。</summary>
+    public IReadOnlyList<TurnView> Kept { get; init; } = Array.Empty<TurnView>();
 }
 
 /// <summary>user.injected 载荷。</summary>
@@ -196,4 +223,24 @@ public sealed record ResyncRequiredPayload
 {
     /// <summary>原因。</summary>
     public string Reason { get; init; } = "";
+}
+
+/// <summary>tool.result 参数（P15-D8）。</summary>
+public sealed record ToolResultParams
+{
+    public string ToolCallId { get; init; } = "";
+    public int Offset { get; init; }
+    public int Limit { get; init; } = 8000;
+}
+
+/// <summary>tool.result 结果。</summary>
+public sealed record ToolResultResult
+{
+    public string ToolCallId { get; init; } = "";
+    public string ArgsSlice { get; init; } = "";
+    public string OutputSlice { get; init; } = "";
+    public int ArgsTotal { get; init; }
+    public int OutputTotal { get; init; }
+    public bool Found { get; init; }
+    public string? Reason { get; init; }
 }

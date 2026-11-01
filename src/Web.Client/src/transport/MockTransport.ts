@@ -111,12 +111,11 @@ export class MockTransport implements Transport {
     this.stopReplay();
 
     // 把用户消息写进快照
-    if (this.snapshot.messages) {
-      this.snapshot.messages.push({
-        id: `m-u-${Date.now()}`,
-        role: 'user',
-        text: userText,
-        tsMs: Date.now(),
+    if ((this.snapshot as unknown as Record<string,unknown>).turns) {
+      ((this.snapshot as unknown as Record<string,unknown>).turns as Array<Record<string,unknown>>).push({
+        turnId: `t-mock-${Date.now()}`,
+        user: { id: `m-u-${Date.now()}`, role: 'user', text: userText, tsMs: Date.now() },
+        final: { id: `m-f-${Date.now()}`, role: 'assistant', text: '', tsMs: Date.now() },
       });
     }
     if (this.snapshot.agent) this.snapshot.agent.busy = true;

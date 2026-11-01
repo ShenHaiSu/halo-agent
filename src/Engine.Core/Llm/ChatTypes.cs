@@ -40,6 +40,10 @@ public sealed record ChatMessage
     public string? ReasoningContent { get; init; }
     /// <summary>P14-D2：内存透传 UTC ms，永不进 LLM 请求体（JsonIgnore + Converter 不读写）。0=未知。</summary>
     [JsonIgnore] public long TsMs { get; init; }
+    /// <summary>P15：轮序号，0=非回合，>=1 轮内序号。内存透传，不进请求体。</summary>
+    [JsonIgnore] public int Ord { get; init; }
+    /// <summary>P15 TurnId</summary>
+    [JsonIgnore] public string? TurnId { get; init; }
 
     public static ChatMessage System(string content, long tsMs = 0) =>
         new() { RoleWire = "system", Content = content, TsMs = tsMs };

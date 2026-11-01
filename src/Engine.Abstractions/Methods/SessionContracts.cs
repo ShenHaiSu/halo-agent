@@ -25,8 +25,8 @@ public sealed record SessionResumeResult
 {
     /// <summary>消息条数。</summary>
     public int Count { get; init; }
-    /// <summary>消息。</summary>
-    public IReadOnlyList<MessageView> Messages { get; init; } = Array.Empty<MessageView>();
+    /// <summary>P15：回合视图。</summary>
+    public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
 }
 
 // ============================ session.list ============================

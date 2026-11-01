@@ -234,7 +234,7 @@ public sealed class EngineState
                 },
                 Queue = _queue.ToArray(),
                 PendingAsk = PendingAsk,
-                Messages = _messages.ToArray(),
+                Turns = Array.Empty<TurnView>(),
                 Notes = Array.Empty<Note>(),
                 Update = new UpdateState(),
             };

@@ -111,20 +111,14 @@ function mockSummary(s: MockSessionData): unknown {
   };
 }
 
- function mockMessageViews(s: MockSessionData): unknown[] {
-   return s.messages.map((m) => ({
-     id: m.id,
-     role: m.role,
-     text: m.text,
-     tsMs: m.tsMs,
-     hasImages: false,
-     attachmentCount: 0,
-     // P13 responses 示例字段：缺省回落由 normalizeMessage 保证（reasoningKind 缺省 full）。
-     ...(m.reasoning !== undefined ? { reasoning: m.reasoning } : {}),
-     ...(m.reasoningKind !== undefined ? { reasoningKind: m.reasoningKind } : {}),
-     ...(m.responseId !== undefined ? { responseId: m.responseId } : {}),
-     ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
-   }));
+ function mockTurnViews(s: MockSessionData): unknown[] {
+   let seq=0; const turns: unknown[]=[]; let cur: Record<string,unknown>|null=null;
+   for (const m of s.messages) {
+     if (m.role === 'user') { if (cur) turns.push(cur); seq++; cur={ turnId: 't-mock-'+seq, user:{ id:m.id, role:'user', content:(m as unknown as {text:string}).text, tsMs:m.tsMs }, injected:[], process:[], final:{ id: 'm-f-'+seq, role:'assistant', content:'', tsMs:m.tsMs } }; }
+     else { if(!cur){ seq++; cur={ turnId: 't-mock-'+seq, user:{ id: 'm-u-'+seq, role:'user', content:'', tsMs:m.tsMs }, injected:[], process:[], final:{ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) } }; } else { const f=(cur as Record<string,unknown>).final as Record<string,unknown>; if(!f.content) cur.final={ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) }; else { ((cur as Record<string,unknown>).process as unknown[]).push({ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) }); } } }
+   }
+   if(cur) turns.push(cur);
+   return turns;
  }
 
 /** Mock 用户发言 / 回放落盘：追加进当前会话，切走切回仍在。 */
@@ -175,7 +169,7 @@ export function getCurrentMockSessionId(): string {
      },
      usage: { input: 0, output: 0 },
      queue: { length: 0 },
-     messages: mockMessageViews(s),
+     turns: mockTurnViews(s),
    };
  }
 
@@ -310,7 +304,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
       const id = (p as { id?: string } | null)?.id;
       if (id && mockSessions.has(id)) currentMockSessionId = id;
       const s = currentMockSession();
-      return { count: s.messages.length, messages: mockMessageViews(s) };
+      return { count: s.messages.length, messages: mockTurnViews(s) };
     },
   },
   'session.list': { kind: 'ok', run: () => ({ items: [...mockSessions.values()].map(mockSummary) }) },
@@ -373,6 +367,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'tool.undoList': { kind: 'ok', run: () => ({ items: [] }) },
   'tool.undoRollback': { kind: 'ok', run: () => ({ ok: true, orig: '' }) },
   'tool.mcpStatus': { kind: 'ok', run: () => ({ servers: [] }) },
+  'tool.result': { kind: 'ok', run: (p) => { const o=(p as {toolCallId?:string;offset?:number;limit?:number}|null)??{}; return { toolCallId: o.toolCallId ?? '', argsSlice: '', outputSlice: '', argsTotal: 0, outputTotal: 0, found: false, reason: 'released' }; } },
 
   'fs.listDir': { kind: 'ok', run: () => ({ items: [] }) },
   'fs.completePaths': { kind: 'ok', run: () => ({ items: [] }) },

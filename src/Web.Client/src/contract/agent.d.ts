@@ -1,5 +1,5 @@
 // [注意] 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。
-// 来源: contract/agent.schema.json（协议版本 2）
+// 来源: contract/agent.schema.json（协议版本 3）
 
 /** PermissionMode */
 export type PermissionMode = "ask" | "acceptEdits" | "bypassPermissions" | "yolo"
@@ -20,6 +20,9 @@ export interface ToolCallView {
   kind?: "function" | "unknown"
   rawType?: string | null
   payload?: Record<string, unknown> | null
+  argsTotal?: number
+  outputTotal?: number
+  truncated?: boolean
 }
 
 /** MessageView */
@@ -35,6 +38,7 @@ export interface MessageView {
   attachmentCount?: number
   reasoningKind?: "full" | "summary"
   responseId?: string | null
+  ord?: number
 }
 
 /** SessionSummary */
@@ -156,12 +160,12 @@ export interface StateSnapshot {
 }
   queue: string[]
   pendingAsk?: PendingAsk | null
-  messages: MessageView[]
   notes?: Note[]
   update?: {
   available?: boolean
   latestVersion?: string | null
 }
+  turns: TurnView[]
 }
 
 /** 主题摘要（只含元信息，不含 tokens） */
@@ -178,6 +182,15 @@ export interface ThemeFile {
   name: string
   basedOn?: string | null
   tokens: Record<string, unknown>
+}
+
+/** TurnView */
+export interface TurnView {
+  turnId: string
+  user: MessageView
+  injected?: MessageView[]
+  process?: MessageView[]
+  final: MessageView
 }
 
 /** 帧信封：request */
@@ -302,7 +315,7 @@ export interface HaloMethods {
   id: string
 }; result: {
   count?: number
-  messages?: MessageView[]
+  turns?: TurnView[]
 } }
   /** session.list */
   'session.list': { params: {
@@ -627,6 +640,20 @@ export interface HaloMethods {
 }; result: {
   ok?: boolean
 } }
+  /** tool.result */
+  'tool.result': { params: {
+  toolCallId: string
+  offset?: number
+  limit?: number
+}; result: {
+  toolCallId: string
+  argsSlice?: string
+  outputSlice?: string
+  argsTotal?: number
+  outputTotal?: number
+  found: boolean
+  reason?: string | null
+} }
 }
 
 /** 事件载荷表：kind → payload。ask.* 的 payload 即 PendingAsk。 */
@@ -637,20 +664,23 @@ export interface HaloEventPayloads {
 }
   /** turn.finished */
   'turn.finished': {
-  turnId?: string
-  text?: string
+  turnId: string
+  text: string
   truncated?: boolean
   reason?: string | null
   responseId?: string | null
+  finalUsed: number
 }
   /** text.delta */
   'text.delta': {
   text?: string
+  used?: number
 }
   /** reasoning.delta */
   'reasoning.delta': {
   text?: string
   kind?: "full" | "summary"
+  used?: number
 }
   /** tool.started */
   'tool.started': {
@@ -660,6 +690,9 @@ export interface HaloEventPayloads {
   idleMs?: number | null
   kind?: "function" | "unknown"
   rawType?: string | null
+  used?: number
+  argsTotal?: number
+  truncated?: boolean
 }
   /** tool.finished */
   'tool.finished': {
@@ -667,6 +700,9 @@ export interface HaloEventPayloads {
   name?: string
   ok?: boolean
   output?: string
+  used?: number
+  outputTotal?: number
+  truncated?: boolean
 }
   /** tool.outputDelta */
   'tool.outputDelta': {
@@ -713,7 +749,7 @@ export interface HaloEventPayloads {
   /** session.historyLoaded */
   'session.historyLoaded': {
   count?: number
-  messages?: MessageView[]
+  turns?: TurnView[]
 }
   /** session.contextCleared */
   'session.contextCleared': Record<string, unknown>
@@ -723,7 +759,7 @@ export interface HaloEventPayloads {
   'session.compacted': {
   removed?: number
   summary?: string
-  kept?: MessageView[]
+  kept?: TurnView[]
 }
   /** user.injected */
   'user.injected': {
@@ -746,6 +782,11 @@ export interface HaloEventPayloads {
   /** resync.required */
   'resync.required': {
   reason?: string
+}
+  /** round.ended */
+  'round.ended': {
+  used: number
+  hasTools: boolean
 }
 }
 
@@ -833,6 +874,7 @@ export const METHODS = [
   'fs.readImageAsBase64',
   'settings.saveProviders',
   'settings.setActive',
+  'tool.result',
 ] as const
 
 /** 全部事件 kind（与 schema.events 的键集合一致）。 */
@@ -861,6 +903,7 @@ export const EVENTS = [
   'state.modeChanged',
   'state.busyChanged',
   'resync.required',
+  'round.ended',
 ] as const
 
 export type HaloMethod = keyof HaloMethods

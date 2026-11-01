@@ -55,11 +55,12 @@ public sealed class EventBus : IAsyncDisposable
     /// <summary>Delta 合并窗口（毫秒）。可用环境变量 HALO_DELTA_MS 覆盖。</summary>
     private readonly int _deltaWindowMs;
 
-    // Delta 累积器（按 kind 分开，因为 text 与 reasoning 不能混在一起）
+    // P15-R2：Delta 累积器按 (kind,used) 分槽，避免跨轮串扰。
+    // ToolOutputDelta 不走 used 分槽（已有 toolCallId 归属）。
     private readonly object _deltaLock = new();
-    private readonly Dictionary<string, System.Text.StringBuilder> _deltaBuffers = new();
-    private readonly Dictionary<string, string> _deltaToolCallIds = new();
-    private string _lastReasoningKind = "full";
+    private readonly Dictionary<(string kind, int used), System.Text.StringBuilder> _deltaBuffers = new();
+    private readonly Dictionary<(string kind, int used), string> _deltaToolCallIds = new();
+    private readonly Dictionary<(string kind, int used), string> _deltaReasoningKinds = new();
     private DateTime _lastFlush = DateTime.UtcNow;
 
     private Task? _flushLoop;
@@ -112,28 +113,32 @@ public sealed class EventBus : IAsyncDisposable
     /// 发布一个可合并/可丢弃的 delta。
     /// **非阻塞**：立即返回，只写内存 buffer。
     /// </summary>
-    public void PublishDelta(string kind, string text, string? toolCallId = null)
+    public void PublishDelta(string kind, string text, int used = 1, string? toolCallId = null)
     {
-        PublishDeltaWithKind(kind, text, null, toolCallId);
+        PublishDeltaWithKind(kind, text, null, toolCallId, used);
     }
-    public void PublishReasoningDelta(string text, string? kind = null)
+    public void PublishReasoningDelta(string text, string? kind = null, int used = 1)
     {
-        if (!string.IsNullOrEmpty(kind)) { lock (_deltaLock) _lastReasoningKind = kind; }
-        PublishDeltaWithKind(EventKinds.ReasoningDelta, text, kind, null);
+        PublishDeltaWithKind(EventKinds.ReasoningDelta, text, kind, null, used);
     }
-    private void PublishDeltaWithKind(string kind, string text, string? reasoningKind, string? toolCallId)
+    private void PublishDeltaWithKind(string kind, string text, string? reasoningKind, string? toolCallId, int used = 1)
     {
         if (string.IsNullOrEmpty(text)) return;
+        // ToolOutputDelta 不分 used 槽，用 used=0 统一槽
+        var slotUsed = kind == EventKinds.ToolOutputDelta ? 0 : Math.Max(0, used);
+        var key = (kind, slotUsed);
         lock (_deltaLock)
         {
-            if (!string.IsNullOrEmpty(reasoningKind)) _lastReasoningKind = reasoningKind;
-            if (!_deltaBuffers.TryGetValue(kind, out var sb))
+            if (!string.IsNullOrEmpty(reasoningKind)) _deltaReasoningKinds[key] = reasoningKind;
+            else if (kind == EventKinds.ReasoningDelta && !_deltaReasoningKinds.ContainsKey(key))
+                _deltaReasoningKinds[key] = "full";
+            if (!_deltaBuffers.TryGetValue(key, out var sb))
             {
                 sb = new System.Text.StringBuilder(256);
-                _deltaBuffers[kind] = sb;
+                _deltaBuffers[key] = sb;
             }
             sb.Append(text);
-            if (toolCallId is not null) _deltaToolCallIds[kind] = toolCallId;
+            if (toolCallId is not null) _deltaToolCallIds[key] = toolCallId;
         }
     }
 
@@ -142,6 +147,32 @@ public sealed class EventBus : IAsyncDisposable
     {
         lock (_deltaLock) { _lastFlush = DateTime.MinValue; }
         TryFlushDeltas();
+    }
+
+    /// <summary>P15-R2：同步刷完本轮 delta（发 round.ended/turn.finished 前必须调用，否则尾字 seq 反超）。</summary>
+    public void FlushDeltasBlocking()
+    {
+        // 先按常规窗口刷一次
+        FlushNow();
+        // 再轮询等待 buffer 清空（最多 ~500ms），保证 State 帧在其后
+        for (var i = 0; i < 50; i++)
+        {
+            lock (_deltaLock)
+            {
+                var pending = false;
+                foreach (var kv in _deltaBuffers) { if (kv.Value.Length > 0) { pending = true; break; } }
+                if (!pending) return;
+            }
+            // 同步写出：直接 TryFlushDeltas（非阻塞队列 TryWrite，队满则丢并计数，与原语义一致）
+            TryFlushDeltas(force: true);
+            lock (_deltaLock)
+            {
+                var pending = false;
+                foreach (var kv in _deltaBuffers) { if (kv.Value.Length > 0) { pending = true; break; } }
+                if (!pending) return;
+            }
+            System.Threading.Thread.Sleep(10);
+        }
     }
 
     // ============================================================
@@ -162,39 +193,42 @@ public sealed class EventBus : IAsyncDisposable
         catch (OperationCanceledException) { }
     }
 
-    private void TryFlushDeltas()
+    private void TryFlushDeltas(bool force = false)
     {
-        List<(string kind, string text, string? toolCallId)> batch = new(4);
+        List<(string kind, int used, string text, string? toolCallId, string? reasoningKind)> batch = new(4);
 
         lock (_deltaLock)
         {
             var now = DateTime.UtcNow;
             if (_deltaBuffers.Count == 0) return;
-            if (_lastFlush != DateTime.MinValue &&
+            if (!force && _lastFlush != DateTime.MinValue &&
                 (now - _lastFlush).TotalMilliseconds < _deltaWindowMs) return;
 
             foreach (var kv in _deltaBuffers)
             {
                 if (kv.Value.Length == 0) continue;
                 _deltaToolCallIds.TryGetValue(kv.Key, out var tcId);
-                batch.Add((kv.Key, kv.Value.ToString(), tcId));
+                _deltaReasoningKinds.TryGetValue(kv.Key, out var rk);
+                batch.Add((kv.Key.kind, kv.Key.used, kv.Value.ToString(), tcId, rk));
                 kv.Value.Clear();
             }
+            // 槽内 kind 消费后清理，避免跨轮污染
+            foreach (var b in batch) _deltaReasoningKinds.Remove((b.kind, b.used));
             _lastFlush = now;
         }
 
-        foreach (var (kind, text, tcId) in batch)
+        foreach (var (kind, used, text, tcId, rk) in batch)
         {
             object payload = kind switch
             {
-                EventKinds.ReasoningDelta => new ReasoningDeltaPayload { Text = text, Kind = _lastReasoningKind },
-                EventKinds.TextDelta => new TextDeltaPayload { Text = text },
+                EventKinds.ReasoningDelta => new ReasoningDeltaPayload { Text = text, Kind = rk ?? "full", Used = used },
+                EventKinds.TextDelta => new TextDeltaPayload { Text = text, Used = used },
                 EventKinds.ToolOutputDelta => new ToolOutputDeltaPayload
                 {
                     ToolCallId = tcId ?? "",
                     Delta = text,
                 },
-                _ => new TextDeltaPayload { Text = text },
+                _ => new TextDeltaPayload { Text = text, Used = used },
             };
 
             var frame = MakeFrame(kind, payload);
