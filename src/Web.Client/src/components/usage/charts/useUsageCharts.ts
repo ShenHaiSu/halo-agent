@@ -1,4 +1,4 @@
-// src/Web.Client/src/components/usage/charts/useUsageCharts.ts
+﻿// src/Web.Client/src/components/usage/charts/useUsageCharts.ts
 // P17 图表重构：主图（token 三段堆叠柱 + 命中率折线双轴）+ 模型分布饼图。
 // echarts 按需引入，禁全量。口径：miss = max(0, input - cached)，后端 prompt 语义不变。
 import * as echarts from 'echarts/core';
@@ -48,11 +48,6 @@ function baseTextStyle(el: HTMLElement | null): Record<string, unknown> {
   return { color: themeAxisColor(el), fontSize: 11 };
 }
 
-/** 三段 tooltip 行：精确值 + 括号紧凑值。 */
-function seg(label: string, v: number): string {
-  return `${label} ${formatNumber(v)}（${formatZhCount(v)}）`;
-}
-
 /** 主图：x=byDay.day，左轴 token（中文单位），右轴命中率 0–100%。bar 三段 miss/cached/output + line 命中率。 */
 export function renderTrend(
   chart: EChartsInstance,
@@ -69,8 +64,9 @@ export function renderTrend(
           const d = days[ps[0]?.dataIndex ?? -1];
           if (!d) return '';
           const miss = missOf(d.input, d.cached);
-          let html = `${d.day}<br/>${seg('未命中输入', miss)} · ${seg('命中缓存', d.cached)} · ${seg('输出', d.output)}`;
-          html += `<br/>命中率 ${d.input > 0 ? `${((d.cached / d.input) * 100).toFixed(1)}%` : '—'}`;
+          const rate = d.input > 0 ? `${((d.cached / d.input) * 100).toFixed(1)}%` : '—';
+          let html = `${d.day}<br/>input: ${formatZhCount(miss)} · cache: ${formatZhCount(d.cached)} · output: ${formatZhCount(d.output)}`;
+          html += `<br/>CacheRate: ${rate}`;
           if (d.cached > d.input) html += '（缓存＞输入，脏数据，已截零）';
           return html;
         },
@@ -138,9 +134,9 @@ export function renderModelPie(
           const name = `${opts.resolve(m.providerId)}/${m.modelId}`;
           const total = m.input + m.output;
           return (
-            `${name}<br/>${seg('总计', total)}` +
-            `<br/>${seg('未命中输入', missOf(m.input, m.cached))} · ${seg('命中缓存', m.cached)} · ${seg('输出', m.output)}` +
-            `<br/>命中率 ${formatHitRate(m.input, m.hitRate)} · 请求数 ${formatNumber(m.requests)}（${formatZhCount(m.requests)}）`
+            `${name}<br/>total: ${formatZhCount(total)}` +
+            `<br/>input: ${formatZhCount(missOf(m.input, m.cached))} · cache: ${formatZhCount(m.cached)} · output: ${formatZhCount(m.output)}` +
+            `<br/>CacheRate: ${formatHitRate(m.input, m.hitRate)} · requests: ${formatNumber(m.requests)}`
           );
         },
       },
