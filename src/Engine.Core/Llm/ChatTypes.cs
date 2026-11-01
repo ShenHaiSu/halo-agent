@@ -38,24 +38,26 @@ public sealed record ChatMessage
     public List<ToolCall>? ToolCalls { get; init; }
     public string? ToolCallId { get; init; }
     public string? ReasoningContent { get; init; }
+    /// <summary>P14-D2：内存透传 UTC ms，永不进 LLM 请求体（JsonIgnore + Converter 不读写）。0=未知。</summary>
+    [JsonIgnore] public long TsMs { get; init; }
 
-    public static ChatMessage System(string content) =>
-        new() { RoleWire = "system", Content = content };
+    public static ChatMessage System(string content, long tsMs = 0) =>
+        new() { RoleWire = "system", Content = content, TsMs = tsMs };
 
-    public static ChatMessage User(string content) =>
-        new() { RoleWire = "user", Content = content };
+    public static ChatMessage User(string content, long tsMs = 0) =>
+        new() { RoleWire = "user", Content = content, TsMs = tsMs };
 
-    public static ChatMessage UserWithParts(List<ChatContentPart> parts) =>
-        new() { RoleWire = "user", ContentParts = parts };
+    public static ChatMessage UserWithParts(List<ChatContentPart> parts, long tsMs = 0) =>
+        new() { RoleWire = "user", ContentParts = parts, TsMs = tsMs };
 
-    public static ChatMessage Assistant(string content) =>
-        new() { RoleWire = "assistant", Content = content };
+    public static ChatMessage Assistant(string content, long tsMs = 0) =>
+        new() { RoleWire = "assistant", Content = content, TsMs = tsMs };
 
-    public static ChatMessage AssistantWithToolCalls(string? content, List<ToolCall> calls) =>
-        new() { RoleWire = "assistant", Content = content, ToolCalls = calls };
+    public static ChatMessage AssistantWithToolCalls(string? content, List<ToolCall> calls, long tsMs = 0) =>
+        new() { RoleWire = "assistant", Content = content, ToolCalls = calls, TsMs = tsMs };
 
-    public static ChatMessage Tool(string toolCallId, string content) =>
-        new() { RoleWire = "tool", Content = content, ToolCallId = toolCallId };
+    public static ChatMessage Tool(string toolCallId, string content, long tsMs = 0) =>
+        new() { RoleWire = "tool", Content = content, ToolCallId = toolCallId, TsMs = tsMs };
 
     [JsonIgnore]
     public Role Role => RoleWire switch

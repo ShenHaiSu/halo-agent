@@ -32,6 +32,7 @@ public static class MessageAdapters
             }).ToList(),
             ToolCallId = m.ToolCallId,
             ReasoningContent = m.ReasoningContent,
+            TsMs = m.TsMs,
         };
     }
 
@@ -48,6 +49,7 @@ public static class MessageAdapters
             }).ToList(),
             ToolCallId = m.ToolCallId,
             ReasoningContent = m.ReasoningContent,
+            TsMs = m.TsMs,
         };
         if (m.ContentParts is { Count: > 0 })
         {

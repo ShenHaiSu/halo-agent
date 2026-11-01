@@ -87,27 +87,30 @@ public sealed record StoredMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ReasoningContent { get; init; }
 
-    public static StoredMessage System(string content) =>
-        FromContent("system", content, null, null, null);
+    /// <summary>P14-D1：UTC ms 时间戳，SSOT。0 = 未知（旧数据）。加性可选字段，不升 HistorySchema。</summary>
+    [JsonPropertyName("ts_ms")] public long TsMs { get; init; }
 
-    public static StoredMessage User(string content) =>
-        FromContent("user", content, null, null, null);
+    public static StoredMessage System(string content, long tsMs = 0) =>
+        FromContent("system", content, null, null, null, tsMs);
 
-    public static StoredMessage Assistant(string content) =>
-        FromContent("assistant", content, null, null, null);
+    public static StoredMessage User(string content, long tsMs = 0) =>
+        FromContent("user", content, null, null, null, tsMs);
 
-    public static StoredMessage AssistantWithToolCalls(string? content, List<StoredToolCall> calls) =>
-        FromContent("assistant", content, calls, null, null);
+    public static StoredMessage Assistant(string content, long tsMs = 0) =>
+        FromContent("assistant", content, null, null, null, tsMs);
 
-    public static StoredMessage Tool(string toolCallId, string content) =>
-        FromContent("tool", content, null, toolCallId, null);
+    public static StoredMessage AssistantWithToolCalls(string? content, List<StoredToolCall> calls, long tsMs = 0) =>
+        FromContent("assistant", content, calls, null, null, tsMs);
 
-    private static StoredMessage FromContent(string role, string? content, List<StoredToolCall>? calls, string? toolCallId, string? reasoning)
+    public static StoredMessage Tool(string toolCallId, string content, long tsMs = 0) =>
+        FromContent("tool", content, null, toolCallId, null, tsMs);
+
+    private static StoredMessage FromContent(string role, string? content, List<StoredToolCall>? calls, string? toolCallId, string? reasoning, long tsMs = 0)
     {
         var el = content is null
             ? JsonDocument.Parse("null").RootElement.Clone()
             : JsonDocument.Parse(JsonSerializer.Serialize(content)).RootElement.Clone();
-        return new StoredMessage { RoleWire = role, ContentRaw = el, ToolCalls = calls, ToolCallId = toolCallId, ReasoningContent = reasoning };
+        return new StoredMessage { RoleWire = role, ContentRaw = el, ToolCalls = calls, ToolCallId = toolCallId, ReasoningContent = reasoning, TsMs = tsMs };
     }
 
     [JsonIgnore]

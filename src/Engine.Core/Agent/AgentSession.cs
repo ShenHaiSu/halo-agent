@@ -88,7 +88,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private int _roundLimit;
     private string? _lastResponseId;
     private int _responsesSentCount;
-
+    private readonly IClock _clock;
+    private long _lastTsMs;
     private const int RepeatWarn = 3;
     private const int RepeatAbort = 6;
     private const int ContextMaxChars = 20_000;
@@ -106,7 +107,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         string persona,
         int maxTurns,
         int retry,
-        bool askInteractive)
+        bool askInteractive,
+        IClock? clock = null)
     {
         _llm = llm;
         _tools = tools;
@@ -120,6 +122,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         _maxTurns = maxTurns;
         _retry = retry;
         _askInteractive = askInteractive;
+        _clock = clock ?? SystemClock.Instance;
 
         PushSystemPrompt();
     }
@@ -1077,11 +1080,22 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         }
         if (string.IsNullOrEmpty(summary))
             throw new InvalidOperationException("压缩模型没返回内容，请再试一次");
+        // P14：摘要走打戳（等价 Record guard），位置在 keep 之前，钳制以保单调：不超过 keep 首条。
+        ChatMessage summaryMsg;
+        lock (_lock)
+        {
+            var now = _clock.UtcNowMs();
+            var stamped = Math.Max(now, _lastTsMs + 1);
+            if (keep.Count > 0 && keep[0].TsMs > 0 && stamped > keep[0].TsMs)
+                stamped = keep[0].TsMs;
+            summaryMsg = ChatMessage.User(
+                "【上下文摘要: 压缩自此前 " + old.Count + " 条消息，由模型自动生成，细节以历史文件为准】\n" + summary,
+                stamped);
+        }
         var newMessages = new List<ChatMessage>
         {
             system,
-            ChatMessage.User(
-                "【上下文摘要: 压缩自此前 " + old.Count + " 条消息，由模型自动生成，细节以历史文件为准】\n" + summary),
+            summaryMsg,
         };
         newMessages.AddRange(keep);
 
@@ -1090,6 +1104,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         {
             _messages.Clear();
             _messages.AddRange(newMessages);
+            _lastTsMs = _messages.Count == 0 ? 0 : _messages.Max(m => m.TsMs);
         }
         ClearResponseChain();
 
@@ -1114,6 +1129,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         lock (_lock)
         {
             _messages.Clear();
+            _lastTsMs = 0;
             PushSystemPromptLocked();
         }
         _store.Clear();
@@ -1126,6 +1142,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         lock (_lock)
         {
             _messages.Clear();
+            _lastTsMs = 0;
             _fileAlways = false;
             _commandAlways = false;
         }
@@ -1166,13 +1183,26 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  metaMissingDir = true;
              }
          }
-         lock (_lock)
-         {
-             _messages.Clear();
-             PushSystemPromptLocked();
-             _messages.AddRange(MessageAdapters.ToChatMessages(messages));
-             if (restored) RefreshSystemPrompt();
-         }
+        lock (_lock)
+        {
+            _messages.Clear();
+            PushSystemPromptLocked();
+            var chatMsgs = MessageAdapters.ToChatMessages(messages);
+            // P14-D4：旧数据读时回填（只动内存，不回写文件）。锚 = 历史文件 mtime。
+            if (chatMsgs.Any(m => m.TsMs == 0))
+            {
+                long anchor;
+                try { anchor = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds(); }
+                catch { anchor = _clock.UtcNowMs(); }
+                var baseTs = anchor - (long)chatMsgs.Count * 1000L;
+                for (var i = 0; i < chatMsgs.Count; i++)
+                    if (chatMsgs[i].TsMs == 0)
+                        chatMsgs[i] = chatMsgs[i] with { TsMs = baseTs + (i + 1) * 1000L };
+            }
+            _messages.AddRange(chatMsgs);
+            _lastTsMs = chatMsgs.Count == 0 ? 0 : chatMsgs.Max(m => m.TsMs);
+            if (restored) RefreshSystemPrompt();
+        }
          ClearResponseChain();
          if (metaMissingDir)
          {
@@ -1291,7 +1321,17 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     private void Record(ChatMessage msg)
     {
-        lock (_lock) _messages.Add(msg);
+        // P14-D3：唯一打戳漏斗 + 单调 guard。已有真值（resume/回填）不动；0 才取时钟。
+        lock (_lock)
+        {
+            if (msg.TsMs == 0)
+            {
+                var now = _clock.UtcNowMs();
+                msg = msg with { TsMs = Math.Max(now, _lastTsMs + 1) };
+            }
+            _lastTsMs = Math.Max(_lastTsMs, msg.TsMs);
+            _messages.Add(msg);
+        }
         _store.Record(MessageAdapters.ToStoredMessage(msg), headless: !_askInteractive, cwd: _cwd);
     }
 

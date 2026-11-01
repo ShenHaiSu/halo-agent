@@ -25,18 +25,20 @@ public static class HistoryRepair
 {
     public const string PlaceholderToolReply = "⏹ 用户中断，该工具调用未执行。";
 
-    /// <summary>原地修复。返回补了几条。</summary>
+    /// <summary>原地修复。返回补了几条。P14：占位 Tool 的 TsMs = parentAssistantTs+1（parent 为 0 则传 0，交回填处理）。</summary>
     public static int Repair(List<StoredMessage> messages)
     {
-        var pending = new List<string>();
+        var pending = new List<(string id, long parentTs)>();
         var output = new List<StoredMessage>(messages.Count);
         int fixedCount = 0;
 
         void FlushPending()
         {
-            foreach (var id in pending)
+            for (var k = 0; k < pending.Count; k++)
             {
-                output.Add(StoredMessage.Tool(id, PlaceholderToolReply));
+                var (id, parentTs) = pending[k];
+                var ts = parentTs > 0 ? parentTs + 1 + k : 0;
+                output.Add(StoredMessage.Tool(id, PlaceholderToolReply, ts));
                 fixedCount++;
             }
             pending.Clear();
@@ -55,7 +57,7 @@ public static class HistoryRepair
                     {
                         foreach (var c in m.ToolCalls)
                         {
-                            if (!pending.Contains(c.Id)) pending.Add(c.Id);
+                            if (!pending.Any(p => p.id == c.Id)) pending.Add((c.Id, m.TsMs));
                         }
                     }
                     output.Add(m);
@@ -63,8 +65,10 @@ public static class HistoryRepair
 
                 case StoredRole.Tool:
                     var id = m.ToolCallId;
-                    if (id is not null && pending.Remove(id))
+                    var idx = pending.FindIndex(p => p.id == id);
+                    if (id is not null && idx >= 0)
                     {
+                        pending.RemoveAt(idx);
                         output.Add(m);
                     }
                     // 无主的 tool 消息：丢弃（留着也会被端点拒）

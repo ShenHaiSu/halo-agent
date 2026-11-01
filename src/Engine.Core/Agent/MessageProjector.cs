@@ -40,7 +40,7 @@ public static class MessageProjector
                 ReasoningKind = m.ReasoningContent is null ? "full" : "summary",
                 HasImages = m.HasImages,
                 AttachmentCount = m.ContentParts is null ? 0 : m.ContentParts.Count(p => p.Type == "image_url"),
-                TsMs = 0,
+                TsMs = m.TsMs,
             };
 
 
@@ -84,6 +84,13 @@ public static class MessageProjector
     {
         var merged = Project(messages);
         if (merged.Count == 0) return merged;
+        // P14-D5：全真且单调 → 直接透传真值，只稳定 Id；否则降级走现存 UtcNow 倒推（纯旧文件兼容）。
+        if (merged.All(v => v.TsMs > 0) && IsMonotonic(merged))
+        {
+            for (var i = 0; i < merged.Count; i++)
+                merged[i] = merged[i] with { Id = "m-" + (i + 1) };
+            return merged;
+        }
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var baseTs = now - (long)merged.Count * 1000L;
         if (baseTs < 0) baseTs = 0;
@@ -98,7 +105,14 @@ public static class MessageProjector
         return merged;
     }
 
-    /// <summary>单条投影（不含工具合并，用于增量场景）。</summary>
+    private static bool IsMonotonic(IReadOnlyList<HaloAgent.Engine.Abstractions.Types.MessageView> views)
+    {
+        for (var i = 1; i < views.Count; i++)
+            if (views[i].TsMs < views[i - 1].TsMs) return false;
+        return true;
+    }
+
+    /// <summary>单条投影（不含工具合并，用于增量场景）。P14：透传真值。</summary>
     public static HaloAgent.Engine.Abstractions.Types.MessageView ToView(
         HaloAgent.Engine.Core.Llm.ChatMessage m) => new()
     {
@@ -108,7 +122,7 @@ public static class MessageProjector
         Reasoning = m.ReasoningContent,
         HasImages = m.HasImages,
         AttachmentCount = m.ContentParts is null ? 0 : m.ContentParts.Count(p => p.Type == "image_url"),
-        TsMs = 0,
+        TsMs = m.TsMs,
     };
 }
 
