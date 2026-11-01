@@ -1,8 +1,16 @@
 <!-- src/Web.Client/src/components/assets/AssetLayout.vue -->
-<!-- 三类资源的统一两栏布局（05 §3.2）：列表 240px + 编辑器自适应。 -->
+<!-- 三类资源的统一两栏布局（05 §3.2）：列表 240px + 编辑器自适应；列表头含搜索，编辑底为 flex 尾栏。 -->
 <script setup lang="ts">
+import HButton from '@/components/base/HButton.vue';
+import HInput from '@/components/base/HInput.vue';
+import HTag from '@/components/base/HTag.vue';
+
 defineProps<{
   title: string;
+  /** 列表 aria-label，具名如“技能列表” */
+  listLabel: string;
+  query: string;
+  queryPlaceholder?: string;
   canCreate: boolean;
   dirty: boolean;
   saving: boolean;
@@ -12,18 +20,30 @@ defineEmits<{
   create: [];
   save: [];
   reload: [];
+  'update:query': [string];
 }>();
 </script>
 
 <template>
   <div class="asset">
-    <aside class="asset-list-col" aria-label="列表">
+    <aside class="asset-list-col" :aria-label="listLabel">
       <div class="asset-list-head">
         <span class="asset-title">{{ title }}</span>
         <span class="spacer" />
-        <button v-if="canCreate" class="asset-new" type="button" @click="$emit('create')">
+        <HButton v-if="canCreate" size="sm" variant="secondary" @click="$emit('create')">
           新建
-        </button>
+        </HButton>
+      </div>
+      <div class="asset-list-search">
+        <HInput
+          :model-value="query"
+          type="text"
+          size="sm"
+          clearable
+          :placeholder="queryPlaceholder ?? '搜索…'"
+          :aria-label="`${title}搜索`"
+          @update:model-value="$emit('update:query', $event)"
+        />
       </div>
       <div class="asset-list-body">
         <slot name="list" />
@@ -36,21 +56,25 @@ defineEmits<{
           <slot name="editTitle" />
         </div>
         <span class="spacer" />
-        <span v-if="dirty" class="dirty" role="status">未保存</span>
-        <button class="asset-btn" type="button" :disabled="saving" @click="$emit('reload')">
+        <HTag v-if="dirty" size="sm" variant="warning" role="status">未保存</HTag>
+        <HButton size="sm" variant="secondary" :disabled="saving" @click="$emit('reload')">
           重新加载
-        </button>
-        <button
-          class="asset-btn primary"
-          type="button"
+        </HButton>
+        <HButton
+          size="sm"
+          variant="primary"
+          :loading="saving"
           :disabled="!dirty || saving"
           @click="$emit('save')"
         >
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
+          保存
+        </HButton>
       </div>
       <div class="asset-edit-body">
         <slot />
+      </div>
+      <div class="asset-edit-foot">
+        <span class="kbd-hint">Ctrl+S 保存（编辑器获焦时）</span>
       </div>
     </section>
   </div>
@@ -74,7 +98,7 @@ defineEmits<{
 .asset-list-head {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   padding: var(--space-2);
   border-bottom: 1px solid hsl(var(--border));
   flex: none;
@@ -87,16 +111,10 @@ defineEmits<{
   flex: 1;
   min-width: 0;
 }
-.asset-new {
-  background: transparent;
-  border: 0;
-  color: hsl(var(--accent));
-  font-size: var(--text-xs);
-  cursor: pointer;
-  padding: 2px 4px;
-}
-.asset-new:hover {
-  text-decoration: underline;
+.asset-list-search {
+  padding: var(--space-2);
+  border-bottom: 1px solid hsl(var(--border));
+  flex: none;
 }
 .asset-list-body {
   flex: 1;
@@ -123,30 +141,6 @@ defineEmits<{
   min-width: 0;
   overflow: hidden;
 }
-.dirty {
-  font-size: var(--text-2xs);
-  color: hsl(var(--warning));
-  flex: none;
-}
-.asset-btn {
-  flex: none;
-  background: hsl(var(--bg-elevated));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  color: hsl(var(--fg));
-}
-.asset-btn.primary {
-  background: hsl(var(--accent));
-  border-color: hsl(var(--accent));
-  color: hsl(var(--accent-fg));
-}
-.asset-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .asset-edit-body {
   flex: 1;
   min-height: 0;
@@ -156,10 +150,35 @@ defineEmits<{
   gap: var(--space-2);
   overflow-y: auto;
 }
+.asset-edit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-2);
+  border-top: 1px solid hsl(var(--border));
+  flex: none;
+}
+.kbd-hint {
+  font-size: var(--text-2xs);
+  color: hsl(var(--fg-subtle));
+  font-family: var(--font-mono);
+}
+@media (max-width: 900px) { /* P14：与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
+  .asset {
+    flex-direction: column;
+  }
+  .asset-list-col {
+    width: 100%;
+    min-width: 0;
+    max-height: 240px;
+    border-right: 0;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+}
 @media (max-width: 700px) {
   .asset-list-col {
-    width: 200px;
-    min-width: 150px;
+    max-height: 200px;
   }
 }
 </style>

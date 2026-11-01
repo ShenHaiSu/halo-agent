@@ -69,7 +69,7 @@ async function cancelTurn(): Promise<void> {
 // 事件拉取循环（挂载时启动，卸载时停止）
 useEventPump();
 
-// 全局快捷键（capture + IME 守卫 + F5/Ctrl+N 拦截）
+ // 应用内快捷键（capture + IME 守卫 + 获焦门控；OS 级热键已拆除）
 useShortcuts({
   isComposing: () => composing.value as unknown as boolean,
   hasOpenModal: () => ui.settingsOpen || ui.commandPaletteOpen,

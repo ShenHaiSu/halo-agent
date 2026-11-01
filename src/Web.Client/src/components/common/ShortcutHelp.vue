@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/common/ShortcutHelp.vue -->
-<!-- 快捷键帮助（01 §11）：Ctrl+K/N/,//, F5 禁止，Enter/Shift+Enter/Esc/Alt+↑↓。 -->
+<!-- 快捷键帮助（01 §11）：应用内键（仅窗口获焦有效）+ 输入框/询问/编辑器。Ctrl+/ 由 useShortcuts 统一打开。 -->
 <script lang="ts">
 import { ref } from 'vue';
 
@@ -15,19 +15,18 @@ export function toggleShortcutHelp(): void {
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue';
 import HDialog from '@/components/base/HDialog.vue';
 
 const GROUPS: Array<{ title: string; items: Array<[string, string]> }> = [
   {
-    title: '全局',
+    title: '应用内（仅窗口获焦时有效）',
     items: [
       ['Ctrl+K', '命令面板 / 搜索'],
-      ['Ctrl+N', '新建对话'],
+      ['Ctrl+N', '新建对话（获焦时）'],
       ['Ctrl+,', '打开设置'],
       ['Ctrl+/', '本帮助'],
       ['F5', '禁止刷新（会丢失状态，已拦截）'],
-      ['Alt+↑ / Alt+↓', '切换会话'],
+      ['Alt+↑ / Alt+↓', '切换会话（输入框内）'],
       ['Alt+F4', '关闭窗口'],
     ],
   },
@@ -52,21 +51,9 @@ const GROUPS: Array<{ title: string; items: Array<[string, string]> }> = [
   },
   {
     title: '编辑器',
-    items: [['Ctrl+S', '保存（技能 / 记忆 / 人格 / MCP）']],
+    items: [['Ctrl+S', '保存（技能 / 记忆 / 人格 / MCP，编辑器获焦时）']],
   },
 ];
-
-function onDocKeydown(e: KeyboardEvent): void {
-  if (e.isComposing) return;
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key === '/') {
-    e.preventDefault();
-    helpOpen.value = !helpOpen.value;
-  }
-}
-
-onMounted(() => document.addEventListener('keydown', onDocKeydown, { capture: true }));
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, { capture: true }));
 </script>
 
 <template>

@@ -1,7 +1,7 @@
 <!-- src/Web.Client/src/components/assets/PersonaEditor.vue -->
-<!-- 人格编辑器（05 §5.2）：使用中徽章，应用/清除经 state.setPersona，Ctrl+S。 -->
+<!-- 人格编辑器（05 §5.2）：使用中徽章，应用/清除经 state.setPersona。Ctrl+S 由资源页统一分发。 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useSessionStore } from '@/stores/session';
 import { useToast } from '@/composables/useToast';
@@ -26,8 +26,20 @@ const fBody = ref('');
 const originBody = ref('');
 const saving = ref(false);
 const creating = ref(false);
+const query = ref('');
 
-const dirty = computed(() => creating.value || fBody.value !== originBody.value);
+const dirty = computed(() => {
+  if (creating.value) return fName.value.trim() !== '' || fBody.value.trim() !== '';
+  return fBody.value !== originBody.value;
+});
+
+const count = computed(() => names.value.length);
+
+const filtered = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  if (!q) return names.value;
+  return names.value.filter((n) => n.toLowerCase().includes(q));
+});
 
 async function loadList(): Promise<void> {
   loading.value = true;
@@ -128,37 +140,36 @@ async function clearPersona(): Promise<void> {
   }
 }
 
-function onDocKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    e.preventDefault();
-    if (dirty.value && !saving.value) void save();
-  }
-}
-
 onMounted(() => {
   void loadList();
-  document.addEventListener('keydown', onDocKeydown, { capture: true });
 });
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, { capture: true }));
 
 function isDirty(): boolean {
   return dirty.value;
 }
-defineExpose({ isDirty, reload: loadList });
+/** Ctrl+S 由资源页统一分发调用。 */
+function saveIfDirty(): void {
+  if (dirty.value && !saving.value) void save();
+}
+defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
 </script>
 
 <template>
   <AssetLayout
     title="人格"
+    list-label="人格列表"
+    :query="query"
+    query-placeholder="搜索人格…"
     :can-create="true"
     :dirty="dirty"
     :saving="saving"
     @create="startCreate"
     @save="save"
     @reload="loadList"
+    @update:query="query = $event"
   >
     <template #list>
-      <div v-if="loading" class="list-state"><HSpinner size="sm" /><span>加载中…</span></div>
+      <div v-if="loading" class="list-state" role="status"><HSpinner size="sm" /><span>加载中…</span></div>
       <div v-else-if="loadError" class="list-state err" role="alert">{{ loadError }}</div>
       <div v-else-if="names.length === 0" class="list-empty">
         <HEmpty
@@ -167,8 +178,11 @@ defineExpose({ isDirty, reload: loadList });
           description="人格会改变模型的语气与行为风格。点右上「新建」创建。"
         />
       </div>
+      <div v-else-if="filtered.length === 0" class="list-empty">
+        <HEmpty icon="user" title="没有匹配的人格" description="换个关键词试试，或清空搜索。" />
+      </div>
       <AssetListItem
-        v-for="n in names"
+        v-for="n in filtered"
         v-else
         :key="n"
         :active="selected === n"
@@ -209,11 +223,6 @@ defineExpose({ isDirty, reload: loadList });
         spellcheck="false"
         placeholder="用自然语言描述你希望模型的语气、关注点与行为边界…"
       />
-
-      <div class="edit-actions">
-        <span class="spacer" />
-        <span class="kbd-hint">Ctrl+S 保存</span>
-      </div>
     </template>
 
     <HEmpty v-else icon="user" title="选择一个人格" description="从左侧选择，或点「新建」创建。" />
@@ -257,18 +266,5 @@ defineExpose({ isDirty, reload: loadList });
   flex: 1;
   min-height: 200px;
   font-size: var(--text-sm);
-}
-.edit-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.spacer {
-  flex: 1;
-}
-.kbd-hint {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
 }
 </style>

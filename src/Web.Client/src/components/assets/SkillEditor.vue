@@ -1,7 +1,7 @@
 <!-- src/Web.Client/src/components/assets/SkillEditor.vue -->
-<!-- 技能编辑器（05 §4.1 + §4.2 + §4.3 + §4.4）：draftCache 替代 confirm；entry 只读；builtin 只读+复制为新。 -->
+<!-- 技能编辑器（05 §4.1 + §4.2 + §4.3 + §4.4）：draftCache 替代 confirm；entry 只读；builtin 只读+复制为新。Ctrl+S 由资源页统一分发。 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import { SKILL_NAME_RE } from '@/components/settings/validators';
@@ -38,6 +38,7 @@ const confirmDelete = ref(false);
 const creatingDialog = ref(false);
 const newName = ref('');
 const newNameError = ref<string | null>(null);
+const query = ref('');
 
 /** 未保存草稿缓存：切换选中项不丢草稿，切回恢复（替代 confirm，见 §4.4）。 */
 const draftCache = new Map<string, string>();
@@ -49,6 +50,16 @@ const dirty = computed(() => {
   if (creating.value) return newName.value.trim() !== '' || draftBody.value.trim() !== '';
   if (current.value === null || isBuiltin.value) return false;
   return draftBody.value !== (current.value.body ?? '');
+});
+
+const count = computed(() => items.value.length);
+
+const filtered = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  if (!q) return items.value;
+  return items.value.filter(
+    (s) => s.name.toLowerCase().includes(q) || firstLine(s.body ?? '').toLowerCase().includes(q),
+  );
 });
 
 function firstLine(body: string, max = 40): string {
@@ -207,38 +218,39 @@ function cancelCreate(): void {
   newNameError.value = null;
 }
 
-function onDocKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    e.preventDefault();
-    if (dirty.value && !saving.value) void save();
-  }
-}
-
 onMounted(() => {
   void loadList();
-  document.addEventListener('keydown', onDocKeydown, { capture: true });
 });
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, { capture: true }));
 
 function isDirty(): boolean {
   return dirty.value;
 }
-defineExpose({ isDirty, reload: loadList });
+/** Ctrl+S 由资源页统一分发调用。 */
+function saveIfDirty(): void {
+  if (dirty.value && !saving.value) void save();
+}
+defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
 </script>
 
 <template>
   <AssetLayout
     title="技能"
+    list-label="技能列表"
+    :query="query"
+    query-placeholder="搜索技能名/首行…"
     :can-create="true"
     :dirty="dirty"
     :saving="saving"
     @create="startCreate"
     @save="save"
     @reload="loadList"
+    @update:query="query = $event"
   >
     <template #list>
-      <div v-if="loading" class="list-state"><HSpinner size="sm" /><span>加载中…</span></div>
-      <div v-else-if="loadError" class="list-state err" role="alert">{{ loadError }}</div>
+      <div v-if="loading" class="list-state" role="status"><HSpinner size="sm" /><span>加载中…</span></div>
+      <div v-else-if="loadError" class="list-state err" role="alert">
+        <span>{{ loadError }}</span>
+      </div>
       <div v-else-if="items.length === 0" class="list-empty">
         <HEmpty
           icon="zap"
@@ -246,15 +258,18 @@ defineExpose({ isDirty, reload: loadList });
           description="技能是可复用的提示词模板。点右上「新建」创建。"
         />
       </div>
+      <div v-else-if="filtered.length === 0" class="list-empty">
+        <HEmpty icon="zap" title="没有匹配的技能" description="换个关键词试试，或清空搜索。" />
+      </div>
       <AssetListItem
-        v-for="s in items"
+        v-for="s in filtered"
         v-else
         :key="s.name"
         :active="selectedName === s.name"
         :title="s.name"
         :subtitle="firstLine(s.body ?? '')"
         :badge="s.source === 'builtin' ? '内置' : '自定义'"
-        :badge-variant="s.source === 'builtin' ? 'accent' : 'neutral'"
+        :badge-variant="s.source === 'builtin' ? 'accent' : 'default'"
         @select="select(s.name)"
       />
     </template>
@@ -271,7 +286,7 @@ defineExpose({ isDirty, reload: loadList });
 
     <template v-if="creating || current">
       <div v-if="creating" class="create-hint">
-        在下方输入技能内容，点右上「保存」或按 Ctrl+S 创建。
+        在下方输入技能内容，点右上「保存」创建。
       </div>
       <div v-else-if="isBuiltin" class="readonly-hint">
         内置技能不可编辑，可复制为新技能后修改。
@@ -300,8 +315,6 @@ defineExpose({ isDirty, reload: loadList });
         <HButton v-else-if="!creating" variant="ghost" size="sm" @click="confirmDelete = true"
           >删除技能</HButton
         >
-        <span class="spacer" />
-        <span class="kbd-hint">Ctrl+S 保存</span>
       </div>
     </template>
 
@@ -401,14 +414,6 @@ defineExpose({ isDirty, reload: loadList });
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.spacer {
-  flex: 1;
-}
-.kbd-hint {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
 }
 .create-hint {
   font-size: var(--text-sm);

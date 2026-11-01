@@ -16,9 +16,8 @@ export function useCommandPaletteOpen() {
   return paletteOpen;
 }
 </script>
-
-<script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+ <script setup lang="ts">
+ import { computed, nextTick, ref, watch } from 'vue';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
 import { transport } from '@/transport';
@@ -340,17 +339,6 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-function onDocKeydown(e: KeyboardEvent): void {
-  if (e.isComposing) return;
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key.toLowerCase() === 'k') {
-    e.preventDefault();
-    paletteOpen.value = !paletteOpen.value;
-  }
-}
-
-onMounted(() => document.addEventListener('keydown', onDocKeydown, { capture: true }));
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, { capture: true }));
 </script>
 
 <template>

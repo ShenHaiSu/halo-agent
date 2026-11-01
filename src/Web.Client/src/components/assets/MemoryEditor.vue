@@ -1,7 +1,7 @@
 <!-- src/Web.Client/src/components/assets/MemoryEditor.vue -->
-<!-- 记忆编辑器（05 §5.1）：scope 分组，filename 只读，mtype decision/preference/fact/pattern，校验，Ctrl+S。 -->
+<!-- 记忆编辑器（05 §5.1）：scope 分组，filename 只读，mtype decision/preference/fact/pattern，校验。Ctrl+S 由资源页统一分发。 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import AssetLayout from './AssetLayout.vue';
@@ -52,6 +52,7 @@ const fBody = ref('');
 const saving = ref(false);
 const creating = ref(false);
 const confirmDelete = ref(false);
+const query = ref('');
 
 const dirty = computed(() => {
   if (creating.value) return fName.value.trim() !== '' || fBody.value.trim() !== '';
@@ -65,13 +66,38 @@ const dirty = computed(() => {
   );
 });
 
+const count = computed(() => items.value.length);
+
+const SCOPE_ORDER = ['global', 'project'];
+
+function normalizeScope(scope?: string): string {
+  if (scope === 'project' || scope === 'global') return scope;
+  return 'global';
+}
+
+const filtered = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  if (!q) return items.value;
+  return items.value.filter(
+    (m) =>
+      m.name.toLowerCase().includes(q) ||
+      (m.description ?? '').toLowerCase().includes(q) ||
+      (m.mtype ?? '').toLowerCase().includes(q),
+  );
+});
+
 const grouped = computed(() => {
-  const g: Record<string, MemorySummary[]> = {};
-  for (const m of items.value) {
-    const k = m.scope ?? 'global';
+  const g: Record<string, MemorySummary[]> = { global: [], project: [] };
+  for (const m of filtered.value) {
+    const k = normalizeScope(m.scope);
     (g[k] ??= []).push(m);
   }
-  return g;
+  // 未知 scope 已归一为 global；固定 global → project 顺序输出
+  const out: Array<[string, MemorySummary[]]> = [];
+  for (const k of SCOPE_ORDER) {
+    if ((g[k] ?? []).length > 0) out.push([k, g[k]!]);
+  }
+  return out;
 });
 
 function keyOf(m: MemorySummary): string {
@@ -199,37 +225,36 @@ async function removeMemory(): Promise<void> {
   }
 }
 
-function onDocKeydown(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    e.preventDefault();
-    if (dirty.value && !saving.value) void save();
-  }
-}
-
 onMounted(() => {
   void loadList();
-  document.addEventListener('keydown', onDocKeydown, { capture: true });
 });
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, { capture: true }));
 
 function isDirty(): boolean {
   return dirty.value;
 }
-defineExpose({ isDirty, reload: loadList });
+/** Ctrl+S 由资源页统一分发调用。 */
+function saveIfDirty(): void {
+  if (dirty.value && !saving.value) void save();
+}
+defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
 </script>
 
 <template>
   <AssetLayout
     title="记忆"
+    list-label="记忆列表"
+    :query="query"
+    query-placeholder="搜索名称/描述/类型…"
     :can-create="true"
     :dirty="dirty"
     :saving="saving"
     @create="startCreate"
     @save="save"
     @reload="loadList"
+    @update:query="query = $event"
   >
     <template #list>
-      <div v-if="loading" class="list-state"><HSpinner size="sm" /><span>加载中…</span></div>
+      <div v-if="loading" class="list-state" role="status"><HSpinner size="sm" /><span>加载中…</span></div>
       <div v-else-if="loadError" class="list-state err" role="alert">{{ loadError }}</div>
       <div v-else-if="items.length === 0" class="list-empty">
         <HEmpty
@@ -238,8 +263,11 @@ defineExpose({ isDirty, reload: loadList });
           description="模型会在需要时自动创建记忆，你也可以手动添加。"
         />
       </div>
+      <div v-else-if="filtered.length === 0" class="list-empty">
+        <HEmpty icon="layers" title="没有匹配的记忆" description="换个关键词试试，或清空搜索。" />
+      </div>
       <template v-else>
-        <template v-for="(list, scope) in grouped" :key="scope">
+        <template v-for="([scope, list]) in grouped" :key="scope">
           <div class="group-head">{{ scopeLabel(String(scope)) }}</div>
           <AssetListItem
             v-for="m in list"
@@ -248,7 +276,7 @@ defineExpose({ isDirty, reload: loadList });
             :title="m.name"
             :subtitle="m.description"
             :badge="m.mtype"
-            badge-variant="neutral"
+            badge-variant="default"
             @select="select(m)"
           />
         </template>
@@ -324,8 +352,6 @@ defineExpose({ isDirty, reload: loadList });
         <HButton v-if="!creating && current" variant="ghost" size="sm" @click="confirmDelete = true"
           >删除记忆</HButton
         >
-        <span class="spacer" />
-        <span class="kbd-hint">Ctrl+S 保存</span>
       </div>
     </template>
 
@@ -424,14 +450,6 @@ defineExpose({ isDirty, reload: loadList });
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.spacer {
-  flex: 1;
-}
-.kbd-hint {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
 }
 .del-p {
   margin: 0;

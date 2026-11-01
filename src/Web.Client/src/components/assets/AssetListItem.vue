@@ -1,12 +1,14 @@
 <!-- src/Web.Client/src/components/assets/AssetListItem.vue -->
-<!-- 资源通用列表项（05 §3.3）。 -->
+<!-- 资源通用列表项（05 §3.3）：标题 + 副标题 + HTag 徽章。 -->
 <script setup lang="ts">
+import HTag from '@/components/base/HTag.vue';
+
 defineProps<{
   active: boolean;
   title: string;
   subtitle?: string;
   badge?: string;
-  badgeVariant?: 'neutral' | 'accent' | 'warning';
+  badgeVariant?: 'default' | 'accent' | 'warning';
 }>();
 
 defineEmits<{ select: [] }>();
@@ -24,9 +26,7 @@ defineEmits<{ select: [] }>();
       <span class="ali-title">{{ title }}</span>
       <span v-if="subtitle" class="ali-sub">{{ subtitle }}</span>
     </span>
-    <span v-if="badge" class="ali-badge" :class="`bv-${badgeVariant ?? 'neutral'}`">{{
-      badge
-    }}</span>
+    <HTag v-if="badge" size="sm" :variant="badgeVariant ?? 'default'">{{ badge }}</HTag>
   </button>
 </template>
 
@@ -71,23 +71,5 @@ defineEmits<{ select: [] }>();
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.ali-badge {
-  flex: none;
-  font-size: var(--text-2xs);
-  padding: 0 4px;
-  border-radius: var(--radius-xs);
-}
-.bv-neutral {
-  background: hsl(var(--bg-muted));
-  color: hsl(var(--fg-muted));
-}
-.bv-accent {
-  background: hsl(var(--accent-subtle));
-  color: hsl(var(--accent));
-}
-.bv-warning {
-  background: hsl(var(--warning-subtle));
-  color: hsl(var(--warning));
 }
 </style>

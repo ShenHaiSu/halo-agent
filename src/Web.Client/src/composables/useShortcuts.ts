@@ -2,7 +2,10 @@
 import { onBeforeUnmount, onMounted } from 'vue';
 
 /**
- * 全局快捷键（见 01 §11.3 冲突处理原则）。
+ * 应用内快捷键（见 01 §11.3 冲突处理原则）。
+ *
+ * v3：OS 级 RegisterHotKey 已拆除。本文件仅在主窗口激活获焦时生效，
+ * 失焦/最小化/切到别的程序一律不响应（document.hasFocus + focus/blur 使能位）。
  *
  * ============ 为什么在 document 上监听而不是 window ============
  *  CefSharp 的 window 层与 document 层在 capture 阶段行为一致，
@@ -16,8 +19,6 @@ import { onBeforeUnmount, onMounted } from 'vue';
  * ============ 为什么是依赖注入而不是直接 import stores ============
  *  composables 目录被 check-layering 禁止 import stores/transport。
  *  调用方（App 层，允许 import stores）传入回调，本函数只做按键分发。
- *  行为与 01 §11.3 一致：capture、IME 守卫、Ctrl+K/,/N preventDefault、
- *  Esc 关闭弹层/设置/取消。
  * ==========================================================
  */
 export interface ShortcutHandlers {
@@ -40,21 +41,38 @@ export interface ShortcutHandlers {
 }
 
 export function useShortcuts(h: ShortcutHandlers): void {
+  let windowActive = true;
+
+  function onFocus(): void {
+    windowActive = true;
+  }
+  function onBlur(): void {
+    windowActive = false;
+  }
+
   function onKeydown(e: KeyboardEvent): void {
+    // 仅主窗口激活获焦时响应；失焦一律忽略。
+    if (!windowActive) return;
+    try {
+      if (typeof document !== 'undefined' && 'hasFocus' in document && !document.hasFocus()) return;
+    } catch {
+      /* 忽略 */
+    }
     // P-2：IME 优先（除 Esc 交给输入法取消组合）
     if ((e.isComposing || h.isComposing()) && e.key !== 'Escape') return;
 
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 
-    // P-4：显式阻止浏览器默认
+    // P-4：显式阻止浏览器默认（F5 刷新会丢状态，F7 插入符浏览）
     if (['f5', 'f7'].includes(key)) {
       e.preventDefault();
       return;
     }
+    // N/P/O/F/G/J/U：删除无条件全局捕获，改为获焦门内应用键。
+    // N=新建会话；其余仅 preventDefault，不再裸奔到 CEF 默认；S 只拦截不保存（保存由资源页统一分发）。
     if (mod && ['n', 'p', 's', 'o', 'f', 'g', 'j', 'u'].includes(key)) {
-      // Ctrl+S 交给输入框/编辑器自己处理（保存），其余阻止
-      if (key !== 's') e.preventDefault();
+      e.preventDefault();
       if (key === 'n') h.newSession();
       return;
     }
@@ -86,6 +104,19 @@ export function useShortcuts(h: ShortcutHandlers): void {
     }
   }
 
-  onMounted(() => document.addEventListener('keydown', onKeydown, { capture: true }));
-  onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, { capture: true }));
+  onMounted(() => {
+    try {
+      windowActive = typeof document === 'undefined' || !('hasFocus' in document) || document.hasFocus();
+    } catch {
+      windowActive = true;
+    }
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('keydown', onKeydown, { capture: true });
+  });
+  onBeforeUnmount(() => {
+    window.removeEventListener('focus', onFocus);
+    window.removeEventListener('blur', onBlur);
+    document.removeEventListener('keydown', onKeydown, { capture: true });
+  });
 }
