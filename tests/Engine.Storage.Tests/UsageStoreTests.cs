@@ -103,4 +103,47 @@ public sealed class UsageStoreTests
             Assert.True(size > 0);
         }
     }
+     [Fact]
+     public void ExportFile_writes_bom_and_rows_and_cleans_tmp()
+     {
+         var store = NewStore(out var tmp);
+         using (tmp)
+         {
+             store.Record(Ev("s1", "t1", "openai", "gpt-4o", 100, 10, 20, 1000));
+             store.Record(Ev("s1", "t2", "openai", "gpt-4o", 200, 20, 30, 2000));
+             var path = Path.Combine(tmp.Dir, "out", "usage.csv");
+             var (wrote, truncated) = store.ExportFile(new UsageQuery(), path, null);
+             Assert.Equal(2, wrote);
+             Assert.False(truncated);
+             Assert.True(File.Exists(path));
+             Assert.False(File.Exists(path + ".tmp"));
+              // ReadAllText 会吞 BOM：按字节断言 EF BB BF，再解码验行数。
+              var bytes = File.ReadAllBytes(path);
+              Assert.True(bytes.Length >= 3);
+              Assert.Equal(0xEF, bytes[0]);
+              Assert.Equal(0xBB, bytes[1]);
+              Assert.Equal(0xBF, bytes[2]);
+              var text = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+              var lines = text.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+              Assert.Equal(3, lines.Length); // 表头 + 2 行
+         }
+     }
+ 
+     [Fact]
+     public void ExportCsv_maskMap_replaces_provider_field_only()
+     {
+         var store = NewStore(out var tmp);
+         using (tmp)
+         {
+             // model 名含 provider 真值字符串：字段级替换不得误伤 model；session_id 保留真值。
+             store.Record(Ev("sess-openai-1", "t1", "openai", "openai-special", 100, 10, 20, 1000));
+             var mask = new Dictionary<string, string>(StringComparer.Ordinal) { ["openai"] = "abc12" };
+             var (csv, truncated, wrote) = store.ExportCsv(new UsageQuery(), mask);
+             Assert.False(truncated);
+             Assert.Equal(1, wrote);
+             Assert.Contains("\"abc12\"", csv);
+             Assert.Contains("\"openai-special\"", csv);
+             Assert.Contains("\"sess-openai-1\"", csv);
+         }
+     }
 }

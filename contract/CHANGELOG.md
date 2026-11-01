@@ -3,6 +3,13 @@
 > **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 contractVersion 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 
+ ## [3] — P17 用量分析修复（非破坏性）
+ 
+ **非破坏性增补**（`contractVersion` 保持 `3`，只新增 1 个方法）：
+ 
+ - 新增 `usage.exportFile {同 usage.export 筛选 + path!, maskMap?} → {path, wrote, truncated, degraded?}`（`path` 必需：绝对路径 `.csv`，非法/越界报 `params.invalid`；`maskMap: providerId→假名` 只做 provider 字段级替换；引擎先写 `path.tmp` 再 rename，引擎写 BOM；旧 `usage.export` 保留给浏览器/Mock）。
+ - 其余 `usage.*` 不变（`sessionId` 参数保留）。
+ - 前端跑 `node scripts/gen-contract-types.mjs` 重生成 `src/Web.Client/src/contract/agent.d.ts`。
  ## [3] — 2026-11-01 · P16 用量分析（非破坏性）
  
  **非破坏性增补**（`contractVersion` 保持 `3`，只新增 5 个方法 + 3 个类型）：

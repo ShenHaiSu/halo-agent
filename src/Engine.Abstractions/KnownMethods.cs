@@ -66,10 +66,11 @@ internal static class KnownMethods
         "tool.undoRollback",
          "update.check",
          "update.install",
-         "usage.clear",
-         "usage.export",
-         "usage.query",
-         "usage.stats",
-         "usage.summary",
+          "usage.clear",
+          "usage.export",
+          "usage.exportFile",
+          "usage.query",
+          "usage.stats",
+          "usage.summary",
     };
 }

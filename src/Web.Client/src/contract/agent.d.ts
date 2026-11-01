@@ -746,6 +746,24 @@ export interface HaloMethods {
   truncated: boolean
   degraded?: boolean
 } }
+  /** usage.exportFile */
+  'usage.exportFile': { params: {
+  fromMs?: number
+  toMs?: number
+  providerId?: string
+  modelId?: string
+  sessionId?: string
+  tzOffsetMin?: number
+  /** 绝对路径 .csv（用户经保存对话框选路）；非法/越界报 params.invalid */
+  path: string
+  /** providerId→假名（前端模糊化映射）；引擎只做 provider 字段级替换 */
+  maskMap?: Record<string, unknown>
+}; result: {
+  path: string
+  wrote: number
+  truncated: boolean
+  degraded?: boolean
+} }
   /** usage.clear */
   'usage.clear': { params: {
   beforeMs: number
@@ -978,6 +996,7 @@ export const METHODS = [
   'usage.summary',
   'usage.stats',
   'usage.export',
+  'usage.exportFile',
   'usage.clear',
 ] as const
 

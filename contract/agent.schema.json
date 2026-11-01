@@ -2776,7 +2776,69 @@
       "errors": [
         "params.invalid"
       ]
-    },
+     },
+     "usage.exportFile": {
+       "params": {
+         "type": "object",
+         "properties": {
+           "fromMs": {
+             "type": "integer"
+           },
+           "toMs": {
+             "type": "integer"
+           },
+           "providerId": {
+             "type": "string"
+           },
+           "modelId": {
+             "type": "string"
+           },
+           "sessionId": {
+             "type": "string"
+           },
+           "tzOffsetMin": {
+             "type": "integer"
+           },
+           "path": {
+             "type": "string",
+             "description": "绝对路径 .csv（用户经保存对话框选路）；非法/越界报 params.invalid"
+           },
+           "maskMap": {
+             "type": "object",
+             "description": "providerId→假名（前端模糊化映射）；引擎只做 provider 字段级替换"
+           }
+         },
+         "required": [
+           "path"
+         ]
+       },
+       "result": {
+         "type": "object",
+         "properties": {
+           "path": {
+             "type": "string"
+           },
+           "wrote": {
+             "type": "integer"
+           },
+           "truncated": {
+             "type": "boolean"
+           },
+           "degraded": {
+             "type": "boolean"
+           }
+         },
+         "required": [
+           "path",
+           "wrote",
+           "truncated"
+         ]
+       },
+       "implementedIn": "engine",
+       "errors": [
+         "params.invalid"
+       ]
+     },
     "usage.clear": {
       "params": {
         "type": "object",

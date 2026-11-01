@@ -212,11 +212,12 @@ public static class EngineAssembly
              ("update.check", real.UpdateCheckAsync),
              ("update.install", real.UpdateInstallAsync),
  
-             ("usage.query", real.UsageQueryAsync),
-             ("usage.summary", real.UsageSummaryAsync),
-             ("usage.stats", real.UsageStatsAsync),
-             ("usage.export", real.UsageExportAsync),
-             ("usage.clear", real.UsageClearAsync));
+              ("usage.query", real.UsageQueryAsync),
+              ("usage.summary", real.UsageSummaryAsync),
+              ("usage.stats", real.UsageStatsAsync),
+              ("usage.export", real.UsageExportAsync),
+              ("usage.exportFile", real.UsageExportFileAsync),
+              ("usage.clear", real.UsageClearAsync));
 
         return new AssembledEngine(router, state, bus, session, store, tools);
     }

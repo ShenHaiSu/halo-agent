@@ -114,13 +114,42 @@ public sealed partial class RealMethods
         return Task.FromResult<object?>(new { sizeBytes = size, rowCount = rows, degraded = _usageStore.Degraded });
     }
 
-    public Task<object?> UsageExportAsync(JsonElement? p, CancellationToken ct)
-    {
-        var q = ParseUsageQuery(p, paged: false);
-        _usageStore.EnsureCreated();
-        var (csv, truncated) = _usageStore.ExportCsv(q);
-        return Task.FromResult<object?>(new { csv, truncated, degraded = _usageStore.Degraded });
-    }
+     public Task<object?> UsageExportAsync(JsonElement? p, CancellationToken ct)
+     {
+         var q = ParseUsageQuery(p, paged: false);
+         _usageStore.EnsureCreated();
+         var (csv, truncated, _) = _usageStore.ExportCsv(q);
+         return Task.FromResult<object?>(new { csv, truncated, degraded = _usageStore.Degraded });
+     }
+ 
+     /// <summary>P17 导出落盘：选路→引擎写盘（.tmp→rename）→reveal。旧 usage.export 保留给浏览器/Mock，桌面禁用 Blob 分支。</summary>
+     public Task<object?> UsageExportFileAsync(JsonElement? p, CancellationToken ct)
+     {
+         if (p is null || p.Value.ValueKind != JsonValueKind.Object)
+             throw RpcException.ParamsInvalid("path 必需（绝对路径 .csv）");
+         var q = ParseUsageQuery(p, paged: false);
+         if (!p.Value.TryGetProperty("path", out var pathEl) || pathEl.ValueKind != JsonValueKind.String
+             || string.IsNullOrWhiteSpace(pathEl.GetString()))
+             throw RpcException.ParamsInvalid("path 必需（绝对路径 .csv）");
+         var path = pathEl.GetString()!;
+         if (!Path.IsPathFullyQualified(path)
+             || !string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase))
+             throw RpcException.ParamsInvalid("path 须为绝对路径且以 .csv 结尾");
+         IReadOnlyDictionary<string, string>? maskMap = null;
+         if (p.Value.TryGetProperty("maskMap", out var mm) && mm.ValueKind == JsonValueKind.Object)
+         {
+             var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+             foreach (var prop in mm.EnumerateObject())
+             {
+                 if (prop.Value.ValueKind == JsonValueKind.String)
+                     dict[prop.Name] = prop.Value.GetString() ?? "";
+             }
+             maskMap = dict;
+         }
+         _usageStore.EnsureCreated();
+         var (wrote, truncated) = _usageStore.ExportFile(q, path, maskMap);
+         return Task.FromResult<object?>(new { path, wrote, truncated, degraded = _usageStore.Degraded });
+     }
 
     public Task<object?> UsageClearAsync(JsonElement? p, CancellationToken ct)
     {

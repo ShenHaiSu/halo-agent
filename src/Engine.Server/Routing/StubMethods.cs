@@ -105,11 +105,12 @@ public sealed class StubMethods
              // ---- update 2 ----
              ("update.check", stub.NotImplemented),
              ("update.install", stub.NotImplemented),
-             // ---- usage 5 (P16) ----
+             // ---- usage 6 (P16 5 + P17 exportFile) ----
              ("usage.query", stub.UsageQuery),
              ("usage.summary", stub.UsageSummary),
              ("usage.stats", stub.UsageStats),
              ("usage.export", stub.UsageExport),
+             ("usage.exportFile", stub.UsageExportFile),
              ("usage.clear", stub.UsageClear));
     }
 
@@ -319,8 +320,11 @@ public sealed class StubMethods
          Task.FromResult<object?>(new { input = 0, cached = 0, output = 0, total = 0, requests = 0, hitRate = 0.0, byDay = Array.Empty<object>(), byModel = Array.Empty<object>() });
      public Task<object?> UsageStats(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { sizeBytes = 0, rowCount = 0 });
-     public Task<object?> UsageExport(JsonElement? _, CancellationToken ct) =>
-         Task.FromResult<object?>(new { csv = "", truncated = false });
+      public Task<object?> UsageExport(JsonElement? _, CancellationToken ct) =>
+          Task.FromResult<object?>(new { csv = "", truncated = false });
+      /// <summary>P17 导出落盘桩：无真实落盘，返回 mock 路径。</summary>
+      public Task<object?> UsageExportFile(JsonElement? _, CancellationToken ct) =>
+          Task.FromResult<object?>(new { path = "(stub)/usage.csv", wrote = 0, truncated = false });
      public Task<object?> UsageClear(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { removed = 0 });
     private static bool IsWin7()

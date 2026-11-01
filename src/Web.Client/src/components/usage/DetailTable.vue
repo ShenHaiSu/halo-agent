@@ -1,24 +1,32 @@
 <!-- src/Web.Client/src/components/usage/DetailTable.vue -->
-<!-- P16 用量明细表：分页 + 会话下钻列。 -->
+<!-- P17 用量明细表：分页。会话列已删除（后端 sessionId 保留），行 key 仍为 sessionId/turnId。 -->
 <script setup lang="ts">
 import HButton from '@/components/base/HButton.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
 import { formatDateTime, formatNumber } from '@/utils/format';
+import ZhCell from './ZhCell.vue';
+import { resolveProviderDisplay } from './providerMask';
 import { formatHitRate, type UsageRow } from './usageTypes';
 
-defineProps<{
+const props = defineProps<{
   rows: UsageRow[];
   total: number;
   page: number;
   pageSize: number;
   loading: boolean;
   failed: boolean;
+  maskOn: boolean;
 }>();
 
 const emit = defineEmits<{
   'update:page': [number];
-  drilldown: [string];
 }>();
+
+/** 服务商显示：经 resolve 唯一入口；localStorage 非响应式，靠 maskOn prop 订阅切换（页容器先写存储再改 prop）。 */
+function providerText(r: UsageRow): string {
+  void props.maskOn;
+  return resolveProviderDisplay(r.providerId, r.providerDisplay ?? '');
+}
 
 function totalPages(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize));
@@ -40,7 +48,6 @@ function totalPages(total: number, pageSize: number): number {
             <th class="px-2 py-1.5 font-medium">时间</th>
             <th class="px-2 py-1.5 font-medium">服务商</th>
             <th class="px-2 py-1.5 font-medium">模型</th>
-            <th class="px-2 py-1.5 font-medium">会话</th>
             <th class="px-2 py-1.5 text-right font-medium">输入</th>
             <th class="px-2 py-1.5 text-right font-medium">缓存</th>
             <th class="px-2 py-1.5 text-right font-medium">输出</th>
@@ -50,31 +57,31 @@ function totalPages(total: number, pageSize: number): number {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="`${r.sessionId}/${r.turnId}`" class="border-b border-border-subtle">
-            <td class="whitespace-nowrap px-2 py-1.5 text-fg-muted">{{ formatDateTime(r.tsMs) }}</td>
-            <td class="px-2 py-1.5" :title="r.providerDisplay || r.providerId">{{ r.providerId }}</td>
-            <td class="px-2 py-1.5" :title="r.modelDisplay || r.modelId">{{ r.modelId }}</td>
-            <td class="max-w-40 truncate px-2 py-1.5">
-              <button
-                type="button"
-                class="text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                :title="r.sessionId"
-                @click="emit('drilldown', r.sessionId)"
-              >
-                {{ r.sessionId }}
-              </button>
+          <tr
+            v-for="r in rows"
+            :key="`${r.sessionId}/${r.turnId}`"
+            class="border-b border-border-subtle"
+          >
+            <td class="whitespace-nowrap px-2 py-1.5 text-fg-muted">
+              {{ formatDateTime(r.tsMs) }}
             </td>
-            <td class="px-2 py-1.5 text-right">{{ formatNumber(r.prompt) }}</td>
-            <td class="px-2 py-1.5 text-right">{{ formatNumber(r.cached) }}</td>
-            <td class="px-2 py-1.5 text-right">{{ formatNumber(r.output) }}</td>
-            <td class="px-2 py-1.5 text-right">{{ formatNumber(r.total) }}</td>
+            <!-- 开时文本/悬停均为假名（防泄漏）；关时真名。单元格只含假名，无真值残留。 -->
+            <td class="px-2 py-1.5" :title="providerText(r)">{{ providerText(r) }}</td>
+            <td class="px-2 py-1.5" :title="r.modelDisplay || r.modelId">{{ r.modelId }}</td>
+            <ZhCell :value="r.prompt" />
+            <ZhCell :value="r.cached" />
+            <ZhCell :value="r.output" />
+            <ZhCell :value="r.total" />
             <td class="px-2 py-1.5 text-right">{{ formatHitRate(r.prompt, r.hitRate) }}</td>
             <td class="px-2 py-1.5 text-fg-muted">{{ r.truncated === 1 ? '是' : '—' }}</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div v-if="!failed && total > 0" class="mt-2 flex items-center justify-between text-xs text-fg-muted">
+    <div
+      v-if="!failed && total > 0"
+      class="mt-2 flex items-center justify-between text-xs text-fg-muted"
+    >
       <span>共 {{ formatNumber(total) }} 条</span>
       <div class="flex items-center gap-2">
         <HButton

@@ -437,5 +437,9 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
      kind: 'ok',
      run: () => ({ csv: '"时间","session_id","turn_id","provider","model","protocol","输入","缓存","输出","合计","命中率","截断"\r\n', truncated: false }),
    },
-   'usage.clear': { kind: 'ok', run: () => ({ removed: 0 }) },
+    'usage.clear': { kind: 'ok', run: () => ({ removed: 0 }) },
+    'usage.exportFile': {
+      kind: 'ok',
+      run: () => ({ path: '(mock)/usage.csv', wrote: 4, truncated: false }),
+    },
  };

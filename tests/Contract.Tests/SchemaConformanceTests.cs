@@ -211,7 +211,7 @@ internal static class KnownMethods
         "fs.browse", "fs.pickFiles", "fs.pickSavePath", "fs.readImageAsBase64",
          // update
          "update.check", "update.install",
-         // usage (P16)
-         "usage.query", "usage.summary", "usage.stats", "usage.export", "usage.clear",
+          // usage (P16 5 + P17 exportFile)
+          "usage.query", "usage.summary", "usage.stats", "usage.export", "usage.exportFile", "usage.clear",
      };
 }

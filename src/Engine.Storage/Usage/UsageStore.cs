@@ -353,62 +353,79 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
         return map.Values.OrderByDescending(x => x.Input).ToList();
     }
 
-    /// <summary>导出 CSV（RFC4180，全字段包引号，\r\n，调用方加 BOM）。上限 50000。</summary>
-    public (string Csv, bool Truncated) ExportCsv(UsageQuery q)
-    {
-        EnsureCreated();
-        lock (_gate)
-        {
-            try
-            {
-                using var conn = Open();
-                var sb = new StringBuilder();
-                sb.Append("\"时间\",\"session_id\",\"turn_id\",\"provider\",\"model\",\"protocol\","
-                    + "\"输入\",\"缓存\",\"输出\",\"合计\",\"命中率\",\"截断\"\r\n");
-                int count = 0;
-                bool truncated = false;
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.CommandText = "SELECT ts_ms, session_id, turn_id, provider_id, provider_display,"
-                        + " model_id, model_display, protocol, prompt_tokens, cached_tokens,"
-                        + " completion_tokens, total_tokens, truncated, recorded_ms"
-                        + " FROM usage_events WHERE " + BuildWhere(q, cmd)
-                        + " ORDER BY ts_ms DESC, id DESC LIMIT @lim;";
-                    AddParam(cmd, "@lim", ExportLimit + 1);
-                    using var r = cmd.ExecuteReader();
-                    while (r.Read())
-                    {
-                        count++;
-                        if (count > ExportLimit) { truncated = true; break; }
-                        var e = ReadEvent(r);
-                        string time = DateTimeOffset.FromUnixTimeMilliseconds(e.TsMs).ToLocalTime()
-                            .ToString("yyyy-MM-dd HH:mm:ss");
-                        double hit = e.PromptTokens > 0 ? (double)e.CachedTokens / e.PromptTokens : 0;
-                        string[] fields = new[]
-                        {
-                            time, e.SessionId, e.TurnId, e.ProviderId, e.ModelId, e.Protocol,
-                            e.PromptTokens.ToString(), e.CachedTokens.ToString(),
-                            e.CompletionTokens.ToString(), e.TotalTokens.ToString(),
-                            (hit * 100).ToString("F1") + "%", e.Truncated == 1 ? "1" : "0",
-                        };
-                        for (int i = 0; i < fields.Length; i++)
-                        {
-                            if (i > 0) sb.Append(',');
-                            sb.Append('"');
-                            sb.Append(fields[i].Replace("\"", "\"\""));
-                            sb.Append('"');
-                        }
-                        sb.Append("\r\n");
-                    }
-                }
-                return (sb.ToString(), truncated);
-            }
-            catch
-            {
-                return ("", false);
-            }
-        }
-    }
+     /// <summary>导出 CSV（RFC4180，全字段包引号，\r\n，调用方加 BOM）。上限 50000。maskMap 仅做 provider 字段级替换（禁全文替换，防误伤 model/session_id）。</summary>
+     public (string Csv, bool Truncated, int Wrote) ExportCsv(UsageQuery q, IReadOnlyDictionary<string, string>? maskMap = null)
+     {
+         EnsureCreated();
+         lock (_gate)
+         {
+             try
+             {
+                 using var conn = Open();
+                 var sb = new StringBuilder();
+                 sb.Append("\"时间\",\"session_id\",\"turn_id\",\"provider\",\"model\",\"protocol\","
+                     + "\"输入\",\"缓存\",\"输出\",\"合计\",\"命中率\",\"截断\"\r\n");
+                 int count = 0;
+                 bool truncated = false;
+                 using (var cmd = conn.CreateCommand())
+                 {
+                     cmd.CommandText = "SELECT ts_ms, session_id, turn_id, provider_id, provider_display,"
+                         + " model_id, model_display, protocol, prompt_tokens, cached_tokens,"
+                         + " completion_tokens, total_tokens, truncated, recorded_ms"
+                         + " FROM usage_events WHERE " + BuildWhere(q, cmd)
+                         + " ORDER BY ts_ms DESC, id DESC LIMIT @lim;";
+                     AddParam(cmd, "@lim", ExportLimit + 1);
+                     using var r = cmd.ExecuteReader();
+                     while (r.Read())
+                     {
+                         count++;
+                         if (count > ExportLimit) { truncated = true; break; }
+                         var e = ReadEvent(r);
+                         string time = DateTimeOffset.FromUnixTimeMilliseconds(e.TsMs).ToLocalTime()
+                             .ToString("yyyy-MM-dd HH:mm:ss");
+                         double hit = e.PromptTokens > 0 ? (double)e.CachedTokens / e.PromptTokens : 0;
+                         string provider = e.ProviderId;
+                         if (maskMap is not null && maskMap.TryGetValue(e.ProviderId, out var fake) && !string.IsNullOrEmpty(fake))
+                             provider = fake;
+                         string[] fields = new[]
+                         {
+                             time, e.SessionId, e.TurnId, provider, e.ModelId, e.Protocol,
+                             e.PromptTokens.ToString(), e.CachedTokens.ToString(),
+                             e.CompletionTokens.ToString(), e.TotalTokens.ToString(),
+                             (hit * 100).ToString("F1") + "%", e.Truncated == 1 ? "1" : "0",
+                         };
+                         for (int i = 0; i < fields.Length; i++)
+                         {
+                             if (i > 0) sb.Append(',');
+                             sb.Append('"');
+                             sb.Append(fields[i].Replace("\"", "\"\""));
+                             sb.Append('"');
+                         }
+                         sb.Append("\r\n");
+                     }
+                 }
+                 int wrote = truncated ? ExportLimit : count;
+                 return (sb.ToString(), truncated, wrote);
+             }
+             catch
+             {
+                 return ("", false, 0);
+             }
+         }
+     }
+ 
+     /// <summary>P17 导出落盘：复用 ExportCsv → 先写 path.tmp 再 rename（引擎写 BOM）。返回 (wrote, truncated)。</summary>
+     public (int Wrote, bool Truncated) ExportFile(UsageQuery q, string path, IReadOnlyDictionary<string, string>? maskMap)
+     {
+         EnsureCreated();
+         var (csv, truncated, wrote) = ExportCsv(q, maskMap);
+         var dir = Path.GetDirectoryName(path);
+         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+         var tmp = path + ".tmp";
+         File.WriteAllText(tmp, "\uFEFF" + csv, new UTF8Encoding(false));
+         File.Move(tmp, path, overwrite: true);
+         return (wrote, truncated);
+     }
 
     public long ClearBefore(long beforeMs)
     {

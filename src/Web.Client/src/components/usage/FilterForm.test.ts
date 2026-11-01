@@ -1,8 +1,9 @@
 // src/Web.Client/src/components/usage/FilterForm.test.ts
-// P16：provider 切换清空 model；全部时间只清日期由 usagePresets 覆盖，此处断言组件行为。
-import { describe, expect, it } from 'vitest';
+// P16：provider 切换清空 model；P17：隐私遮蔽开关默认开、label 假名但 value 真值。
+import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import FilterForm from './FilterForm.vue';
+import { MASK_KEY, maskProviderId } from './providerMask';
 import type { ProviderDict } from './usageTypes';
 
 const dict: ProviderDict = {
@@ -16,6 +17,10 @@ const dict: ProviderDict = {
   },
 };
 
+// resolve 读 localStorage：挂载前须与 maskOn 入参同步（页容器 onMaskToggle 同理先写存储再改 prop）。
+beforeEach(() => {
+  localStorage.removeItem(MASK_KEY);
+});
 function mountForm(extra: Record<string, unknown> = {}): ReturnType<typeof mount> {
   return mount(FilterForm, {
     props: {
@@ -27,6 +32,7 @@ function mountForm(extra: Record<string, unknown> = {}): ReturnType<typeof mount
       providerDict: dict,
       activePreset: null,
       querying: false,
+      maskOn: true,
       ...extra,
     },
   });
@@ -50,5 +56,41 @@ describe('FilterForm', () => {
     // 第一个预设按钮是今日
     await btns[0]?.trigger('click');
     expect(w.emitted('preset')?.[0]).toEqual(['today']);
+  });
+
+  it('隐私遮蔽开关默认开', () => {
+    const w = mountForm();
+    const sw = w.findComponent({ name: 'HSwitch' });
+    expect(sw.exists()).toBe(true);
+    expect(sw.props('modelValue')).toBe(true);
+  });
+
+  it('开时下拉 label 为恒 5 位假名、value 恒真值（遮蔽不污染过滤）', () => {
+    const w = mountForm({ providerId: '', modelId: '' });
+    const options = w.findAll('option');
+    const byValue = new Map(
+      options.map((o) => [(o.element as HTMLOptionElement).value, o.text().trim()])
+    );
+    expect(byValue.get('openai')).toBe(maskProviderId('openai'));
+    expect(byValue.get('openai')).toMatch(/^[a-z0-9]{5}$/);
+    expect(byValue.get('other')).toBe(maskProviderId('other'));
+  });
+
+  it('关时下拉 label 还原真名', () => {
+    localStorage.setItem(MASK_KEY, '0'); // 与 maskOn:false 同步（页容器行为）
+    const w = mountForm({ providerId: '', modelId: '', maskOn: false });
+    const options = w.findAll('option');
+    const byValue = new Map(
+      options.map((o) => [(o.element as HTMLOptionElement).value, o.text().trim()])
+    );
+    expect(byValue.get('openai')).toBe('OpenAI');
+    expect(byValue.get('other')).toBe('Other');
+  });
+
+  it('开关切换 emit update:maskOn（只重绘不重查由页容器保证）', async () => {
+    const w = mountForm();
+    const sw = w.findComponent({ name: 'HSwitch' });
+    await sw.trigger('click');
+    expect(w.emitted('update:maskOn')?.[0]).toEqual([false]);
   });
 });
