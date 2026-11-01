@@ -90,14 +90,20 @@ public sealed record SessionClearResult
 
 // ============================ session.compact ============================
 
-/// <summary>session.compact 结果。</summary>
-public sealed record SessionCompactResult
-{
-    /// <summary>移除条数。</summary>
-    public int Removed { get; init; }
-    /// <summary>摘要。</summary>
-    public string Summary { get; init; } = "";
-}
+ /// <summary>session.compact 结果。</summary>
+ public sealed record SessionCompactResult
+ {
+     /// <summary>移除条数。</summary>
+     public int Removed { get; init; }
+     /// <summary>摘要。</summary>
+     public string Summary { get; init; } = "";
+     /// <summary>P18：压缩前消息数（含 system）。</summary>
+     public int TotalBefore { get; init; }
+     /// <summary>P18：压缩后消息数（含 system）。</summary>
+     public int TotalAfter { get; init; }
+     /// <summary>P18：保留尾部条数。</summary>
+     public int KeptCount { get; init; }
+ }
 
 // ============================ session.setCwd ============================
 

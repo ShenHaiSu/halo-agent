@@ -63,9 +63,10 @@ public sealed partial class RealMethods
         if (!_session.BuildSnapshot().Agent.Configured)
             throw new RpcException(RpcError.StateNotConfigured, "模型未配置：请去模型设置页选择 active provider/model 后再试。");
 
-        if (_session.IsBusy)
-            throw RpcException.Busy("有回合正在执行");
-
+         if (_session.IsBusy)
+             throw RpcException.Busy("有回合正在执行");
+         if (_session.IsCompacting)
+             throw RpcException.Busy("正在压缩上下文");
         var turnId = _session.NewTurnId();
 
 
@@ -129,13 +130,20 @@ public sealed partial class RealMethods
 
     public Task<object?> StateSnapshotAsync(JsonElement? p, CancellationToken ct) =>
         Task.FromResult<object?>(_session.BuildSnapshot());
-
-    public async Task<object?> SessionCompactAsync(JsonElement? p, CancellationToken ct)
-    {
-        var (removed, summary) = await _session.CompactAsync(ct).ConfigureAwait(false);
-        return new { removed, summary };
-    }
-
+     public async Task<object?> SessionCompactAsync(JsonElement? p, CancellationToken ct)
+     {
+         if (_session.IsBusy)
+             throw RpcException.Busy("回合执行中，稍后再压缩");
+         var r = await _session.CompactAsync(ct).ConfigureAwait(false);
+         return new SessionCompactResult
+         {
+             Removed = r.Removed,
+             Summary = r.Summary,
+             TotalBefore = r.TotalBefore,
+             TotalAfter = r.TotalAfter,
+             KeptCount = Math.Max(0, r.TotalAfter - 2),
+         };
+     }
     public Task<object?> SessionClearAsync(JsonElement? p, CancellationToken ct)
     {
         _session.ClearContext();

@@ -20,8 +20,9 @@ export function useCommandPaletteOpen() {
  import { computed, nextTick, ref, watch } from 'vue';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
-import { transport } from '@/transport';
-import { useToast } from '@/composables/useToast';
+ import { transport } from '@/transport';
+ import { useToast } from '@/composables/useToast';
+ import { useCompactAction } from '@/composables/useCompactAction';
 import { fuzzyScore, highlight } from './fuzzy';
 import { openSettings, type SettingsTab } from '@/components/settings/SettingsApp.vue';
 import { openShortcutHelp } from './ShortcutHelp.vue';
@@ -127,12 +128,13 @@ function commands(): Entry[] {
       group: '命令',
       id: 'cmd:compact',
       label: '压缩上下文',
-      hint: '/compact',
-      icon: 'layers',
-      run: async () => {
-        await transport.request('session.compact', null);
-        close();
-      },
+       hint: '/compact',
+       icon: 'layers',
+       run: async () => {
+         const { runCompact } = useCompactAction();
+         await runCompact();
+         close();
+       },
     },
     {
       group: '命令',

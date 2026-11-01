@@ -84,7 +84,7 @@ const samples = [
 <template>
   <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
     <div class="msg-inner density-compact">
-      <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" />
+       <CompactionCard v-if="session.compactionSummary" :summary="session.compactionSummary" :removed="session.compactionRemoved" :kept-count="session.compactionKept" />
 
       <div v-if="visible.hiddenTop > 0 && !showAll" class="msg-fold">
         <HButton variant="ghost" size="sm" @click="showAll = true">

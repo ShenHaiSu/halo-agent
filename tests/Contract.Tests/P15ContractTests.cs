@@ -23,17 +23,17 @@ public sealed class P15ContractTests
         }
     }
 
-    [Fact]
-    public void ContractVersion_Is3_ProtocolStill1()
-    {
-        Assert.Equal(3, Schema.RootElement.GetProperty("contractVersion").GetInt32());
-        // TurnView 存在，StateSnapshot 用 turns
-        var types = Schema.RootElement.GetProperty("types");
-        Assert.True(types.TryGetProperty("TurnView", out _));
-        var snap = types.GetProperty("StateSnapshot");
-        Assert.True(snap.GetProperty("properties").TryGetProperty("turns", out _));
-        Assert.False(snap.GetProperty("properties").TryGetProperty("messages", out _));
-    }
+     [Fact]
+     public void ContractVersion_Is4_ProtocolStill1()
+     {
+         Assert.Equal(4, Schema.RootElement.GetProperty("contractVersion").GetInt32());
+         // TurnView 存在，StateSnapshot 用 turns
+         var types = Schema.RootElement.GetProperty("types");
+         Assert.True(types.TryGetProperty("TurnView", out _));
+         var snap = types.GetProperty("StateSnapshot");
+         Assert.True(snap.GetProperty("properties").TryGetProperty("turns", out _));
+         Assert.False(snap.GetProperty("properties").TryGetProperty("messages", out _));
+     }
 
     [Fact]
     public void Events_HaveRoundEnded_And_Used()
@@ -62,12 +62,41 @@ public sealed class P15ContractTests
         Assert.True(methods.TryGetProperty("tool.result", out _));
     }
 
-    [Fact]
-    public void Payloads_Serialize_Used_FinalUsed()
-    {
-        var td = System.Text.Json.JsonSerializer.Serialize(new TextDeltaPayload { Text = "x", Used = 2 }, HaloJson.Options);
-        Assert.Contains("\"used\":2", td);
-        var fin = System.Text.Json.JsonSerializer.Serialize(new TurnFinishedPayload { TurnId = "t1", Text = "hi", FinalUsed = 2 }, HaloJson.Options);
-        Assert.Contains("\"finalUsed\":2", fin);
-    }
-}
+     [Fact]
+     public void Payloads_Serialize_Used_FinalUsed()
+     {
+         var td = System.Text.Json.JsonSerializer.Serialize(new TextDeltaPayload { Text = "x", Used = 2 }, HaloJson.Options);
+         Assert.Contains("\"used\":2", td);
+         var fin = System.Text.Json.JsonSerializer.Serialize(new TurnFinishedPayload { TurnId = "t1", Text = "hi", FinalUsed = 2 }, HaloJson.Options);
+         Assert.Contains("\"finalUsed\":2", fin);
+     }
+     [Fact]
+     public void P18_Compacted_HasTurns_Additive()
+     {
+         var events = Schema.RootElement.GetProperty("events");
+         var props = events.GetProperty("session.compacted").GetProperty("payload").GetProperty("properties");
+         Assert.True(props.TryGetProperty("turns", out var turns));
+         Assert.Equal("TurnView", turns.GetProperty("items").GetProperty("$ref").GetString()?.Split('/')[^1]);
+         Assert.True(props.TryGetProperty("totalBefore", out _));
+         Assert.True(props.TryGetProperty("totalAfter", out _));
+         Assert.True(props.TryGetProperty("kept", out _));
+         var methods = Schema.RootElement.GetProperty("methods");
+         var res = methods.GetProperty("session.compact").GetProperty("result").GetProperty("properties");
+         Assert.True(res.TryGetProperty("totalBefore", out _));
+         Assert.True(res.TryGetProperty("totalAfter", out _));
+         Assert.True(res.TryGetProperty("keptCount", out _));
+         var dto = System.Text.Json.JsonSerializer.Serialize(new SessionCompactedPayload
+         {
+             Removed = 5, Summary = "s",
+             Turns = new[] { new HaloAgent.Engine.Abstractions.Types.TurnView() },
+             TotalBefore = 10, TotalAfter = 6,
+         }, HaloJson.Options);
+         Assert.Contains("\"turns\"", dto);
+         Assert.Contains("\"totalBefore\"", dto);
+         var r = System.Text.Json.JsonSerializer.Serialize(new HaloAgent.Engine.Abstractions.Methods.SessionCompactResult
+         {
+             Removed = 5, Summary = "s", TotalBefore = 10, TotalAfter = 6, KeptCount = 4,
+         }, HaloJson.Options);
+         Assert.Contains("\"keptCount\"", r);
+     }
+ }

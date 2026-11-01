@@ -6,9 +6,18 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-    // ---------- system.diagnostics（契约要求 {}，不是 {ok:true}） ----------
-    public Task<object?> SystemDiagnosticsAsync(JsonElement? p, CancellationToken ct) =>
-        Task.FromResult<object?>(new { });
+     // ---------- system.diagnostics（契约要求 {}，不是 {ok:true}；P18 加 compact 最新一次，不持久化） ----------
+     public Task<object?> SystemDiagnosticsAsync(JsonElement? p, CancellationToken ct) =>
+         Task.FromResult<object?>(new
+         {
+             compact = new
+             {
+                 lastRemoved = _session.LastCompactRemoved,
+                 lastBefore = _session.LastCompactBefore,
+                 lastAfter = _session.LastCompactAfter,
+                 lastTsMs = _session.LastCompactTsMs,
+             },
+         });
 
     // ---------- tool.mcpStatus ----------
     public Task<object?> ToolMcpStatusAsync(JsonElement? p, CancellationToken ct)

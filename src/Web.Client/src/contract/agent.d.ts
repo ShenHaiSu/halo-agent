@@ -1,5 +1,5 @@
 // [注意] 本文件由 scripts/gen-contract-types.mjs 自动生成，请勿手改。
-// 来源: contract/agent.schema.json（协议版本 3）
+// 来源: contract/agent.schema.json（协议版本 4）
 
 /** PermissionMode */
 export type PermissionMode = "ask" | "acceptEdits" | "bypassPermissions" | "yolo"
@@ -303,7 +303,14 @@ export interface HaloMethods {
   ok?: boolean
 } }
   /** system.diagnostics */
-  'system.diagnostics': { params: void; result: Record<string, unknown> }
+  'system.diagnostics': { params: void; result: {
+  compact?: {
+  lastRemoved?: number
+  lastBefore?: number
+  lastAfter?: number
+  lastTsMs?: number
+}
+} }
   /** agent.prompt */
   'agent.prompt': { params: {
   text: string
@@ -383,6 +390,9 @@ export interface HaloMethods {
   'session.compact': { params: void; result: {
   removed?: number
   summary?: string
+  totalBefore?: number
+  totalAfter?: number
+  keptCount?: number
 } }
   /** session.setCwd */
   'session.setCwd': { params: {
@@ -877,6 +887,9 @@ export interface HaloEventPayloads {
   removed?: number
   summary?: string
   kept?: TurnView[]
+  turns?: TurnView[]
+  totalBefore?: number
+  totalAfter?: number
 }
   /** user.injected */
   'user.injected': {

@@ -219,11 +219,26 @@ async function events(): Promise<void> {
     await emit('session.contextCleared', {});
     a.ok('17 session.contextCleared → 消息清空', m.items.length === 0);
 
-    await emit('session.compactionStarted', {});
-    a.ok('18 compactionStarted → 标记为 true', s.compactionStarted === true);
-
-    await emit('session.compacted', { removed: 5, summary: '摘要', kept: ['a', 'b'] });
-    a.ok('19 compacted → 标记清除', s.compactionStarted === false);
+     await emit('session.compactionStarted', {});
+     a.ok('18 compactionStarted → 标记为 true', s.compactionStarted === true);
+     await emit('session.compacted', {
+       removed: 5,
+       summary: '摘要',
+       kept: [],
+       turns: [
+         {
+           turnId: 't-compact-1',
+           user: { id: 'm-1', role: 'user', content: '【上下文摘要】要点', ts: Date.now(), ord: 0 },
+           injected: [],
+           process: [],
+           final: { id: 'm-2', role: 'assistant', content: '', ts: Date.now(), ord: 0 },
+         },
+       ],
+       totalBefore: 10,
+       totalAfter: 1,
+     });
+     a.ok('19 compacted → 标记清除', s.compactionStarted === false);
+     a.ok('19 compacted{turns} → turns 全量替换且首轮含摘要', m.turns.length === 1 && String(m.turns[0]?.user?.content ?? '').includes('上下文摘要'));
 
     await emit('user.injected', { text: '注入的消息' });
     a.ok(

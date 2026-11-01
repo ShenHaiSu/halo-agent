@@ -31,7 +31,9 @@ export const useSessionStore = defineStore('session', () => {
   const acceptsImages = ref(false);
   const includeReasoning = ref(true);
   const proxyInUse = ref(false);
-  const compactionSummary = ref<string | null>(null);
+   const compactionSummary = ref<string | null>(null);
+   const compactionRemoved = ref<number | null>(null);
+   const compactionKept = ref<number | null>(null);
 
   const isYolo = computed(() => mode.value === 'yolo');
   const modeLabel = computed(() => {
@@ -179,7 +181,9 @@ export const useSessionStore = defineStore('session', () => {
     acceptsImages,
     includeReasoning,
     proxyInUse,
-    compactionSummary,
+     compactionSummary,
+     compactionRemoved,
+     compactionKept,
     applyInfo,
     applySnapshotAgent,
     addUsage: (input: number, output: number): void => {

@@ -3,8 +3,8 @@
   "$id": "https://haloagent.local/contract/agent.schema.json",
   "title": "HaloAgent 通信契约",
   "description": "宿主 ↔ 引擎的 NDJSON 帧契约。所有字段 camelCase。信封字段用短名。",
-  "contractVersion": 3,
-  "frozen": "2026-10-29",
+   "contractVersion": 4,
+   "frozen": "2026-11-01",
   "envelope": {
     "request": {
       "type": "object",
@@ -1028,14 +1028,24 @@
       },
       "implementedIn": "engine"
     },
-    "system.diagnostics": {
-      "params": null,
-      "result": {
-        "type": "object",
-        "properties": {}
-      },
-      "implementedIn": "engine"
-    },
+     "system.diagnostics": {
+       "params": null,
+       "result": {
+         "type": "object",
+         "properties": {
+           "compact": {
+             "type": "object",
+             "properties": {
+               "lastRemoved": { "type": "integer" },
+               "lastBefore": { "type": "integer" },
+               "lastAfter": { "type": "integer" },
+               "lastTsMs": { "type": "integer" }
+             }
+           }
+         }
+       },
+       "implementedIn": "engine"
+     },
     "agent.prompt": {
       "params": {
         "type": "object",
@@ -1322,21 +1332,30 @@
       },
       "implementedIn": "engine"
     },
-    "session.compact": {
-      "params": null,
-      "result": {
-        "type": "object",
-        "properties": {
-          "removed": {
-            "type": "integer"
-          },
-          "summary": {
-            "type": "string"
-          }
-        }
-      },
-      "implementedIn": "engine"
-    },
+     "session.compact": {
+       "params": null,
+       "result": {
+         "type": "object",
+         "properties": {
+           "removed": {
+             "type": "integer"
+           },
+           "summary": {
+             "type": "string"
+           },
+           "totalBefore": {
+             "type": "integer"
+           },
+           "totalAfter": {
+             "type": "integer"
+           },
+           "keptCount": {
+             "type": "integer"
+           }
+         }
+       },
+       "implementedIn": "engine"
+     },
     "session.setCwd": {
       "params": {
         "type": "object",
@@ -3174,25 +3193,37 @@
         "properties": {}
       }
     },
-    "session.compacted": {
-      "payload": {
-        "type": "object",
-        "properties": {
-          "removed": {
-            "type": "integer"
-          },
-          "summary": {
-            "type": "string"
-          },
-          "kept": {
-            "type": "array",
-            "items": {
-              "$ref": "#/types/TurnView"
-            }
-          }
-        }
-      }
-    },
+     "session.compacted": {
+       "payload": {
+         "type": "object",
+         "properties": {
+           "removed": {
+             "type": "integer"
+           },
+           "summary": {
+             "type": "string"
+           },
+           "kept": {
+             "type": "array",
+             "items": {
+               "$ref": "#/types/TurnView"
+             }
+           },
+           "turns": {
+             "type": "array",
+             "items": {
+               "$ref": "#/types/TurnView"
+             }
+           },
+           "totalBefore": {
+             "type": "integer"
+           },
+           "totalAfter": {
+             "type": "integer"
+           }
+         }
+       }
+     },
     "user.injected": {
       "payload": {
         "type": "object",

@@ -1,4 +1,6 @@
-using System.Text.Json;
+ using System.Text.Json;
+ using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Logging.Abstractions;
 using HaloAgent.Engine.Abstractions;
 using HaloAgent.Engine.Abstractions.Events;
 using HaloAgent.Engine.Abstractions.Types;
@@ -31,6 +33,15 @@ public sealed class PendingAskSlot
 }
 
 public sealed record AskAnswer(bool Allow, bool Always);
+ /// <summary>P18：压缩结果（含对账字段）。提供 2 元解构以兼容旧调用方。</summary>
+ public sealed record CompactResult(int Removed, string Summary, int TotalBefore, int TotalAfter)
+ {
+     public void Deconstruct(out int removed, out string summary)
+     {
+         removed = Removed;
+         summary = Summary;
+     }
+ }
 
 /// <summary>
 /// agent 会话：回合循环 + 工具执行 + 权限 + 全部边界机制。
@@ -75,12 +86,19 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private bool _fileAlways;
     private bool _commandAlways;
 
-    private CancellationTokenSource? _turnCts;
-    private volatile bool _busy;
-    private string? _currentTurnId;
-    private string? _currentToolCallId;
-    private PendingAskSlot? _pendingAsk;
-    private int _askSeq;
+     private CancellationTokenSource? _turnCts;
+     private volatile bool _busy;
+     private volatile bool _compacting;
+     private readonly ILogger _log;
+     private string? _currentTurnId;
+     private string? _currentToolCallId;
+     private PendingAskSlot? _pendingAsk;
+     private int _askSeq;
+     // P18：最新一次压缩对账（内存最新一次，不持久化，供 system.diagnostics 用）
+     private int _lastCompactRemoved;
+     private int _lastCompactBefore;
+     private int _lastCompactAfter;
+     private long _lastCompactTsMs;
 
     private long _usageIn;
     private long _usageOut;
@@ -104,38 +122,39 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private const int KeepTailForCompact = 4;
 
 
-     public AgentSession(
-         ILlmClient llm,
-         ToolRegistry tools,
-         SessionStore store,
-         EventBus bus,
-         string dataDir,
-         string cwd,
-         PermissionMode mode,
-         string persona,
-         int maxTurns,
-         int retry,
-         bool askInteractive,
-         IClock? clock = null,
-         UsageStore? usageStore = null)
-    {
-        _llm = llm;
-        _tools = tools;
-        _store = store;
-        _bus = bus;
-        _self = this;
-        _dataDir = dataDir;
-        _cwd = cwd;
-        _mode = mode;
-        _persona = persona;
-        _maxTurns = maxTurns;
-        _retry = retry;
-        _askInteractive = askInteractive;
+      public AgentSession(
+          ILlmClient llm,
+          ToolRegistry tools,
+          SessionStore store,
+          EventBus bus,
+          string dataDir,
+          string cwd,
+          PermissionMode mode,
+          string persona,
+          int maxTurns,
+          int retry,
+          bool askInteractive,
+          IClock? clock = null,
+          UsageStore? usageStore = null,
+          ILogger? logger = null)
+     {
+         _llm = llm;
+         _tools = tools;
+         _store = store;
+         _bus = bus;
+         _self = this;
+         _dataDir = dataDir;
+         _cwd = cwd;
+         _mode = mode;
+         _persona = persona;
+         _maxTurns = maxTurns;
+         _retry = retry;
+         _askInteractive = askInteractive;
          _clock = clock ?? SystemClock.Instance;
          _usageStore = usageStore ?? new UsageStore(HaloAgent.Engine.Storage.Paths.UsageDbFile);
-
-        PushSystemPrompt();
-    }
+         _log = logger ?? NullLogger.Instance;
+         PushSystemPrompt();
+     }
 
     // ============================================================
     //  状态访问
@@ -146,6 +165,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     public string? HistoryPath => _store.HistoryPath;
     public string Cwd => _cwd;
     public PermissionMode Mode => _mode;
+     public bool IsCompacting => _compacting;
+     public int LastCompactRemoved { get { lock (_lock) return _lastCompactRemoved; } }
+     public int LastCompactBefore { get { lock (_lock) return _lastCompactBefore; } }
+     public int LastCompactAfter { get { lock (_lock) return _lastCompactAfter; } }
+     public long LastCompactTsMs { get { lock (_lock) return _lastCompactTsMs; } }
     public string Persona => _persona;
     public int MaxTurns => _maxTurns;
     public int Retry => _retry;
@@ -231,12 +255,16 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          }
          ClearResponseChain();
      }
-     /// <summary>P13 链管理：清链（内存 + 落盘同步）。注意：不碰 _responsesStateless（网关能力粘性，只换模型时重置）。</summary>
+     /// <summary>P13 链管理：清链（内存 + 落盘同步）。注意：不碰 _responsesStateless（网关能力粘性，只换模型时重置）。P18：加日志。</summary>
      public void ClearResponseChain()
      {
-         lock (_lock) { _lastResponseId = null; _responsesSentCount = 0; }
+         string? prev;
+         int sent;
+         lock (_lock) { prev = _lastResponseId; sent = _responsesSentCount; _lastResponseId = null; _responsesSentCount = 0; }
          try { _store.SaveResponseId(null); } catch { }
+         try { _log.LogInformation("compact chain cleared prev:{Prev}->null sent:{Sent}->0", ShortId(prev), sent); } catch { }
      }
+     private static string ShortId(string? id) => string.IsNullOrEmpty(id) ? "(null)" : (id.Length <= 8 ? id : id[..8]);
      /// <summary>测试/诊断用：无状态粘性是否已置位。</summary>
      internal bool IsResponsesStatelessForTest { get { lock (_lock) return _responsesStateless; } }
     private void SetResponseId(string? id)
@@ -446,9 +474,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  主循环：RunTurnAsync
     // ============================================================
 
-    public async Task<TurnResult> RunTurnAsync(string prompt, CancellationToken externalCt)
-    {
-        if (_busy) throw new InvalidOperationException("已有回合在执行");
+     public async Task<TurnResult> RunTurnAsync(string prompt, CancellationToken externalCt)
+     {
+         if (_compacting) throw new InvalidOperationException("正在压缩上下文，稍后再试");
+         if (_busy) throw new InvalidOperationException("已有回合在执行");
 
         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
         _turnCts = turnCts;
@@ -784,7 +813,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              string? sendPrev = prev;
              int sent;
              lock (_lock) sent = _responsesSentCount;
-             if (sendPrev is null) { input = fullInput; }
+             if (sendPrev is null) { input = fullInput; try { _log.LogDebug("responses full send input={Count} instructions={Len} prev=null", fullInput.Count, instructions?.Length ?? 0); } catch { } }
             else
             {
                 int total = stripped.Count;
@@ -1090,91 +1119,164 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  上下文压缩
     // ============================================================
 
-    public async Task<(int removed, string summary)> CompactAsync(CancellationToken ct)
-    {
-        List<ChatMessage> snapshot;
-        lock (_lock) snapshot = _messages.ToList();
-
-        if (snapshot.Count <= KeepTailForCompact + 1) return (0, "");
-
-        await _bus.PublishStateAsync(EventKinds.SessionCompactionStarted, null, ct).ConfigureAwait(false);
-
-        var system = snapshot[0];
-        var tail = snapshot.Skip(1).ToList();
-        var splitAt = tail.Count - KeepTailForCompact;
-        var old = tail.Take(splitAt).ToList();
-        var keep = tail.Skip(splitAt).ToList();
-
-        var body = string.Join("\n", old.Select(m =>
-            "[" + RoleLabel(m.Role) + "] " + Truncate(MessageAdapters.StripImagesForSummary(m).Content ?? "", 2000)));
-
-
-        var summaryMessages = new[]
-        {
-            ChatMessage.System(
-                "你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n" +
-                "- 任务目标与当前进展到哪一步\n" +
-                "- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n" +
-                "- 用户的明确决定、偏好与要求\n" +
-                "- 尚未完成、需要继续处理的事项\n" +
-                "只输出要点，不要复述对话原文，不要添加对话里没有的内容。"),
-            ChatMessage.User(body),
-        };
-
-        string? summary;
-        bool isResp;
-        lock (_lock) isResp = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
-        if (isResp)
-        {
-            var (instr, inp) = ResponsesTranslators.TranslateMessages(new[] { ChatMessage.System("你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n- 任务目标与当前进展到哪一步\n- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n- 用户的明确决定、偏好与要求\n- 尚未完成、需要继续处理的事项\n只输出要点，不要复述对话原文，不要添加对话里没有的内容。"), ChatMessage.User(body) });
-            var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId).ConfigureAwait(false);
-            summary = rr.Content?.Trim();
-        }
-        else
-        {
-            var reply = await _llm.ChatAsync(summaryMessages, null, ct, _store.SessionId).ConfigureAwait(false);
-            summary = reply.Content?.Trim();
-        }
-        if (string.IsNullOrEmpty(summary))
-            throw new InvalidOperationException("压缩模型没返回内容，请再试一次");
-        // P14：摘要走打戳（等价 Record guard），位置在 keep 之前，钳制以保单调：不超过 keep 首条。
-        ChatMessage summaryMsg;
-        lock (_lock)
-        {
-            var now = _clock.UtcNowMs();
-            var stamped = Math.Max(now, _lastTsMs + 1);
-            if (keep.Count > 0 && keep[0].TsMs > 0 && stamped > keep[0].TsMs)
-                stamped = keep[0].TsMs;
-            summaryMsg = ChatMessage.User(
-                "【上下文摘要: 压缩自此前 " + old.Count + " 条消息，由模型自动生成，细节以历史文件为准】\n" + summary,
-                stamped);
-        }
-        var newMessages = new List<ChatMessage>
-        {
-            system,
-            summaryMsg,
-        };
-        newMessages.AddRange(keep);
-
-        // 成功才替换（失败保持原样）
-        lock (_lock)
-        {
-            _messages.Clear();
-            _messages.AddRange(newMessages);
-            _lastTsMs = _messages.Count == 0 ? 0 : _messages.Max(m => m.TsMs);
-        }
-        ClearResponseChain();
-
-        await _bus.PublishStateAsync(EventKinds.SessionCompacted,
-            new SessionCompactedPayload
-            {
-                Removed = old.Count,
-                Summary = summary,
-                 Kept = MessageProjector.ProjectSnapshotTurns(keep),
-            }, ct).ConfigureAwait(false);
-
-        return (old.Count, summary);
-    }
+     public async Task<CompactResult> CompactAsync(CancellationToken ct)
+     {
+         if (_busy) throw new InvalidOperationException("回合执行中，稍后再压缩");
+         if (_compacting) throw new InvalidOperationException("正在压缩上下文，稍后再试");
+         _compacting = true;
+         try
+         {
+             List<ChatMessage> snapshot;
+             lock (_lock) snapshot = _messages.ToList();
+             int totalBefore = snapshot.Count;
+             if (snapshot.Count <= KeepTailForCompact + 1)
+             {
+                 try { _log.LogInformation("compact noop session={Sid} count={Count}", _store.SessionId, totalBefore); } catch { }
+                 try
+                 {
+                     await _bus.PublishStateAsync(EventKinds.Notice,
+                         new NoticePayload { Text = "消息太少，无需压缩", Level = "info" }, ct).ConfigureAwait(false);
+                 }
+                 catch { }
+                 return new CompactResult(0, "", totalBefore, totalBefore);
+             }
+             await _bus.PublishStateAsync(EventKinds.SessionCompactionStarted, null, ct).ConfigureAwait(false);
+             var system = snapshot[0];
+             var tail = snapshot.Skip(1).ToList();
+             var splitAt = tail.Count - KeepTailForCompact;
+             var old = tail.Take(splitAt).ToList();
+             var keep = tail.Skip(splitAt).ToList();
+             var body = string.Join("\n", old.Select(m =>
+                 "[" + RoleLabel(m.Role) + "] " + Truncate(MessageAdapters.StripImagesForSummary(m).Content ?? "", 2000)));
+             var summaryMessages = new[]
+             {
+                 ChatMessage.System(
+                     "你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n" +
+                     "- 任务目标与当前进展到哪一步\n" +
+                     "- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n" +
+                     "- 用户的明确决定、偏好与要求\n" +
+                     "- 尚未完成、需要继续处理的事项\n" +
+                     "只输出要点，不要复述对话原文，不要添加对话里没有的内容。"),
+                 ChatMessage.User(body),
+             };
+             string? summary;
+             bool isResp;
+             lock (_lock) isResp = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
+             try
+             {
+                 if (isResp)
+                 {
+                     var (instr, inp) = ResponsesTranslators.TranslateMessages(new[] { ChatMessage.System("你是会话上下文压缩器。把用户提供的对话压缩成精炼的中文要点列表，必须保留:\n- 任务目标与当前进展到哪一步\n- 已完成的关键操作与结果(重要的文件路径、命令、数据结论)\n- 用户的明确决定、偏好与要求\n- 尚未完成、需要继续处理的事项\n只输出要点，不要复述对话原文，不要添加对话里没有的内容。"), ChatMessage.User(body) });
+                     var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId).ConfigureAwait(false);
+                     summary = rr.Content?.Trim();
+                 }
+                 else
+                 {
+                     var reply = await _llm.ChatAsync(summaryMessages, null, ct, _store.SessionId).ConfigureAwait(false);
+                     summary = reply.Content?.Trim();
+                 }
+             }
+             catch (Exception ex)
+             {
+                 try { _log.LogWarning("compact failed session={Sid} reason={Msg} fileUnchanged=true memUnchanged=true", _store.SessionId, ex.Message); } catch { }
+                 try
+                 {
+                     await _bus.PublishStateAsync(EventKinds.Notice,
+                         new NoticePayload { Text = "压缩失败: " + ex.Message, Level = "error" }, CancellationToken.None).ConfigureAwait(false);
+                 }
+                 catch { }
+                 throw;
+             }
+             if (string.IsNullOrEmpty(summary))
+             {
+                 try { _log.LogWarning("compact failed session={Sid} reason=empty fileUnchanged=true memUnchanged=true", _store.SessionId); } catch { }
+                 throw new InvalidOperationException("压缩模型没返回内容，请再试一次");
+             }
+             ChatMessage summaryMsg;
+             lock (_lock)
+             {
+                 var now = _clock.UtcNowMs();
+                 var stamped = Math.Max(now, _lastTsMs + 1);
+                 if (keep.Count > 0 && keep[0].TsMs > 0 && stamped > keep[0].TsMs)
+                     stamped = keep[0].TsMs;
+                 summaryMsg = ChatMessage.User(
+                     "【上下文摘要: 压缩自此前 " + old.Count + " 条消息，由模型自动生成，细节以历史文件为准】\n" + summary,
+                     stamped);
+             }
+             var newMessages = new List<ChatMessage>
+             {
+                 system,
+                 summaryMsg,
+             };
+             newMessages.AddRange(keep);
+             int totalAfter = newMessages.Count;
+             // P18：先写文件后换内存，避免分裂
+             int fileBefore = -1;
+             try
+             {
+                 fileBefore = CountHistoryLines();
+                 var stored = MessageAdapters.ToStoredMessages(newMessages.Skip(1).ToList());
+                 _store.RewriteAfterCompact(stored);
+             }
+             catch (Exception ex)
+             {
+                 try { _log.LogWarning("compact failed session={Sid} reason={Msg} fileUnchanged=true memUnchanged=true", _store.SessionId, ex.Message); } catch { }
+                 try
+                 {
+                     await _bus.PublishStateAsync(EventKinds.Notice,
+                         new NoticePayload { Text = "压缩落盘失败: " + ex.Message, Level = "error" }, CancellationToken.None).ConfigureAwait(false);
+                 }
+                 catch { }
+                 throw new InvalidOperationException("压缩落盘失败: " + ex.Message, ex);
+             }
+             int fileAfter = CountHistoryLines();
+             string? prevChain;
+             int sentChain;
+             lock (_lock) { prevChain = _lastResponseId; sentChain = _responsesSentCount; }
+             lock (_lock)
+             {
+                 _messages.Clear();
+                 _messages.AddRange(newMessages);
+                 _lastTsMs = _messages.Count == 0 ? 0 : _messages.Max(m => m.TsMs);
+                 _lastCompactRemoved = old.Count;
+                 _lastCompactBefore = totalBefore;
+                 _lastCompactAfter = totalAfter;
+                 _lastCompactTsMs = _clock.UtcNowMs();
+             }
+             ClearResponseChain();
+             try { _log.LogInformation("compact done session={Sid} removed={Removed} before={Before} after={After} file={Fb}->{Fa} chain={Prev}->null", _store.SessionId, old.Count, totalBefore, totalAfter, fileBefore, fileAfter, ShortId(prevChain)); } catch { }
+             var turns = MessageProjector.ProjectSnapshotTurns(newMessages);
+             await _bus.PublishStateAsync(EventKinds.SessionCompacted,
+                 new SessionCompactedPayload
+                 {
+                     Removed = old.Count,
+                     Summary = summary,
+                     Kept = MessageProjector.ProjectSnapshotTurns(keep),
+                     Turns = turns,
+                     TotalBefore = totalBefore,
+                     TotalAfter = totalAfter,
+                 }, ct).ConfigureAwait(false);
+             return new CompactResult(old.Count, summary, totalBefore, totalAfter);
+         }
+         finally
+         {
+             _compacting = false;
+         }
+     }
+     private int CountHistoryLines()
+     {
+         try
+         {
+             var p = _store.HistoryPath;
+             if (string.IsNullOrEmpty(p) || !File.Exists(p)) return 0;
+             int n = 0;
+             using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+             using var sr = new StreamReader(fs);
+             while (sr.ReadLine() is not null) n++;
+             return n;
+         }
+         catch { return -1; }
+     }
 
     // ============================================================
     //  会话操作

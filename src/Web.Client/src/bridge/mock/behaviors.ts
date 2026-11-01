@@ -375,7 +375,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
     },
   },
   'session.clear': { kind: 'ok', run: () => ({ ok: true }) },
-  'session.compact': { kind: 'ok', run: () => ({ removed: 0, summary: '' }) },
+   'session.compact': { kind: 'ok', run: () => ({ removed: 0, summary: '', totalBefore: 0, totalAfter: 0, keptCount: 0 }) },
   'session.setCwd': { kind: 'ok', run: (p) => ({ cwd: (p as { path?: string } | null)?.path ?? '(mock)' }) },
 
   'state.snapshot': { kind: 'ok', run: () => mockSnapshot() },

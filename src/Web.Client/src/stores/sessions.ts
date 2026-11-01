@@ -170,7 +170,7 @@ export const useSessionsStore = defineStore('sessions', () => {
             if (token !== switchToken) return;
             currentId.value = id;
             messages.clearItems();
-            sessionInfo.compactionSummary = null;
+            sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
             try {
               await messages.loadSnapshot();
             } catch {
@@ -201,7 +201,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       }
        // 成功后补齐：resume 不带 session/agent 元信息；以 state.snapshot 全量补齐（含 agent.configured）。
        // P12-02：此前只补 session.id/cwd/historyPath，agent 恒为初始值导致切换器恒未配置。
-       sessionInfo.compactionSummary = null;
+       sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
        try {
          const snap = await transport.request<{ session?: Record<string, unknown>; agent?: Record<string, unknown>; usage?: Record<string, unknown> }>('state.snapshot', null);
          if (token !== switchToken) return;
@@ -242,7 +242,7 @@ export const useSessionsStore = defineStore('sessions', () => {
      perms.clear();
      queue.clear();
      clearCollapsedTools();
-     sessionInfo.compactionSummary = null;
+     sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
     try {
       const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
       if (token !== switchToken) return;

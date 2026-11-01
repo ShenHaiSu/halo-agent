@@ -175,16 +175,22 @@ public sealed record SessionHistoryLoadedPayload
     public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
 }
 
-/// <summary>session.compacted 载荷。</summary>
-public sealed record SessionCompactedPayload
-{
-    /// <summary>移除条数。</summary>
-    public int Removed { get; init; }
-    /// <summary>摘要。</summary>
-    public string Summary { get; init; } = "";
-    /// <summary>P15：保留的回合视图。</summary>
-    public IReadOnlyList<TurnView> Kept { get; init; } = Array.Empty<TurnView>();
-}
+ /// <summary>session.compacted 载荷。</summary>
+ public sealed record SessionCompactedPayload
+ {
+     /// <summary>移除条数。</summary>
+     public int Removed { get; init; }
+     /// <summary>摘要。</summary>
+     public string Summary { get; init; } = "";
+     /// <summary>P15：保留的回合视图（deprecated，保留兼容；新端优先用 Turns）。</summary>
+     public IReadOnlyList<TurnView> Kept { get; init; } = Array.Empty<TurnView>();
+     /// <summary>P18：压缩后全量回合视图（含摘要轮），前端以此替换 turns。</summary>
+     public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
+     /// <summary>P18：压缩前消息数（含 system）。</summary>
+     public int TotalBefore { get; init; }
+     /// <summary>P18：压缩后消息数（含 system）。</summary>
+     public int TotalAfter { get; init; }
+ }
 
 /// <summary>user.injected 载荷。</summary>
 public sealed record UserInjectedPayload

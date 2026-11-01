@@ -194,6 +194,84 @@ public sealed class SessionStore : IDisposable
          }
          catch { }
      }
+ 
+     /// <summary>P18：压缩后原子重写历史文件（tmp+rename，与 UpdateCwdAtomic 同口径）。
+     /// 入参为压缩后应落盘的全部消息（不含 system，与 ReadHistory 对称：文件从不存 system）。
+     /// 成功则文件变小，失败抛异常（调用方判为压缩失败，内存不换、不断链、不发 compacted）。</summary>
+     public void RewriteAfterCompact(IReadOnlyList<StoredMessage> keepPlusSummary)
+     {
+         string? path;
+         lock (_lock)
+         {
+             path = _path;
+             try { _writer?.Flush(); } catch { }
+             try { _writer?.Dispose(); } catch { }
+             _writer = null;
+         }
+         if (string.IsNullOrEmpty(path))
+             throw new InvalidOperationException("无历史文件路径，无法重写压缩结果");
+         var dir = Path.GetDirectoryName(path) ?? ".";
+         Directory.CreateDirectory(dir);
+         // 保留首行 meta（headless/schema/cwd）
+         bool headless = false;
+         string schema = HistorySchema;
+         string? cwd = null;
+         bool hasFile = File.Exists(path) && new FileInfo(path).Length > 0;
+         if (hasFile)
+         {
+             try
+             {
+                 string? first = null;
+                 using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                 using (var sr = new StreamReader(fs, new UTF8Encoding(false)))
+                     first = sr.ReadLine();
+                 if (!string.IsNullOrWhiteSpace(first))
+                 {
+                     using var doc = JsonDocument.Parse(first.Trim());
+                     if (doc.RootElement.ValueKind == JsonValueKind.Object
+                         && doc.RootElement.TryGetProperty("meta", out _))
+                     {
+                         try
+                         {
+                             var parsed = JsonSerializer.Deserialize<HistoryMeta>(first.Trim(), StorageJson.Compact);
+                             headless = parsed?.Meta?.Headless ?? false;
+                             schema = parsed?.Meta?.Schema ?? HistorySchema;
+                             cwd = parsed?.Meta?.Cwd;
+                         }
+                         catch { }
+                     }
+                 }
+             }
+             catch (Exception ex) { throw new InvalidOperationException("读取历史 meta 失败: " + ex.Message, ex); }
+         }
+         var tmp = Path.Combine(dir, Path.GetFileName(path) + ".tmp");
+         try
+         {
+             using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.Read))
+             using (var sw = new StreamWriter(fs, new UTF8Encoding(false)))
+             {
+                 var meta = JsonSerializer.Serialize(new
+                 {
+                     meta = new { headless, schema, cwd },
+                 }, StorageJson.Compact);
+                 sw.WriteLine(meta);
+                 foreach (var m in keepPlusSummary)
+                 {
+                     if (m.Role == StoredRole.System) continue;
+                     sw.WriteLine(JsonSerializer.Serialize(m, StorageJson.Compact));
+                 }
+                 sw.Flush();
+                 fs.Flush(true);
+             }
+             File.Replace(tmp, path, null);
+         }
+         catch
+         {
+             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+             throw;
+         }
+     }
+ 
 
     /// <summary>
     /// 读取历史文件。返回 (meta, messages)。

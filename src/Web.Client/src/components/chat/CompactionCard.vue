@@ -1,6 +1,5 @@
 <!-- src/Web.Client/src/components/chat/CompactionCard.vue -->
-<!-- P5 上下文压缩摘要卡（见 03 §6.3）：session.compacted 后插入消息区顶部，
-     明确告诉用户"这是上下文压缩"，避免误以为丢数据。 -->
+<!-- P18 上下文压缩分隔栏：标题行追加 移除 N 条·保留 M 轮；summary 为空不挂载（由 MessageList v-if 控制）。 -->
 <script setup lang="ts">
 import { ref } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
@@ -10,8 +9,12 @@ withDefaults(
     summary: string;
     /** 保留的消息（可选，显示前 KEEP_PREVIEW 条） */
     kept?: string[];
+    /** P18：移除条数（可选） */
+    removed?: number | null;
+    /** P18：保留轮数（可选） */
+    keptCount?: number | null;
   }>(),
-  { kept: () => [] }
+  { kept: () => [], removed: null, keptCount: null }
 );
 
 const open = ref(false);
@@ -29,7 +32,11 @@ const KEEP_PREVIEW = 5;
     >
       <HaloIcon name="history" :size="14" />
       <span class="cc-title">上下文已压缩</span>
-      <span class="cc-meta">更早的消息已折叠为摘要</span>
+      <span v-if="removed !== null && removed !== undefined" class="cc-meta"
+        >移除 {{ removed }} 条<span v-if="keptCount !== null && keptCount !== undefined"> · 保留 {{ keptCount }} 轮</span
+        ><span v-else> · 以上历史已折叠为摘要</span></span
+      >
+      <span v-else class="cc-meta">更早的消息已折叠为摘要</span>
       <span class="cc-spacer" />
       <HaloIcon :name="open ? 'chevron-up' : 'chevron-down'" :size="14" />
     </button>

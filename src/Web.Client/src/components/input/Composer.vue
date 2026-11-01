@@ -8,8 +8,9 @@ import { useSessionsStore } from '@/stores/sessions';
 import { usePermissionsStore } from '@/stores/permissions';
 import { useHostStore } from '@/stores/host';
 import { useUiStore } from '@/stores/ui';
-import { transport } from '@/transport';
-import { useToast } from '@/composables/useToast';
+ import { transport } from '@/transport';
+ import { useToast } from '@/composables/useToast';
+ import { useCompactAction } from '@/composables/useCompactAction';
 import { useComposition } from '@/composables/useComposition';
 import { useAutoResize } from '@/composables/useAutoResize';
 import { useFileDrop } from '@/composables/useFileDrop';
@@ -292,12 +293,14 @@ async function runCommand(name: string, args: string): Promise<void> {
       case 'new':
         await transport.request('session.new', null);
         break;
-      case 'clear':
-        await transport.request('session.clear', null);
-        break;
-      case 'compact':
-        await transport.request('session.compact', null);
-        break;
+       case 'clear':
+         await transport.request('session.clear', null);
+         break;
+       case 'compact': {
+         const { runCompact } = useCompactAction();
+         await runCompact();
+         break;
+       }
       case 'undo':
         toast.info('撤销面板尚未接入，请稍候');
         break;

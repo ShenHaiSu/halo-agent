@@ -331,22 +331,28 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           useStreamStore().notice = { level: 'info', text: '正在压缩上下文…' };
           break;
         }
-        case 'session.compacted': {
-          const p = asRecord(f.p);
-          const session = useSessionStore();
-          const stream = useStreamStore();
-          session.compactionSummary = String(p.summary ?? '');
-          stream.compactionStarted = false;
-          stream.notice = {
-            level: 'info',
-            text: `已压缩上下文，移除 ${String(p.removed ?? 0)} 条`,
-          };
-          // kept 若为 turns 则直接应用（同源），否则 resync
-          if (Array.isArray(p.kept)) {
-            // kept 是 TurnView[] 片段：不直接替换全量，触发 resync 全量拉
-          }
-          break;
-        }
+         case 'session.compacted': {
+           const p = asRecord(f.p);
+           const session = useSessionStore();
+           const stream = useStreamStore();
+           const removed = typeof p.removed === 'number' ? (p.removed as number) : 0;
+           session.compactionSummary = String(p.summary ?? '');
+           session.compactionRemoved = removed;
+           session.compactionKept = typeof p.totalAfter === 'number' ? Math.max(0, (p.totalAfter as number) - 2) : null;
+           stream.compactionStarted = false;
+           stream.notice = removed === 0
+             ? { level: 'info', text: '消息太少，无需压缩' }
+             : { level: 'info', text: `已压缩上下文，移除 ${String(removed)} 条` };
+           const turns = (p.turns ?? null) as unknown;
+           if (Array.isArray(turns) && turns.length > 0) {
+             messages.applySnapshot({ seq, turns: turns as never });
+           } else if (Array.isArray(p.kept)) {
+             // 老引擎兼容：kept 只是尾部，拉全量
+             void messages.loadSnapshot();
+           }
+           messages.setLastSeq(seq);
+           break;
+         }
         case 'user.injected': {
           const p = asRecord(f.p);
           const stream = useStreamStore();

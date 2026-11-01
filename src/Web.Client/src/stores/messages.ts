@@ -258,26 +258,34 @@ export const useMessagesStore = defineStore('messages', () => {
     return `${turnId}:${used}`;
   }
 
-  function applySnapshot(snapshot: { seq?: number; turns?: unknown; messages?: Array<Record<string, unknown>> }): void {
-    if (typeof snapshot.seq === 'number') setLastSeq(snapshot.seq);
-    if (Array.isArray(snapshot.turns)) {
-      turns.value = (snapshot.turns as Array<Record<string, unknown>>).map(normalizeTurn);
-    } else if (Array.isArray(snapshot.messages)) {
-      turns.value = projectTurnsFromFlat(snapshot.messages);
-    } else {
-      turns.value = [];
-    }
-    drafts.value = {};
-    toolTail.value = new Map();
-    // 快照替换后若 currentTurn 不在新 turns 中，视为旧会话残留（迟到帧点亮），强制收尾，避免历史按流式渲染。
-    try {
-      const cur = useStreamStore().currentTurn?.turnId;
-      if (cur && !turns.value.some((t) => t.turnId === cur)) useStreamStore().endTurn();
-    } catch {
-      /* store 未挂载时忽略 */
-    }
-  }
-
+   function applySnapshot(snapshot: { seq?: number; turns?: unknown; messages?: Array<Record<string, unknown>> }): void {
+     if (typeof snapshot.seq === 'number') setLastSeq(snapshot.seq);
+     if (Array.isArray(snapshot.turns)) {
+       turns.value = (snapshot.turns as Array<Record<string, unknown>>).map(normalizeTurn);
+     } else if (Array.isArray(snapshot.messages)) {
+       turns.value = projectTurnsFromFlat(snapshot.messages);
+     } else {
+       turns.value = [];
+     }
+     drafts.value = {};
+     toolTail.value = new Map();
+     // P18：快照后若首轮含上下文摘要前缀，回填 compactionSummary（刷新/重连后卡片不丢）
+     try {
+       const first = turns.value[0]?.user?.content ?? '';
+       if (typeof first === 'string' && first.includes('【上下文摘要')) {
+         useSessionStore().compactionSummary = first;
+       }
+     } catch {
+       /* store 未挂载时忽略 */
+     }
+     // 快照替换后若 currentTurn 不在新 turns 中，视为旧会话残留（迟到帧点亮），强制收尾，避免历史按流式渲染。
+     try {
+       const cur = useStreamStore().currentTurn?.turnId;
+       if (cur && !turns.value.some((t) => t.turnId === cur)) useStreamStore().endTurn();
+     } catch {
+       /* store 未挂载时忽略 */
+     }
+   }
   function findTurn(turnId: string): TurnView | undefined {
     return turns.value.find((t) => t.turnId === turnId);
   }

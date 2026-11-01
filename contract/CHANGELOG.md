@@ -3,6 +3,14 @@
 > **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 contractVersion 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 
+ ## [4] — 2026-11-01 · P18 上下文压缩实效修复（非破坏性，只做加法）
+ 
+ **非破坏性增补**（`contractVersion` 3 → 4，只新增可选字段，无新方法）：
+ 
+ - `session.compact result += totalBefore?/totalAfter?/keptCount?`（`removed/summary` 保持必填；`removed==0` 时 `totalBefore==totalAfter`，前端弹“消息太少”）。
+ - `session.compacted += turns?/totalBefore?/totalAfter?`（`kept` 保留兼容，新前端优先用 `turns` 全量替换；老引擎无 `turns` 时新前端回退 `loadSnapshot()`）。
+ - `system.diagnostics result += compact?{lastRemoved,lastBefore,lastAfter,lastTsMs}`（内存最新一次，不持久化）。
+ - 前端跑 `node scripts/gen-contract-types.mjs` 重生成 `src/Web.Client/src/contract/agent.d.ts`。
  ## [3] — P17 用量分析修复（非破坏性）
  
  **非破坏性增补**（`contractVersion` 保持 `3`，只新增 1 个方法）：
