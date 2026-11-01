@@ -12,8 +12,10 @@ import { transport } from '@/transport';
 import { useEventPump } from '@/stores/useEventPump';
 import { useToast } from '@/composables/useToast';
 import MockWarningBar from './components/common/MockWarningBar.vue';
+import BootSplash from './components/common/BootSplash.vue';
 import WindowResizeHandles from './components/layout/WindowResizeHandles.vue';
 import { useHostStore } from '@/stores/host';
+import { useBootStore } from '@/stores/boot';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
 import { useStreamStore } from '@/stores/stream';
@@ -45,6 +47,7 @@ if (import.meta.env.DEV) {
 
 // ---- 主界面状态 ----
 const host = useHostStore();
+const boot = useBootStore();
 const sessions = useSessionsStore();
 const session = useSessionStore();
 const stream = useStreamStore();
@@ -81,13 +84,26 @@ useShortcuts({
 
 onMounted(() => {
   session.restoreMode();
-  void host.load();
-  // P09-fix2 C：启动串行化。先加载会话列表并切首个会话（select 内含快照绘制），
-  // 删除裸 messages.loadSnapshot()，避免与 select 竞态互相覆盖。
-  void sessions.load().then(() => {
-    if (sessions.list.length > 0 && !sessions.currentId) {
-      void sessions.select(sessions.list[0]!.id);
-    }
+  // 启动门（boot gate）：dist 下前端常比引擎先就绪，直接发请求只会收获
+  // 一片“引擎桥接不可用”误报。用纯前端启动动画盖住首屏，等引擎就绪
+  // （或超时降级）后再发初始请求，绕开发布初期的竞态报错。
+  void boot.waitForEngine().then(() => {
+    void host.load();
+    // P09-fix2 C：启动串行化。先加载会话列表并切首个会话（select 内含快照绘制），
+    // 删除裸 messages.loadSnapshot()，避免与 select 竞态互相覆盖。
+    void sessions
+      .load()
+      .then(() => {
+        if (sessions.list.length > 0 && !sessions.currentId) {
+          void sessions.select(sessions.list[0]!.id).catch((e: unknown) => {
+            console.warn('[boot] 启动自动切会话失败', e);
+          });
+        }
+      })
+      .catch((e: unknown) => {
+        // 门后才到这里：引擎超时未就绪等真故障，照常提示（不再是抢跑误报）。
+        toast.error(`加载会话列表失败：${(e as Error).message}`);
+      });
   });
 });
 
@@ -108,6 +124,7 @@ onBeforeUnmount(() => undefined);
         <AppShell />
       </div>
     </div>
+    <BootSplash />
     <SettingsApp />
     <CommandPalette />
     <ShortcutHelp />

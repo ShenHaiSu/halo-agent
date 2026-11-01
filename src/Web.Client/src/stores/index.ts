@@ -10,6 +10,7 @@ export function createAppPinia(): Pinia {
 }
 
 export { useHostStore } from './host';
+export { useBootStore } from './boot';
 export { useUiStore } from './ui';
 export { useThemeStore } from './theme';
 export { useSessionsStore } from './sessions';

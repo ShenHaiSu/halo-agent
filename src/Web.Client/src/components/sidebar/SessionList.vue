@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useSessionsStore, type SessionListItem } from '@/stores/sessions';
+import { useBootStore } from '@/stores/boot';
 import { useToast } from '@/composables/useToast';
 import SessionItem from './SessionItem.vue';
 import SessionGroupHeader from './SessionGroupHeader.vue';
@@ -138,8 +139,14 @@ function onScroll(): void {
 
 let ro: ResizeObserver | null = null;
 onMounted(() => {
-  if (!sessions.list.length && !sessions.loading) {
+  // 启动门：boot 阶段由 App.vue 在引擎就绪后统一加载，这里不抢跑。
+  if (!useBootStore().isBooting && !sessions.list.length && !sessions.loading) {
     void sessions.load().catch((e: unknown) => {
+      // 极端竞态（请求飞行中门恰好变化）下仍静默，只记日志。
+      if (useBootStore().isBooting) {
+        console.debug('[boot] 启动期会话列表请求被抑制', e);
+        return;
+      }
       toast.error(`加载会话列表失败：${(e as Error).message}`);
     });
   }
@@ -193,8 +200,8 @@ async function createNew(): Promise<void> {
 }
 </script>
 
- <template>
-   <div class="sess-pane" data-sidebar>
+<template>
+  <div class="sess-pane" data-sidebar>
     <SessionSearch v-model="query" />
 
     <NewSessionButton />
