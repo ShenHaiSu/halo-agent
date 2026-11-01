@@ -1,6 +1,6 @@
 <!-- src/Web.Client/src/components/sidebar/SessionItem.vue -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { SessionListItem } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
 import { transport } from '@/transport';
@@ -8,14 +8,13 @@ import { useToast } from '@/composables/useToast';
 import { copyText } from '@/utils/clipboard';
 import { formatRelativeTime } from '@/utils/format';
 import HInput from '@/components/base/HInput.vue';
-import HDialog from '@/components/base/HDialog.vue';
-import HButton from '@/components/base/HButton.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import SessionContextMenu, { type SessionMenuKey } from './SessionContextMenu.vue';
 
 /**
  * 会话列表项：固定 56px 高（虚拟滚动要求），标题 1 行省略，
  * 副标题相对时间，⋯ 悬停出现操作菜单，选中 2px accent 竖条。
+ * 删除为原地两段确认：点垃圾桶 → 图标变问号待命，再点一次执行。
  */
 const props = defineProps<{ session: SessionListItem; height: number }>();
 
@@ -25,12 +24,38 @@ const toast = useToast();
 const editing = ref(false);
 const draft = ref('');
 const menuOpen = ref(false);
-const confirmDelete = ref(false);
+const armingDelete = ref(false);
 const editInput = ref<InstanceType<typeof HInput> | null>(null);
+
+let armTimer: ReturnType<typeof setTimeout> | null = null;
 
 const active = computed(() => sessions.currentId === props.session.id);
 const title = computed(() => props.session.title || '新对话');
 const sub = computed(() => formatRelativeTime(props.session.mtime));
+const deleteLabel = computed(() => (armingDelete.value ? '再次点击确认删除' : '删除会话'));
+
+function cancelArming(): void {
+  armingDelete.value = false;
+  if (armTimer !== null) {
+    clearTimeout(armTimer);
+    armTimer = null;
+  }
+}
+
+function onDeleteClick(): void {
+  if (editing.value) return;
+  if (armingDelete.value) {
+    void doDelete();
+    return;
+  }
+  armingDelete.value = true;
+  if (armTimer !== null) clearTimeout(armTimer);
+  armTimer = setTimeout(cancelArming, 3000);
+}
+
+// 虚拟滚动会复用行组件：会话切换 / 卸载时必须解除待命，防止误删下一行。
+watch(() => props.session.id, cancelArming);
+onBeforeUnmount(cancelArming);
 
 function focusEdit(): void {
   const root = editInput.value?.$el;
@@ -42,6 +67,7 @@ function startRename(): void {
   draft.value = props.session.title;
   editing.value = true;
   menuOpen.value = false;
+  cancelArming();
   void nextTick(focusEdit);
 }
 
@@ -81,7 +107,7 @@ async function open(): Promise<void> {
 }
 
 async function doDelete(): Promise<void> {
-  confirmDelete.value = false;
+  cancelArming();
   const wasActive = active.value;
   try {
     await transport.request('session.delete', { id: props.session.id });
@@ -96,7 +122,6 @@ async function doDelete(): Promise<void> {
 async function onMenuSelect(key: SessionMenuKey): Promise<void> {
   menuOpen.value = false;
   if (key === 'rename') startRename();
-  else if (key === 'delete') confirmDelete.value = true;
   else if (key === 'copy-id') {
     const ok = await copyText(props.session.id);
     toast[ok ? 'success' : 'error'](ok ? '已复制会话 ID' : '复制失败');
@@ -136,28 +161,32 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
       </template>
     </div>
 
-    <SessionContextMenu :open="menuOpen" @update:open="menuOpen = $event" @select="onMenuSelect">
-      <template #trigger>
-         <button
-           class="sess-more"
-           type="button"
-           aria-label="会话操作"
-           aria-haspopup="menu"
-           :aria-expanded="menuOpen ? 'true' : 'false'"
-         >
-          <HaloIcon name="more-horizontal" :size="14" />
-        </button>
-      </template>
-    </SessionContextMenu>
-
-    <HDialog :open="confirmDelete" title="删除会话？" @update:open="confirmDelete = $event">
-      <p class="del-line">{{ title }}</p>
-      <p class="del-desc">删除后会连同其历史文件一起移除，无法恢复。</p>
-      <template #footer>
-        <HButton variant="secondary" size="sm" @click="confirmDelete = false">取消</HButton>
-        <HButton variant="danger" size="sm" @click="doDelete">删除</HButton>
-      </template>
-    </HDialog>
+    <div v-if="!editing" class="sess-actions" @mouseleave="cancelArming">
+      <button
+        class="sess-del"
+        :class="{ arming: armingDelete }"
+        type="button"
+        :aria-label="deleteLabel"
+        :title="deleteLabel"
+        @click.stop="onDeleteClick"
+        @keydown.esc.prevent="cancelArming"
+      >
+        <HaloIcon :name="armingDelete ? 'help' : 'trash'" :size="14" />
+      </button>
+      <SessionContextMenu :open="menuOpen" @update:open="menuOpen = $event" @select="onMenuSelect">
+        <template #trigger>
+           <button
+             class="sess-more"
+             type="button"
+             aria-label="会话操作"
+             aria-haspopup="menu"
+             :aria-expanded="menuOpen ? 'true' : 'false'"
+           >
+            <HaloIcon name="more-horizontal" :size="14" />
+          </button>
+        </template>
+      </SessionContextMenu>
+    </div>
   </div>
 </template>
 
@@ -206,7 +235,14 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
 .sess-edit {
   width: 100%;
 }
-.sess-more {
+.sess-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.sess-more,
+.sess-del {
   opacity: 0;
   flex: none;
   background: transparent;
@@ -217,16 +253,19 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
   border-radius: var(--radius-xs);
 }
 .sess-item:hover .sess-more,
-.sess-more:focus-visible {
+.sess-item:hover .sess-del,
+.sess-more:focus-visible,
+.sess-del:focus-visible,
+.sess-del.arming {
   opacity: 1;
 }
-.del-line {
-  margin: 0 0 var(--space-2);
-  font-weight: 500;
+.sess-more:hover,
+.sess-del:hover {
+  background: hsl(var(--bg-muted));
+  color: hsl(var(--fg));
 }
-.del-desc {
-  margin: 0;
-  color: hsl(var(--fg-muted));
-  font-size: var(--text-sm);
-}
+ .sess-del.arming {
+   color: hsl(var(--danger));
+   background: hsl(var(--bg-muted));
+ }
 </style>

@@ -3,7 +3,7 @@
 import HMenu from '@/components/base/HMenu.vue';
 import HMenuItem from '@/components/base/HMenuItem.vue';
 
-export type SessionMenuKey = 'rename' | 'copy-id' | 'delete';
+ export type SessionMenuKey = 'rename' | 'copy-id';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{
@@ -24,6 +24,5 @@ function pick(key: SessionMenuKey): void {
     </template>
     <HMenuItem icon="edit" @click="pick('rename')">重命名</HMenuItem>
     <HMenuItem icon="copy" @click="pick('copy-id')">复制会话 ID</HMenuItem>
-    <HMenuItem icon="trash" danger @click="pick('delete')">删除</HMenuItem>
   </HMenu>
 </template>
