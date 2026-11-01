@@ -1,10 +1,10 @@
 namespace HaloAgent.Desktop.Shell;
 
-/// <summary>
-/// 受控关闭（唯一正确的退出路径）：
-/// ①存窗口位置 → ②停引擎 → ③注销热键 → ④Dispose托盘 → ⑤⑥释放浏览器 → ⑦Cef.Shutdown。
-/// 顺序不可改；fast 模式（关机/任务管理器）跳过所有等待。
-/// </summary>
+ /// <summary>
+ /// 受控关闭（唯一正确的退出路径）：
+ /// ①存窗口位置 → ②停引擎 → ③Dispose托盘 → ④⑤释放浏览器 → ⑥Cef.Shutdown。
+ /// 顺序不可改；fast 模式（关机/任务管理器）跳过所有等待。
+ /// </summary>
 public static class ShutdownSequence
 {
     private static readonly object Gate = new();
@@ -14,7 +14,6 @@ public static class ShutdownSequence
     {
         void SavePlacementNow();
         Task StopEngineAsync(TimeSpan timeout);
-        void DisposeHotkeys();
         void DisposeTray();
         void DisposeBrowser();
     }
@@ -38,17 +37,13 @@ public static class ShutdownSequence
             var timeout = fast ? TimeSpan.FromMilliseconds(500) : TimeSpan.FromSeconds(5);
             TryStepAsync("停止引擎", () => form.StopEngineAsync(timeout), timeout);
         }
-
-        // ③ 注销热键（窗口销毁前）。
-        TryStep("注销热键", () => form?.DisposeHotkeys());
-
-        // ④ 托盘（消息循环结束前）。
+        // ③ 托盘（消息循环结束前）。
         TryStep("释放托盘图标", () => form?.DisposeTray());
 
-        // ⑤⑥ 浏览器。
+        // ④⑤ 浏览器。
         TryStep("释放浏览器", () => form?.DisposeBrowser());
 
-        // ⑦ CEF（最后，此时不能再有 UI 操作）。
+        // ⑥ CEF（最后，此时不能再有 UI 操作）。
         TryStep("关闭 CEF", () =>
         {
             if (CefSharp.Cef.IsInitialized)

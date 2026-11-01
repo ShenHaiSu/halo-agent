@@ -11,14 +11,13 @@ using HaloAgent.Desktop.Shell;
 
 namespace HaloAgent.Desktop;
 
-/// <summary>
-/// 主窗体（ChromeForm 无边框基类）。
-/// 浏览器填满客户区；桥接注册 haloHost(11) + haloAgent(3) + hostBridge(兼容)；
-/// 引擎异步启动；托盘/热键/单实例/关闭确认/崩溃恢复/位置持久化。
-/// </summary>
+ /// <summary>
+ /// 主窗体（ChromeForm 无边框基类）。
+ /// 浏览器填满客户区；桥接注册 haloHost(11) + haloAgent(3) + hostBridge(兼容)；
+ /// 引擎异步启动；托盘/单实例/关闭确认/崩溃恢复/位置持久化。
+ /// </summary>
 public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdownTarget, HaloHostBridge.IDevToolsHost
 {
-    private const int WM_HOTKEY = 0x0312;
 
     private readonly HostOptions _opts;
     private readonly string _gpuMode;
@@ -31,7 +30,6 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
     private readonly HostFileDialogs _dialogs;
     private EngineSupervisor? _engine;
     private TrayIcon? _trayIcon;
-    private GlobalHotkeys? _hotkeys;
     private Panel? _banner;
 
     private bool _allowClose;
@@ -82,7 +80,6 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
             _single.ActivateRequested += OnActivateRequested;
             _single.StartListening();
         }
-        SetupHotkeys();
 
         if (_engine is not null)
             _engine.StatusChanged += (_, s) => _ = _haloHost.EmitEngineStatusAsync(s);
@@ -289,7 +286,7 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
     }
 
     // ============================================================
-    //  托盘 / 热键（ITrayHost）
+    //  托盘（ITrayHost）
     // ============================================================
 
     public void ActivateFromTray()
@@ -334,16 +331,6 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
         InvokeScriptSafe("window.__haloHostEvent && window.__haloHostEvent('host.showAbout', {})");
     }
 
-    private void SetupHotkeys()
-    {
-        _hotkeys = new GlobalHotkeys(Handle);
-        if (!_hotkeys.TryRegister(GlobalHotkeys.IdToggleWindow,
-                Keys.Space, GlobalHotkeys.KeyModifiers.Control | GlobalHotkeys.KeyModifiers.Alt))
-            AppLog.Warn("全局热键 Ctrl+Alt+Space 被占用");
-        if (!_hotkeys.TryRegister(GlobalHotkeys.IdNewSession,
-                Keys.N, GlobalHotkeys.KeyModifiers.Control | GlobalHotkeys.KeyModifiers.Shift))
-            AppLog.Warn("全局热键 Ctrl+Shift+N 被占用");
-    }
 
     private void OnActivateRequested(string[] args)
     {
@@ -361,22 +348,6 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WM_HOTKEY)
-        {
-            switch (m.WParam.ToInt32())
-            {
-                case GlobalHotkeys.IdToggleWindow:
-                    if (Visible && ContainsFocus) HideToTray();
-                    else ActivateFromTray();
-                    break;
-                case GlobalHotkeys.IdNewSession:
-                    ActivateFromTray();
-                    NewSessionFromTray();
-                    break;
-            }
-            m.Result = IntPtr.Zero;
-            return;
-        }
         base.WndProc(ref m);
     }
 
@@ -455,11 +426,6 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
         catch (TimeoutException) { /* 超时则继续 */ }
     }
 
-    public void DisposeHotkeys()
-    {
-        _hotkeys?.Dispose();
-        _hotkeys = null;
-    }
 
     public void DisposeTray()
     {
