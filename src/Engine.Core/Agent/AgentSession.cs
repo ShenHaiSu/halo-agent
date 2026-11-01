@@ -87,8 +87,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private long? _lastPromptTokens;
     private int _roundUsed;
     private int _roundLimit;
-    private string? _lastResponseId;
-    private int _responsesSentCount;
+     private string? _lastResponseId;
+     private int _responsesSentCount;
+     /// <summary>粘性无状态：网关不支持 previous_response_id/store 链时置位，之后不再试探链式，只发全量裸请求（换模型时清零）。</summary>
+     private bool _responsesStateless;
      private readonly IClock _clock;
      private readonly UsageStore _usageStore;
      private long _turnPrompt;
@@ -195,8 +197,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
                     _cwd, _mode, _store.SessionId, _persona, _dataDir));
         }
-        if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
-            ClearResponseChain();
+         if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
+         {
+             lock (_lock) { _responsesStateless = false; }
+             ClearResponseChain();
+         }
     }
 
     /// <summary>设置全局代理（非模型链路用）。</summary>
@@ -222,15 +227,18 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeBaseUrl = "";
              _activeApiKeySet = false;
              _activeConfigured = false;
+             _responsesStateless = false;
          }
          ClearResponseChain();
      }
-    /// <summary>P13 链管理：清链（内存 + 落盘同步）。</summary>
-    public void ClearResponseChain()
-    {
-        lock (_lock) { _lastResponseId = null; _responsesSentCount = 0; }
-        try { _store.SaveResponseId(null); } catch { }
-    }
+     /// <summary>P13 链管理：清链（内存 + 落盘同步）。注意：不碰 _responsesStateless（网关能力粘性，只换模型时重置）。</summary>
+     public void ClearResponseChain()
+     {
+         lock (_lock) { _lastResponseId = null; _responsesSentCount = 0; }
+         try { _store.SaveResponseId(null); } catch { }
+     }
+     /// <summary>测试/诊断用：无状态粘性是否已置位。</summary>
+     internal bool IsResponsesStatelessForTest { get { lock (_lock) return _responsesStateless; } }
     private void SetResponseId(string? id)
     {
         lock (_lock) { _lastResponseId = id; }
@@ -761,20 +769,22 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         bool rebuilt = false;
         while (true)
         {
-            ct.ThrowIfCancellationRequested();
-            string? prev;
-            List<ChatMessage> snap;
-            bool includeReasoning;
-            bool acceptsImages;
-            lock (_lock) { prev = _lastResponseId; snap = _messages.ToList(); includeReasoning = _activeIncludeReasoning; acceptsImages = _activeAcceptsImages; }
-            var stripped = MessageAdapters.StripReasoning(snap, includeReasoning).ToList();
-            foreach (var m in stripped) MessageAdapters.ValidateImages(m, acceptsImages);
-            var (instructions, fullInput) = ResponsesTranslators.TranslateMessages(stripped);
-            List<object> input;
-            string? sendPrev = prev;
-            int sent;
-            lock (_lock) sent = _responsesSentCount;
-            if (sendPrev is null) { input = fullInput; }
+             ct.ThrowIfCancellationRequested();
+             string? prev;
+             List<ChatMessage> snap;
+             bool includeReasoning;
+             bool acceptsImages;
+             bool stateless;
+             lock (_lock) { prev = _lastResponseId; snap = _messages.ToList(); includeReasoning = _activeIncludeReasoning; acceptsImages = _activeAcceptsImages; stateless = _responsesStateless; }
+             if (stateless) prev = null;
+             var stripped = MessageAdapters.StripReasoning(snap, includeReasoning).ToList();
+             foreach (var m in stripped) MessageAdapters.ValidateImages(m, acceptsImages);
+             var (instructions, fullInput) = ResponsesTranslators.TranslateMessages(stripped);
+             List<object> input;
+             string? sendPrev = prev;
+             int sent;
+             lock (_lock) sent = _responsesSentCount;
+             if (sendPrev is null) { input = fullInput; }
             else
             {
                 int total = stripped.Count;
@@ -804,14 +814,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     }
                 }, ct, _store.SessionId).ConfigureAwait(false);
             }
-             catch (OperationCanceledException) { _bus.FlushNow(); throw; }
-             // P16-F2：断链重建（400/404 + 毒 id 文案即重建；网关文案随时会变，宁宽勿严）。
-             catch (EndpointStatusException ese) when (!rebuilt && IsBrokenChain(ese))
-             {
+              catch (OperationCanceledException) { _bus.FlushNow(); throw; }
+              // 粘性无状态：首次断链后本会话不再试探 previous_response_id（换模型才重置）；单轮兜底保留以覆盖中途过期。
+              catch (EndpointStatusException ese) when (!rebuilt && IsBrokenChain(ese))
+              {
+                 lock (_lock) { _responsesStateless = true; }
                  ClearResponseChain();
                  rebuilt = true;
                  continue;
-             }
+              }
             catch (Exception ex)
             {
                 var reason = RetryPolicy.GetRetryReason(ex);
@@ -820,23 +831,30 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
                 continue;
             }
-            if (r.ResponseId is null)
-            {
-                SetResponseId(null);
-                lock (_lock) _responsesSentCount = snap.Count;
-                try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "服务端未返回 response.id，已断链重建", Level = "info" }, ct).ConfigureAwait(false); } catch { }
-            }
-            else
-            {
-                SetResponseId(r.ResponseId);
-                lock (_lock) _responsesSentCount = snap.Count + 1;
-                try
-                {
-                    var hist = _store.LoadResponseId();
-                    if (string.IsNullOrEmpty(hist)) { try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "已重建上下文链", Level = "info" }, ct).ConfigureAwait(false); } catch { } }
-                }
-                catch { }
-            }
+             bool wasStateless = stateless;
+             if (wasStateless)
+             {
+                 // 无状态网关：不存链，靠全量重建；避免下次误带过期 id。
+                 SetResponseId(null);
+                 lock (_lock) _responsesSentCount = snap.Count;
+             }
+             else if (r.ResponseId is null)
+             {
+                 SetResponseId(null);
+                 lock (_lock) _responsesSentCount = snap.Count;
+                 try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "服务端未返回 response.id，已断链重建", Level = "info" }, ct).ConfigureAwait(false); } catch { }
+             }
+             else
+             {
+                 SetResponseId(r.ResponseId);
+                 lock (_lock) _responsesSentCount = snap.Count + 1;
+                 try
+                 {
+                     var hist = _store.LoadResponseId();
+                     if (string.IsNullOrEmpty(hist)) { try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "已重建上下文链", Level = "info" }, ct).ConfigureAwait(false); } catch { } }
+                 }
+                 catch { }
+             }
             var reply = ToAssistantReply(r);
             if (RetryPolicy.IsEmptyReply(reply))
             {
