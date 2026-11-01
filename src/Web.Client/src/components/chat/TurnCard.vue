@@ -91,8 +91,14 @@ async function retry(): Promise<void> {
 
 <template>
   <article class="turn-card" :data-turn="turn.turnId">
-    <!-- 用户消息 + 排队 injected -->
-    <div v-if="turn.user.content" class="turn-user user-plain">{{ turn.user.content }}</div>
+    <!-- 用户消息 + 时间/复制（绑定 turn.user，与 final 独立） -->
+    <div v-if="turn.user.content" class="turn-user-block">
+      <div class="turn-user user-plain">{{ turn.user.content }}</div>
+      <div class="turn-user-meta">
+        <span class="msg-time">{{ formatRelativeTime(turn.user.ts) }}</span>
+        <MessageActions :message="turn.user" />
+      </div>
+    </div>
     <div v-for="u in turn.injected" :key="u.id" class="turn-user user-plain injected">
       {{ u.content }}<span class="msg-badge">已注入</span>
     </div>
@@ -152,6 +158,28 @@ async function retry(): Promise<void> {
 }
 .turn-user.injected {
   opacity: 0.85;
+}
+.turn-user-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  max-width: min(100%, 560px);
+  align-self: flex-end;
+  min-width: 0;
+}
+.turn-user-block .turn-user.user-plain {
+  max-width: 100%;
+}
+.turn-user-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: hsl(var(--fg-subtle));
+}
+.turn-user-meta .msg-time {
+  font-size: var(--text-2xs);
 }
 .msg-badge {
   font-size: var(--text-2xs);

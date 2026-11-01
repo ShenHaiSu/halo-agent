@@ -244,14 +244,53 @@ describe('18 TurnCard 草稿合并渲染：多 used 正文只出现一次', () =
   });
 });
 
-describe('19 MessageActions hover 选择器覆盖 TurnCard', () => {
-  it('源码同时覆盖 .msg-item / .turn-card / .turn-meta', async () => {
+describe('19 MessageActions hover 作用域隔离：各亮各的', () => {
+  it('用户块与 final 各自点亮，不用整卡通亮', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const vue = readFileSync(resolve(__dirname, '../components/chat/MessageActions.vue'), 'utf-8');
     const css = vue.slice(vue.indexOf('<style'));
-    expect(css).toContain('.turn-card:hover .actions');
-    expect(css).toContain('.turn-meta:hover .actions');
+    expect(css).toContain('.turn-user-block:hover .actions');
+    expect(css).toContain('.turn-final:hover .actions');
     expect(css).toContain('.msg-item:hover .actions');
+    expect(css).not.toContain('.turn-card:hover .actions');
+  });
+});
+
+describe('20 TurnCard 用户/模型 meta 独立', () => {
+  function mountSteady(userContent: string, finalContent: string) {
+    return mount(TurnCard, {
+      props: {
+        turn: {
+          turnId: 't9',
+          user: { id: 'u9', role: 'user', content: userContent, ts: 1000, ord: 0 },
+          injected: [],
+          process: [],
+          final: { id: 'f9', role: 'assistant', content: finalContent, ts: 2000, ord: 0 },
+        },
+      },
+      global: {
+        stubs: { ReasoningBlock: true, ToolCard: true, MessageActions: true, StreamingCursor: true },
+      },
+    } as never);
+  }
+
+  it('用户块绑定 turn.user，尾部绑定 turn.final', () => {
+    const w = mountSteady('uq', 'ans');
+    expect(w.find('.turn-user-block').exists()).toBe(true);
+    expect(w.find('.turn-user-meta .msg-time').exists()).toBe(true);
+    const acts = w.findAllComponents({ name: 'MessageActions' });
+    expect(acts.length).toBe(2);
+    expect((acts[0]!.props('message') as unknown as { content: string }).content).toBe('uq');
+    expect((acts[1]!.props('message') as unknown as { content: string }).content).toBe('ans');
+    w.unmount();
+  });
+
+  it('用户复制不带重发（role=user 无 retry 按钮由组件内判定）', () => {
+    const w = mountSteady('uq', 'ans');
+    const acts = w.findAllComponents({ name: 'MessageActions' });
+    expect((acts[0]!.props('message') as unknown as { role: string }).role).toBe('user');
+    expect((acts[1]!.props('message') as unknown as { role: string }).role).toBe('assistant');
+    w.unmount();
   });
 });

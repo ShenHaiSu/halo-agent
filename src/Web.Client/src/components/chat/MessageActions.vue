@@ -39,8 +39,8 @@ async function onCopy(): Promise<void> {
   transition: opacity 120ms;
 }
 .msg-item:hover .actions,
-.turn-card:hover .actions,
-.turn-meta:hover .actions,
+.turn-user-block:hover .actions,
+.turn-final:hover .actions,
 .actions:focus-within {
   opacity: 1;
 }
