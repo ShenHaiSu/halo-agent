@@ -1,10 +1,14 @@
 // P15 前端验收 9~15：turncard-routing / round-move / stream-stable-parity / dropped-fallback / process-autofold / tool-lazy / 反例
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { mount } from '@vue/test-utils';
 import { useMessagesStore } from '@/stores/messages';
 import { useStreamStore } from '@/stores/stream';
+import { useSessionsStore } from '@/stores/sessions';
 import { dispatchFrames } from '@/stores/eventBridge';
 import { parseMarkdown } from '@/components/chat/MarkdownRenderer';
+import TurnCard from '@/components/chat/TurnCard.vue';
+import { transport } from '@/transport';
 import type { HaloFrame } from '@/bridge/types';
 
 function frames(list: Array<{ seq: number; k: string; p: unknown }>): HaloFrame[] {
@@ -140,5 +144,114 @@ describe('15 反例补齐', () => {
   it('tool.result offset 越界：slice 为空但不抛', () => {
     const s = 'abc'.slice(999, 999 + 8000);
     expect(s).toBe('');
+  });
+});
+
+describe('16 stale-active 剥离：快照替换后旧 currentTurn 不再点亮历史', () => {
+  function turnFixture(turnId: string, userContent: string, finalContent: string): Record<string, unknown> {
+    return {
+      turnId,
+      user: { id: 'u-' + turnId, role: 'user', content: userContent, tsMs: 1000 },
+      injected: [],
+      process: [],
+      final: { id: 'f-' + turnId, role: 'assistant', content: finalContent, tsMs: 2000 },
+    };
+  }
+
+  it('currentTurn 不在新快照中 → endTurn，不再按流式渲染', () => {
+    const messages = useMessagesStore();
+    const stream = useStreamStore();
+    dispatchFrames(frames([{ seq: 1, k: 'turn.started', p: { turnId: 't-old' } }]));
+    expect(stream.currentTurn?.turnId).toBe('t-old');
+    messages.applySnapshot({ turns: [turnFixture('t-new', 'q', 'a')] });
+    expect(stream.currentTurn).toBeNull();
+    expect(messages.turns.map((t) => t.turnId)).toEqual(['t-new']);
+  });
+
+  it('currentTurn 仍在快照中 → 保留，流式不受影响', () => {
+    const messages = useMessagesStore();
+    const stream = useStreamStore();
+    dispatchFrames(frames([{ seq: 1, k: 'turn.started', p: { turnId: 't1' } }]));
+    messages.applySnapshot({ turns: [turnFixture('t1', 'q', '')] });
+    expect(stream.currentTurn?.turnId).toBe('t1');
+  });
+});
+
+describe('17 resume 形状嗅探：messages 键下的回合形数组按 turns 应用', () => {
+  it('回合形走 turns：内容与 ts 精确保留，不被扁平投影吞掉', async () => {
+    const sessions = useSessionsStore();
+    const messages = useMessagesStore();
+    sessions.currentId = 'old';
+    vi.spyOn(transport, 'request').mockImplementation(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          count: 1,
+          messages: [
+            {
+              turnId: 't1',
+              user: { id: 'u1', role: 'user', content: 'q', tsMs: 1000 },
+              injected: [],
+              process: [],
+              final: { id: 'm1', role: 'assistant', content: 'ans', tsMs: 2000 },
+            },
+          ],
+        } as never;
+      }
+      if (method === 'state.snapshot') return { session: { id: 'new' } } as never;
+      throw new Error('unexpected ' + method);
+    });
+    await sessions.select('new');
+    expect(messages.turns).toHaveLength(1);
+    expect(messages.turns[0]!.final.content).toBe('ans');
+    expect(messages.turns[0]!.final.ts).toBe(2000);
+    expect(messages.turns[0]!.user.content).toBe('q');
+  });
+});
+
+describe('18 TurnCard 草稿合并渲染：多 used 正文只出现一次', () => {
+  function mountTurn(userContent: string) {
+    return mount(TurnCard, {
+      props: {
+        turn: {
+          turnId: 't1',
+          user: { id: 'u1', role: 'user', content: userContent, ts: 1, ord: 0 },
+          injected: [],
+          process: [],
+          final: { id: 'f1', role: 'assistant', content: '', ts: 2, ord: 0 },
+        },
+      },
+      global: {
+        stubs: { ReasoningBlock: true, ToolCard: true, MessageActions: true, StreamingCursor: true },
+      },
+    } as never);
+  }
+
+  it('双 used 草稿正文合并后只渲染一次', () => {
+    const messages = useMessagesStore();
+    dispatchFrames(frames([{ seq: 1, k: 'turn.started', p: { turnId: 't1' } }]));
+    messages.drafts['t1:1'] = { text: 'A', reasoning: '' };
+    messages.drafts['t1:2'] = { text: 'B', reasoning: '' };
+    const w = mountTurn('hi');
+    const hits = (w.text().match(/AB/g) ?? []).length;
+    expect(hits).toBe(1);
+    w.unmount();
+  });
+
+  it('空 user 不渲染空泡', () => {
+    const w = mountTurn('');
+    expect(w.find('.turn-user').exists()).toBe(false);
+    w.unmount();
+  });
+});
+
+describe('19 MessageActions hover 选择器覆盖 TurnCard', () => {
+  it('源码同时覆盖 .msg-item / .turn-card / .turn-meta', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const vue = readFileSync(resolve(__dirname, '../components/chat/MessageActions.vue'), 'utf-8');
+    const css = vue.slice(vue.indexOf('<style'));
+    expect(css).toContain('.turn-card:hover .actions');
+    expect(css).toContain('.turn-meta:hover .actions');
+    expect(css).toContain('.msg-item:hover .actions');
   });
 });

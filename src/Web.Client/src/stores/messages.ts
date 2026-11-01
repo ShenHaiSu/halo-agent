@@ -3,7 +3,8 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
-import { useSessionStore } from '@/stores/session';
+ import { useSessionStore } from '@/stores/session';
+ import { useStreamStore } from './stream';
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 
@@ -268,6 +269,13 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     drafts.value = {};
     toolTail.value = new Map();
+    // 快照替换后若 currentTurn 不在新 turns 中，视为旧会话残留（迟到帧点亮），强制收尾，避免历史按流式渲染。
+    try {
+      const cur = useStreamStore().currentTurn?.turnId;
+      if (cur && !turns.value.some((t) => t.turnId === cur)) useStreamStore().endTurn();
+    } catch {
+      /* store 未挂载时忽略 */
+    }
   }
 
   function findTurn(turnId: string): TurnView | undefined {

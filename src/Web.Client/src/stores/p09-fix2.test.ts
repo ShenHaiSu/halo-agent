@@ -169,9 +169,9 @@ describe('D: Mock 多会话历史', () => {
     expect(resume?.kind).toBe('ok');
     if (resume?.kind !== 'ok') return;
     for (const item of res.items.slice(0, 2)) {
-      const r = resume.run({ id: item.id }) as { count: number; messages: unknown[] };
+      const r = resume.run({ id: item.id }) as { count: number; turns: unknown[] };
       expect(r.count).toBeGreaterThan(0);
-      expect(r.messages.length).toBeGreaterThan(0);
+      expect(r.turns.length).toBeGreaterThan(0);
     }
   });
 
@@ -182,9 +182,9 @@ describe('D: Mock 多会话历史', () => {
     expect(resume?.kind).toBe('ok');
     if (prompt?.kind !== 'ok' || resume?.kind !== 'ok') return;
     (resume.run as (p: unknown) => unknown)({ id: 's-mock-1' });
-    const before = (resume.run({ id: 's-mock-1' }) as { messages: unknown[] }).messages.length;
+    const before = (resume.run({ id: 's-mock-1' }) as { turns: unknown[] }).turns.length;
     prompt.run({ text: 'mock 回归探针' });
-    const after = (resume.run({ id: 's-mock-1' }) as { messages: unknown[] }).messages.length;
+    const after = (resume.run({ id: 's-mock-1' }) as { turns: unknown[] }).turns.length;
     expect(after).toBe(before + 1);
   });
 });

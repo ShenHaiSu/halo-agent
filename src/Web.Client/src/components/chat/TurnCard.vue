@@ -92,7 +92,7 @@ async function retry(): Promise<void> {
 <template>
   <article class="turn-card" :data-turn="turn.turnId">
     <!-- 用户消息 + 排队 injected -->
-    <div class="turn-user user-plain">{{ turn.user.content }}</div>
+    <div v-if="turn.user.content" class="turn-user user-plain">{{ turn.user.content }}</div>
     <div v-for="u in turn.injected" :key="u.id" class="turn-user user-plain injected">
       {{ u.content }}<span class="msg-badge">已注入</span>
     </div>
@@ -109,10 +109,11 @@ async function retry(): Promise<void> {
           </div>
         </div>
         <!-- 流式草稿（未搬运前可见） -->
-        <div v-for="d in draftsForTurn" :key="`draft-${d.used}`" class="process-item draft">
+        <!-- 流式草稿（未搬运前可见）：正文合并渲染一次，多 used 不重复 -->
+        <template v-for="d in draftsForTurn" :key="`draft-${d.used}`">
           <ReasoningBlock v-if="d.reasoning" :text="d.reasoning" :live="true" kind="full" />
-          <MessageBody v-if="d.text" :nodes="liveNodes" :pending="liveMd.pendingText.value" />
-        </div>
+        </template>
+        <MessageBody v-if="liveText" :nodes="liveNodes" :pending="liveMd.pendingText.value" />
         <!-- 当前 final 上的 running 工具卡（未搬运） -->
         <div v-if="turn.final.toolCalls?.length" class="msg-tools">
           <ToolCard v-for="tc in turn.final.toolCalls" :key="tc.id" :tool="tc" :is-live="isActive" />

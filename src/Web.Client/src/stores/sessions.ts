@@ -188,9 +188,11 @@ export const useSessionsStore = defineStore('sessions', () => {
       // 复用 resume.messages 直接绘制（无 seq 不回退游标，见 01）；缺字段才回退 loadSnapshot。
       const rawTurns = (resumed as Record<string,unknown>)?.turns as unknown;
       const rawMsgs = (resumed as Record<string,unknown>)?.messages as unknown;
-      const isTurnShape = Array.isArray(rawTurns) && (rawTurns.length===0 || (typeof rawTurns[0]==="object" && rawTurns[0] !== null && ("turnId" in (rawTurns[0] as object) || "final" in (rawTurns[0] as object))));
-      const resumedTurns = isTurnShape ? rawTurns as Array<Record<string, unknown>> : Array.isArray(rawMsgs) ? rawMsgs as Array<Record<string, unknown>> : null;
+      const msgLooksTurn = Array.isArray(rawMsgs) && rawMsgs.length > 0 && typeof rawMsgs[0] === 'object' && rawMsgs[0] !== null && ('turnId' in (rawMsgs[0] as object) || 'final' in (rawMsgs[0] as object));
+      const isTurnShape = (Array.isArray(rawTurns) && (rawTurns.length===0 || (typeof rawTurns[0]==='object' && rawTurns[0] !== null && ('turnId' in (rawTurns[0] as object) || 'final' in (rawTurns[0] as object))))) || (!Array.isArray(rawTurns) && msgLooksTurn);
+      const rawTurnsAsTurns = Array.isArray(rawTurns) && (rawTurns.length===0 || (typeof rawTurns[0]==='object' && rawTurns[0] !== null && ('turnId' in (rawTurns[0] as object) || 'final' in (rawTurns[0] as object))));
       const resumedIsFlat = !isTurnShape && Array.isArray(rawMsgs);
+      const resumedTurns = rawTurnsAsTurns ? rawTurns as Array<Record<string, unknown>> : Array.isArray(rawMsgs) ? rawMsgs as Array<Record<string, unknown>> : null;
       if (resumedTurns) {
         messages.applySnapshot(resumedIsFlat ? { messages: resumedTurns as never } : { turns: resumedTurns as never });
       } else {

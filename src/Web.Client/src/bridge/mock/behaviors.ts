@@ -304,7 +304,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
       const id = (p as { id?: string } | null)?.id;
       if (id && mockSessions.has(id)) currentMockSessionId = id;
       const s = currentMockSession();
-      return { count: s.messages.length, messages: mockTurnViews(s) };
+      return { count: s.messages.length, turns: mockTurnViews(s) };
     },
   },
   'session.list': { kind: 'ok', run: () => ({ items: [...mockSessions.values()].map(mockSummary) }) },
