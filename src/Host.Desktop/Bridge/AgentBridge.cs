@@ -6,7 +6,7 @@ namespace HaloAgent.Desktop.Bridge;
 
 /// <summary>
 /// 引擎传输桥接（window.haloAgent，恰好 3 方法）。
-/// 54 个引擎方法不逐个包一层，只暴露通用 request(method, params)。
+ /// 61 个引擎方法不逐个包一层，只暴露通用 request(method, params)。
 /// fs.* 由宿主路由（HostMethodRouter），其余转引擎。
 /// </summary>
 /// <remarks>

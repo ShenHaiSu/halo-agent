@@ -1,15 +1,16 @@
 <!-- src/Web.Client/src/components/settings/SettingsApp.vue -->
-<!-- 设置页容器：7 分页 + 窄窗全屏 + DirtyGuard 拦截切页/关页。 -->
+ <!-- 设置页容器：8 分页 + 窄窗全屏 + DirtyGuard 拦截切页/关页。 -->
 <script lang="ts">
 import { ref as sharedRef } from 'vue';
-export type SettingsTab =
-  | 'general'
-  | 'model'
-  | 'network'
-  | 'permissions'
-  | 'mcp'
-  | 'assets'
-  | 'about';
+ export type SettingsTab =
+   | 'general'
+   | 'model'
+   | 'network'
+   | 'permissions'
+   | 'mcp'
+   | 'assets'
+   | 'usage'
+   | 'about';
 const settingsTab = sharedRef<SettingsTab>('general');
 
 /** 跨组件打开设置（指定分页）。运行时调用，pinia 已就绪。 */
@@ -42,8 +43,9 @@ import GeneralPage from './pages/GeneralPage.vue';
 import ModelPage from './pages/ModelPage.vue';
 import NetworkPage from './pages/NetworkPage.vue';
 import PermissionsPage from './pages/PermissionsPage.vue';
-import McpPage from './pages/McpPage.vue';
-import AssetsPage from './pages/AssetsPage.vue';
+ import McpPage from './pages/McpPage.vue';
+ import AssetsPage from './pages/AssetsPage.vue';
+ import UsageAnalyticsPage from './pages/UsageAnalyticsPage.vue';
 import AboutPage from './pages/AboutPage.vue';
 
 interface SettingsPage {
@@ -60,6 +62,7 @@ const networkPage = ref<SettingsPage | null>(null);
 const permissionsPage = ref<SettingsPage | null>(null);
 const mcpPage = ref<SettingsPage | null>(null);
 const assetsPage = ref<SettingsPage | null>(null);
+ const usagePage = ref<SettingsPage | null>(null);
 const aboutPage = ref<SettingsPage | null>(null);
 
 const activePage = computed<SettingsPage | null>(() => {
@@ -76,6 +79,8 @@ const activePage = computed<SettingsPage | null>(() => {
       return mcpPage.value;
     case 'assets':
       return assetsPage.value;
+     case 'usage':
+       return usagePage.value;
     case 'about':
       return aboutPage.value;
     default:
@@ -91,6 +96,7 @@ const NAV: SettingsNavItem[] = [
   { key: 'model', label: '模型', icon: 'zap' },
   { key: 'network', label: '网络', icon: 'link' },
   { key: 'permissions', label: '权限', icon: 'shield-check' },
+   { key: 'usage', label: '用量', icon: 'chart' },
   { key: 'mcp', label: '扩展', icon: 'layers' },
   { key: 'assets', label: '资源', icon: 'folder' },
   { key: 'about', label: '关于', icon: 'info' },
@@ -134,8 +140,9 @@ function requestClose(): void {
             <NetworkPage v-else-if="tab === 'network'" ref="networkPage" />
             <PermissionsPage v-else-if="tab === 'permissions'" ref="permissionsPage" />
             <McpPage v-else-if="tab === 'mcp'" ref="mcpPage" />
-            <AssetsPage v-else-if="tab === 'assets'" ref="assetsPage" />
-            <AboutPage v-else ref="aboutPage" />
+             <AssetsPage v-else-if="tab === 'assets'" ref="assetsPage" />
+             <UsageAnalyticsPage v-else-if="tab === 'usage'" ref="usagePage" />
+             <AboutPage v-else-if="tab === 'about'" ref="aboutPage" />
           </div>
         </div>
 

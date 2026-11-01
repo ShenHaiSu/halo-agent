@@ -74,8 +74,9 @@ describe('ICONS', () => {
       'plus',
       'trash',
       'copy',
-      'settings',
-      'refresh',
+       'settings',
+       'refresh',
+       'chart',
     ];
     for (const name of required) {
       expect(ICONS[name], `缺少核心图标 ${name}`).toBeDefined();

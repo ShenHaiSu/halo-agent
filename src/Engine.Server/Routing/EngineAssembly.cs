@@ -101,14 +101,16 @@ public static class EngineAssembly
         var store = new SessionStore();
         store.StartNew();
 
-        // 4) 建通道总线 + 会话（有管道 = 有 UI，可交互确认）
-        var bus = new EventBus(channel, busLogger);
-        var initialMode = PrefsStore.LoadPermissionMode() ?? PermissionMode.Ask;
-        var session = new AgentSession(
-            llm, tools, store, bus,
-            Paths.DataDir, Environment.CurrentDirectory, initialMode, resolved?.Persona ?? "",
-            resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
-            askInteractive: true);
+         // 4) 建通道总线 + 会话（有管道 = 有 UI，可交互确认）
+         var bus = new EventBus(channel, busLogger);
+         var initialMode = PrefsStore.LoadPermissionMode() ?? PermissionMode.Ask;
+         // P16：用量库单例（与 SessionStore 同级，AgentSession 落盘与 RPC 查询共用同一实例）
+         var usageStore = new HaloAgent.Engine.Storage.Usage.UsageStore(Paths.UsageDbFile);
+         var session = new AgentSession(
+             llm, tools, store, bus,
+             Paths.DataDir, Environment.CurrentDirectory, initialMode, resolved?.Persona ?? "",
+             resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
+             askInteractive: true, usageStore: usageStore);
         if (resolved is not null)
         {
             try { session.ReconfigureActive(resolved); }
@@ -141,9 +143,8 @@ public static class EngineAssembly
             Retry = resolved?.Retry ?? 0,
             Persona = resolved?.Persona ?? "",
         };
-
-        // 6) 注册路由（P10 新契约；旧方法删除）
-        var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt);
+         // 6) 注册路由（P10 新契约；旧方法删除）
+         var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt, usageStore);
         var stub = new StubMethods(state);
         router.RegisterAll(
             ("system.ping", stub.SystemPing),
@@ -208,8 +209,14 @@ public static class EngineAssembly
             ("fs.completePaths", real.FsCompletePathsAsync),
             ("fs.validatePath", real.FsValidatePathAsync),
 
-            ("update.check", real.UpdateCheckAsync),
-            ("update.install", real.UpdateInstallAsync));
+             ("update.check", real.UpdateCheckAsync),
+             ("update.install", real.UpdateInstallAsync),
+ 
+             ("usage.query", real.UsageQueryAsync),
+             ("usage.summary", real.UsageSummaryAsync),
+             ("usage.stats", real.UsageStatsAsync),
+             ("usage.export", real.UsageExportAsync),
+             ("usage.clear", real.UsageClearAsync));
 
         return new AssembledEngine(router, state, bus, session, store, tools);
     }

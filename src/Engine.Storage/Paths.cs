@@ -25,7 +25,8 @@ public static class Paths
     }
 
     public static string ConfigFile => Path.Combine(DataDir, "config.json");
-    /// <summary>UI 偏好（权限模式等）：独立小文件，不进 config.json，避免触碰旧形状嗅探/备份/迁移语义。</summary>
+     public static string UsageDbFile => Path.Combine(DataDir, "usage.db");
+     /// <summary>UI 偏好（权限模式等）：独立小文件，不进 config.json，避免触碰旧形状嗅探/备份/迁移语义。</summary>
     public static string PrefsFile => Path.Combine(DataDir, "prefs.json");
     public static string McpFile => Path.Combine(DataDir, "mcp.json");
     public static string LogsDir => Path.Combine(DataDir, "logs");

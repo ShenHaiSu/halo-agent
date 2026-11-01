@@ -51,9 +51,10 @@ public sealed class FrameServer
         "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
         "settings.mcp.save",
 
-        "asset.skills.save", "asset.skills.delete", "asset.skills.run",
-        "asset.personas.save", "asset.memory.save", "asset.memory.delete",
-        "tool.undoRollback", "system.shutdown", "update.install",
+         "asset.skills.save", "asset.skills.delete", "asset.skills.run",
+         "asset.personas.save", "asset.memory.save", "asset.memory.delete",
+         "tool.undoRollback", "system.shutdown", "update.install",
+         "usage.clear",
     };
 
     public FrameServer(IFrameChannel channel, EngineState state, EventBus bus,

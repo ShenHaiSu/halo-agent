@@ -257,6 +257,50 @@ function mockSettings(): unknown {
     configPath: '(mock)/config.json',
   };
 }
+ // P16 mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
+ function mockUsageRows(): unknown[] {
+   const day = 86400000;
+   const now = Date.now();
+   const mk = (i: number, ts: number, providerId: string, modelId: string, prompt: number, cached: number, output: number) => ({
+     tsMs: ts, sessionId: 's-mock-1', turnId: `t-mock-${i}`, providerId, providerDisplay: providerId,
+     modelId, modelDisplay: modelId, protocol: 'chat', prompt, cached, output,
+     total: prompt + output, hitRate: prompt > 0 ? cached / prompt : 0, truncated: 0,
+   });
+   return [
+     mk(1, now - 2 * day, 'openai', 'shared-name', 40000, 10000, 15000),
+     mk(2, now - 1 * day, 'openai', 'shared-name', 40000, 10000, 15000),
+     mk(3, now, 'openai', 'shared-name', 20000, 5000, 8000),
+     mk(4, now, 'other', 'shared-name', 20000, 5000, 7000),
+   ];
+ }
+ function mockUsageSummary(): unknown {
+   const rows = mockUsageRows() as { tsMs: number; providerId: string; modelId: string; prompt: number; cached: number; output: number }[];
+   const input = rows.reduce((a, r) => a + r.prompt, 0);
+   const cached = rows.reduce((a, r) => a + r.cached, 0);
+   const output = rows.reduce((a, r) => a + r.output, 0);
+   const byDayMap = new Map<string, { input: number; cached: number; output: number }>();
+   for (const r of rows) {
+     const d = new Date(r.tsMs);
+     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+     const e = byDayMap.get(key) ?? { input: 0, cached: 0, output: 0 };
+     e.input += r.prompt; e.cached += r.cached; e.output += r.output;
+     byDayMap.set(key, e);
+   }
+   const byDay = [...byDayMap.entries()].map(([day, v]) => ({ day, ...v })).sort((a, b) => (a.day < b.day ? -1 : 1));
+   const byModelMap = new Map<string, { providerId: string; modelId: string; input: number; cached: number; output: number; requests: number }>();
+   for (const r of rows) {
+     const k = `${r.providerId} ${r.modelId}`;
+     const e = byModelMap.get(k) ?? { providerId: r.providerId, modelId: r.modelId, input: 0, cached: 0, output: 0, requests: 0 };
+     e.input += r.prompt; e.cached += r.cached; e.output += r.output; e.requests += 1;
+     byModelMap.set(k, e);
+   }
+   const byModel = [...byModelMap.values()].map((m) => ({
+     providerId: m.providerId, providerDisplay: m.providerId, modelId: m.modelId, modelDisplay: m.modelId,
+     input: m.input, cached: m.cached, output: m.output, requests: m.requests,
+     hitRate: m.input > 0 ? m.cached / m.input : 0,
+   }));
+   return { input, cached, output, total: input + output, requests: rows.length, hitRate: input > 0 ? cached / input : 0, byDay, byModel };
+ }
 
 export const BEHAVIORS: Record<string, MockBehavior> = {
   'system.ping': { kind: 'ok', run: () => ({ pong: true, version: '0.0.0-mock', protocol: 1, pid: 0, uptimeMs: 12345, serverTimeMs: Date.now() }) },
@@ -373,6 +417,25 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'fs.completePaths': { kind: 'ok', run: () => ({ items: [] }) },
   'fs.validatePath': { kind: 'ok', run: (p) => ({ valid: true, normalized: (p as { path?: string } | null)?.path ?? '', isDir: true }) },
 
-  'update.check': { kind: 'ok', run: () => ({ available: false, latestVersion: null, notes: 'Mock 环境无更新源' }) },
-  'update.install': { kind: 'ok', run: () => ({ started: false }) },
-};
+   'update.check': { kind: 'ok', run: () => ({ available: false, latestVersion: null, notes: 'Mock 环境无更新源' }) },
+   'update.install': { kind: 'ok', run: () => ({ started: false }) },
+ 
+   // usage 5 (P16 mock：3 天数据，两个 provider 同名模型各一行，验证双键拆分)
+   'usage.summary': { kind: 'ok', run: () => mockUsageSummary() },
+   'usage.query': {
+     kind: 'ok',
+     run: (p) => {
+       const o = (p as { page?: number; pageSize?: number } | null) ?? {};
+       const page = Math.max(1, o.page ?? 1);
+       const pageSize = Math.min(200, Math.max(1, o.pageSize ?? 50));
+       const items = mockUsageRows().slice((page - 1) * pageSize, page * pageSize);
+       return { items, total: mockUsageRows().length };
+     },
+   },
+   'usage.stats': { kind: 'ok', run: () => ({ sizeBytes: 123456, rowCount: mockUsageRows().length }) },
+   'usage.export': {
+     kind: 'ok',
+     run: () => ({ csv: '"时间","session_id","turn_id","provider","model","protocol","输入","缓存","输出","合计","命中率","截断"\r\n', truncated: false }),
+   },
+   'usage.clear': { kind: 'ok', run: () => ({ removed: 0 }) },
+ };

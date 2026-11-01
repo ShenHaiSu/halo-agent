@@ -156,11 +156,11 @@ public abstract record StreamEvent
     public sealed record ToolCallDelta(int Index, string Name, string ArgumentsFragment) : StreamEvent;
 }
 
-public sealed record Usage(long PromptTokens = 0, long CompletionTokens = 0)
-{
-    public long Total => PromptTokens + CompletionTokens;
-    public bool IsEmpty => Total == 0;
-}
+ public sealed record Usage(long PromptTokens = 0, long CompletionTokens = 0, long CachedTokens = 0)
+ {
+     public long Total => PromptTokens + CompletionTokens;
+     public bool IsEmpty => Total == 0 && CachedTokens == 0;
+ }
 
 /// <summary>一次模型回复（流式累积后的完整结果）。</summary>
 public sealed record AssistantReply

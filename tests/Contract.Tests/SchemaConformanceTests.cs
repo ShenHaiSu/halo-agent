@@ -209,7 +209,9 @@ internal static class KnownMethods
         // fs
         "fs.listDir", "fs.completePaths", "fs.validatePath",
         "fs.browse", "fs.pickFiles", "fs.pickSavePath", "fs.readImageAsBase64",
-        // update
-        "update.check", "update.install",
-    };
+         // update
+         "update.check", "update.install",
+         // usage (P16)
+         "usage.query", "usage.summary", "usage.stats", "usage.export", "usage.clear",
+     };
 }

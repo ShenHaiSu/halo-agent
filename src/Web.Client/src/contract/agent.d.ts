@@ -193,6 +193,45 @@ export interface TurnView {
   final: MessageView
 }
 
+/** 用量明细行 */
+export interface UsageRow {
+  tsMs: number
+  sessionId: string
+  turnId: string
+  providerId: string
+  providerDisplay?: string
+  modelId: string
+  modelDisplay?: string
+  protocol?: string
+  prompt: number
+  cached: number
+  output: number
+  total: number
+  hitRate: number
+  truncated?: number
+}
+
+/** 按天聚合 */
+export interface UsageByDay {
+  day: string
+  input: number
+  cached: number
+  output: number
+}
+
+/** 按双键聚合 */
+export interface UsageByModel {
+  providerId: string
+  providerDisplay?: string
+  modelId: string
+  modelDisplay?: string
+  input: number
+  cached: number
+  output: number
+  requests: number
+  hitRate: number
+}
+
 /** 帧信封：request */
 export interface RequestFrame {
   t: "req"
@@ -654,6 +693,66 @@ export interface HaloMethods {
   found: boolean
   reason?: string | null
 } }
+  /** usage.query */
+  'usage.query': { params: {
+  fromMs?: number
+  toMs?: number
+  providerId?: string
+  modelId?: string
+  sessionId?: string
+  tzOffsetMin?: number
+  page?: number
+  pageSize?: number
+}; result: {
+  items: UsageRow[]
+  total: number
+  degraded?: boolean
+} }
+  /** usage.summary */
+  'usage.summary': { params: {
+  fromMs?: number
+  toMs?: number
+  providerId?: string
+  modelId?: string
+  sessionId?: string
+  tzOffsetMin?: number
+}; result: {
+  input: number
+  cached: number
+  output: number
+  total: number
+  requests: number
+  hitRate: number
+  byDay: UsageByDay[]
+  byModel: UsageByModel[]
+  degraded?: boolean
+} }
+  /** usage.stats */
+  'usage.stats': { params: void; result: {
+  sizeBytes: number
+  rowCount: number
+  degraded?: boolean
+} }
+  /** usage.export */
+  'usage.export': { params: {
+  fromMs?: number
+  toMs?: number
+  providerId?: string
+  modelId?: string
+  sessionId?: string
+  tzOffsetMin?: number
+}; result: {
+  csv: string
+  truncated: boolean
+  degraded?: boolean
+} }
+  /** usage.clear */
+  'usage.clear': { params: {
+  beforeMs: number
+}; result: {
+  removed: number
+  degraded?: boolean
+} }
 }
 
 /** 事件载荷表：kind → payload。ask.* 的 payload 即 PendingAsk。 */
@@ -875,6 +974,11 @@ export const METHODS = [
   'settings.saveProviders',
   'settings.setActive',
   'tool.result',
+  'usage.query',
+  'usage.summary',
+  'usage.stats',
+  'usage.export',
+  'usage.clear',
 ] as const
 
 /** 全部事件 kind（与 schema.events 的键集合一致）。 */

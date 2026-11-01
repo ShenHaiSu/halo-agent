@@ -18,38 +18,41 @@ namespace HaloAgent.Engine.Server.Routing;
 /// </summary>
 public sealed partial class RealMethods
 {
-    private readonly AgentSession _session;
-    private readonly SessionStore _store;
-    private readonly ToolRegistry _tools;
-    private readonly string _dataDir;
-    private readonly ILogger _log;
-    private readonly CancellationToken _shutdownCt;
-
-    public RealMethods(
-        AgentSession session,
-        SessionStore store,
-        ToolRegistry tools,
-        ILogger log,
-        CancellationToken shutdownCt)
-        : this(session, store, tools, Paths.DataDir, log, shutdownCt)
-    {
-    }
-
-    public RealMethods(
-        AgentSession session,
-        SessionStore store,
-        ToolRegistry tools,
-        string dataDir,
-        ILogger log,
-        CancellationToken shutdownCt)
-    {
-        _session = session;
-        _store = store;
-        _tools = tools;
-        _dataDir = dataDir;
-        _log = log;
-        _shutdownCt = shutdownCt;
-    }
+     private readonly AgentSession _session;
+     private readonly SessionStore _store;
+     private readonly ToolRegistry _tools;
+     private readonly string _dataDir;
+     private readonly ILogger _log;
+     private readonly CancellationToken _shutdownCt;
+     private readonly HaloAgent.Engine.Storage.Usage.UsageStore _usageStore;
+ 
+     public RealMethods(
+         AgentSession session,
+         SessionStore store,
+         ToolRegistry tools,
+         ILogger log,
+         CancellationToken shutdownCt)
+         : this(session, store, tools, Paths.DataDir, log, shutdownCt)
+     {
+     }
+ 
+     public RealMethods(
+         AgentSession session,
+         SessionStore store,
+         ToolRegistry tools,
+         string dataDir,
+         ILogger log,
+         CancellationToken shutdownCt,
+         HaloAgent.Engine.Storage.Usage.UsageStore? usageStore = null)
+     {
+         _session = session;
+         _store = store;
+         _tools = tools;
+         _dataDir = dataDir;
+         _log = log;
+         _shutdownCt = shutdownCt;
+         _usageStore = usageStore ?? new HaloAgent.Engine.Storage.Usage.UsageStore(Paths.UsageDbFile);
+     }
 
     public Task<object?> AgentPromptAsync(JsonElement? p, CancellationToken ct)
     {

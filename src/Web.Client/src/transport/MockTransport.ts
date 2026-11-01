@@ -83,12 +83,23 @@ export class MockTransport implements Transport {
       case 'session.list':
         return { items: MOCK_SESSIONS } as unknown as HaloResult<M>;
 
-      case 'tool.list':
-        return { items: MOCK_TOOLS } as unknown as HaloResult<M>;
-
-      default:
-        // 其余方法返回最小可用 stub，避免前端开发被阻断
-        return {} as unknown as HaloResult<M>;
+       case 'tool.list':
+         return { items: MOCK_TOOLS } as unknown as HaloResult<M>;
+ 
+       case 'usage.summary':
+         return { input: 0, cached: 0, output: 0, total: 0, requests: 0, hitRate: 0, byDay: [], byModel: [] } as unknown as HaloResult<M>;
+       case 'usage.query':
+         return { items: [], total: 0 } as unknown as HaloResult<M>;
+       case 'usage.stats':
+         return { sizeBytes: 0, rowCount: 0 } as unknown as HaloResult<M>;
+       case 'usage.export':
+         return { csv: '', truncated: false } as unknown as HaloResult<M>;
+       case 'usage.clear':
+         return { removed: 0 } as unknown as HaloResult<M>;
+ 
+       default:
+         // 其余方法返回最小可用 stub，避免前端开发被阻断
+         return {} as unknown as HaloResult<M>;
     }
   }
 

@@ -34,8 +34,9 @@ const TILDE = {
   'typescript-eslint': '8.16.',
   prettier: '3.4.',
   jsdom: '25.',
-  '@vitejs/plugin-vue': '5.2.',
-  '@vue/test-utils': '2.4.',
+   '@vitejs/plugin-vue': '5.2.',
+   '@vue/test-utils': '2.4.',
+   echarts: '5.5.',
 };
 
 const FORBIDDEN_DEPS = [

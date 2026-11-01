@@ -212,13 +212,17 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         {
             var root = doc.RootElement;
 
-            // usage（include_usage 时流末尾的一条）
-            if (root.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
-            {
-                var p = u.TryGetProperty("prompt_tokens", out var pt) ? pt.GetInt64() : 0;
-                var c = u.TryGetProperty("completion_tokens", out var ct2) ? ct2.GetInt64() : 0;
-                if (p + c > 0) usage = new Usage(p, c);
-            }
+             // usage（include_usage 时流末尾的一条；中间帧不更新由调用方保证单次赋值语义，此处仅末帧含 usage 时赋值）
+             if (root.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+             {
+                 var p = GetLong(u, "prompt_tokens");
+                 var c = GetLong(u, "completion_tokens");
+                 JsonElement det = default;
+                 bool hasDet = u.TryGetProperty("prompt_tokens_details", out det);
+                 var cached = GetCached(u, hasDet ? det : default);
+                 var nu = WithClamp(p, c, cached);
+                 if (!nu.IsEmpty) usage = nu;
+             }
 
             if (!root.TryGetProperty("choices", out var choices) ||
                 choices.ValueKind != JsonValueKind.Array)
@@ -406,17 +410,39 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         return sb.Length == 0 || string.IsNullOrWhiteSpace(sb.ToString()) ? null : sb.ToString();
     }
 
-    private static Usage ExtractUsage(JsonElement root)
-    {
-        if (!root.TryGetProperty("usage", out var u) || u.ValueKind != JsonValueKind.Object)
-            return new Usage();
-
-        long Get(string name) =>
-            u.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
-                ? v.GetInt64() : 0;
-
-        return new Usage(Get("prompt_tokens"), Get("completion_tokens"));
-    }
+     private static long GetLong(JsonElement o, string name)
+     {
+         if (o.ValueKind != JsonValueKind.Object) return 0;
+         if (!o.TryGetProperty(name, out var v)) return 0;
+         if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n)) return Math.Max(0, n);
+         return 0;
+     }
+     private static long GetCached(JsonElement usageObj, JsonElement detailsObj)
+     {
+         long c = 0;
+         if (detailsObj.ValueKind == JsonValueKind.Object)
+             c = GetLong(detailsObj, "cached_tokens");
+         if (c == 0) c = GetLong(usageObj, "cached_tokens");
+         if (c == 0) c = GetLong(usageObj, "prompt_cache_hit_tokens");
+         return Math.Max(0, c);
+     }
+     private static Usage WithClamp(long prompt, long completion, long cached)
+     {
+         prompt = Math.Max(0, prompt); completion = Math.Max(0, completion); cached = Math.Max(0, cached);
+         if (prompt > 0) cached = Math.Min(cached, prompt); else cached = 0;
+         return new Usage(prompt, completion, cached);
+     }
+     private static Usage ExtractUsage(JsonElement root)
+     {
+         if (!root.TryGetProperty("usage", out var u) || u.ValueKind != JsonValueKind.Object)
+             return new Usage();
+         var prompt = GetLong(u, "prompt_tokens");
+         var completion = GetLong(u, "completion_tokens");
+         JsonElement details = default;
+         bool hasDetails = u.TryGetProperty("prompt_tokens_details", out details);
+         var cached = GetCached(u, hasDetails ? details : default);
+         return WithClamp(prompt, completion, cached);
+     }
 
     private static ToolCall? ValueToToolCall(JsonElement v)
     {
@@ -613,12 +639,16 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                 if (root.TryGetProperty("response", out var r2) && r2.ValueKind == JsonValueKind.Object)
                 {
                     if (r2.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String) responseId = idEl.GetString();
-                    if (r2.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
-                    {
-                        long gi(string n) => u.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
-                        long p = gi("input_tokens"), c = gi("output_tokens");
-                        if (p + c > 0) usage = new Usage(p, c);
-                    }
+                     if (r2.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+                     {
+                         long p = GetLong(u, "input_tokens");
+                         long c = GetLong(u, "output_tokens");
+                         JsonElement det = default;
+                         bool hasDet = u.TryGetProperty("input_tokens_details", out det);
+                         var cached = GetCached(u, hasDet ? det : default);
+                         var nu = WithClamp(p, c, cached);
+                         if (!nu.IsEmpty) usage = nu;
+                     }
                     if (r2.TryGetProperty("incomplete", out var inc) && inc.ValueKind == JsonValueKind.Object)
                     {
                         if (inc.TryGetProperty("reason", out var rr) && rr.ValueKind == JsonValueKind.String) incompleteReason = rr.GetString();
@@ -653,26 +683,28 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
             return false;
         }
     }
-    internal static ResponsesReply ParseResponsesResponse(string text)
-    {
-        using var doc = JsonDocument.Parse(text);
-        var root = doc.RootElement;
-        string? id = root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : null;
-        if (root.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.Object) { if (r.TryGetProperty("id", out var id2) && id2.ValueKind == JsonValueKind.String) id ??= id2.GetString(); }
-        var sb = new StringBuilder(); var rsb = new StringBuilder();
-        var calls = new List<ToolCall>(); var unknowns = new List<UnknownOutput>();
-        Usage usage = new();
-        bool trunc = false; string? incReason = null;
-        if (root.TryGetProperty("usage", out var u2) && u2.ValueKind == JsonValueKind.Object)
-        {
-            long g(string n) => u2.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
-            usage = new Usage(g("input_tokens"), g("output_tokens"));
-        }
-        else if (root.TryGetProperty("response", out var rr4) && rr4.ValueKind == JsonValueKind.Object && rr4.TryGetProperty("usage", out var u3) && u3.ValueKind == JsonValueKind.Object)
-        {
-            long g2(string n) => u3.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
-            usage = new Usage(g2("input_tokens"), g2("output_tokens"));
-        }
+     internal static ResponsesReply ParseResponsesResponse(string text)
+     {
+         using var doc = JsonDocument.Parse(text);
+         var root = doc.RootElement;
+         string? id = root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : null;
+         if (root.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.Object) { if (r.TryGetProperty("id", out var id2) && id2.ValueKind == JsonValueKind.String) id ??= id2.GetString(); }
+         var sb = new StringBuilder(); var rsb = new StringBuilder();
+         var calls = new List<ToolCall>(); var unknowns = new List<UnknownOutput>();
+         Usage usage = new();
+         bool trunc = false; string? incReason = null;
+         if (root.TryGetProperty("usage", out var u2) && u2.ValueKind == JsonValueKind.Object)
+         {
+             JsonElement det2 = default;
+             bool hasDet2 = u2.TryGetProperty("input_tokens_details", out det2);
+             usage = WithClamp(GetLong(u2, "input_tokens"), GetLong(u2, "output_tokens"), GetCached(u2, hasDet2 ? det2 : default));
+         }
+         else if (root.TryGetProperty("response", out var rr4) && rr4.ValueKind == JsonValueKind.Object && rr4.TryGetProperty("usage", out var u3) && u3.ValueKind == JsonValueKind.Object)
+         {
+             JsonElement det3 = default;
+             bool hasDet3 = u3.TryGetProperty("input_tokens_details", out det3);
+             usage = WithClamp(GetLong(u3, "input_tokens"), GetLong(u3, "output_tokens"), GetCached(u3, hasDet3 ? det3 : default));
+         }
         JsonElement output = default;
         bool hasOutput = false;
         if (root.TryGetProperty("output", out var o2) && o2.ValueKind == JsonValueKind.Array) { output = o2; hasOutput = true; }

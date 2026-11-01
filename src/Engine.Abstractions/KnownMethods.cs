@@ -64,7 +64,12 @@ internal static class KnownMethods
         "tool.mcpStatus",
         "tool.undoList",
         "tool.undoRollback",
-        "update.check",
-        "update.install",
+         "update.check",
+         "update.install",
+         "usage.clear",
+         "usage.export",
+         "usage.query",
+         "usage.stats",
+         "usage.summary",
     };
 }

@@ -26,9 +26,9 @@ public sealed class StubMethods
     public StubMethods(EngineState state) => _state = state;
 
     // ============================================================
-    //  一次性注册：覆盖契约 54 个方法
-    //  system 5 / agent 7 / session 8 / state 6 / settings 7
-    //  / asset 12 / tool 4 / fs 3 / update 2
+     //  一次性注册：覆盖契约 58 个方法
+     //  system 5 / agent 7 / session 8 / state 5 / settings 7
+     //  / asset 12 / tool 4 / fs 3 / update 2 / usage 5
     // ============================================================
 
     public static void RegisterAll(MethodRouter router, StubMethods stub)
@@ -102,9 +102,15 @@ public sealed class StubMethods
             ("fs.completePaths", stub.EmptyList),
             ("fs.validatePath", stub.NotImplemented),
 
-            // ---- update 2 ----
-            ("update.check", stub.NotImplemented),
-            ("update.install", stub.NotImplemented));
+             // ---- update 2 ----
+             ("update.check", stub.NotImplemented),
+             ("update.install", stub.NotImplemented),
+             // ---- usage 5 (P16) ----
+             ("usage.query", stub.UsageQuery),
+             ("usage.summary", stub.UsageSummary),
+             ("usage.stats", stub.UsageStats),
+             ("usage.export", stub.UsageExport),
+             ("usage.clear", stub.UsageClear));
     }
 
     // ============================================================
@@ -302,10 +308,21 @@ public sealed class StubMethods
     public Task<object?> SettingsMcpSave(JsonElement? _, CancellationToken ct) =>
         Task.FromResult<object?>(new { ok = true, notes = Array.Empty<string>() });
 
-    /// <summary>asset.skills.list 回落形状（含 warnings，与契约一致）。</summary>
-    public Task<object?> AssetSkillsList(JsonElement? _, CancellationToken ct) =>
-        Task.FromResult<object?>(new { items = Array.Empty<object>(), warnings = Array.Empty<string>() });
-
+     /// <summary>asset.skills.list 回落形状（含 warnings，与契约一致）。</summary>
+     public Task<object?> AssetSkillsList(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { items = Array.Empty<object>(), warnings = Array.Empty<string>() });
+ 
+     /// <summary>P16 用量桩：summary 全 0 + 空数组；query 空页；export 空串；clear 0；stats 0。</summary>
+     public Task<object?> UsageQuery(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { items = Array.Empty<object>(), total = 0 });
+     public Task<object?> UsageSummary(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { input = 0, cached = 0, output = 0, total = 0, requests = 0, hitRate = 0.0, byDay = Array.Empty<object>(), byModel = Array.Empty<object>() });
+     public Task<object?> UsageStats(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { sizeBytes = 0, rowCount = 0 });
+     public Task<object?> UsageExport(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { csv = "", truncated = false });
+     public Task<object?> UsageClear(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { removed = 0 });
     private static bool IsWin7()
     {
         var v = Environment.OSVersion.Version;

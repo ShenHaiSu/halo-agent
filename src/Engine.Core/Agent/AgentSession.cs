@@ -8,9 +8,10 @@ using HaloAgent.Engine.Core.Llm;
 using HaloAgent.Engine.Core.Permissions;
 using HaloAgent.Engine.Core.Tools;
 using HaloAgent.Engine.Core.Util;
-using HaloAgent.Engine.Storage.Config;
-using HaloAgent.Engine.Storage.Sessions;
-using HaloAgent.Engine.Storage.Undo;
+ using HaloAgent.Engine.Storage.Config;
+ using HaloAgent.Engine.Storage.Sessions;
+ using HaloAgent.Engine.Storage.Undo;
+ using HaloAgent.Engine.Storage.Usage;
 
 namespace HaloAgent.Engine.Core.Agent;
 
@@ -88,27 +89,33 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private int _roundLimit;
     private string? _lastResponseId;
     private int _responsesSentCount;
-    private readonly IClock _clock;
-    private long _lastTsMs;
+     private readonly IClock _clock;
+     private readonly UsageStore _usageStore;
+     private long _turnPrompt;
+     private long _turnCached;
+     private long _turnCompletion;
+     private bool _turnHasUsage;
+     private long _lastTsMs;
     private const int RepeatWarn = 3;
     private const int RepeatAbort = 6;
     private const int ContextMaxChars = 20_000;
     private const int KeepTailForCompact = 4;
 
 
-    public AgentSession(
-        ILlmClient llm,
-        ToolRegistry tools,
-        SessionStore store,
-        EventBus bus,
-        string dataDir,
-        string cwd,
-        PermissionMode mode,
-        string persona,
-        int maxTurns,
-        int retry,
-        bool askInteractive,
-        IClock? clock = null)
+     public AgentSession(
+         ILlmClient llm,
+         ToolRegistry tools,
+         SessionStore store,
+         EventBus bus,
+         string dataDir,
+         string cwd,
+         PermissionMode mode,
+         string persona,
+         int maxTurns,
+         int retry,
+         bool askInteractive,
+         IClock? clock = null,
+         UsageStore? usageStore = null)
     {
         _llm = llm;
         _tools = tools;
@@ -122,7 +129,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         _maxTurns = maxTurns;
         _retry = retry;
         _askInteractive = askInteractive;
-        _clock = clock ?? SystemClock.Instance;
+         _clock = clock ?? SystemClock.Instance;
+         _usageStore = usageStore ?? new UsageStore(HaloAgent.Engine.Storage.Paths.UsageDbFile);
 
         PushSystemPrompt();
     }
@@ -444,11 +452,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         {
             return await RunTurnInnerAsync(prompt, turnId, turnCts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+         catch (OperationCanceledException)
+         {
+             try { RecordTurnUsage(turnId, true); } catch { }
+             await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+             throw;
+         }
          catch (Exception ex)
          {
              // P16-F3：异常出口不再哑巴空帧——Text 带上错误文本（与 notice 同一串文案），前端回填后气泡可见。
@@ -464,10 +473,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                      Record(ChatMessage.Assistant(msg) with { TurnId = turnId, Ord = fu });
                  } catch { }
                  _bus.FlushDeltasBlocking();
-                 try { await _bus.PublishStateAsync(EventKinds.RoundEnded, new RoundEndedPayload { Used = fu, HasTools = true }, CancellationToken.None).ConfigureAwait(false); } catch { }
                  await _bus.PublishStateAsync(EventKinds.TurnFinished,
                      new TurnFinishedPayload { TurnId = turnId, Text = msg, Truncated = true, Reason = ex.Message, FinalUsed = fu },
                      CancellationToken.None).ConfigureAwait(false);
+                 try { RecordTurnUsage(turnId, true); } catch { }
              } catch { }
  
              await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
@@ -517,6 +526,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var repeatCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         int toolCallCount = 0;
+         // P16：turn 级用量累积（同 turn 多 round 只记一次，以最终累积为准）
+         _turnPrompt = 0; _turnCached = 0; _turnCompletion = 0; _turnHasUsage = false;
 
         while (true)
         {
@@ -560,6 +571,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 _usageIn += reply.Usage.PromptTokens;
                 _usageOut += reply.Usage.CompletionTokens;
                 _lastPromptTokens = reply.Usage.PromptTokens;
+                 // P16：turn 级累积（多 round 求和，FinishAsync 时一次落盘）
+                 _turnPrompt += reply.Usage.PromptTokens;
+                 _turnCached += reply.Usage.CachedTokens;
+                 _turnCompletion += reply.Usage.CompletionTokens;
+                 _turnHasUsage = true;
 
                 await _bus.PublishStateAsync(EventKinds.Usage,
                     new UsagePayload
@@ -1428,24 +1444,54 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }, ct).ConfigureAwait(false);
     }
 
-    private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null)
-    {
-        _bus.FlushDeltasBlocking();
-        string? rid;
-        lock (_lock) rid = _lastResponseId;
-        await _bus.PublishStateAsync(EventKinds.TurnFinished,
-            new TurnFinishedPayload
-            {
-                TurnId = turnId,
-                Text = text,
-                Truncated = truncated,
-                ResponseId = rid,
-                FinalUsed = finalUsed,
-                Reason = reason,
-            }, ct).ConfigureAwait(false);
-
-        await PublishBusyAsync(false, ct).ConfigureAwait(false);
-    }
+     private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null)
+     {
+         RecordTurnUsage(turnId, truncated);
+         _bus.FlushDeltasBlocking();
+         string? rid;
+         lock (_lock) rid = _lastResponseId;
+         await _bus.PublishStateAsync(EventKinds.TurnFinished,
+             new TurnFinishedPayload
+             {
+                 TurnId = turnId,
+                 Text = text,
+                 Truncated = truncated,
+                 ResponseId = rid,
+                 FinalUsed = finalUsed,
+                 Reason = reason,
+             }, ct).ConfigureAwait(false);
+         await PublishBusyAsync(false, ct).ConfigureAwait(false);
+     }
+     /// <summary>P16：每非空 turn exactly-once 落盘（靠 ux_usage_turn 幂等；失败不中断对话）。无 Usage 不记。</summary>
+     private void RecordTurnUsage(string turnId, bool truncated)
+     {
+         if (!_turnHasUsage) return;
+         _turnHasUsage = false;
+         try
+         {
+             string pid, pdisp, mid, mdisp, proto, sid;
+             lock (_lock)
+             {
+                 pid = _activeProviderId; pdisp = _activeProviderDisplay;
+                 mid = _activeModelId; mdisp = _activeModelDisplay; proto = _activeProtocol;
+             }
+             sid = _store.SessionId;
+             if (string.IsNullOrEmpty(mid)) mid = _llm.Model ?? "";
+             long now = _clock.UtcNowMs();
+             _usageStore.Record(new UsageEvent
+             {
+                 TsMs = now, SessionId = sid, TurnId = turnId,
+                 ProviderId = pid, ProviderDisplay = pdisp,
+                 ModelId = mid, ModelDisplay = mdisp ?? "",
+                 Protocol = string.IsNullOrEmpty(proto) ? "chat" : proto,
+                 PromptTokens = _turnPrompt, CachedTokens = _turnCached,
+                 CompletionTokens = _turnCompletion,
+                 TotalTokens = _turnPrompt + _turnCompletion,
+                 Truncated = truncated ? 1 : 0, RecordedMs = now,
+             });
+         }
+         catch { }
+     }
 
     private async Task PublishBusyAsync(bool busy, CancellationToken ct)
     {

@@ -3,6 +3,15 @@
 > **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 contractVersion 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 
+ ## [3] — 2026-11-01 · P16 用量分析（非破坏性）
+ 
+ **非破坏性增补**（`contractVersion` 保持 `3`，只新增 5 个方法 + 3 个类型）：
+ 
+ - 新增 `usage.query {fromMs?,toMs?,providerId?,modelId?,sessionId?,tzOffsetMin?,page,pageSize} → {items: UsageRow[], total, degraded?}`（恒 desc，`order:'asc'` 直接 `params.invalid`）。
+ - 新增 `usage.summary`（同筛选无分页）`→ {input,cached,output,total,requests,hitRate,byDay,byModel,degraded?}`（`hitRate` 小数 0~1；`byDay` 按 `tzOffsetMin` 切天补 0；`byModel` 恒双键）。
+ - 新增 `usage.stats {} → {sizeBytes,rowCount,degraded?}`；`usage.export`（同筛选，上限 50000）`→ {csv,truncated,degraded?}`；`usage.clear {beforeMs} → {removed,degraded?}`（`beforeMs` 须为过去时间）。
+ - 无金额字段（P16 否决单价表 + 费用估算）。
+ - 前端跑 `node scripts/gen-contract-types.mjs` 重生成 `src/Web.Client/src/contract/agent.d.ts`。
 ## [3] — P15 回合渲染重构（破坏性）
 
 **破坏性**（contractVersion 2 → 3，不向后兼容；frame.Protocol 仍 1；旧历史打开即重排为 TurnView，不写回）：

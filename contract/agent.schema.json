@@ -778,6 +778,132 @@
         "user",
         "final"
       ]
+    },
+    "UsageRow": {
+      "type": "object",
+      "description": "用量明细行",
+      "properties": {
+        "tsMs": {
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "providerDisplay": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "modelDisplay": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "integer"
+        },
+        "cached": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "hitRate": {
+          "type": "number"
+        },
+        "truncated": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tsMs",
+        "sessionId",
+        "turnId",
+        "providerId",
+        "modelId",
+        "prompt",
+        "cached",
+        "output",
+        "total",
+        "hitRate"
+      ]
+    },
+    "UsageByDay": {
+      "type": "object",
+      "description": "按天聚合",
+      "properties": {
+        "day": {
+          "type": "string"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "cached": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "input",
+        "cached",
+        "output"
+      ]
+    },
+    "UsageByModel": {
+      "type": "object",
+      "description": "按双键聚合",
+      "properties": {
+        "providerId": {
+          "type": "string"
+        },
+        "providerDisplay": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "modelDisplay": {
+          "type": "string"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "cached": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "hitRate": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "providerId",
+        "modelId",
+        "input",
+        "cached",
+        "output",
+        "requests",
+        "hitRate"
+      ]
     }
   },
   "methods": {
@@ -2440,6 +2566,246 @@
       "implementedIn": "engine",
       "errors": [
         "session.notFound"
+      ]
+    },
+    "usage.query": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "fromMs": {
+            "type": "integer"
+          },
+          "toMs": {
+            "type": "integer"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tzOffsetMin": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/UsageRow"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": [
+        "params.invalid"
+      ]
+    },
+    "usage.summary": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "fromMs": {
+            "type": "integer"
+          },
+          "toMs": {
+            "type": "integer"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tzOffsetMin": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer"
+          },
+          "cached": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "hitRate": {
+            "type": "number"
+          },
+          "byDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/UsageByDay"
+            }
+          },
+          "byModel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/UsageByModel"
+            }
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "input",
+          "cached",
+          "output",
+          "total",
+          "requests",
+          "hitRate",
+          "byDay",
+          "byModel"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": [
+        "params.invalid"
+      ]
+    },
+    "usage.stats": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "rowCount": {
+            "type": "integer"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sizeBytes",
+          "rowCount"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": []
+    },
+    "usage.export": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "fromMs": {
+            "type": "integer"
+          },
+          "toMs": {
+            "type": "integer"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tzOffsetMin": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "csv": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "csv",
+          "truncated"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": [
+        "params.invalid"
+      ]
+    },
+    "usage.clear": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "beforeMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "beforeMs"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": [
+        "params.invalid"
       ]
     }
   },
