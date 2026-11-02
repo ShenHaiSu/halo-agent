@@ -1,7 +1,7 @@
 <!-- src/Web.Client/src/components/settings/pages/AboutPage.vue -->
-<!-- 关于分页：版本号 + 协议版本 / 检查更新 / 诊断信息复制 / 打开日志目录 / 数据目录。 -->
+<!-- 关于分页：版本号 + 协议版本 / 检查更新 / 诊断信息复制 / 打开日志目录 / 日志目录。 -->
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { hostBridge } from '@/bridge/host';
 import { useHostStore } from '@/stores/host';
@@ -21,6 +21,11 @@ const checking = ref(false);
 const updateInfo = ref<string | null>(null);
 
 const dataDir = ref('');
+const logsDir = computed(() => {
+  const d = (dataDir.value || '').replace(/[\\/]+$/, '');
+  if (!d) return '';
+  return d.includes('\\') ? `${d}\\logs` : `${d}/logs`;
+});
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -76,8 +81,8 @@ async function checkUpdate(): Promise<void> {
      const d = await transport.request<unknown>('system.diagnostics', null);
      const ok = await copyText(JSON.stringify(d, null, 2));
      toast[ok ? 'success' : 'error'](ok ? '诊断信息已复制' : '复制失败');
-   } catch (e) {
-     toast.error(`读取诊断信息失败：${(e as Error).message}`);
+  } catch (e) {
+    toast.error(`读取诊断信息失败：${(e as Error).message}`);
    }
  }
  
@@ -118,13 +123,13 @@ async function checkUpdate(): Promise<void> {
  }
 
 async function openDataDir(): Promise<void> {
-  if (!dataDir.value) {
-    toast.warning('数据目录未知');
+  if (!logsDir.value) {
+    toast.warning('日志目录未知');
     return;
   }
   try {
-    await hostBridge.showItemInFolder(dataDir.value);
-  } catch (e) {
+    await hostBridge.showItemInFolder(logsDir.value);
+   } catch (e) {
     toast.error(`打开失败：${(e as Error).message}`);
   }
 }
@@ -170,18 +175,18 @@ defineExpose({ isDirty, resetToSaved });
        </SettingRow>
  
        <SettingRow label="验证代理连通性" desc="复用模型探测，显示本次 via + 耗时（地址已脱敏）">
-         <div class="row-flex">
-           <HButton size="sm" variant="secondary" :loading="verifying" @click="verifyProxy">验证代理连通性</HButton>
+        <div class="row-flex">
+          <HButton size="sm" variant="secondary" :loading="verifying" @click="verifyProxy">验证代理连通性</HButton>
            <span v-if="verifyInfo" class="update-info" role="status">{{ verifyInfo }}</span>
          </div>
        </SettingRow>
  
  
 
-      <SettingRow label="数据目录" desc="只读。日志文件存放在该目录下">
-        <div class="row-flex">
-          <HInput :model-value="dataDir || '（未知）'" readonly />
-          <HButton size="sm" variant="secondary" :disabled="!dataDir" @click="openDataDir"
+      <SettingRow label="日志目录" desc="只读。引擎日志存放在该目录下（数据目录下的 logs 子目录）">
+         <div class="row-flex">
+          <HInput :model-value="logsDir || '（未知）'" readonly />
+           <HButton size="sm" variant="secondary" :disabled="!logsDir" @click="openDataDir"
             >打开目录</HButton
           >
         </div>

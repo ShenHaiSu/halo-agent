@@ -33,7 +33,6 @@ const ackRisk = ref(false);
 const applying = ref(false);
 
 const sandboxDir = computed(() => host.systemInfo?.cwd || session.cwd || '');
-const dataDir = computed(() => host.systemInfo?.dataDir || '');
 
 function onSelect(v: string | number): void {
   const next = v as PermissionMode;
@@ -108,9 +107,6 @@ defineExpose({ isDirty, resetToSaved });
       <HInput :model-value="sandboxDir || '（未知）'" readonly />
     </SettingRow>
 
-    <SettingRow label="数据目录" desc="只读。配置与资源文件的存放位置">
-      <HInput :model-value="dataDir || '（未知）'" readonly />
-    </SettingRow>
 
     <HDialog
       :open="pendingMode !== null"
