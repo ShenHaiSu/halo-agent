@@ -147,13 +147,14 @@ Step 'A-10.2：契约方法名白名单' 'A-10-contract.txt' {
     'state.snapshot','state.setMode','state.setPersona','state.setProvider',
     'state.setMaxTurns','state.setRetry',
     'settings.get','settings.saveModel','settings.saveNetwork','settings.probeModels',
-    'settings.saveExtraHeaders','settings.mcp.get','settings.mcp.save',
+    'settings.saveExtraHeaders','settings.saveProviders','settings.setActive','settings.mcp.get','settings.mcp.save',
     'asset.skills.list','asset.skills.get','asset.skills.save','asset.skills.delete','asset.skills.run',
-    'asset.personas.list','asset.personas.get','asset.personas.save',
+    'asset.personas.list','asset.personas.get','asset.personas.save','asset.personas.delete',
     'asset.memory.list','asset.memory.get','asset.memory.save','asset.memory.delete',
-    'tool.list','tool.undoList','tool.undoRollback','tool.mcpStatus',
-    'fs.listDir','fs.completePaths','fs.validatePath',
-    'update.check','update.install'
+    'tool.list','tool.result','tool.undoList','tool.undoRollback','tool.mcpStatus',
+    'fs.listDir','fs.completePaths','fs.validatePath','fs.browse','fs.pickSavePath',
+    'update.check','update.install',
+    'usage.query','usage.summary','usage.stats','usage.export','usage.exportFile','usage.clear'
   )
   "白名单 = $($contract.Count) 个方法"
 

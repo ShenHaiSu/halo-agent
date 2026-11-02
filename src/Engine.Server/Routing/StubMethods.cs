@@ -26,9 +26,9 @@ public sealed class StubMethods
     public StubMethods(EngineState state) => _state = state;
 
     // ============================================================
-     //  一次性注册：覆盖契约 58 个方法
+     //  一次性注册：覆盖契约 59 个方法
      //  system 5 / agent 7 / session 8 / state 5 / settings 7
-     //  / asset 12 / tool 4 / fs 3 / update 2 / usage 5
+     //  / asset 13 / tool 4 / fs 3 / update 2 / usage 6
     // ============================================================
 
     public static void RegisterAll(MethodRouter router, StubMethods stub)
@@ -77,7 +77,7 @@ public sealed class StubMethods
             ("settings.mcp.save", stub.SettingsMcpSave),
 
 
-            // ---- asset 12 ----
+            // ---- asset 13 ----
             ("asset.skills.list", stub.AssetSkillsList),
             ("asset.skills.get", stub.NotImplemented),
             ("asset.skills.save", stub.EmptyOk),
@@ -86,6 +86,7 @@ public sealed class StubMethods
             ("asset.personas.list", stub.EmptyList),
             ("asset.personas.get", stub.NotImplemented),
             ("asset.personas.save", stub.EmptyOk),
+            ("asset.personas.delete", stub.EmptyOk),
             ("asset.memory.list", stub.EmptyList),
             ("asset.memory.get", stub.NotImplemented),
             ("asset.memory.save", stub.EmptyOk),

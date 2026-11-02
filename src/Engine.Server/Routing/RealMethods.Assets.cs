@@ -170,6 +170,30 @@ public sealed partial class RealMethods
         return Task.FromResult<object?>(new AssetPersonasSaveResult { Ok = true });
     }
 
+    // ---------- asset.personas.delete ----------
+    public Task<object?> AssetPersonasDeleteAsync(JsonElement? p, CancellationToken ct)
+    {
+        var name = p?.TryGetProperty("name", out var nv) == true ? nv.GetString() : null;
+        if (string.IsNullOrWhiteSpace(name))
+            throw RpcException.ParamsInvalid("name 不能为空");
+        // 路径分隔符等非法名先拦掉：否则下面的 File.Exists 会拿它拼出人格目录外的路径。
+        if (name!.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || name.Contains('/') || name.Contains('\\')
+            || name is "." or "..")
+            throw RpcException.ParamsInvalid("人格名非法: " + name);
+
+        // PersonaStore.Delete 用单一 false 表达"非法名 / 不存在 / 删除失败"三种情形。
+        // 先用一次 stat 把"确实不存在"与"存在却删不掉"分开，避免文件被占用时误报"不存在"。
+        var path = Path.Combine(PersonaStore.Dir(_dataDir), name + ".md");
+        if (!File.Exists(path))
+            throw new RpcException(RpcError.AssetNotFound, "人格不存在: " + name);
+
+        if (!PersonaStore.Delete(_dataDir, name!))
+            throw new RpcException(RpcError.Internal, "删除人格失败（文件可能被占用或权限不足）: " + name);
+
+        return Task.FromResult<object?>(new AssetPersonasDeleteResult { Ok = true });
+    }
+
     // ---------- asset.memory.list ----------
     public Task<object?> AssetMemoryListAsync(JsonElement? p, CancellationToken ct)
     {

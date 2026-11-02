@@ -407,6 +407,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'asset.personas.list': { kind: 'ok', run: () => ({ items: [] }) },
   'asset.personas.get': { kind: 'ok', run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '', body: '' }) },
   'asset.personas.save': { kind: 'ok', run: () => ({ ok: true }) },
+  'asset.personas.delete': { kind: 'ok', run: () => ({ ok: true }) },
   'asset.memory.list': { kind: 'ok', run: () => ({ items: [] }) },
   'asset.memory.get': { kind: 'ok', run: () => ({ name: '', description: '', mtype: '', scope: '', body: '' }) },
   'asset.memory.save': { kind: 'ok', run: () => ({ ok: true, filename: 'mock.md' }) },

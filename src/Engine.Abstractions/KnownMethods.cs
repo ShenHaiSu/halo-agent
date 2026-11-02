@@ -18,6 +18,7 @@ internal static class KnownMethods
         "asset.memory.get",
         "asset.memory.list",
         "asset.memory.save",
+        "asset.personas.delete",
         "asset.personas.get",
         "asset.personas.list",
         "asset.personas.save",

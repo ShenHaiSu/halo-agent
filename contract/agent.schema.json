@@ -2108,6 +2108,32 @@
       },
       "implementedIn": "engine"
     },
+    "asset.personas.delete": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": [
+        "params.invalid",
+        "asset.notFound"
+      ],
+      "implementedIn": "engine"
+    },
     "asset.memory.list": {
       "params": null,
       "result": {

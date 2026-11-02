@@ -52,7 +52,7 @@ public sealed class FrameServer
         "settings.mcp.save",
 
          "asset.skills.save", "asset.skills.delete", "asset.skills.run",
-         "asset.personas.save", "asset.memory.save", "asset.memory.delete",
+         "asset.personas.save", "asset.personas.delete", "asset.memory.save", "asset.memory.delete",
          "tool.undoRollback", "system.shutdown", "update.install",
          "usage.clear",
     };

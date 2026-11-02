@@ -202,7 +202,7 @@ internal static class KnownMethods
         "asset.skills.delete", "asset.skills.run",
         "asset.themes.list", "asset.themes.get",
         "asset.themes.list", "asset.themes.get",
-        "asset.personas.list", "asset.personas.get", "asset.personas.save",
+        "asset.personas.list", "asset.personas.get", "asset.personas.save", "asset.personas.delete",
         "asset.memory.list", "asset.memory.get", "asset.memory.save", "asset.memory.delete",
         // tool
         "tool.list", "tool.undoList", "tool.undoRollback", "tool.mcpStatus", "tool.result",

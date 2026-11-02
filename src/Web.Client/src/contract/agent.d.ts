@@ -585,6 +585,12 @@ export interface HaloMethods {
 }; result: {
   ok?: boolean
 } }
+  /** asset.personas.delete */
+  'asset.personas.delete': { params: {
+  name: string
+}; result: {
+  ok?: boolean
+} }
   /** asset.memory.list */
   'asset.memory.list': { params: void; result: {
   items?: MemorySummary[]
@@ -1019,6 +1025,7 @@ export const METHODS = [
   'asset.personas.list',
   'asset.personas.get',
   'asset.personas.save',
+  'asset.personas.delete',
   'asset.memory.list',
   'asset.memory.get',
   'asset.memory.save',

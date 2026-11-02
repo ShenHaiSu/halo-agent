@@ -196,6 +196,7 @@ public static class EngineAssembly
             ("asset.personas.list", real.AssetPersonasListAsync),
             ("asset.personas.get", real.AssetPersonasGetAsync),
             ("asset.personas.save", real.AssetPersonasSaveAsync),
+            ("asset.personas.delete", real.AssetPersonasDeleteAsync),
             ("asset.memory.list", real.AssetMemoryListAsync),
             ("asset.memory.get", real.AssetMemoryGetAsync),
             ("asset.memory.save", real.AssetMemorySaveAsync),

@@ -132,6 +132,22 @@ public sealed record AssetPersonasSaveResult
     public bool Ok { get; init; }
 }
 
+// ============================ asset.personas.delete ============================
+
+/// <summary>asset.personas.delete 参数。</summary>
+public sealed record AssetPersonasDeleteParams
+{
+    /// <summary>人格名。</summary>
+    public string Name { get; init; } = "";
+}
+
+/// <summary>asset.personas.delete 结果。</summary>
+public sealed record AssetPersonasDeleteResult
+{
+    /// <summary>是否成功。</summary>
+    public bool Ok { get; init; }
+}
+
 // ============================ asset.memory.list ============================
 
 /// <summary>asset.memory.list 结果。</summary>

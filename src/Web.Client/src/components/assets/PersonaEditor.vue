@@ -12,6 +12,7 @@ import HTextarea from '@/components/base/HTextarea.vue';
 import HButton from '@/components/base/HButton.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
+import HDialog from '@/components/base/HDialog.vue';
 
 const toast = useToast();
 const session = useSessionStore();
@@ -27,6 +28,10 @@ const originBody = ref('');
 const saving = ref(false);
 const creating = ref(false);
 const query = ref('');
+const confirmDelete = ref(false);
+/** 待删除的目标名：打开对话框时快照，防止对话框期间切走选中项导致删错文件。 */
+const pendingDelete = ref<string | null>(null);
+const deleting = ref(false);
 
 const dirty = computed(() => {
   if (creating.value) return fName.value.trim() !== '' || fBody.value.trim() !== '';
@@ -140,6 +145,60 @@ async function clearPersona(): Promise<void> {
   }
 }
 
+function requestDelete(): void {
+  if (!selected.value || deleting.value) return;
+  if (dirty.value) {
+    toast.warning('请先保存或撤销当前改动，再删除');
+    return;
+  }
+  pendingDelete.value = selected.value; // 快照：之后 selected 变化也不影响删除目标
+  confirmDelete.value = true;
+}
+
+/** 删除人格文件；若删除的是当前会话使用中的人格，先解绑再删。 */
+async function removePersona(): Promise<void> {
+  const name = pendingDelete.value; // 用快照名，不用 selected（见 requestDelete 注释）
+  confirmDelete.value = false;
+  if (!name || deleting.value) {
+    pendingDelete.value = null;
+    return;
+  }
+  deleting.value = true;
+  try {
+    // ① 先解绑：避免"文件已删但会话仍指向该名"的中间态，也避免同名内置人格被回落命中。
+    const wasInUse = session.persona === name;
+    if (wasInUse) {
+      try {
+        await session.setPersona('');
+      } catch {
+        toast.warning('无法解除当前会话的人格绑定，已取消删除');
+        return; // 解绑失败就不删，避免"人格还在跑但文件没了"
+      }
+    }
+
+    // ② 再删文件
+    try {
+      await transport.request('asset.personas.delete', { name });
+      toast.success('已删除');
+      if (wasInUse) toast.info('该人格正在使用，已自动清除当前会话的人格设置');
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+      if (wasInUse) toast.warning('会话人格已清除，但文件删除失败，可稍后重试');
+      return;
+    }
+
+    // ③ 清空编辑区并重载列表
+    selected.value = null;
+    fName.value = '';
+    fBody.value = '';
+    originBody.value = '';
+    await loadList();
+  } finally {
+    pendingDelete.value = null;
+    deleting.value = false;
+  }
+}
+
 onMounted(() => {
   void loadList();
 });
@@ -208,6 +267,15 @@ defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
         <HButton v-if="session.persona" size="sm" variant="ghost" @click="clearPersona"
           >清除人格</HButton
         >
+        <HButton
+          v-if="selected && !creating"
+          size="sm"
+          variant="ghost"
+          :disabled="dirty"
+          :loading="deleting"
+          @click="requestDelete"
+          >删除人格</HButton
+        >
       </div>
 
       <div v-if="session.persona" class="current-hint">
@@ -226,6 +294,27 @@ defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
     </template>
 
     <HEmpty v-else icon="user" title="选择一个人格" description="从左侧选择，或点「新建」创建。" />
+
+    <HDialog
+      :open="confirmDelete"
+      title="删除人格？"
+      width="sm"
+      @update:open="confirmDelete = $event"
+    >
+      <p class="del-p">
+        将从磁盘删除 <code>{{ pendingDelete }}.md</code>，无法恢复。
+        <template v-if="session.persona === pendingDelete">
+          该人格正在当前会话使用，删除后会先解除绑定再删除。
+        </template>
+      </p>
+      <p class="del-p del-p-hint">若该名称与内置人格同名，删除后将回退为内置版本。</p>
+      <template #footer>
+        <HButton variant="secondary" size="sm" @click="confirmDelete = false">取消</HButton>
+        <HButton variant="danger" size="sm" :loading="deleting" @click="removePersona"
+          >删除</HButton
+        >
+      </template>
+    </HDialog>
   </AssetLayout>
 </template>
 
@@ -266,5 +355,14 @@ defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
   flex: 1;
   min-height: 200px;
   font-size: var(--text-sm);
+}
+.del-p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.del-p-hint {
+  color: hsl(var(--fg-muted));
+  font-size: var(--text-xs);
 }
 </style>
