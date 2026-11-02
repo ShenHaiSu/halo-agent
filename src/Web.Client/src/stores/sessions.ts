@@ -72,6 +72,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const currentId = ref<string>('');
   const loading = ref(false);
   const query = ref('');
+  const switching = ref(false);
   const current = computed(() => items.value.find((s) => s.id === currentId.value));
 
   const filtered = computed(() => {
@@ -140,6 +141,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const sessionInfo = useSessionStore();
     const token = ++switchToken;
     switchDepth++;
+    switching.value = true;
     messages.loading = true;
      // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
      stream.endTurn();
@@ -224,6 +226,7 @@ export const useSessionsStore = defineStore('sessions', () => {
        }
     } finally {
       switchDepth--;
+      if (switchDepth <= 0) { switchDepth = 0; switching.value = false; }
       if (token === switchToken) messages.loading = false;
     }
   }
@@ -231,6 +234,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function createNew(): Promise<void> {
     const token = ++switchToken;
     switchDepth++;
+    switching.value = true;
     const messages = useMessagesStore();
     const stream = useStreamStore();
     const perms = usePermissionsStore();
@@ -256,8 +260,9 @@ export const useSessionsStore = defineStore('sessions', () => {
       await messages.loadSnapshot();
     } finally {
       switchDepth--;
+      if (switchDepth <= 0) { switchDepth = 0; switching.value = false; }
       if (token === switchToken) messages.loading = false;
-    }
+  }
   }
 
   function create(): Promise<void> {
@@ -309,6 +314,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     list,
     currentId,
     loading,
+    switching,
     query,
     filtered,
     grouped,

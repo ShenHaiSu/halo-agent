@@ -1,4 +1,4 @@
-﻿<!-- src/Web.Client/src/components/chat/MessageList.vue -->
+<!-- src/Web.Client/src/components/chat/MessageList.vue -->
 <!-- P15：渲染 TurnCard 列表，窗口化以 currentTurn.turnId 为中心 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
@@ -21,6 +21,7 @@ const stream = useStreamStore();
 const sessions = useSessionsStore();
 
 const currentTurnId = computed(() => stream.currentTurn?.turnId ?? null);
+const switching = computed(() => sessions.switching);
 
 const scroller = ref<InstanceType<typeof HScroll> | null>(null);
 
@@ -62,7 +63,7 @@ const lastToolOutputLen = computed(() =>
 );
 watch(lastToolOutputLen, throttledFollow);
 
-// 切会话即重置展开态并回顶
+// 切会话即重置展开态并回顶（instant，避免 smooth 强制布局掉帧）
 watch(
   () => sessions.currentId,
   () => {
@@ -80,59 +81,72 @@ const samples = [
 </script>
 
 <template>
-  <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
-    <div class="msg-inner density-compact">
-      <div v-if="visible.hiddenTop > 0 && !showAll" class="msg-fold">
-        <HButton variant="ghost" size="sm" @click="showAll = true">
-          显示更早的 {{ visible.hiddenTop }} 条
-        </HButton>
-      </div>
-
-      <template v-for="t in visible.items" :key="t.turnId">
-        <CompactDivider v-if="t.dividerBefore" :divider="t.dividerBefore" />
-        <TurnCard :turn="t" />
-      </template>
-
-      <div v-if="visible.hiddenBottom > 0 && !showAll" class="msg-fold">
-        <HButton variant="ghost" size="sm" @click="showAll = true">
-          显示更新的 {{ visible.hiddenBottom }} 条
-        </HButton>
-      </div>
-
-      <div v-if="messages.loading" class="msg-loading-list">
-        <HSkeleton shape="block" height="72px" />
-        <HSkeleton shape="block" height="120px" />
-        <HSkeleton shape="block" height="56px" />
-      </div>
-
-      <div v-if="messages.isEmpty && !messages.loading" class="msg-empty">
-        <HEmpty
-          icon="message"
-          title="开始新的对话"
-          description="描述你想让 HaloAgent 做的事，它会在需要时请求你的许可。"
-        >
-          <template #action>
-            <div class="empty-samples">
-              <HButton
-                v-for="(s, i) in samples"
-                :key="i"
-                variant="ghost"
-                size="sm"
-                @click="emit('use-sample', s)"
-              >
-                {{ s }}
-              </HButton>
-            </div>
-          </template>
-        </HEmpty>
-      </div>
-
-      <div data-scroll-anchor class="msg-anchor" />
+  <div class="msg-wrap" :class="{ 'is-switching': switching }">
+    <div v-if="switching" class="msg-switch-bar" aria-hidden="true">
+      <div class="msg-switch-bar-inner" />
     </div>
-  </HScroll>
+    <HScroll ref="scroller" data-scroll="messages" class="msg-scroll h-full min-h-0 flex-1">
+      <div class="msg-inner density-compact">
+        <div v-if="visible.hiddenTop > 0 && !showAll" class="msg-fold">
+          <HButton variant="ghost" size="sm" @click="showAll = true">
+            显示更早的 {{ visible.hiddenTop }} 条
+          </HButton>
+        </div>
+
+        <template v-for="t in visible.items" :key="t.turnId">
+          <CompactDivider v-if="t.dividerBefore" :divider="t.dividerBefore" />
+          <TurnCard :turn="t" />
+        </template>
+
+        <div v-if="visible.hiddenBottom > 0 && !showAll" class="msg-fold">
+          <HButton variant="ghost" size="sm" @click="showAll = true">
+            显示更新的 {{ visible.hiddenBottom }} 条
+          </HButton>
+        </div>
+
+        <!-- 有旧内容驻留时不挂骨架（省 DOM、省抖动），只在真正的空页加载时显示 -->
+        <div v-if="messages.loading && messages.isEmpty" class="msg-loading-list">
+          <HSkeleton shape="block" height="72px" />
+          <HSkeleton shape="block" height="120px" />
+          <HSkeleton shape="block" height="56px" />
+        </div>
+
+        <div v-if="messages.isEmpty && !messages.loading" class="msg-empty">
+          <HEmpty
+            icon="message"
+            title="开始新的对话"
+            description="描述你想让 HaloAgent 做的事，它会在需要时请求你的许可。"
+          >
+            <template #action>
+              <div class="empty-samples">
+                <HButton
+                  v-for="(s, i) in samples"
+                  :key="i"
+                  variant="ghost"
+                  size="sm"
+                  @click="emit('use-sample', s)"
+                >
+                  {{ s }}
+                </HButton>
+              </div>
+            </template>
+          </HEmpty>
+        </div>
+
+        <div data-scroll-anchor class="msg-anchor" />
+      </div>
+    </HScroll>
+  </div>
 </template>
 
 <style scoped>
+.msg-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
 .msg-scroll {
   flex: 1;
   min-height: 0;
@@ -148,6 +162,13 @@ const samples = [
   gap: var(--space-4);
   min-height: 100%;
   min-width: 0;
+  /* 250ms 柔和过渡：只动 opacity（合成器层，不触发重排） */
+  opacity: 1;
+  transition: opacity 250ms ease;
+}
+.msg-wrap.is-switching .msg-inner {
+  opacity: 0.35;
+  pointer-events: none;
 }
 .msg-fold {
   display: flex;
@@ -172,5 +193,33 @@ const samples = [
 }
 .msg-anchor {
   height: 1px;
+}
+/* 顶部进度条：只用 transform 位移动画，走 GPU，长列表切换也不掉帧 */
+.msg-switch-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  z-index: 5;
+  background: transparent;
+}
+.msg-switch-bar-inner {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: hsl(var(--accent));
+  animation: msg-switch-slide 1s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes msg-switch-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-inner { transition: none; }
+  .msg-switch-bar-inner { animation: none; }
+  .msg-wrap.is-switching .msg-inner { opacity: 1; }
 }
 </style>

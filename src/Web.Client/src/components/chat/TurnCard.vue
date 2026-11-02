@@ -145,6 +145,9 @@ async function retry(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* 长会话性能：视口外的卡片跳过渲染，滚动时按需绘制 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
 }
 .turn-user.user-plain {
   background: hsl(var(--accent-subtle));

@@ -69,8 +69,10 @@ const drop = useFileDrop((paths) => addAttachments(paths, true), {
  *  生成中   → 可以发，但走排队
  * =================================
  */
+const switching = computed(() => sessions.switching);
 const askPending = computed(() => perms.pending !== null);
 const canSend = computed(() => {
+  if (switching.value) return false;
   if (askPending.value) return false;
   const hasContent = text.value.trim().length > 0 || attachments.value.length > 0;
   if (!hasContent) return false;
@@ -137,6 +139,7 @@ async function submit(): Promise<void> {
   const rawInput = text.value;
   const t = rawInput.trim();
   if (!t && attachments.value.length === 0) return;
+  if (switching.value) return;
   if (askPending.value) return;
   // P10-fix3 01：斜杠白名单拦截（askPending 之后、附件拼接/排队/乐观 append 之前）。
   // 斜杠命令不进 messages.append、不进 agent.queue、不进 ↑ 历史。
@@ -386,8 +389,8 @@ defineExpose({
         class="composer-input"
         rows="1"
         aria-label="消息输入框"
-        :disabled="askPending"
-        :placeholder="askPending ? '请先处理上方的确认' : '输入消息，Enter 发送，Shift+Enter 换行'"
+        :disabled="askPending || switching"
+        :placeholder="switching ? '正在切换会话…' : askPending ? '请先处理上方的确认' : '输入消息，Enter 发送，Shift+Enter 换行'"
         @input="onInput"
         @keydown="onKeydown"
         @paste="onPaste"
