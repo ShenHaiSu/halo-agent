@@ -1,7 +1,8 @@
-<!-- src/Web.Client/src/components/settings/SettingsApp.vue -->
+﻿<!-- src/Web.Client/src/components/settings/SettingsApp.vue -->
  <!-- 设置页容器：8 分页 + 窄窗全屏 + DirtyGuard 拦截切页/关页。 -->
 <script lang="ts">
 import { ref as sharedRef } from 'vue';
+import { useUiStore } from '@/stores/ui';
  export type SettingsTab =
    | 'general'
    | 'model'
@@ -16,14 +17,11 @@ const settingsTab = sharedRef<SettingsTab>('general');
 /** 跨组件打开设置（指定分页）。运行时调用，pinia 已就绪。 */
 export function openSettings(tab: SettingsTab = 'general'): void {
   settingsTab.value = tab;
-  // 延迟 import 避免模块循环？直接用 ui store（运行时 pinia 已安装）。
-  import('@/stores/ui')
-    .then((m) => {
-      m.useUiStore().openSettings();
-    })
-    .catch(() => {
-      /* 忽略 */
-    });
+  try {
+    useUiStore().openSettings();
+  } catch {
+    /* 忽略 */
+  }
 }
 
 export function useSettingsTab() {
@@ -33,7 +31,6 @@ export function useSettingsTab() {
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useUiStore } from '@/stores/ui';
 import { useDirtyGuard } from '@/composables/useDirtyGuard';
 import SettingsNav, { type SettingsNavItem } from './SettingsNav.vue';
 import HButton from '@/components/base/HButton.vue';

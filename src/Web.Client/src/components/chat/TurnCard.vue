@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/chat/TurnCard.vue -->
+﻿<!-- src/Web.Client/src/components/chat/TurnCard.vue -->
 <!-- P15 TurnCard 三段式：用户消息（+排队 injected） / 过程 details（思考+中途正文+工具卡） / 末轮正文 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
@@ -14,6 +14,7 @@ import StreamingCursor from './StreamingCursor.vue';
 import ToolCard from './ToolCard.vue';
 import MessageActions from './MessageActions.vue';
 import { formatRelativeTime } from '@/utils/format';
+import { transport } from '@/transport';
 
 const props = defineProps<{ turn: TurnView }>();
 const messages = useMessagesStore();
@@ -84,7 +85,6 @@ const processCount = computed(() => {
 const truncated = computed(() => props.turn.final.truncatedByLength === true);
 
 async function retry(): Promise<void> {
-  const { transport } = await import('@/transport');
   await transport.request('agent.prompt', { text: props.turn.user.content });
 }
 </script>

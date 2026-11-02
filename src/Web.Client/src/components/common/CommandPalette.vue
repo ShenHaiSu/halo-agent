@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/common/CommandPalette.vue -->
+﻿<!-- src/Web.Client/src/components/common/CommandPalette.vue -->
 <!-- Ctrl+K 命令面板（01 §11.4 + 05 §6）：会话 + 命令 + 技能 + 人格 + 设置项，本地过滤上限 40。 -->
 <script lang="ts">
 import { ref as sharedRef } from 'vue';
@@ -21,6 +21,7 @@ export function useCommandPaletteOpen() {
 import { useSessionsStore } from '@/stores/sessions';
 import { useSessionStore } from '@/stores/session';
  import { transport } from '@/transport';
+import { hostBridge } from '@/bridge/host';
  import { useToast } from '@/composables/useToast';
  import { useCompactAction } from '@/composables/useCompactAction';
 import { fuzzyScore, highlight } from './fuzzy';
@@ -169,7 +170,6 @@ function commands(): Entry[] {
       icon: 'info',
       run: async () => {
         const d = await transport.request<unknown>('system.diagnostics', null);
-        const { hostBridge } = await import('@/bridge/host');
         try {
           await hostBridge.copyText(JSON.stringify(d, null, 2));
           toast.success('诊断信息已复制');
