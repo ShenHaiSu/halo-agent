@@ -42,7 +42,8 @@ public sealed class RunShellCommandTool : ITool
 
     private const int GracePercent = 20;
     private static readonly TimeSpan GraceCap = TimeSpan.FromMinutes(1);
-    private const int OutputBufferCap = 256 * 1024;
+    // P21-F4：滚动缓冲由字节改为字符。256KB 字节按中英混合约 2 字节/字折算为 128K 字符。
+    private const int OutputBufferCapChars = 128_000;
     private const int ContextMaxChars = 20_000;
     private const int DeathTailChars = 1500;
 
@@ -132,8 +133,13 @@ public sealed class RunShellCommandTool : ITool
             var stdout = process.StandardOutput.BaseStream;
             var stderr = process.StandardError.BaseStream;
 
-            var outBuf = new RollingBuffer(OutputBufferCap);
-            var errBuf = new RollingBuffer(OutputBufferCap);
+            var outBuf = new RollingBuffer(OutputBufferCapChars);
+            var errBuf = new RollingBuffer(OutputBufferCapChars);
+            // P21-F4：stdout/stderr 各持独立 Decoder（非线程安全，禁止共用），跨 ReadAsync 累积未完成字节。
+            var outDec = Encoding.UTF8.GetDecoder();
+            var errDec = Encoding.UTF8.GetDecoder();
+            var outChars = new char[Encoding.UTF8.GetMaxCharCount(8192)];
+            var errChars = new char[Encoding.UTF8.GetMaxCharCount(8192)];
             var pendingDelta = new StringBuilder();
 
             var outChunk = new byte[8192];
@@ -151,8 +157,8 @@ public sealed class RunShellCommandTool : ITool
                 // 读循环
                 var readTasks = new List<Task>
                 {
-                    ReadPipeAsync(stdout, outBuf, outChunk, token),
-                    ReadPipeAsync(stderr, errBuf, errChunk, token),
+                    ReadPipeAsync(stdout, outBuf, outChunk, outDec, outChars, token),
+                    ReadPipeAsync(stderr, errBuf, errChunk, errDec, errChars, token),
                 };
 
                 // 等：命令自然结束 / 被杀 / 中断
@@ -196,7 +202,7 @@ public sealed class RunShellCommandTool : ITool
             // ---------------- 局部函数 ----------------
 
             async Task ReadPipeAsync(Stream stream, RollingBuffer buf, byte[] chunk,
-                CancellationToken token)
+                Decoder dec, char[] charBuf, CancellationToken token)
             {
                 try
                 {
@@ -205,8 +211,10 @@ public sealed class RunShellCommandTool : ITool
                         int n = await stream.ReadAsync(chunk.AsMemory(), token).ConfigureAwait(false);
                         if (n == 0) break;
 
-                        buf.Append(chunk, n);
-                        lock (pendingDelta) pendingDelta.Append(Encoding.UTF8.GetString(chunk, 0, n));
+                        // P21-F4：单次解码同时喂给滚动缓冲与实时输出；碎字节由 Decoder 留存到下次，不产生 U+FFFD。
+                        int c = dec.GetChars(chunk, 0, n, charBuf, 0, flush: false);
+                        buf.AppendChars(charBuf, 0, c);
+                        lock (pendingDelta) pendingDelta.Append(charBuf, 0, c);
                         lastOutputAt.Restart();
 
                         if (currentAlert != 0)
@@ -218,6 +226,17 @@ public sealed class RunShellCommandTool : ITool
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception) { /* 管道关闭：正常 */ }
+                // P21-F4：收尾 flush 一次，把 Decoder 内残留字节解出（中途禁止 flush，避免碎字节变 U+FFFD）。
+                try
+                {
+                    int tail = dec.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
+                    if (tail > 0)
+                    {
+                        buf.AppendChars(charBuf, 0, tail);
+                        lock (pendingDelta) pendingDelta.Append(charBuf, 0, tail);
+                    }
+                }
+                catch { }
             }
 
             async Task TickerLoopAsync()
@@ -420,27 +439,63 @@ public sealed class RunShellCommandTool : ITool
     // ============================================================
 
     /// <summary>
-    /// 有界字节缓冲：超上限丢头部一半。
+    /// P21-F4 有界字符缓冲：超上限从头丢整字符（按 Rune 计）。
     /// 为什么丢头部：展示与“死前遗言”都只关心最新输出。
+    /// 只追加已解码、无碎字节的数据，从根上消除字节切分产生的 U+FFFD。
     /// </summary>
-    private sealed class RollingBuffer
+    internal sealed class RollingBuffer
     {
-        private readonly List<byte> _bytes = new();
-        private readonly int _cap;
+        private readonly StringBuilder _text = new();
+        private readonly int _capChars;
 
-        public RollingBuffer(int cap) => _cap = cap;
+        public RollingBuffer(int capChars) => _capChars = capChars;
 
-        public void Append(byte[] chunk, int count)
+        public void AppendDecoded(byte[] chunk, int count, Decoder dec)
         {
-            _bytes.AddRange(new ArraySegment<byte>(chunk, 0, count));
-            if (_bytes.Count > _cap)
-            {
-                int drop = _bytes.Count - _cap / 2;
-                _bytes.RemoveRange(0, drop);
-            }
+            char[] cs = new char[Encoding.UTF8.GetMaxCharCount(count)];
+            int c = dec.GetChars(chunk, 0, count, cs, 0, flush: false);
+            AppendChars(cs, 0, c);
         }
 
-        public string ToText() => Encoding.UTF8.GetString(_bytes.ToArray());
+        public void AppendChars(char[] cs, int off, int count)
+        {
+            if (cs is null || count <= 0) return;
+            _text.Append(cs, off, count);
+            TrimHead();
+        }
+
+        public void Append(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            _text.Append(s);
+            TrimHead();
+        }
+
+        private void TrimHead()
+        {
+            int runes = CountRunes();
+            if (runes <= _capChars) return;
+            int drop = runes - _capChars / 2;
+            int idx = 0;
+            int removed = 0;
+            foreach (var rune in _text.ToString().EnumerateRunes())
+            {
+                if (removed >= drop) break;
+                removed++;
+                idx += rune.Utf16SequenceLength;
+            }
+            if (idx > 0) _text.Remove(0, idx);
+        }
+
+        private int CountRunes()
+        {
+            int n = 0;
+            var s = _text.ToString();
+            foreach (var _ in s.EnumerateRunes()) n++;
+            return n;
+        }
+
+        public string ToText() => _text.ToString();
 
         public string TailText(int maxChars)
         {
