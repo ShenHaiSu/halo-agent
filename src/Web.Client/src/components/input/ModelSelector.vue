@@ -36,12 +36,12 @@ const unconfigured = computed(
   () => !session.configured || !session.provider || !session.model,
 );
 
-const triggerLabel = computed(() => {
-  if (unconfigured.value) return '未配置模型 → 去设置';
-   const p = mainName(session.provider, session.providerDisplay);
-   const m = mainName(session.model, session.modelDisplay);
-  return `${p} / ${m}`;
-});
+ const triggerLabel = computed(() => {
+   if (unconfigured.value) return '未配置 — 点击选择模型';
+    const p = mainName(session.provider, session.providerDisplay);
+    const m = mainName(session.model, session.modelDisplay);
+   return `${p} / ${m}`;
+ });
 
 const weakInfo = computed(() => {
   if (unconfigured.value) return '';
@@ -72,25 +72,32 @@ async function loadTree(): Promise<void> {
   }
 }
 
-function toggle(): void {
-  if (disabled.value) {
-    if (disabledReason.value) toast.warning(disabledReason.value);
-    return;
-  }
-  if (unconfigured.value) {
-    openSettings('model');
-    return;
-  }
-  open.value = !open.value;
-  if (open.value) {
-    void loadTree();
-    void nextTick(() => {
-      // 面板内 onMounted 自动聚焦搜索框
-    });
-  } else {
-    focusTrigger();
-  }
-}
+ async function toggle(): Promise<void> {
+   if (disabled.value) {
+     if (disabledReason.value) toast.warning(disabledReason.value);
+     return;
+   }
+   // 有候选就开浮窗，真空（0 provider / 0 model）才跳设置页。unconfigured 只做展示，不再拦截。
+   try {
+     await loadTree();
+   } catch {
+     openSettings('model');
+     return;
+   }
+   const total = tree.value.providers.reduce((n, g) => n + g.models.length, 0);
+   if (total <= 0) {
+     openSettings('model');
+     return;
+   }
+   open.value = !open.value;
+   if (open.value) {
+     void nextTick(() => {
+       // 面板内 onMounted 自动聚焦搜索框
+     });
+   } else {
+     focusTrigger();
+   }
+ }
 
 function closePanel(): void {
   open.value = false;
@@ -160,12 +167,12 @@ onBeforeUnmount(() => {
 <template>
   <div class="composer-modelbar">
     <div ref="triggerRef" class="modelbar-trigger">
-      <HTooltip :content="unconfigured ? '去模型设置' : fullIds" placement="top" :delay="300">
-        <HButton
-          size="sm"
-          variant="ghost"
-          :disabled="disabled && !unconfigured"
-          :aria-haspopup="'listbox'"
+       <HTooltip :content="unconfigured ? '点击选择模型' : fullIds" placement="top" :delay="300">
+         <HButton
+           size="sm"
+           variant="ghost"
+           :disabled="disabled"
+           :aria-haspopup="'listbox'"
           :aria-expanded="open"
           @click="toggle"
         >
