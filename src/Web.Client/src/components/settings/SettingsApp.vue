@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/ui';
    | 'general'
    | 'model'
    | 'network'
+   | 'behavior'
    | 'permissions'
    | 'mcp'
    | 'assets'
@@ -36,14 +37,15 @@ import SettingsNav, { type SettingsNavItem } from './SettingsNav.vue';
 import HButton from '@/components/base/HButton.vue';
 import HDialog from '@/components/base/HDialog.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
-import GeneralPage from './pages/GeneralPage.vue';
-import ModelPage from './pages/ModelPage.vue';
-import NetworkPage from './pages/NetworkPage.vue';
-import PermissionsPage from './pages/PermissionsPage.vue';
- import McpPage from './pages/McpPage.vue';
- import AssetsPage from './pages/AssetsPage.vue';
- import UsageAnalyticsPage from './pages/UsageAnalyticsPage.vue';
-import AboutPage from './pages/AboutPage.vue';
+ import GeneralPage from './pages/GeneralPage.vue';
+ import ModelPage from './pages/ModelPage.vue';
+ import NetworkPage from './pages/NetworkPage.vue';
+ import BehaviorPage from './pages/BehaviorPage.vue';
+ import PermissionsPage from './pages/PermissionsPage.vue';
+  import McpPage from './pages/McpPage.vue';
+  import AssetsPage from './pages/AssetsPage.vue';
+  import UsageAnalyticsPage from './pages/UsageAnalyticsPage.vue';
+ import AboutPage from './pages/AboutPage.vue';
 
 interface SettingsPage {
   isDirty: () => boolean;
@@ -52,52 +54,55 @@ interface SettingsPage {
 
 const ui = useUiStore();
 const tab = settingsTab;
-
-const generalPage = ref<SettingsPage | null>(null);
-const modelPage = ref<SettingsPage | null>(null);
-const networkPage = ref<SettingsPage | null>(null);
-const permissionsPage = ref<SettingsPage | null>(null);
-const mcpPage = ref<SettingsPage | null>(null);
-const assetsPage = ref<SettingsPage | null>(null);
- const usagePage = ref<SettingsPage | null>(null);
+ const generalPage = ref<SettingsPage | null>(null);
+ const modelPage = ref<SettingsPage | null>(null);
+ const networkPage = ref<SettingsPage | null>(null);
+ const behaviorPage = ref<SettingsPage | null>(null);
+ const permissionsPage = ref<SettingsPage | null>(null);
+ const mcpPage = ref<SettingsPage | null>(null);
+ const assetsPage = ref<SettingsPage | null>(null);
+  const usagePage = ref<SettingsPage | null>(null);
 const aboutPage = ref<SettingsPage | null>(null);
 
-const activePage = computed<SettingsPage | null>(() => {
-  switch (tab.value) {
-    case 'general':
-      return generalPage.value;
-    case 'model':
-      return modelPage.value;
-    case 'network':
-      return networkPage.value;
-    case 'permissions':
-      return permissionsPage.value;
-    case 'mcp':
-      return mcpPage.value;
-    case 'assets':
-      return assetsPage.value;
-     case 'usage':
-       return usagePage.value;
-    case 'about':
-      return aboutPage.value;
-    default:
-      return null;
-  }
-});
-
-const currentDirty = computed(() => activePage.value?.isDirty() === true);
-const guard = useDirtyGuard(currentDirty, () => activePage.value?.resetToSaved());
-
-const NAV: SettingsNavItem[] = [
-  { key: 'general', label: '常规', icon: 'settings' },
-  { key: 'model', label: '模型', icon: 'zap' },
-  { key: 'network', label: '网络', icon: 'link' },
-  { key: 'permissions', label: '权限', icon: 'shield-check' },
-   { key: 'usage', label: '用量', icon: 'chart' },
-  { key: 'mcp', label: '扩展', icon: 'layers' },
-  { key: 'assets', label: '资源', icon: 'folder' },
-  { key: 'about', label: '关于', icon: 'info' },
-];
+ const activePage = computed<SettingsPage | null>(() => {
+   switch (tab.value) {
+     case 'general':
+       return generalPage.value;
+     case 'model':
+       return modelPage.value;
+     case 'network':
+       return networkPage.value;
+     case 'behavior':
+       return behaviorPage.value;
+     case 'permissions':
+       return permissionsPage.value;
+     case 'mcp':
+       return mcpPage.value;
+     case 'assets':
+       return assetsPage.value;
+      case 'usage':
+        return usagePage.value;
+     case 'about':
+       return aboutPage.value;
+     default:
+       return null;
+   }
+ });
+ 
+ const currentDirty = computed(() => activePage.value?.isDirty() === true);
+ const guard = useDirtyGuard(currentDirty, () => activePage.value?.resetToSaved());
+ 
+ const NAV: SettingsNavItem[] = [
+   { key: 'general', label: '常规', icon: 'settings' },
+   { key: 'model', label: '模型', icon: 'zap' },
+   { key: 'network', label: '网络', icon: 'link' },
+   { key: 'behavior', label: '行为', icon: 'brainstorm' },
+   { key: 'permissions', label: '权限', icon: 'shield-check' },
+    { key: 'usage', label: '用量', icon: 'chart' },
+   { key: 'mcp', label: '扩展', icon: 'layers' },
+   { key: 'assets', label: '资源', icon: 'folder' },
+   { key: 'about', label: '关于', icon: 'info' },
+ ];
 
 function selectTab(t: SettingsTab): void {
   guard.confirmLeave(() => {
@@ -132,14 +137,15 @@ function requestClose(): void {
         <div class="settings-body">
           <SettingsNav :items="NAV" :active="tab" @select="selectTab" />
           <div class="settings-page">
-            <GeneralPage v-if="tab === 'general'" ref="generalPage" />
-            <ModelPage v-else-if="tab === 'model'" ref="modelPage" />
-            <NetworkPage v-else-if="tab === 'network'" ref="networkPage" />
-            <PermissionsPage v-else-if="tab === 'permissions'" ref="permissionsPage" />
-            <McpPage v-else-if="tab === 'mcp'" ref="mcpPage" />
-             <AssetsPage v-else-if="tab === 'assets'" ref="assetsPage" />
-             <UsageAnalyticsPage v-else-if="tab === 'usage'" ref="usagePage" />
-             <AboutPage v-else-if="tab === 'about'" ref="aboutPage" />
+             <GeneralPage v-if="tab === 'general'" ref="generalPage" />
+             <ModelPage v-else-if="tab === 'model'" ref="modelPage" />
+             <NetworkPage v-else-if="tab === 'network'" ref="networkPage" />
+             <BehaviorPage v-else-if="tab === 'behavior'" ref="behaviorPage" />
+             <PermissionsPage v-else-if="tab === 'permissions'" ref="permissionsPage" />
+             <McpPage v-else-if="tab === 'mcp'" ref="mcpPage" />
+              <AssetsPage v-else-if="tab === 'assets'" ref="assetsPage" />
+              <UsageAnalyticsPage v-else-if="tab === 'usage'" ref="usagePage" />
+              <AboutPage v-else-if="tab === 'about'" ref="aboutPage" />
           </div>
         </div>
 

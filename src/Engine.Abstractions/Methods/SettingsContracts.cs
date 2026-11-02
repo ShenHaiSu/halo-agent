@@ -4,20 +4,22 @@ namespace HaloAgent.Engine.Abstractions.Methods;
 
 // ============================ settings.get ============================
 
-/// <summary>settings.get 结果（P10 新整树：一次拿全）。P18：network 取代 useProxy + effective 下发。</summary>
-public sealed record SettingsGetResult
-{
-    public string ActiveProvider { get; init; } = "";
-    public string ActiveModel { get; init; } = "";
-    public bool MigrationRequired { get; init; }
-    public IReadOnlyList<ProviderView> Providers { get; init; } = Array.Empty<ProviderView>();
-    public ProxySettings? Proxy { get; init; }
-    public int Retry { get; init; }
-    public int MaxTurns { get; init; }
-    public string Persona { get; init; } = "";
-    public string DataDir { get; init; } = "";
-    public string ConfigPath { get; init; } = "";
-}
+ /// <summary>settings.get 结果（P10 新整树：一次拿全）。P18：network 取代 useProxy + effective 下发。P22：行为页 compactKeepTail/autoCompactOnLimit。</summary>
+ public sealed record SettingsGetResult
+ {
+     public string ActiveProvider { get; init; } = "";
+     public string ActiveModel { get; init; } = "";
+     public bool MigrationRequired { get; init; }
+     public IReadOnlyList<ProviderView> Providers { get; init; } = Array.Empty<ProviderView>();
+     public ProxySettings? Proxy { get; init; }
+     public int Retry { get; init; }
+     public int MaxTurns { get; init; }
+     public string Persona { get; init; } = "";
+     public int CompactKeepTail { get; init; } = 2;
+     public bool AutoCompactOnLimit { get; init; }
+     public string DataDir { get; init; } = "";
+     public string ConfigPath { get; init; } = "";
+ }
 
 public sealed record ProviderView
 {
@@ -133,29 +135,48 @@ public sealed record SettingsSetActiveResult
     public bool Ok { get; init; }
 }
 
-// ============================ settings.saveNetwork ============================
-
-/// <summary>settings.saveNetwork 参数（P18：全局三档 system/direct/manual + 重试）。</summary>
-public sealed record SettingsSaveNetworkParams
-{
-    /// <summary>代理模式：“system” | “direct” | “manual”（可为空）。</summary>
-    public string? Mode { get; init; }
-    /// <summary>代理地址（可为空）。</summary>
-    public string? Url { get; init; }
-    /// <summary>重试次数（可为空）。</summary>
-    public int? Retry { get; init; }
-}
-
-/// <summary>settings.saveNetwork 结果（P18：加 Warnings）。</summary>
-public sealed record SettingsSaveNetworkResult
-{
-    /// <summary>是否成功。</summary>
-    public bool Ok { get; init; }
-    /// <summary>备注。</summary>
-    public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
-    /// <summary>P18：代理组合降级 warning（与 saveProviders 同名，不复用 Notes）。</summary>
-    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
-}
+ // ============================ settings.saveBehavior ============================
+ 
+ /// <summary>P22 行为页：5 项全局行为配置（maxTurns/retry/persona/compactKeepTail/autoCompactOnLimit）。</summary>
+ public sealed record SettingsSaveBehaviorParams
+ {
+     public int? MaxTurns { get; init; }
+     public int? Retry { get; init; }
+     public string? Persona { get; init; }
+     public int? CompactKeepTail { get; init; }
+     public bool? AutoCompactOnLimit { get; init; }
+ }
+ 
+ /// <summary>P22 settings.saveBehavior 结果（与 saveNetwork 对齐，只有 ok/warnings）。</summary>
+ public sealed record SettingsSaveBehaviorResult
+ {
+     public bool Ok { get; init; }
+     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+ }
+ 
+ // ============================ settings.saveNetwork ============================
+ 
+ /// <summary>settings.saveNetwork 参数（P18：全局三档 system/direct/manual + 重试）。P22：retry 已搬家至 saveBehavior，后端保留读兼容。</summary>
+ public sealed record SettingsSaveNetworkParams
+ {
+     /// <summary>代理模式：“system” | “direct” | “manual”（可为空）。</summary>
+     public string? Mode { get; init; }
+     /// <summary>代理地址（可为空）。</summary>
+     public string? Url { get; init; }
+     /// <summary>重试次数（可为空；已搬家至 saveBehavior，此处为兼容保留）。</summary>
+     public int? Retry { get; init; }
+ }
+ 
+ /// <summary>settings.saveNetwork 结果（P18：加 Warnings）。</summary>
+ public sealed record SettingsSaveNetworkResult
+ {
+     /// <summary>是否成功。</summary>
+     public bool Ok { get; init; }
+     /// <summary>备注。</summary>
+     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
+     /// <summary>P18：代理组合降级 warning（与 saveProviders 同名，不复用 Notes）。</summary>
+     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+ }
 
 // ============================ settings.probeModels ============================
 

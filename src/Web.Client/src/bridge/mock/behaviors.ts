@@ -254,14 +254,16 @@ function mockSettings(): unknown {
         ],
       },
     ],
-    proxy: { mode: 'system', url: null },
-    retry: 0,
-    maxTurns: 200,
-    persona: '',
-    dataDir: '(mock)',
-    configPath: '(mock)/config.json',
-  };
-}
+     proxy: { mode: 'system', url: null },
+     retry: 0,
+     maxTurns: 200,
+     persona: '',
+     compactKeepTail: 2,
+     autoCompactOnLimit: false,
+     dataDir: '(mock)',
+     configPath: '(mock)/config.json',
+   };
+ }
  // P16 mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
  function mockUsageRows(): unknown[] {
    const day = 86400000;
@@ -390,11 +392,12 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'state.setMaxTurns': { kind: 'ok', run: (p) => ({ maxTurns: (p as { value?: number } | null)?.value ?? 200 }) },
   'state.setRetry': { kind: 'ok', run: (p) => ({ retry: (p as { value?: number } | null)?.value ?? 0 }) },
 
-  'settings.get': { kind: 'ok', run: () => mockSettings() },
-  'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
-  'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
-  'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [], warnings: [] }) },
-  'settings.probeModels': { kind: 'ok', run: () => ({ models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'], via: { source: 'global-system', maskedUrl: null }, latencyMs: 123 }) },
+   'settings.get': { kind: 'ok', run: () => mockSettings() },
+   'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
+   'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
+   'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [], warnings: [] }) },
+   'settings.saveBehavior': { kind: 'ok', run: () => ({ ok: true, warnings: [] }) },
+   'settings.probeModels': { kind: 'ok', run: () => ({ models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'], via: { source: 'global-system', maskedUrl: null }, latencyMs: 123 }) },
   'settings.mcp.get': { kind: 'ok', run: () => ({ path: '(mock)/mcp.json', text: '{"mcpServers":{}}' }) },
   'settings.mcp.save': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
 

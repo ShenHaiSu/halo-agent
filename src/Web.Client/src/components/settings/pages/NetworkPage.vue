@@ -1,12 +1,11 @@
 <!-- src/Web.Client/src/components/settings/pages/NetworkPage.vue -->
-<!-- P18：全局三档 system/direct/manual + 各 Provider effective 一览 + 当前生效 + 一键探测。 -->
+<!-- P22：全局三档 system/direct/manual + 各 Provider effective 一览 + 当前生效 + 一键探测（retry 已搬家至行为页）。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import SettingRow from '../fields/SettingRow.vue';
 import HInput from '@/components/base/HInput.vue';
-import HSlider from '@/components/base/HSlider.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
 import HRadioGroup from '@/components/base/HRadioGroup.vue';
@@ -28,7 +27,6 @@ const saving = ref(false);
 const loadError = ref<string | null>(null);
 const mode = ref<ProxyMode>('system');
 const url = ref('');
-const retry = ref(0);
 const providers = ref<Array<{
   id: string;
   displayName: string;
@@ -40,10 +38,10 @@ const providers = ref<Array<{
 const saveWarnings = ref<string[]>([]);
 const probing = ref<string | null>(null);
 const probeInfo = ref<Record<string, string>>({});
-const original = ref({ mode: 'system' as ProxyMode, url: '', retry: 0 });
+const original = ref({ mode: 'system' as ProxyMode, url: '' });
 const fieldErrors = ref<Record<string, string>>({});
 
-const dirty = computed(() => mode.value !== original.value.mode || url.value !== original.value.url || retry.value !== original.value.retry);
+const dirty = computed(() => mode.value !== original.value.mode || url.value !== original.value.url);
 
 function markDirty(): void { fieldErrors.value = {}; }
 
@@ -66,7 +64,6 @@ async function load(): Promise<void> {
   try {
     const s = (await transport.request('settings.get', null)) as {
       proxy?: { mode?: string; url?: string | null };
-      retry?: number;
       providers?: Array<{
         id?: string;
         displayName?: string;
@@ -78,7 +75,6 @@ async function load(): Promise<void> {
     };
     mode.value = normalizeMode(s.proxy?.mode);
     url.value = typeof s.proxy?.url === 'string' ? s.proxy.url : '';
-    retry.value = typeof s.retry === 'number' ? s.retry : 0;
     providers.value = (s.providers ?? []).map((p) => ({
       id: p.id ?? '',
       displayName: mainName(p.id ?? '', p.displayName ?? ''),
@@ -92,7 +88,7 @@ async function load(): Promise<void> {
         warning: typeof p.effective.warning === 'string' ? p.effective.warning : null,
       } : null,
     })).filter((p) => p.id);
-    original.value = { mode: mode.value, url: url.value, retry: retry.value };
+    original.value = { mode: mode.value, url: url.value };
     fieldErrors.value = {};
     saveWarnings.value = [];
   } catch (e) {
@@ -104,7 +100,7 @@ async function load(): Promise<void> {
 
 async function save(): Promise<void> {
   if (saving.value) return;
-  const errs = validateNetworkForm({ mode: mode.value, url: url.value, retry: retry.value });
+  const errs = validateNetworkForm({ mode: mode.value, url: url.value });
   const map: Record<string, string> = {};
   for (const e of errs) map[e.field] = e.message;
   fieldErrors.value = map;
@@ -117,9 +113,8 @@ async function save(): Promise<void> {
     const r = (await transport.request('settings.saveNetwork', {
       mode: mode.value,
       url: mode.value === 'manual' ? url.value : undefined,
-      retry: retry.value,
     })) as { warnings?: string[] };
-    original.value = { mode: mode.value, url: url.value, retry: retry.value };
+    original.value = { mode: mode.value, url: url.value };
     saveWarnings.value = Array.isArray(r.warnings) ? r.warnings : [];
     for (const w of saveWarnings.value) toast.warning(w);
     toast.success('已保存');
@@ -171,7 +166,6 @@ function isDirty(): boolean { return dirty.value; }
 function resetToSaved(): void {
   mode.value = original.value.mode;
   url.value = original.value.url;
-  retry.value = original.value.retry;
   fieldErrors.value = {};
 }
 defineExpose({ isDirty, resetToSaved });
@@ -199,9 +193,6 @@ onMounted(() => void load());
       </SettingRow>
       <SettingRow v-if="mode === 'manual'" label="代理地址" desc="仅指定地址模式需要，http(s):// 开头" required :error="fieldErrors['url'] ?? null">
         <HInput :model-value="url" placeholder="http://127.0.0.1:7890" :error="!!fieldErrors['url']" @update:model-value="(v: string) => { url = v; markDirty(); }" />
-      </SettingRow>
-      <SettingRow label="重试次数" desc="请求失败时最多重试次数，0 ~ 8（不触发代理热切）" :error="fieldErrors['retry'] ?? null">
-        <HSlider :model-value="retry" :min="0" :max="8" :step="1" show-value label="重试次数" @update:model-value="(v: number) => { retry = v; markDirty(); }" />
       </SettingRow>
       <div v-if="saveWarnings.length > 0" class="warn-box" role="status">
         <p v-for="(w, i) in saveWarnings" :key="i" class="warn-line">{{ w }}</p>

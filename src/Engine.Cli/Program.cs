@@ -148,12 +148,14 @@ var nullBus = NullEventBus.Create();
 var bus = nullBus.Adapter;
 bus.Start();
 
-await using var session = new AgentSession(
-    llm, tools, store, bus,
-    Paths.DataDir, cwd, mode, resolved.Persona,
-    maxTurns: opts.MaxTurns ?? resolved.MaxTurns,
-    retry: opts.Retry ?? resolved.Retry,
-    askInteractive: false);
+ await using var session = new AgentSession(
+     llm, tools, store, bus,
+     Paths.DataDir, cwd, mode, resolved.Persona,
+     maxTurns: opts.MaxTurns ?? resolved.MaxTurns,
+     retry: opts.Retry ?? resolved.Retry,
+     askInteractive: false,
+     compactKeepTail: resolved.CompactKeepTail,
+     autoCompactOnLimit: resolved.AutoCompactOnLimit);
 session.ReconfigureActive(resolved);
 
 

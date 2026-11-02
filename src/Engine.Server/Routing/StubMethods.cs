@@ -67,14 +67,15 @@ public sealed class StubMethods
             ("state.setMaxTurns", stub.StateSetMaxTurns),
             ("state.setRetry", stub.StateSetRetry),
 
-            // ---- settings ----
-            ("settings.get", stub.NotImplemented),
-            ("settings.saveProviders", stub.NotImplemented),
-            ("settings.setActive", stub.NotImplemented),
-            ("settings.saveNetwork", stub.EmptyOk),
-            ("settings.probeModels", stub.NotImplemented),
-            ("settings.mcp.get", stub.NotImplemented),
-            ("settings.mcp.save", stub.SettingsMcpSave),
+             // ---- settings ----
+             ("settings.get", stub.NotImplemented),
+             ("settings.saveProviders", stub.NotImplemented),
+             ("settings.setActive", stub.NotImplemented),
+             ("settings.saveNetwork", stub.EmptyOk),
+             ("settings.saveBehavior", stub.SettingsSaveBehavior),
+             ("settings.probeModels", stub.NotImplemented),
+             ("settings.mcp.get", stub.NotImplemented),
+             ("settings.mcp.save", stub.SettingsMcpSave),
 
 
             // ---- asset 13 ----
@@ -306,9 +307,13 @@ public sealed class StubMethods
         return Task.FromResult<object?>(new { retry = v });
     }
 
-    /// <summary>settings.mcp.save 回落形状（含 notes，与契约一致）。</summary>
-    public Task<object?> SettingsMcpSave(JsonElement? _, CancellationToken ct) =>
-        Task.FromResult<object?>(new { ok = true, notes = Array.Empty<string>() });
+     /// <summary>P22 settings.saveBehavior 空实现（未配置态也能调通契约，结果体只有 ok/warnings）。</summary>
+     public Task<object?> SettingsSaveBehavior(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { ok = true, warnings = Array.Empty<string>() });
+ 
+     /// <summary>settings.mcp.save 回落形状（含 notes，与契约一致）。</summary>
+     public Task<object?> SettingsMcpSave(JsonElement? _, CancellationToken ct) =>
+         Task.FromResult<object?>(new { ok = true, notes = Array.Empty<string>() });
 
      /// <summary>asset.skills.list 回落形状（含 warnings，与契约一致）。</summary>
      public Task<object?> AssetSkillsList(JsonElement? _, CancellationToken ct) =>

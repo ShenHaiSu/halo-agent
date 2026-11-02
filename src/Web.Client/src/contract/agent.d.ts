@@ -483,6 +483,8 @@ export interface HaloMethods {
   retry?: number
   maxTurns?: number
   persona?: string
+  compactKeepTail?: number
+  autoCompactOnLimit?: boolean
   dataDir?: string
   configPath?: string
 } }
@@ -494,6 +496,17 @@ export interface HaloMethods {
 }; result: {
   ok?: boolean
   notes?: string[]
+  warnings?: string[]
+} }
+  /** settings.saveBehavior */
+  'settings.saveBehavior': { params: {
+  maxTurns?: number
+  retry?: number
+  persona?: string
+  compactKeepTail?: number
+  autoCompactOnLimit?: boolean
+}; result: {
+  ok?: boolean
   warnings?: string[]
 } }
   /** settings.probeModels */
@@ -1012,6 +1025,7 @@ export const METHODS = [
   'state.setRetry',
   'settings.get',
   'settings.saveNetwork',
+  'settings.saveBehavior',
   'settings.probeModels',
   'settings.mcp.get',
   'settings.mcp.save',

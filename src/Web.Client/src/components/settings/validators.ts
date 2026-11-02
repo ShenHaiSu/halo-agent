@@ -59,20 +59,50 @@ export function validateJson(text: string): JsonValidation {
 
 export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 
-/** 网络分页校验（P10 瘦身）：代理模式 + 地址 + 重试 0~8 */
-export function validateNetworkForm(f: { mode: string; url: string; retry: number }): FieldError[] {
-  const errs: FieldError[] = [];
-  if (!['direct', 'system', 'manual'].includes(f.mode))
-    errs.push({ field: 'mode', message: '代理模式不合法' });
-  if (f.mode === 'manual') {
-    if (!f.url.trim()) errs.push({ field: 'url', message: '自定义代理请填写代理地址' });
-    else if (!isValidHttpUrl(f.url))
-      errs.push({ field: 'url', message: '代理地址必须是 http(s) 开头的合法 URL' });
-  }
-  if (!isIntInRange(f.retry, 0, 8))
-    errs.push({ field: 'retry', message: '重试次数需在 0 ~ 8 之间' });
-  return errs;
-}
+ /** 网络分页校验（P22 瘦身：代理模式 + 地址；retry 已搬家至行为页） */
+ export function validateNetworkForm(f: { mode: string; url: string }): FieldError[] {
+   const errs: FieldError[] = [];
+   if (!['direct', 'system', 'manual'].includes(f.mode))
+     errs.push({ field: 'mode', message: '代理模式不合法' });
+   if (f.mode === 'manual') {
+     if (!f.url.trim()) errs.push({ field: 'url', message: '自定义代理请填写代理地址' });
+     else if (!isValidHttpUrl(f.url))
+       errs.push({ field: 'url', message: '代理地址必须是 http(s) 开头的合法 URL' });
+   }
+   return errs;
+ }
+ 
+ /** P22：人格名格式（前端只做格式拦，存在性以后端拒存为准） */
+ export function isValidPersonaName(name: string): boolean {
+   const t = (name ?? '').trim();
+   if (!t) return true;
+   if (t.length > 64) return false;
+   if (t === '.' || t === '..') return false;
+   if (t.includes('/') || t.includes('\\')) return false;
+   if (/[<>:"|?*\x00-\x1F]/.test(t)) return false;
+   return true;
+ }
+ 
+ /** P22 行为页校验：maxTurns（整数且 0 或 1~500）、retry（0~8）、compact（1~10）、persona（空或 ≤64 且无非法文件名字符） */
+ export function validateBehaviorForm(f: {
+   maxTurns: unknown;
+   retry: unknown;
+   compactKeepTail: unknown;
+   persona: string;
+ }): FieldError[] {
+   const errs: FieldError[] = [];
+   const mt = typeof f.maxTurns === 'number' ? f.maxTurns : Number(f.maxTurns);
+   if (!(Number.isInteger(mt) && (mt === 0 || (mt >= 1 && mt <= 500))))
+     errs.push({ field: 'maxTurns', message: '最大轮数须为整数且 0 或 1~500（0=不限）' });
+   if (!isIntInRange(f.retry, 0, 8))
+     errs.push({ field: 'retry', message: '重试次数需在 0 ~ 8 之间' });
+   if (!isIntInRange(f.compactKeepTail, 1, 10))
+     errs.push({ field: 'compactKeepTail', message: '压缩保留轮数需在 1 ~ 10 之间' });
+   const p = (f.persona ?? '').trim();
+   if (p && !isValidPersonaName(p))
+     errs.push({ field: 'persona', message: '人格名非法（≤64 且无非法文件名字符）' });
+   return errs;
+ }
 
 /** P18：provider network 三选项。 */
 export const PROVIDER_NETWORKS = ['follow', 'proxy', 'direct'] as const;

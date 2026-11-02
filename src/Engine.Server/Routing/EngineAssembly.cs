@@ -110,7 +110,9 @@ public static class EngineAssembly
              llm, tools, store, bus,
              Paths.DataDir, Environment.CurrentDirectory, initialMode, resolved?.Persona ?? "",
              resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
-             askInteractive: true, usageStore: usageStore);
+             askInteractive: true, usageStore: usageStore,
+             compactKeepTail: resolved?.CompactKeepTail ?? 2,
+             autoCompactOnLimit: resolved?.AutoCompactOnLimit ?? false);
          if (resolved is not null)
          {
              try { session.ReconfigureActive(resolved); }
@@ -178,13 +180,14 @@ public static class EngineAssembly
             ("state.setMaxTurns", real.StateSetMaxTurnsAsync),
             ("state.setRetry", real.StateSetRetryAsync),
 
-            ("settings.get", real.SettingsGetAsync),
-            ("settings.saveProviders", real.SettingsSaveProvidersAsync),
-            ("settings.setActive", real.SettingsSetActiveAsync),
-            ("settings.saveNetwork", real.SettingsSaveNetworkAsync),
-            ("settings.probeModels", real.SettingsProbeModelsAsync),
-            ("settings.mcp.get", real.SettingsMcpGetAsync),
-            ("settings.mcp.save", real.SettingsMcpSaveAsync),
+             ("settings.get", real.SettingsGetAsync),
+             ("settings.saveProviders", real.SettingsSaveProvidersAsync),
+             ("settings.setActive", real.SettingsSetActiveAsync),
+              ("settings.saveNetwork", real.SettingsSaveNetworkAsync),
+              ("settings.saveBehavior", real.SettingsSaveBehaviorAsync),
+              ("settings.probeModels", real.SettingsProbeModelsAsync),
+              ("settings.mcp.get", real.SettingsMcpGetAsync),
+              ("settings.mcp.save", real.SettingsMcpSaveAsync),
 
             ("asset.skills.list", real.AssetSkillsListAsync),
             ("asset.skills.get", real.AssetSkillsGetAsync),

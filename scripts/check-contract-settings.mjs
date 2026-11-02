@@ -11,7 +11,7 @@ const schema = JSON.parse(readFileSync(resolve(root, 'contract/agent.schema.json
 const cs = readFileSync(resolve(root, 'src/Engine.Abstractions/Methods/SettingsContracts.cs'), 'utf8');
 const dts = readFileSync(resolve(root, 'src/Web.Client/src/contract/agent.d.ts'), 'utf8');
 
-const mustMethods = ['settings.get', 'settings.saveProviders', 'settings.setActive', 'settings.saveNetwork', 'settings.probeModels'];
+ const mustMethods = ['settings.get', 'settings.saveProviders', 'settings.setActive', 'settings.saveNetwork', 'settings.saveBehavior', 'settings.probeModels'];
 const mustNot = ['settings.saveModel', 'settings.saveExtraHeaders', 'state.setProvider'];
 let fail = 0;
 for (const m of mustMethods) {
@@ -23,15 +23,17 @@ for (const m of mustNot) {
   if (dts.includes(`'${m}'`)) { console.error(`d.ts 不应含 ${m}`); fail = 1; }
 }
 // cs 侧新契约类型
-for (const t of ['ProviderView', 'ModelView', 'SettingsSaveProvidersParams', 'SettingsSetActiveParams']) {
-  if (!cs.includes(t)) { console.error(`cs 缺 ${t}`); fail = 1; }
-}
-// d.ts 由 gen-contract-types 从 schema 生成：校验 settings.get 结果含整树关键键
-const getResult = JSON.stringify(schema.methods['settings.get']?.result ?? {});
-for (const k of ['activeProvider', 'activeModel', 'migrationRequired', 'providers', 'proxy']) {
-  if (!getResult.includes(k)) { console.error(`schema settings.get 缺 ${k}`); fail = 1; }
-}
-if (!dts.includes('activeProvider')) { console.error('d.ts settings.get 缺 activeProvider'); fail = 1; }
+ // cs 侧新契约类型
+ for (const t of ['ProviderView', 'ModelView', 'SettingsSaveProvidersParams', 'SettingsSetActiveParams', 'SettingsSaveBehaviorParams']) {
+   if (!cs.includes(t)) { console.error(`cs 缺 ${t}`); fail = 1; }
+ }
+ // d.ts 由 gen-contract-types 从 schema 生成：校验 settings.get 结果含整树关键键
+ const getResult = JSON.stringify(schema.methods['settings.get']?.result ?? {});
+ for (const k of ['activeProvider', 'activeModel', 'migrationRequired', 'providers', 'proxy', 'maxTurns', 'retry', 'persona', 'compactKeepTail', 'autoCompactOnLimit']) {
+   if (!getResult.includes(k)) { console.error(`schema settings.get 缺 ${k}`); fail = 1; }
+ }
+ if (!dts.includes('compactKeepTail')) { console.error('d.ts 缺 compactKeepTail'); fail = 1; }
+ if (!dts.includes('settings.saveBehavior')) { console.error('d.ts 缺 settings.saveBehavior'); fail = 1; }
 if (!existsSync(resolve(root, 'src/Web.Client/src/components/settings/providerEditing.ts'))) {
   console.error('缺 providerEditing.ts');
   fail = 1;

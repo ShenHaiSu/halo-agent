@@ -119,46 +119,51 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private long _turnCompletion;
      private bool _turnHasUsage;
      private long _lastTsMs;
-    private const int RepeatWarn = 3;
-    private const int RepeatAbort = 6;
-    private const int ContextMaxChars = 20_000;
-    public const int KeepTailTurns = 2;
-    public const int KeepTailForCompact = 4;
-
-
-      public AgentSession(
-          ILlmClient llm,
-          ToolRegistry tools,
-          SessionStore store,
-          EventBus bus,
-          string dataDir,
-          string cwd,
-          PermissionMode mode,
-          string persona,
-          int maxTurns,
-          int retry,
-          bool askInteractive,
-          IClock? clock = null,
-          UsageStore? usageStore = null,
-          ILogger? logger = null)
-     {
-         _llm = llm;
-         _tools = tools;
-         _store = store;
-         _bus = bus;
-         _self = this;
-         _dataDir = dataDir;
-         _cwd = cwd;
-         _mode = mode;
-         _persona = persona;
-         _maxTurns = maxTurns;
-         _retry = retry;
-         _askInteractive = askInteractive;
-         _clock = clock ?? SystemClock.Instance;
-         _usageStore = usageStore ?? new UsageStore(HaloAgent.Engine.Storage.Paths.UsageDbFile);
-         _log = logger ?? NullLogger.Instance;
-         PushSystemPrompt();
-     }
+     private const int RepeatWarn = 3;
+     private const int RepeatAbort = 6;
+     private const int ContextMaxChars = 20_000;
+     /// <summary>P22：压缩保留轮数（实例字段，活会话经 ReconfigureActive 更新；/compact 与自动压缩共用）。</summary>
+     private int _compactKeepTail = 2;
+     /// <summary>P22：超限自动压缩开关（无头下无效，保持“必停”语义）。</summary>
+     private bool _autoCompactOnLimit;
+ 
+       public AgentSession(
+           ILlmClient llm,
+           ToolRegistry tools,
+           SessionStore store,
+           EventBus bus,
+           string dataDir,
+           string cwd,
+           PermissionMode mode,
+           string persona,
+           int maxTurns,
+           int retry,
+           bool askInteractive,
+           IClock? clock = null,
+           UsageStore? usageStore = null,
+           ILogger? logger = null,
+           int compactKeepTail = 2,
+           bool autoCompactOnLimit = false)
+      {
+          _llm = llm;
+          _tools = tools;
+          _store = store;
+          _bus = bus;
+          _self = this;
+          _dataDir = dataDir;
+          _cwd = cwd;
+          _mode = mode;
+          _persona = persona;
+          _maxTurns = maxTurns;
+          _retry = retry;
+          _compactKeepTail = Math.Clamp(compactKeepTail, 1, 10);
+          _autoCompactOnLimit = autoCompactOnLimit;
+          _askInteractive = askInteractive;
+          _clock = clock ?? SystemClock.Instance;
+          _usageStore = usageStore ?? new UsageStore(HaloAgent.Engine.Storage.Paths.UsageDbFile);
+          _log = logger ?? NullLogger.Instance;
+          PushSystemPrompt();
+      }
 
     // ============================================================
     //  状态访问
@@ -174,9 +179,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      public int LastCompactBefore { get { lock (_lock) return _lastCompactBefore; } }
      public int LastCompactAfter { get { lock (_lock) return _lastCompactAfter; } }
      public long LastCompactTsMs { get { lock (_lock) return _lastCompactTsMs; } }
-    public string Persona => _persona;
-    public int MaxTurns => _maxTurns;
-    public int Retry => _retry;
+     public string Persona => _persona;
+     public int MaxTurns => _maxTurns;
+     public int Retry => _retry;
+     public int CompactKeepTail { get { lock (_lock) return _compactKeepTail; } }
+     public bool AutoCompactOnLimit { get { lock (_lock) return _autoCompactOnLimit; } }
     public string? CurrentToolCallId => _currentToolCallId;
 
      /// <summary>P18：非模型链路生效代理（WebFetch 用；System 不固化地址）。</summary>
@@ -232,11 +239,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeProxySource = resolved.ProxySource ?? "";
              _activeProxyWarning = resolved.ProxyWarning ?? "";
              _activeBaseUrl = resolved.BaseUrl ?? "";
-             _activeApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey);
-             _activeConfigured = resolved.Configured;
              _maxTurns = resolved.MaxTurns;
              _retry = resolved.Retry;
              _persona = resolved.Persona ?? "";
+             _compactKeepTail = Math.Clamp(resolved.CompactKeepTail, 1, 10);
+             _autoCompactOnLimit = resolved.AutoCompactOnLimit;
              if (_messages.Count > 0 && _messages[0].Role == Role.System)
                  _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
                      _cwd, _mode, _store.SessionId, _persona, _dataDir));
@@ -602,23 +609,62 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         {
             ct.ThrowIfCancellationRequested();
 
-            // ===== 预算检查 =====
-            if (used >= budget)
-            {
-                var cont = await AskContinueRoundsAsync(used, ct).ConfigureAwait(false);
-                if (!cont)
-                {
-                    var text = _askInteractive
-                        ? "⚠ 已达 " + used + " 轮上限，按你的选择停在这里。要接着干就再发一条消息；"
-                          + "想一次跑更久可用 --max-turns N 调大上限（--max-turns 0 = 不限）"
-                        : "⚠ 已达 " + used + " 轮上限，任务可能没干完。用 --max-turns N 调大上限，"
-                          + "--max-turns 0 表示不限";
-
-                    await FinishAsync(turnId, text, truncated: true, ct, finalUsed: Math.Max(used, 1)).ConfigureAwait(false);
-                    return new TurnResult(text, toolCallCount, true, _usageIn, _usageOut);
-                }
-                budget = Math.Min(budget + batch, int.MaxValue);
-            }
+             // ===== 预算检查（P22：超限自动压缩） =====
+             if (used >= budget)
+             {
+                 bool autoOk = false;
+                 if (_maxTurns != 0 && _autoCompactOnLimit && _askInteractive)
+                 {
+                     try
+                     {
+                         using var autoCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                         autoCts.CancelAfter(TimeSpan.FromSeconds(120));
+                         var r = await CompactForLimitAsync(autoCts.Token).ConfigureAwait(false);
+                         if (r.RemovedTurns > 0)
+                         {
+                             budget = Math.Min(budget + batch, int.MaxValue);
+                             _roundLimit = (int)Math.Min(budget, int.MaxValue);
+                             try { _log.LogInformation("auto-compact on limit session={Sid} removedTurns={Rt} newBudget={B}", _store.SessionId, r.RemovedTurns, budget); } catch { }
+                             autoOk = true;
+                         }
+                         else
+                         {
+                             try { _log.LogInformation("auto-compact noop session={Sid}, fallback to ask", _store.SessionId); } catch { }
+                         }
+                     }
+                     catch (OperationCanceledException)
+                     {
+                         try { _log.LogWarning("auto-compact timeout/cancel session={Sid}, fallback to ask", _store.SessionId); } catch { }
+                         try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "自动压缩超时，已回落为手动确认", Level = "warn" }, CancellationToken.None).ConfigureAwait(false); } catch { }
+                     }
+                     catch (Exception ex)
+                     {
+                         try { _log.LogWarning("auto-compact failed session={Sid} reason={Msg}, fallback to ask", _store.SessionId, ex.Message); } catch { }
+                         // CompactCore 内部已发 notice；此处不再重复
+                     }
+                 }
+                 if (autoOk)
+                 {
+                     // 压缩成功且有裁剪：涨一档继续（下一轮 RoundStarted 会带新 Limit，可观测）
+                 }
+                 else
+                 {
+                     var cont = await AskContinueRoundsAsync(used, ct).ConfigureAwait(false);
+                     if (!cont)
+                     {
+                         var text = _askInteractive
+                             ? "⚠ 已达 " + used + " 轮上限，按你的选择停在这里。要接着干就再发一条消息；"
+                               + "想一次跑更久可用 --max-turns N 调大上限（--max-turns 0 = 不限）"
+                             : "⚠ 已达 " + used + " 轮上限，任务可能没干完。用 --max-turns N 调大上限，"
+                               + "--max-turns 0 表示不限";
+ 
+                         await FinishAsync(turnId, text, truncated: true, ct, finalUsed: Math.Max(used, 1)).ConfigureAwait(false);
+                         return new TurnResult(text, toolCallCount, true, _usageIn, _usageOut);
+                     }
+                     budget = Math.Min(budget + batch, int.MaxValue);
+                     _roundLimit = _maxTurns == 0 ? 0 : (int)Math.Min(budget, int.MaxValue);
+                 }
+             }
 
             used++;
             _roundUsed = used;
@@ -1159,15 +1205,42 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          _compacting = true;
          try
          {
-             List<ChatMessage> snapshot;
-             lock (_lock) snapshot = _messages.ToList();
-             int totalBefore = snapshot.Count;
-
-             var nonSystem = snapshot.Count > 0 && snapshot[0].Role == Role.System
-                 ? snapshot.Skip(1).ToList()
-                 : snapshot;
-
-             var (oldTurns, keepTurns) = TurnSegmenter.Segment(nonSystem, KeepTailTurns);
+             return await CompactCoreAsync(ct).ConfigureAwait(false);
+         }
+         finally
+         {
+             _compacting = false;
+         }
+     }
+ 
+     /// <summary>P22 超限分支内部路径：复用 Core，但跳过 _busy 检查（预算分支正处忙回合内，不可直调 CompactAsync）。
+     /// 保留 _compacting 重入 guard；/compact 手动命令不受 autoCompactOnLimit 开关影响（调用方区分）。</summary>
+     private async Task<CompactResult> CompactForLimitAsync(CancellationToken ct)
+     {
+         if (_compacting) throw new InvalidOperationException("正在压缩上下文，稍后再试");
+         _compacting = true;
+         try
+         {
+             return await CompactCoreAsync(ct).ConfigureAwait(false);
+         }
+         finally
+         {
+             _compacting = false;
+         }
+     }
+ 
+     private async Task<CompactResult> CompactCoreAsync(CancellationToken ct)
+     {
+         List<ChatMessage> snapshot;
+         lock (_lock) snapshot = _messages.ToList();
+         int totalBefore = snapshot.Count;
+ 
+         var nonSystem = snapshot.Count > 0 && snapshot[0].Role == Role.System
+             ? snapshot.Skip(1).ToList()
+             : snapshot;
+         int keepTail;
+         lock (_lock) keepTail = _compactKeepTail;
+         var (oldTurns, keepTurns) = TurnSegmenter.Segment(nonSystem, keepTail);
              if (oldTurns.Count == 0)
              {
                  try { _log.LogInformation("compact noop session={Sid} count={Count}", _store.SessionId, totalBefore); } catch { }
@@ -1334,11 +1407,6 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  }, ct).ConfigureAwait(false);
 
              return new CompactResult(oldMessages.Count, summary, totalBefore, totalAfter, seq, removedTurns, keptTurns);
-         }
-         finally
-         {
-             _compacting = false;
-         }
      }
      private int CountHistoryLines()
      {

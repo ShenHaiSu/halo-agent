@@ -41,21 +41,21 @@ public sealed class FrameServer
     private sealed record ReqItem(long Id, string Method, JsonElement? Params);
 
     /// <summary>需要串行执行的方法（会改状态）。其余方法可并发。</summary>
-    private static readonly HashSet<string> MutatingMethods = new(StringComparer.Ordinal)
-    {
-        "agent.prompt", "agent.queue", "agent.unqueue", "agent.cancel", "agent.answer",
-        "agent.drain", "session.new", "session.resume", "session.rename", "session.delete",
-        "session.clear", "session.compact", "session.setCwd",
-        "state.setMode", "state.setPersona",
-        "state.setMaxTurns", "state.setRetry",
-        "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
-        "settings.mcp.save",
-
-         "asset.skills.save", "asset.skills.delete", "asset.skills.run",
-         "asset.personas.save", "asset.personas.delete", "asset.memory.save", "asset.memory.delete",
-         "tool.undoRollback", "system.shutdown", "update.install",
-         "usage.clear",
-    };
+     private static readonly HashSet<string> MutatingMethods = new(StringComparer.Ordinal)
+     {
+         "agent.prompt", "agent.queue", "agent.unqueue", "agent.cancel", "agent.answer",
+         "agent.drain", "session.new", "session.resume", "session.rename", "session.delete",
+         "session.clear", "session.compact", "session.setCwd",
+         "state.setMode", "state.setPersona",
+         "state.setMaxTurns", "state.setRetry",
+         "settings.saveProviders", "settings.setActive", "settings.saveNetwork", "settings.saveBehavior",
+         "settings.mcp.save",
+ 
+          "asset.skills.save", "asset.skills.delete", "asset.skills.run",
+          "asset.personas.save", "asset.personas.delete", "asset.memory.save", "asset.memory.delete",
+          "tool.undoRollback", "system.shutdown", "update.install",
+          "usage.clear",
+     };
 
     public FrameServer(IFrameChannel channel, EngineState state, EventBus bus,
         ILogger logger, CancellationToken ct)

@@ -82,9 +82,11 @@ public sealed partial class RealMethods
              MigrationRequired = migrationRequired,
              Providers = providers,
               Proxy = new ProxySettings { Mode = mode, Url = cfg.Proxy?.Url },
-             Retry = cfg.Retry ?? 0,
-             MaxTurns = cfg.MaxTurns ?? 200,
+             Retry = Math.Clamp(cfg.Retry ?? 0, 0, 8),
+             MaxTurns = Math.Clamp(cfg.MaxTurns ?? 200, 0, 500),
              Persona = cfg.Persona ?? "",
+             CompactKeepTail = Math.Clamp(cfg.CompactKeepTail ?? 2, 1, 10),
+             AutoCompactOnLimit = cfg.AutoCompactOnLimit ?? false,
              DataDir = _dataDir,
              ConfigPath = Path.Combine(_dataDir, "config.json"),
          });
@@ -122,15 +124,17 @@ public sealed partial class RealMethods
         if (force)
             warnings.Add("已按二次确认覆盖旧结构或损坏的配置（原文件已自动备份为 .bak.*）");
 
-        var next = new ConfigModel
-        {
-            ActiveProvider = cfg.ActiveProvider,
-            ActiveModel = cfg.ActiveModel,
-            MaxTurns = cfg.MaxTurns,
-            Persona = cfg.Persona,
-            Retry = cfg.Retry,
-            Proxy = cfg.Proxy,
-        };
+         var next = new ConfigModel
+         {
+             ActiveProvider = cfg.ActiveProvider,
+             ActiveModel = cfg.ActiveModel,
+             MaxTurns = cfg.MaxTurns,
+             Persona = cfg.Persona,
+             Retry = cfg.Retry,
+             CompactKeepTail = cfg.CompactKeepTail,
+             AutoCompactOnLimit = cfg.AutoCompactOnLimit,
+             Proxy = cfg.Proxy,
+         };
 
         // apiKey 缺席或空 = 不改；clearKey=true 清除（与 apiKey 同传时 clear 优先 + warning）
         foreach (var prop in pv.EnumerateObject())
@@ -353,6 +357,108 @@ public sealed partial class RealMethods
          }
      }
 
+     /// <summary>P22 行为页保存：5 项全局行为（LoadForWrite → Validate → Save → 活应用）。</summary>
+     public Task<object?> SettingsSaveBehaviorAsync(JsonElement? p, CancellationToken ct)
+     {
+         ConfigModel cfg;
+         try { cfg = ConfigStore.LoadForWrite(); }
+         catch (InvalidOperationException ex)
+         {
+             throw new RpcException(RpcError.Internal,
+                 "配置文件损坏，已拒绝保存以免覆盖：" + ex.Message);
+         }
+         int? maxTurns = null; int? retry = null; string? persona = null;
+         int? compactKeepTail = null; bool? autoCompact = null;
+         if (p is not null)
+         {
+             if (p.Value.TryGetProperty("maxTurns", out var mv))
+             {
+                 if (mv.ValueKind == JsonValueKind.Null) maxTurns = null;
+                 else if (mv.ValueKind == JsonValueKind.Number && mv.TryGetInt32(out var v)) maxTurns = v;
+                 else throw RpcException.ParamsInvalid("maxTurns 须为整数且 0 或 1~500（0=不限）");
+             }
+             if (p.Value.TryGetProperty("retry", out var rv))
+             {
+                 if (rv.ValueKind == JsonValueKind.Null) retry = null;
+                 else if (rv.ValueKind == JsonValueKind.Number && rv.TryGetInt32(out var v)) retry = v;
+                 else throw RpcException.ParamsInvalid("retry 须为 0~8");
+             }
+             if (p.Value.TryGetProperty("persona", out var pv))
+             {
+                 if (pv.ValueKind == JsonValueKind.Null) persona = null;
+                 else if (pv.ValueKind == JsonValueKind.String) persona = pv.GetString() ?? "";
+                 else throw RpcException.ParamsInvalid("persona 须为字符串");
+             }
+             if (p.Value.TryGetProperty("compactKeepTail", out var cv))
+             {
+                 if (cv.ValueKind == JsonValueKind.Null) compactKeepTail = null;
+                 else if (cv.ValueKind == JsonValueKind.Number && cv.TryGetInt32(out var v)) compactKeepTail = v;
+                 else throw RpcException.ParamsInvalid("compactKeepTail 须为 1~10");
+             }
+             if (p.Value.TryGetProperty("autoCompactOnLimit", out var av))
+             {
+                 if (av.ValueKind == JsonValueKind.True) autoCompact = true;
+                 else if (av.ValueKind == JsonValueKind.False) autoCompact = false;
+                 else if (av.ValueKind == JsonValueKind.Null) autoCompact = null;
+                 else throw RpcException.ParamsInvalid("autoCompactOnLimit 须为布尔");
+             }
+         }
+         var errs = ConfigValidation.ValidateBehaviorValues(maxTurns, retry, persona, compactKeepTail, autoCompact, PersonaExistsForBehavior);
+         if (errs.Count > 0)
+         {
+             var first = errs[0];
+             if (first.Field == "persona" && first.Message.StartsWith("persona 不存在"))
+                 throw new RpcException(RpcError.ParamsInvalid, "参数不合法: [persona] " + first.Message, "到设置→资源→人格新建");
+             throw RpcException.ParamsInvalid($"[{first.Field}] {first.Message}");
+         }
+         bool personaCleared = false;
+         if (maxTurns.HasValue) cfg.MaxTurns = maxTurns.Value;
+         if (retry.HasValue) cfg.Retry = retry.Value;
+         if (persona is not null)
+         {
+             var trimmed = persona.Trim();
+             if (trimmed.Length == 0 && (cfg.Persona ?? "").Length > 0) personaCleared = true;
+             cfg.Persona = trimmed;
+         }
+         if (compactKeepTail.HasValue) cfg.CompactKeepTail = compactKeepTail.Value;
+         if (autoCompact.HasValue) cfg.AutoCompactOnLimit = autoCompact.Value;
+         ConfigStore.Save(cfg);
+         var warnings = new List<string>(ConfigValidation.Warnings(cfg));
+         if (personaCleared) warnings.Add("已清空默认人格（note）");
+         try
+         {
+             var resolved = ConfigStore.Resolve(cfg);
+             try { _session.ReconfigureActive(resolved); }
+             catch (NotSupportedException ex)
+             {
+                 _session.ClearActive();
+                 warnings.Add("已保存，但生效模型协议暂不支持，已置为未配置态（" + ex.Message + "）");
+             }
+         }
+         catch (Exception ex)
+         {
+             _session.ClearActive();
+             warnings.Add("已保存，但 active 指向无效，已置为未配置态，请重选 active 后再试（" + ex.Message + "）");
+         }
+         return Task.FromResult<object?>(new SettingsSaveBehaviorResult
+         {
+             Ok = true,
+             Warnings = warnings.Distinct().ToList(),
+         });
+     }
+ 
+     private bool PersonaExistsForBehavior(string name)
+     {
+         try
+         {
+             if (HaloAgent.Engine.Core.Agent.Prompts.PersonaBuiltin.GetBuiltin(name) is not null) return true;
+             var list = HaloAgent.Engine.Storage.Personas.PersonaStore.List(_dataDir);
+             return list.Contains(name, StringComparer.Ordinal);
+         }
+         catch { return false; }
+     }
+ 
+ 
      public Task<object?> SettingsSaveNetworkAsync(JsonElement? p, CancellationToken ct)
      {
          ConfigModel cfg;
@@ -392,7 +498,12 @@ public sealed partial class RealMethods
          if (p?.TryGetProperty("url", out var uv) == true)
              proxyCfg.Url = NullIfBlank(uv.GetString());
          if (p?.TryGetProperty("retry", out var rv) == true && rv.ValueKind == JsonValueKind.Number)
-             cfg.Retry = Math.Clamp(rv.GetInt32(), 0, 8);
+         {
+             if (!rv.TryGetInt32(out var rvi) || rvi < 0 || rvi > 8)
+                 throw RpcException.ParamsInvalid("retry 须为 0~8");
+             cfg.Retry = Math.Clamp(rvi, 0, 8);
+             warnings.Add("retry 已搬家至行为页，此处为兼容保留");
+         }
          // 瘦身：headers/headersEnabled/providerHeaders 已删除；收到则直接拒绝（破坏性口径）
          if (p?.TryGetProperty("headers", out _) == true ||
              p?.TryGetProperty("headersEnabled", out _) == true ||

@@ -1,21 +1,21 @@
-﻿<#
-.SYNOPSIS
-  P0 产物构建：一键产出可直接双击运行的发行目录 dist\<win-x86|win-x64>\。
-
-.DESCRIPTION
-  顺序：
-    [1/4] 生成契约类型（前端依赖它）
-    [2/4] 构建前端到 Host.Desktop/wwwroot
-    [3/4] 自包含发布宿主 + 引擎到 dist\<rid>\
-    [4/4] 版本锁校验 + 输出运行指引
-
-  产物可直接拷到任意 Win7 SP1 / Win10 / Win11 机器运行（x86 包通吃 32/64 位）。
-
-.EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1
-  powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1 -Platform x64
-  powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1 -SkipFrontend
-#>
+﻿ <#
+ .SYNOPSIS
+   P0 产物构建：一键产出可直接双击运行的发行目录 dist\<win-x86|win-x64>\（P22 行为页已纳入）。
+ 
+ .DESCRIPTION
+   顺序：
+     [1/4] 生成契约类型（前端依赖它；P22：跑两遍验证幂等 + check-contract-settings 三方一致）
+     [2/4] 构建前端到 Host.Desktop/wwwroot（含行为页 BehaviorPage）
+     [3/4] 自包含发布宿主 + 引擎到 dist\<rid>\
+     [4/4] 版本锁校验 + 输出运行指引
+ 
+   产物可直接拷到任意 Win7 SP1 / Win10 / Win11 机器运行（x86 包通吃 32/64 位）。
+ 
+ .EXAMPLE
+   powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1 -Platform x64
+   powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1 -SkipFrontend
+ #>
 
 [CmdletBinding()]
 param(
@@ -48,14 +48,17 @@ try {
     }
     New-Item -ItemType Directory -Force $outDir | Out-Null
 
-    # 1) 契约类型生成
-    Write-Host ""
-    Write-Host "[1/4] 生成契约类型" -ForegroundColor Cyan
-    if (Get-Command node -ErrorAction SilentlyContinue) {
-        node scripts/gen-contract-types.mjs
-    } else {
-        Write-Host "  跳过：未安装 node" -ForegroundColor Yellow
-    }
+     # 1) 契约类型生成（P22：跑两遍验证幂等 + 三方一致）
+     Write-Host ""
+     Write-Host "[1/4] 生成契约类型" -ForegroundColor Cyan
+     if (Get-Command node -ErrorAction SilentlyContinue) {
+         node scripts/gen-contract-types.mjs
+         node scripts/gen-contract-types.mjs
+         node scripts/check-contract-settings.mjs
+         if ($LASTEXITCODE -ne 0) { throw "契约一致性校验失败（check-contract-settings）" }
+     } else {
+         Write-Host "  跳过：未安装 node" -ForegroundColor Yellow
+     }
 
     # 2) 前端
     if (-not $SkipFrontend) {

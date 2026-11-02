@@ -40,17 +40,28 @@ describe('Mock 行为表与契约一致性', () => {
     }
   });
 
-  it('settings.get Mock 含 providers 整树 + proxy', () => {
-    const b = BEHAVIORS['settings.get'];
-    expect(b?.kind).toBe('ok');
-    if (b?.kind === 'ok') {
-      const s = b.run(null) as { providers?: unknown[]; proxy?: { mode?: string }; activeProvider?: string };
-      expect(s.providers).toBeDefined();
-      expect(Array.isArray(s.providers)).toBe(true);
-      expect(s.proxy?.mode).toBe('system');
-      expect(typeof s.activeProvider).toBe('string');
-    }
-  });
+   it('settings.get Mock 含 providers 整树 + proxy', () => {
+     const b = BEHAVIORS['settings.get'];
+     expect(b?.kind).toBe('ok');
+     if (b?.kind === 'ok') {
+       const s = b.run(null) as { providers?: unknown[]; proxy?: { mode?: string }; activeProvider?: string };
+       expect(s.providers).toBeDefined();
+       expect(Array.isArray(s.providers)).toBe(true);
+       expect(s.proxy?.mode).toBe('system');
+       expect(typeof s.activeProvider).toBe('string');
+     }
+   });
+ 
+   it('settings.saveBehavior Mock 结果体只有 ok/warnings（无 errors）', () => {
+     const b = BEHAVIORS['settings.saveBehavior'];
+     expect(b?.kind).toBe('ok');
+     if (b?.kind === 'ok') {
+       const r = b.run({}) as Record<string, unknown>;
+       expect(r).toHaveProperty('ok');
+       expect(r).toHaveProperty('warnings');
+       expect(r).not.toHaveProperty('errors');
+     }
+   });
 
   it('update.check 形状符合契约', () => {
     const b = BEHAVIORS['update.check'];

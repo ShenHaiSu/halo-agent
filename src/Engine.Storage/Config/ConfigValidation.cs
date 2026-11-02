@@ -91,29 +91,83 @@ public static class ConfigValidation
             }
         }
 
-        // active
-        var ap = cfg.ActiveProvider?.Trim() ?? "";
-        var am = cfg.ActiveModel?.Trim() ?? "";
-        if (string.IsNullOrEmpty(ap) && string.IsNullOrEmpty(am))
-        {
-            // 未配置态：允许（整树空 providers 也允许保存）
-        }
-        else if (string.IsNullOrEmpty(ap) || string.IsNullOrEmpty(am))
-        {
-            errs.Add(new(ap, am, "active", "active_provider 与 active_model 必须同时存在或同时为空"));
-        }
-        else
-        {
-            if (!cfg.Providers.TryGetValue(ap, out var p))
-                errs.Add(new(ap, am, "active", $"active provider 不存在：{ap}"));
-            else if (p.Models.Count == 0)
-                errs.Add(new(ap, am, "active", "active 不可指向空 provider"));
-            else if (!p.Models.Any(m => string.Equals(m.Id, am, StringComparison.Ordinal)))
-                errs.Add(new(ap, am, "active", $"active model 不存在：{ap}/{am}"));
-        }
-
-        return errs;
-    }
+         // active
+         var ap = cfg.ActiveProvider?.Trim() ?? "";
+         var am = cfg.ActiveModel?.Trim() ?? "";
+         if (string.IsNullOrEmpty(ap) && string.IsNullOrEmpty(am))
+         {
+             // 未配置态：允许（整树空 providers 也允许保存）
+         }
+         else if (string.IsNullOrEmpty(ap) || string.IsNullOrEmpty(am))
+         {
+             errs.Add(new(ap, am, "active", "active_provider 与 active_model 必须同时存在或同时为空"));
+         }
+         else
+         {
+             if (!cfg.Providers.TryGetValue(ap, out var p))
+                 errs.Add(new(ap, am, "active", $"active provider 不存在：{ap}"));
+             else if (p.Models.Count == 0)
+                 errs.Add(new(ap, am, "active", "active 不可指向空 provider"));
+             else if (!p.Models.Any(m => string.Equals(m.Id, am, StringComparison.Ordinal)))
+                 errs.Add(new(ap, am, "active", $"active model 不存在：{ap}/{am}"));
+         }
+ 
+         // P22：行为 5 项同样纳入整树校验（两套范围不漂移）
+         errs.AddRange(ValidateBehavior(cfg));
+ 
+         return errs;
+     }
+ 
+     /// null = 缺席（沿用默认），不拦；persona 格式必查，存在性仅当 personaExists 传入时查
+     /// （Storage 不引用 Engine.Core，内置存在性由调用方 Server 层注入，避免铁律破环）。</summary>
+     public static IReadOnlyList<ConfigValidationError> ValidateBehavior(ConfigModel cfg, Func<string, bool>? personaExists = null)
+     {
+         return ValidateBehaviorValues(cfg.MaxTurns, cfg.Retry, cfg.Persona, cfg.CompactKeepTail, cfg.AutoCompactOnLimit, personaExists);
+     }
+ 
+     /// <summary>P22 行为 5 字段值校验（供 saveBehavior 直接用原始值，避免 ConfigModel 装箱）。</summary>
+     public static IReadOnlyList<ConfigValidationError> ValidateBehaviorValues(int? maxTurns, int? retry, string? persona, int? compactKeepTail, bool? autoCompact, Func<string, bool>? personaExists = null)
+     {
+         var errs = new List<ConfigValidationError>();
+         if (maxTurns.HasValue)
+         {
+             var v = maxTurns.Value;
+             if (!(v == 0 || (v >= 1 && v <= 500)))
+                 errs.Add(new("", null, "maxTurns", "maxTurns 须为整数且 0 或 1~500（0=不限）"));
+         }
+         if (retry.HasValue)
+         {
+             var v = retry.Value;
+             if (v < 0 || v > 8)
+                 errs.Add(new("", null, "retry", "retry 须为 0~8"));
+         }
+         if (compactKeepTail.HasValue)
+         {
+             var v = compactKeepTail.Value;
+             if (v < 1 || v > 10)
+                 errs.Add(new("", null, "compactKeepTail", "compactKeepTail 须为 1~10"));
+         }
+         // autoCompactOnLimit：bool，无校验
+         var name = (persona ?? "").Trim();
+         if (name.Length == 0)
+         {
+             // 空串通过（=无人格）
+         }
+         else
+         {
+             if (name.Length > 64)
+                 errs.Add(new("", null, "persona", "persona 不超过 64 字"));
+             else if (name.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0
+                 || name.Contains('/') || name.Contains('\\')
+                 || name is "." or "..")
+                 errs.Add(new("", null, "persona", "persona 含非法文件名字符"));
+             else if (personaExists is not null && !personaExists(name))
+                 errs.Add(new("", null, "persona", $"persona 不存在：{name}"));
+         }
+         return errs;
+     }
+ 
+ 
 
       /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。P14：alias==id 聚合为单条提示。P18：代理 warning 与 TryResolve 同源。</summary>
       public static List<string> Warnings(ConfigModel cfg)

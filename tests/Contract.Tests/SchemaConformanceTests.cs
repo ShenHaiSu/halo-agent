@@ -193,10 +193,11 @@ internal static class KnownMethods
         // state
         "state.snapshot", "state.setMode", "state.setPersona",
         "state.setMaxTurns", "state.setRetry",
-        // settings
-        "settings.get", "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
-        "settings.probeModels",
-        "settings.mcp.get", "settings.mcp.save",
+         // settings
+         "settings.get", "settings.saveProviders", "settings.setActive", "settings.saveNetwork",
+         "settings.saveBehavior",
+         "settings.probeModels",
+         "settings.mcp.get", "settings.mcp.save",
         // asset
         "asset.skills.list", "asset.skills.get", "asset.skills.save",
         "asset.skills.delete", "asset.skills.run",

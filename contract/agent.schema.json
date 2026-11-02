@@ -1690,15 +1690,21 @@
           "maxTurns": {
             "type": "integer"
           },
-          "persona": {
-            "type": "string"
-          },
-          "dataDir": {
-            "type": "string"
-          },
-          "configPath": {
-            "type": "string"
-          }
+           "persona": {
+             "type": "string"
+           },
+           "compactKeepTail": {
+             "type": "integer"
+           },
+           "autoCompactOnLimit": {
+             "type": "boolean"
+           },
+           "dataDir": {
+             "type": "string"
+           },
+           "configPath": {
+             "type": "string"
+           }
         }
       },
       "implementedIn": "engine"
@@ -1748,6 +1754,43 @@
       },
       "implementedIn": "engine"
     },
+     "settings.saveBehavior": {
+       "params": {
+         "type": "object",
+         "properties": {
+           "maxTurns": {
+             "type": "integer"
+           },
+           "retry": {
+             "type": "integer"
+           },
+           "persona": {
+             "type": "string"
+           },
+           "compactKeepTail": {
+             "type": "integer"
+           },
+           "autoCompactOnLimit": {
+             "type": "boolean"
+           }
+         }
+       },
+       "result": {
+         "type": "object",
+         "properties": {
+           "ok": {
+             "type": "boolean"
+           },
+           "warnings": {
+             "type": "array",
+             "items": {
+               "type": "string"
+             }
+           }
+         }
+       },
+       "implementedIn": "engine"
+     },
     "settings.probeModels": {
       "params": {
         "type": "object",

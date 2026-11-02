@@ -17,15 +17,17 @@ public sealed class ConfigModel
     [JsonPropertyName("providers")]
     public Dictionary<string, ProviderConfig> Providers { get; set; } = new(StringComparer.Ordinal);
 
-    [JsonPropertyName("max_turns")] public int? MaxTurns { get; set; }
-    [JsonPropertyName("persona")] public string? Persona { get; set; }
-
-    [JsonPropertyName("build_tag")] public string? BuildTag { get; set; }
-
-    [JsonPropertyName("proxy")]
-    public ProxyConfig Proxy { get; set; } = new();
-
-    [JsonPropertyName("retry")] public int? Retry { get; set; }
+     [JsonPropertyName("max_turns")] public int? MaxTurns { get; set; }
+     [JsonPropertyName("persona")] public string? Persona { get; set; }
+     [JsonPropertyName("compact_keep_tail")] public int? CompactKeepTail { get; set; }
+     [JsonPropertyName("auto_compact_on_limit")] public bool? AutoCompactOnLimit { get; set; }
+ 
+     [JsonPropertyName("build_tag")] public string? BuildTag { get; set; }
+ 
+     [JsonPropertyName("proxy")]
+     public ProxyConfig Proxy { get; set; } = new();
+ 
+     [JsonPropertyName("retry")] public int? Retry { get; set; }
 }
 
 public sealed class ProviderConfig

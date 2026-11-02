@@ -34,12 +34,14 @@ public sealed record ResolvedActiveModel
      public string? GlobalProxyUrl { get; init; }
      /// <summary>本次模型请求是否走代理（system 下保守标 true）。</summary>
      public bool ProxyInUse { get; init; }
-    public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
-        = Array.Empty<KeyValuePair<string, string>>();
-    public int MaxTurns { get; init; } = 200;
-    public int Retry { get; init; }
-    public string Persona { get; init; } = "";
-    public bool Configured { get; init; }
+     public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
+         = Array.Empty<KeyValuePair<string, string>>();
+     public int MaxTurns { get; init; } = 200;
+     public int Retry { get; init; }
+     public string Persona { get; init; } = "";
+     public int CompactKeepTail { get; init; } = 2;
+     public bool AutoCompactOnLimit { get; init; }
+     public bool Configured { get; init; }
     // ---- 兼容旧名（减少调用方改动） ----
     public string Model => ModelId;
     public string ProviderName => ProviderId;
@@ -401,9 +403,11 @@ public static class ConfigStore
              GlobalProxyUrl = gUrl,
              ProxyInUse = eff.InUse,
              Headers = ResolveHeaders(cfg, providerId),
-             MaxTurns = cfg.MaxTurns ?? 200,
+             MaxTurns = Math.Clamp(cfg.MaxTurns ?? 200, 0, 500),
              Retry = Math.Clamp(cfg.Retry ?? 0, 0, 8),
              Persona = cfg.Persona ?? "",
+             CompactKeepTail = Math.Clamp(cfg.CompactKeepTail ?? 2, 1, 10),
+             AutoCompactOnLimit = cfg.AutoCompactOnLimit ?? false,
              Configured = true,
          };
      }
