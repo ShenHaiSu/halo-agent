@@ -31,7 +31,11 @@ public static class ConfigValidation
                 if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                     errs.Add(new(pid, null, "baseUrl", "baseUrl 必须是绝对 http(s) 地址"));
-            }
+             // P18：network 枚举校验（非法直接拦；未知回落只发生在读归一，写前此处已拦）
+             var _net = (p.Network ?? "").Trim().ToLowerInvariant();
+             if (_net is not ("follow" or "proxy" or "direct"))
+                 errs.Add(new(pid, null, "network", "network 须为 follow/proxy/direct"));
+             }
             // headers
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in p.Headers)
@@ -111,31 +115,35 @@ public static class ConfigValidation
         return errs;
     }
 
-     /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。P14：alias==id 聚合为单条提示。</summary>
-     public static List<string> Warnings(ConfigModel cfg)
-     {
-         var w = new List<string>();
-         int aliasEqId = 0;
-         foreach (var (pid, p) in cfg.Providers)
-         {
-             if (string.Equals(p.DisplayName?.Trim(), pid, StringComparison.Ordinal)) aliasEqId++;
-             if (p.Models.Count > 50)
-                 w.Add($"服务商「{pid}」模型数 {p.Models.Count} 超过 50（建议精简）");
-             foreach (var m in p.Models)
-             {
-                 if (string.Equals(m.DisplayName?.Trim(), m.Id, StringComparison.Ordinal)) aliasEqId++;
-                 if (m.ContextWindow is not null && m.MaxTokens is not null && m.MaxTokens > m.ContextWindow)
-                     w.Add($"模型 {pid}/{m.Id} 的 maxTokens 大于 contextWindow（仅提示，不拦截）");
-             }
-             if (p.UseProxy)
-             {
-                 var (avail, _) = ConfigStore.GlobalProxy(cfg);
-                 if (!avail)
-                     w.Add($"服务商「{pid}」useProxy=true，但全局无可用代理（direct/auto 下直连）");
-             }
-         }
-         if (aliasEqId > 0)
-             w.Add($"有 {aliasEqId} 个别名与 id 相同，已视为无别名（仅提示，不拦截）");
-         return w;
-     }
-}
+      /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。P14：alias==id 聚合为单条提示。P18：代理 warning 与 TryResolve 同源。</summary>
+      public static List<string> Warnings(ConfigModel cfg)
+      {
+          var w = new List<string>();
+          int aliasEqId = 0;
+          var (geff, gwarn) = ConfigStore.ResolveGlobalEffective(cfg.Proxy ?? new ProxyConfig());
+          _ = geff;
+          if (!string.IsNullOrEmpty(gwarn)) w.Add(gwarn);
+          foreach (var (pid, p) in cfg.Providers)
+          {
+              if (string.Equals(p.DisplayName?.Trim(), pid, StringComparison.Ordinal)) aliasEqId++;
+              if (p.Models.Count > 50)
+                  w.Add($"服务商「{pid}」模型数 {p.Models.Count} 超过 50（建议精简）");
+              foreach (var m in p.Models)
+              {
+                  if (string.Equals(m.DisplayName?.Trim(), m.Id, StringComparison.Ordinal)) aliasEqId++;
+                  if (m.ContextWindow is not null && m.MaxTokens is not null && m.MaxTokens > m.ContextWindow)
+                      w.Add($"模型 {pid}/{m.Id} 的 maxTokens 大于 contextWindow（仅提示，不拦截）");
+              }
+              var network = ConfigStore.NormalizeProviderNetwork(p.Network, p.UseProxyLegacy);
+              if (network == "proxy")
+              {
+                  var (_, pwarn) = ConfigStore.TryResolveEffectiveProxy(cfg.Proxy ?? new ProxyConfig(), network);
+                  if (!string.IsNullOrEmpty(pwarn) && !w.Contains(pwarn))
+                      w.Add(pwarn);
+              }
+          }
+          if (aliasEqId > 0)
+              w.Add($"有 {aliasEqId} 个别名与 id 相同，已视为无别名（仅提示，不拦截）");
+          return w;
+      }
+ }

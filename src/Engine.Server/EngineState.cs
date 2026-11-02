@@ -43,7 +43,10 @@ public sealed class EngineState
     public int? MaxTokens { get; set; }
     public bool AcceptsImages { get; set; }
     public bool IncludeReasoning { get; set; } = true;
-    public bool ProxyInUse { get; set; }
+     public bool ProxyInUse { get; set; }
+     public string ProxyKind { get; set; } = "None";
+     public string ProxySource { get; set; } = "";
+     public string? ProxyMaskedUrl { get; set; }
     public bool Configured { get; set; }
     public int MaxTurns { get; set; } = 200;
     public int Retry { get; set; }
@@ -220,7 +223,10 @@ public sealed class EngineState
                     MaxTokens = MaxTokens,
                     AcceptsImages = AcceptsImages,
                     IncludeReasoning = IncludeReasoning,
-                    ProxyInUse = ProxyInUse,
+                     ProxyInUse = ProxyInUse,
+                     ProxyKind = ProxyKind,
+                     ProxySource = ProxySource,
+                     ProxyMaskedUrl = ProxyMaskedUrl,
                     MaxTurns = MaxTurns,
                     Retry = Retry,
                     Configured = Configured,

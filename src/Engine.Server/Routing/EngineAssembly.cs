@@ -81,18 +81,18 @@ public static class EngineAssembly
 
         var llmProto = resolved is not null && string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase)
             ? LlmProtocol.Responses : LlmProtocol.Chat;
-        var llm = new OpenAiCompatibleClient(new LlmConfig
-        {
-            BaseUrl = resolved?.BaseUrl ?? "http://localhost:11434/v1",
-            Model = resolved?.ModelId ?? "",
-            ApiKey = resolved?.ApiKey,
-            ProxyUrl = resolved?.ProxyUrl,
-            Headers = resolved?.Headers ?? Array.Empty<KeyValuePair<string, string>>(),
-            Protocol = llmProto,
-            MaxTokens = resolved?.MaxTokens,
-            AcceptsImages = resolved?.AcceptsImages ?? false,
-            IncludeReasoningHistory = resolved?.IncludeReasoningHistory ?? true,
-        });
+         var llm = new OpenAiCompatibleClient(new LlmConfig
+         {
+             BaseUrl = resolved?.BaseUrl ?? "http://localhost:11434/v1",
+             Model = resolved?.ModelId ?? "",
+             ApiKey = resolved?.ApiKey,
+             Proxy = resolved?.EffectiveProxy ?? HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None,
+             Headers = resolved?.Headers ?? Array.Empty<KeyValuePair<string, string>>(),
+             Protocol = llmProto,
+             MaxTokens = resolved?.MaxTokens,
+             AcceptsImages = resolved?.AcceptsImages ?? false,
+             IncludeReasoningHistory = resolved?.IncludeReasoningHistory ?? true,
+         });
 
         // 2) 建工具
         var tools = ToolRegistry.CreateBuiltin();
@@ -111,43 +111,45 @@ public static class EngineAssembly
              Paths.DataDir, Environment.CurrentDirectory, initialMode, resolved?.Persona ?? "",
              resolved?.MaxTurns ?? 200, resolved?.Retry ?? 0,
              askInteractive: true, usageStore: usageStore);
-        if (resolved is not null)
-        {
-            try { session.ReconfigureActive(resolved); }
-            catch (NotSupportedException) { session.ClearActive(); }
-        }
-        else
-        {
-            session.SetGlobalProxy(ConfigStore.GlobalProxyUrl(cfg));
-        }
-
-        // 5) 状态（给 stub 的 system.* 用）+ 同步已解析的配置
-        var router = new MethodRouter();
-        var state = new EngineState(Paths.DataDir, router)
-        {
-            Mode = initialMode,
-            Provider = resolved?.ProviderId ?? "",
-            ProviderDisplay = resolved?.ProviderDisplay ?? "",
-            Model = resolved?.ModelId ?? "",
-            ModelDisplay = resolved?.ModelDisplay ?? "",
-            Protocol = resolved?.Protocol ?? "chat",
-            BaseUrl = resolved?.BaseUrl ?? "",
-            ApiKeySet = !string.IsNullOrEmpty(resolved?.ApiKey),
-            ContextWindow = resolved?.ContextWindow,
-            MaxTokens = resolved?.MaxTokens,
-            AcceptsImages = resolved?.AcceptsImages ?? false,
-            IncludeReasoning = resolved?.IncludeReasoningHistory ?? true,
-            ProxyInUse = resolved?.ProxyInUse ?? false,
-            Configured = resolved is not null,
-            MaxTurns = resolved?.MaxTurns ?? 200,
-            Retry = resolved?.Retry ?? 0,
-            Persona = resolved?.Persona ?? "",
-        };
+         if (resolved is not null)
+         {
+             try { session.ReconfigureActive(resolved); }
+             catch (NotSupportedException) { session.ClearActive(); }
+         }
+         else
+         {
+             session.SetGlobalProxy(ConfigStore.ResolveGlobalEffective(cfg.Proxy ?? new ProxyConfig()).proxy);
+         }
+         // 5) 状态（给 stub 的 system.* 用）+ 同步已解析的配置
+         var router = new MethodRouter();
+         var state = new EngineState(Paths.DataDir, router)
+         {
+             Mode = initialMode,
+             Provider = resolved?.ProviderId ?? "",
+             ProviderDisplay = resolved?.ProviderDisplay ?? "",
+             Model = resolved?.ModelId ?? "",
+             ModelDisplay = resolved?.ModelDisplay ?? "",
+             Protocol = resolved?.Protocol ?? "chat",
+             BaseUrl = resolved?.BaseUrl ?? "",
+             ApiKeySet = !string.IsNullOrEmpty(resolved?.ApiKey),
+             ContextWindow = resolved?.ContextWindow,
+             MaxTokens = resolved?.MaxTokens,
+             AcceptsImages = resolved?.AcceptsImages ?? false,
+             IncludeReasoning = resolved?.IncludeReasoningHistory ?? true,
+             ProxyInUse = resolved?.ProxyInUse ?? false,
+             ProxyKind = resolved?.ProxyKind.ToString() ?? "None",
+             ProxySource = resolved?.ProxySource ?? "",
+             ProxyMaskedUrl = resolved?.EffectiveProxy?.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual ? HaloAgent.Engine.Core.Net.HttpClientFactory.MaskProxy(resolved.EffectiveProxy.Url ?? "") : null,
+             Configured = resolved is not null,
+             MaxTurns = resolved?.MaxTurns ?? 200,
+             Retry = resolved?.Retry ?? 0,
+             Persona = resolved?.Persona ?? "",
+         };
          // 6) 注册路由（P10 新契约；旧方法删除）
          var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt, usageStore);
-        var stub = new StubMethods(state);
-        router.RegisterAll(
-            ("system.ping", stub.SystemPing),
+          var stub = new StubMethods(state);
+           router.RegisterAll(
+             ("system.ping", stub.SystemPing),
             ("system.info", stub.SystemInfo),
             ("system.protocol", stub.SystemProtocol),
             ("system.shutdown", stub.SystemShutdown),

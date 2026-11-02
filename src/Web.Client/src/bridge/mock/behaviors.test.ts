@@ -47,7 +47,7 @@ describe('Mock 行为表与契约一致性', () => {
       const s = b.run(null) as { providers?: unknown[]; proxy?: { mode?: string }; activeProvider?: string };
       expect(s.providers).toBeDefined();
       expect(Array.isArray(s.providers)).toBe(true);
-      expect(s.proxy?.mode).toBe('auto');
+      expect(s.proxy?.mode).toBe('system');
       expect(typeof s.activeProvider).toBe('string');
     }
   });

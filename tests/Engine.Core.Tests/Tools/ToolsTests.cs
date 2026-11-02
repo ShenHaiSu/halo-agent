@@ -40,8 +40,9 @@ public sealed class ToolsTests : IDisposable
             Directory.CreateDirectory(_backupDir);
         }
 
-        public string DataDir { get; }
-        public string? ProxyUrl => null;
+         public string DataDir { get; }
+         public string? ProxyUrl => null;
+         public HaloAgent.Engine.Abstractions.Types.EffectiveProxy EffectiveProxy => HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
         public List<string> Outputs { get; } = new();
         public List<int> Alerts { get; } = new();
         public List<string> BackupCopies { get; } = new();

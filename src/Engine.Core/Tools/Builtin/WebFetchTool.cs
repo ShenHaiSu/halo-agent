@@ -48,16 +48,19 @@ public sealed class WebFetchTool : ITool
 
         var maxChars = (int)Math.Min(args.GetLongOrNull("max_chars") ?? DefaultMaxChars, 200_000);
 
-        HttpClient client;
-        try
-        {
-            client = HaloAgent.Engine.Core.Net.HttpClientFactory.Create(ctx.Host.ProxyUrl, timeoutSeconds: 30);
-        }
-        catch (Exception ex)
-        {
-            return ToolResult.Failure($"HTTP 客户端初始化失败: {ex.Message}");
-        }
-
+         HttpClient client;
+         try
+         {
+             // P18：逐 URL 旁路预检（本地/内网永远直连，不走 system 通道）
+             var eff = HaloAgent.Engine.Storage.Config.ConfigStore.IsBypassedUrl(url)
+                 ? HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None
+                 : ctx.Host.EffectiveProxy;
+             client = HaloAgent.Engine.Core.Net.HttpClientFactory.Create(eff, timeoutSeconds: 30);
+         }
+         catch (Exception ex)
+         {
+             return ToolResult.Failure($"HTTP 客户端初始化失败: {ex.Message}");
+         }
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);

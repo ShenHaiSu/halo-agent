@@ -30,37 +30,37 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     /// <summary>请求顶层 user 字段（遥测/实例区分用，固定值即可）。</summary>
     private const string ReqUser = "haloagent";
 
-    public OpenAiCompatibleClient(LlmConfig cfg)
-        : this(cfg, BuildHttp(cfg.ProxyUrl))
-    {
-        EnsureProtocol(cfg);
-    }
-
-    /// <summary>测试用：注入 HttpClient（FakeHttpHandler）。</summary>
-    public OpenAiCompatibleClient(LlmConfig cfg, HttpClient http)
-    {
-        EnsureProtocol(cfg);
-        _cfg = cfg;
-        _http = http;
-    }
-
-
-    public string Model => _cfg.Model;
-    public string? ProxyUrl => _cfg.ProxyUrl;
-
-    // ============================================================
-    public void Reconfigure(LlmConfig cfg)
-    {
-        // 两协议均允许（D6 一次性放开）
-        if (cfg.Protocol != LlmProtocol.Chat && cfg.Protocol != LlmProtocol.Responses)
-            throw new NotSupportedException("未知协议: " + cfg.Protocol);
-        if (!string.Equals(cfg.ProxyUrl, _cfg.ProxyUrl, StringComparison.Ordinal))
-        {
-            _http.Dispose();
-            _http = BuildHttp(cfg.ProxyUrl);
-        }
-        _cfg = cfg;
-    }
+     public OpenAiCompatibleClient(LlmConfig cfg)
+         : this(cfg, BuildHttp(cfg.Proxy))
+     {
+         EnsureProtocol(cfg);
+     }
+ 
+     /// <summary>测试用：注入 HttpClient（FakeHttpHandler）。</summary>
+     public OpenAiCompatibleClient(LlmConfig cfg, HttpClient http)
+     {
+         EnsureProtocol(cfg);
+         _cfg = cfg;
+         _http = http;
+     }
+ 
+     public string Model => _cfg.Model;
+     public string? ProxyUrl => _cfg.Proxy.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual ? _cfg.Proxy.Url : null;
+ 
+     // ============================================================
+     public void Reconfigure(LlmConfig cfg)
+     {
+         // 两协议均允许（D6 一次性放开）
+         if (cfg.Protocol != LlmProtocol.Chat && cfg.Protocol != LlmProtocol.Responses)
+             throw new NotSupportedException("未知协议: " + cfg.Protocol);
+         // P18：整值比较（direct⟷system 即使 ProxyUrl 同为 null 也必须重建）
+         if (!cfg.Proxy.Equals(_cfg.Proxy))
+         {
+             _http.Dispose();
+             _http = BuildHttp(cfg.Proxy);
+         }
+         _cfg = cfg;
+     }
     private static void EnsureChat(LlmConfig cfg)
     {
         if (cfg.Protocol != LlmProtocol.Chat)
@@ -78,9 +78,9 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     }
 
 
-    private static HttpClient BuildHttp(string? proxyUrl) =>
-        // 模型可能很久才吐第一个 token：总超时 600s
-        HttpClientFactory.Create(proxyUrl, timeoutSeconds: 600);
+     private static HttpClient BuildHttp(HaloAgent.Engine.Abstractions.Types.EffectiveProxy proxy) =>
+         // 模型可能很久才吐第一个 token：总超时 600s
+         HttpClientFactory.Create(proxy, timeoutSeconds: 600);
 
     private string ChatUrl() => _cfg.BaseUrl.TrimEnd('/') + "/chat/completions";
     private string ResponsesUrl() => _cfg.BaseUrl.TrimEnd('/') + "/responses";

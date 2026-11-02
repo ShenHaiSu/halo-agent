@@ -3,8 +3,8 @@
   "$id": "https://haloagent.local/contract/agent.schema.json",
   "title": "HaloAgent 通信契约",
   "description": "宿主 ↔ 引擎的 NDJSON 帧契约。所有字段 camelCase。信封字段用短名。",
-   "contractVersion": 4,
-   "frozen": "2026-11-01",
+  "contractVersion": 4,
+  "frozen": "2026-11-01",
   "envelope": {
     "request": {
       "type": "object",
@@ -616,6 +616,23 @@
             },
             "proxyInUse": {
               "type": "boolean"
+            },
+            "proxyKind": {
+              "type": "string",
+              "enum": [
+                "None",
+                "Manual",
+                "System"
+              ]
+            },
+            "proxySource": {
+              "type": "string"
+            },
+            "proxyMaskedUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         },
@@ -1059,24 +1076,32 @@
       },
       "implementedIn": "engine"
     },
-     "system.diagnostics": {
-       "params": null,
-       "result": {
-         "type": "object",
-         "properties": {
-           "compact": {
-             "type": "object",
-             "properties": {
-               "lastRemoved": { "type": "integer" },
-               "lastBefore": { "type": "integer" },
-               "lastAfter": { "type": "integer" },
-               "lastTsMs": { "type": "integer" }
-             }
-           }
-         }
-       },
-       "implementedIn": "engine"
-     },
+    "system.diagnostics": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "compact": {
+            "type": "object",
+            "properties": {
+              "lastRemoved": {
+                "type": "integer"
+              },
+              "lastBefore": {
+                "type": "integer"
+              },
+              "lastAfter": {
+                "type": "integer"
+              },
+              "lastTsMs": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "implementedIn": "engine"
+    },
     "agent.prompt": {
       "params": {
         "type": "object",
@@ -1363,26 +1388,26 @@
       },
       "implementedIn": "engine"
     },
-     "session.compact": {
-       "params": null,
-       "result": {
-         "type": "object",
-         "properties": {
-           "removed": {
-             "type": "integer"
-           },
-           "summary": {
-             "type": "string"
-           },
-           "totalBefore": {
-             "type": "integer"
-           },
-           "totalAfter": {
-             "type": "integer"
-           },
-           "keptCount": {
-             "type": "integer"
-           },
+    "session.compact": {
+      "params": null,
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "totalBefore": {
+            "type": "integer"
+          },
+          "totalAfter": {
+            "type": "integer"
+          },
+          "keptCount": {
+            "type": "integer"
+          },
           "seq": {
             "type": "integer"
           },
@@ -1392,10 +1417,10 @@
           "keptTurns": {
             "type": "integer"
           }
-         }
-       },
-       "implementedIn": "engine"
-     },
+        }
+      },
+      "implementedIn": "engine"
+    },
     "session.setCwd": {
       "params": {
         "type": "object",
@@ -1605,6 +1630,37 @@
                       }
                     }
                   }
+                },
+                "network": {
+                  "type": "string",
+                  "enum": [
+                    "follow",
+                    "proxy",
+                    "direct"
+                  ]
+                },
+                "effective": {
+                  "type": "object",
+                  "properties": {
+                    "inUse": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "maskedUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "warning": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -1615,7 +1671,7 @@
               "mode": {
                 "type": "string",
                 "enum": [
-                  "auto",
+                  "system",
                   "direct",
                   "manual"
                 ]
@@ -1654,7 +1710,7 @@
           "mode": {
             "type": "string",
             "enum": [
-              "auto",
+              "system",
               "direct",
               "manual"
             ]
@@ -1677,6 +1733,12 @@
             "type": "boolean"
           },
           "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
             "type": "array",
             "items": {
               "type": "string"
@@ -1716,6 +1778,14 @@
           },
           "clearKey": {
             "type": "boolean"
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "follow",
+              "proxy",
+              "direct"
+            ]
           }
         }
       },
@@ -1727,6 +1797,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "via": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "maskedUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "latencyMs": {
+            "type": "integer"
           }
         }
       },
@@ -2835,69 +2922,69 @@
       "errors": [
         "params.invalid"
       ]
-     },
-     "usage.exportFile": {
-       "params": {
-         "type": "object",
-         "properties": {
-           "fromMs": {
-             "type": "integer"
-           },
-           "toMs": {
-             "type": "integer"
-           },
-           "providerId": {
-             "type": "string"
-           },
-           "modelId": {
-             "type": "string"
-           },
-           "sessionId": {
-             "type": "string"
-           },
-           "tzOffsetMin": {
-             "type": "integer"
-           },
-           "path": {
-             "type": "string",
-             "description": "绝对路径 .csv（用户经保存对话框选路）；非法/越界报 params.invalid"
-           },
-           "maskMap": {
-             "type": "object",
-             "description": "providerId→假名（前端模糊化映射）；引擎只做 provider 字段级替换"
-           }
-         },
-         "required": [
-           "path"
-         ]
-       },
-       "result": {
-         "type": "object",
-         "properties": {
-           "path": {
-             "type": "string"
-           },
-           "wrote": {
-             "type": "integer"
-           },
-           "truncated": {
-             "type": "boolean"
-           },
-           "degraded": {
-             "type": "boolean"
-           }
-         },
-         "required": [
-           "path",
-           "wrote",
-           "truncated"
-         ]
-       },
-       "implementedIn": "engine",
-       "errors": [
-         "params.invalid"
-       ]
-     },
+    },
+    "usage.exportFile": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "fromMs": {
+            "type": "integer"
+          },
+          "toMs": {
+            "type": "integer"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "tzOffsetMin": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string",
+            "description": "绝对路径 .csv（用户经保存对话框选路）；非法/越界报 params.invalid"
+          },
+          "maskMap": {
+            "type": "object",
+            "description": "providerId→假名（前端模糊化映射）；引擎只做 provider 字段级替换"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "wrote": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "degraded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "wrote",
+          "truncated"
+        ]
+      },
+      "implementedIn": "engine",
+      "errors": [
+        "params.invalid"
+      ]
+    },
     "usage.clear": {
       "params": {
         "type": "object",
@@ -3233,34 +3320,34 @@
         "properties": {}
       }
     },
-     "session.compacted": {
-       "payload": {
-         "type": "object",
-         "properties": {
-           "removed": {
-             "type": "integer"
-           },
-           "summary": {
-             "type": "string"
-           },
-           "kept": {
-             "type": "array",
-             "items": {
-               "$ref": "#/types/TurnView"
-             }
-           },
-           "turns": {
-             "type": "array",
-             "items": {
-               "$ref": "#/types/TurnView"
-             }
-           },
-           "totalBefore": {
-             "type": "integer"
-           },
-           "totalAfter": {
-             "type": "integer"
-           },
+    "session.compacted": {
+      "payload": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "kept": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/TurnView"
+            }
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/types/TurnView"
+            }
+          },
+          "totalBefore": {
+            "type": "integer"
+          },
+          "totalAfter": {
+            "type": "integer"
+          },
           "seq": {
             "type": "integer"
           },
@@ -3270,9 +3357,9 @@
           "keptTurns": {
             "type": "integer"
           }
-         }
-       }
-     },
+        }
+      }
+    },
     "user.injected": {
       "payload": {
         "type": "object",
@@ -3360,10 +3447,10 @@
     "fs.escape": "路径越界",
     "llm.error": "模型端点错误",
     "llm.timeout": "模型超时",
-     "tool.failed": "工具执行失败",
-     "ask.stale": "回答了一个已过期的询问",
-     "config.overwriteRequired": "配置文件为旧结构或已损坏，需二次确认强制覆盖",
-     "internal": "引擎内部错误",
-     "notSupported": "该功能未实现"
+    "tool.failed": "工具执行失败",
+    "ask.stale": "回答了一个已过期的询问",
+    "config.overwriteRequired": "配置文件为旧结构或已损坏，需二次确认强制覆盖",
+    "internal": "引擎内部错误",
+    "notSupported": "该功能未实现"
   }
 }

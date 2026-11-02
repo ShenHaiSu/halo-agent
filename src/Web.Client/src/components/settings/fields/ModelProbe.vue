@@ -13,6 +13,8 @@ const props = defineProps<{
   apiKey?: string;
   providerId?: string;
   headers?: HeaderRow[];
+  network?: 'follow' | 'proxy' | 'direct';
+  /** @deprecated 兼容旧调用：network 缺席时回落 */
   useProxy?: boolean;
   /** 用户已点“清除”但未保存：探测不回落旧 key。 */
   clearKey?: boolean;
@@ -27,6 +29,7 @@ const probing = ref(false);
 const elapsed = ref(0);
 const showDialog = ref(false);
 const foundModels = ref<string[]>([]);
+const viaText = ref<string | null>(null);
 let timer: number | null = null;
 let timedOut = false;
 
@@ -60,14 +63,21 @@ async function probe(): Promise<void> {
       baseUrl: props.baseUrl,
       apiKey: props.apiKey || undefined,
       providerId: props.providerId,
-      useProxy: props.useProxy,
+      network: props.network ?? (props.useProxy === false ? 'direct' : props.useProxy === true ? 'follow' : undefined),
     };
     if (headers.length > 0) params['headers'] = headers;
     if (props.clearKey === true) params['clearKey'] = true;
-    const r = (await transport.request('settings.probeModels', params)) as { models?: string[] };
+    const r = (await transport.request('settings.probeModels', params)) as {
+      models?: string[];
+      via?: { source?: string; maskedUrl?: string | null };
+      latencyMs?: number;
+    };
     if (timedOut) return;
     const models = Array.isArray(r.models) ? r.models : [];
     foundModels.value = models;
+    viaText.value =
+      `via=${r.via?.source ?? '?'}${r.via?.maskedUrl ? `(${r.via.maskedUrl})` : ''}` +
+      (typeof r.latencyMs === 'number' ? ` · ${r.latencyMs}ms` : '');
     emit('probe-models', models);
     // 成功即弹名单 dialog（含 0 个空态），不只 toast。
     showDialog.value = true;
@@ -94,6 +104,7 @@ onBeforeUnmount(() => stopTimer());
     <span v-if="probing && elapsed >= 2" class="probe-hint" role="status"
       >仍在探测（共约 10 秒），请稍候…</span
     >
+    <span v-if="viaText" class="probe-hint" role="status">{{ viaText }}</span>
     <ProbeResultDialog
       :open="showDialog"
       :models="foundModels"

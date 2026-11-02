@@ -71,15 +71,51 @@ async function checkUpdate(): Promise<void> {
   }
 }
 
-async function copyDiagnostics(): Promise<void> {
-  try {
-    const d = await transport.request<unknown>('system.diagnostics', null);
-    const ok = await copyText(JSON.stringify(d, null, 2));
-    toast[ok ? 'success' : 'error'](ok ? '诊断信息已复制' : '复制失败');
-  } catch (e) {
-    toast.error(`读取诊断信息失败：${(e as Error).message}`);
-  }
-}
+ async function copyDiagnostics(): Promise<void> {
+   try {
+     const d = await transport.request<unknown>('system.diagnostics', null);
+     const ok = await copyText(JSON.stringify(d, null, 2));
+     toast[ok ? 'success' : 'error'](ok ? '诊断信息已复制' : '复制失败');
+   } catch (e) {
+     toast.error(`读取诊断信息失败：${(e as Error).message}`);
+   }
+ }
+ 
+ const verifying = ref(false);
+ const verifyInfo = ref<string | null>(null);
+ /** P18：验证代理连通性（复用 probe + 脱敏回显）。 */
+ async function verifyProxy(): Promise<void> {
+   if (verifying.value) return;
+   verifying.value = true;
+   verifyInfo.value = null;
+   try {
+     const s = (await transport.request('settings.get', null)) as {
+       providers?: Array<{ id?: string; baseUrl?: string; network?: string }>;
+     };
+     const first = (s.providers ?? []).find((p) => p.baseUrl);
+     if (!first?.baseUrl) {
+       verifyInfo.value = '暂无可用 Provider（先在“模型”页配置）';
+       return;
+     }
+     const r = (await transport.request('settings.probeModels', {
+       baseUrl: first.baseUrl,
+       providerId: first.id,
+       network: first.network ?? 'follow',
+     })) as {
+       models?: string[];
+       via?: { source?: string; maskedUrl?: string | null };
+       latencyMs?: number;
+     };
+     verifyInfo.value =
+       `via=${r.via?.source ?? '?'}${r.via?.maskedUrl ? `(${r.via.maskedUrl})` : ''}` +
+       (typeof r.latencyMs === 'number' ? ` · ${r.latencyMs}ms` : '') +
+       ` · ${(r.models ?? []).length} 个模型`;
+   } catch (e) {
+     verifyInfo.value = `验证失败：${(e as Error).message}`;
+   } finally {
+     verifying.value = false;
+   }
+ }
 
 async function openDataDir(): Promise<void> {
   if (!dataDir.value) {
@@ -129,10 +165,18 @@ defineExpose({ isDirty, resetToSaved });
           <span v-if="updateInfo" class="update-info" role="status">{{ updateInfo }}</span>
         </div>
       </SettingRow>
-
-      <SettingRow label="诊断信息" desc="复制诊断信息，便于反馈问题">
-        <HButton size="sm" variant="secondary" @click="copyDiagnostics">复制诊断信息</HButton>
-      </SettingRow>
+       <SettingRow label="诊断信息" desc="复制诊断信息，便于反馈问题">
+         <HButton size="sm" variant="secondary" @click="copyDiagnostics">复制诊断信息</HButton>
+       </SettingRow>
+ 
+       <SettingRow label="验证代理连通性" desc="复用模型探测，显示本次 via + 耗时（地址已脱敏）">
+         <div class="row-flex">
+           <HButton size="sm" variant="secondary" :loading="verifying" @click="verifyProxy">验证代理连通性</HButton>
+           <span v-if="verifyInfo" class="update-info" role="status">{{ verifyInfo }}</span>
+         </div>
+       </SettingRow>
+ 
+ 
 
       <SettingRow label="数据目录" desc="只读。日志文件存放在该目录下">
         <div class="row-flex">

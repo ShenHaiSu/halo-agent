@@ -1,8 +1,8 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
-
-namespace HaloAgent.Engine.Core.Llm;
-
+﻿ using HaloAgent.Engine.Abstractions.Types;
+ using System.Text.Json;
+ using System.Text.Json.Serialization;
+ 
+ namespace HaloAgent.Engine.Core.Llm;
 public enum Role { System, User, Assistant, Tool }
 
 public enum LlmProtocol { Chat, Responses }
@@ -231,23 +231,23 @@ public interface ILlmClient
     void Reconfigure(LlmConfig cfg);
 }
 
-public sealed record LlmConfig
-{
-    public string BaseUrl { get; init; } = "";
-    public string Model { get; init; } = "";
-    public string? ApiKey { get; init; }
-    public string? ProxyUrl { get; init; }
-    /// <summary>请求头模板原文（含 `{{session_id}}` / `{{session_hash}}`）；请求时由 HeaderTemplate 展开。</summary>
-    public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
-        = Array.Empty<KeyValuePair<string, string>>();
-    public LlmProtocol Protocol { get; init; } = LlmProtocol.Chat;
-    public int? MaxTokens { get; init; }
-    public bool AcceptsImages { get; init; }
-     public bool IncludeReasoningHistory { get; init; } = true;
-     /// <summary>P16-F2：responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
-     public bool StoreResponses { get; init; } = true;
- }
-
+ public sealed record LlmConfig
+ {
+     public string BaseUrl { get; init; } = "";
+     public string Model { get; init; } = "";
+     public string? ApiKey { get; init; }
+     /// <summary>P18：单个 EffectiveProxy 值对象（旧 ProxyUrl 已删除，避免双源）。</summary>
+     public EffectiveProxy Proxy { get; init; } = EffectiveProxy.None;
+     /// <summary>请求头模板原文（含 `{{session_id}}` / `{{session_hash}}`）；请求时由 HeaderTemplate 展开。</summary>
+     public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
+         = Array.Empty<KeyValuePair<string, string>>();
+     public LlmProtocol Protocol { get; init; } = LlmProtocol.Chat;
+     public int? MaxTokens { get; init; }
+     public bool AcceptsImages { get; init; }
+      public bool IncludeReasoningHistory { get; init; } = true;
+      /// <summary>P16-F2：responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
+      public bool StoreResponses { get; init; } = true;
+  }
 /// <summary>发给模型的工具定义（OpenAI tools 格式）。</summary>
 public sealed record ToolDef
 {

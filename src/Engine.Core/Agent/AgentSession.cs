@@ -69,7 +69,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private int _maxTurns;
     private int _retry;
     private bool _askInteractive;
-    private string? _globalProxyUrl;
+     private HaloAgent.Engine.Abstractions.Types.EffectiveProxy _globalEffectiveProxy = HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
     private string _activeProviderId = "";
     private string _activeProviderDisplay = "";
     private string _activeModelId = "";
@@ -79,9 +79,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private int? _activeMaxTokens;
     private bool _activeAcceptsImages;
     private bool _activeIncludeReasoning = true;
-    private bool _activeProxyInUse;
-    private string _activeBaseUrl = "";
-    private bool _activeApiKeySet;
+     private bool _activeProxyInUse;
+     private HaloAgent.Engine.Abstractions.Types.ProxyKind _activeProxyKind;
+     private string _activeProxySource = "";
+     private string _activeProxyWarning = "";
+     private string _activeBaseUrl = "";
+     private bool _activeApiKeySet;
     private bool _activeConfigured;
     private bool _fileAlways;
     private bool _commandAlways;
@@ -176,64 +179,89 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     public int Retry => _retry;
     public string? CurrentToolCallId => _currentToolCallId;
 
-    /// <summary>当前生效的网络代理（P10：全局代理，与 provider.useProxy 无关，供 WebFetch 等非模型链路用）。</summary>
-    public string? ProxyUrl => _globalProxyUrl;
-    public string DataDir => _dataDir;
-
-    /// <summary>P10 热切：持久化 active 指针后同进程换 llm（无需重启）。busy 时由调用方前置拒绝。</summary>
-    public void ReconfigureActive(ResolvedActiveModel resolved)
-    {
-        var proto = (resolved.Protocol ?? "chat").ToLowerInvariant() == "responses"
-            ? LlmProtocol.Responses : LlmProtocol.Chat;
-        _llm.Reconfigure(new LlmConfig
-        {
-            BaseUrl = resolved.BaseUrl,
-            Model = resolved.ModelId,
-            ApiKey = resolved.ApiKey,
-            ProxyUrl = resolved.ProxyUrl,
-            Headers = resolved.Headers,
-            Protocol = proto,
-            MaxTokens = resolved.MaxTokens,
-            AcceptsImages = resolved.AcceptsImages,
-            IncludeReasoningHistory = resolved.IncludeReasoningHistory,
-        });
-        string oldProto, oldModel, oldProv;
-        lock (_lock) { oldProto = _activeProtocol; oldModel = _activeModelId; oldProv = _activeProviderId; }
-        lock (_lock)
-        {
-            _globalProxyUrl = resolved.GlobalProxyUrl;
-            _activeProviderId = resolved.ProviderId ?? "";
-            _activeProviderDisplay = resolved.ProviderDisplay ?? "";
-            _activeModelId = resolved.ModelId ?? "";
-            _activeModelDisplay = resolved.ModelDisplay ?? "";
-            _activeProtocol = resolved.Protocol ?? "chat";
-            _activeContextWindow = resolved.ContextWindow;
-            _activeMaxTokens = resolved.MaxTokens;
-            _activeAcceptsImages = resolved.AcceptsImages;
-            _activeIncludeReasoning = resolved.IncludeReasoningHistory;
-            _activeProxyInUse = resolved.ProxyInUse;
-            _activeBaseUrl = resolved.BaseUrl ?? "";
-            _activeApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey);
-            _activeConfigured = resolved.Configured;
-            _maxTurns = resolved.MaxTurns;
-            _retry = resolved.Retry;
-            _persona = resolved.Persona ?? "";
-            if (_messages.Count > 0 && _messages[0].Role == Role.System)
-                _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
-                    _cwd, _mode, _store.SessionId, _persona, _dataDir));
-        }
-         if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
+     /// <summary>P18：非模型链路生效代理（WebFetch 用；System 不固化地址）。</summary>
+     public HaloAgent.Engine.Abstractions.Types.EffectiveProxy EffectiveProxy
+     {
+         get { lock (_lock) return _globalEffectiveProxy; }
+     }
+     /// <summary>兼容保留：EffectiveProxy 为 Manual 时的 Url，否则 null。</summary>
+     public string? ProxyUrl
+     {
+         get
          {
-             lock (_lock) { _responsesStateless = false; }
-             ClearResponseChain();
+             lock (_lock)
+                 return _globalEffectiveProxy.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual
+                     ? _globalEffectiveProxy.Url : null;
          }
-    }
-
-    /// <summary>设置全局代理（非模型链路用）。</summary>
-    public void SetGlobalProxy(string? url)
-    {
-        lock (_lock) _globalProxyUrl = url;
-    }
+     }
+     public string DataDir => _dataDir;
+ 
+     /// <summary>P10 热切：持久化 active 指针后同进程换 llm（无需重启）。busy 时由调用方前置拒绝。</summary>
+     public void ReconfigureActive(ResolvedActiveModel resolved)
+     {
+         var proto = (resolved.Protocol ?? "chat").ToLowerInvariant() == "responses"
+             ? LlmProtocol.Responses : LlmProtocol.Chat;
+         _llm.Reconfigure(new LlmConfig
+         {
+             BaseUrl = resolved.BaseUrl,
+             Model = resolved.ModelId,
+             ApiKey = resolved.ApiKey,
+             Proxy = resolved.EffectiveProxy,
+             Headers = resolved.Headers,
+             Protocol = proto,
+             MaxTokens = resolved.MaxTokens,
+             AcceptsImages = resolved.AcceptsImages,
+             IncludeReasoningHistory = resolved.IncludeReasoningHistory,
+         });
+         string oldProto, oldModel, oldProv;
+         lock (_lock) { oldProto = _activeProtocol; oldModel = _activeModelId; oldProv = _activeProviderId; }
+         lock (_lock)
+         {
+             _globalEffectiveProxy = resolved.EffectiveProxy;
+             _activeProviderId = resolved.ProviderId ?? "";
+             _activeProviderDisplay = resolved.ProviderDisplay ?? "";
+             _activeModelId = resolved.ModelId ?? "";
+             _activeModelDisplay = resolved.ModelDisplay ?? "";
+             _activeProtocol = resolved.Protocol ?? "chat";
+             _activeContextWindow = resolved.ContextWindow;
+             _activeMaxTokens = resolved.MaxTokens;
+             _activeAcceptsImages = resolved.AcceptsImages;
+             _activeIncludeReasoning = resolved.IncludeReasoningHistory;
+             _activeProxyInUse = resolved.ProxyInUse;
+             _activeProxyKind = resolved.ProxyKind;
+             _activeProxySource = resolved.ProxySource ?? "";
+             _activeProxyWarning = resolved.ProxyWarning ?? "";
+             _activeBaseUrl = resolved.BaseUrl ?? "";
+             _activeApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey);
+             _activeConfigured = resolved.Configured;
+             _maxTurns = resolved.MaxTurns;
+             _retry = resolved.Retry;
+             _persona = resolved.Persona ?? "";
+             if (_messages.Count > 0 && _messages[0].Role == Role.System)
+                 _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
+                     _cwd, _mode, _store.SessionId, _persona, _dataDir));
+         }
+          if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
+          {
+              lock (_lock) { _responsesStateless = false; }
+              ClearResponseChain();
+          }
+     }
+ 
+     /// <summary>P18：设置全局生效代理（非模型链路用；未配置态回落）。</summary>
+     public void SetGlobalProxy(HaloAgent.Engine.Abstractions.Types.EffectiveProxy proxy)
+     {
+         lock (_lock) _globalEffectiveProxy = proxy;
+     }
+     /// <summary>兼容保留：字符串 url 重载（非空合法→Manual，否则直连）。</summary>
+     [Obsolete("Use SetGlobalProxy(EffectiveProxy)")]
+     public void SetGlobalProxy(string? url)
+     {
+         lock (_lock)
+             _globalEffectiveProxy = string.IsNullOrWhiteSpace(url)
+                 ? HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None
+                 : HaloAgent.Engine.Abstractions.Types.EffectiveProxy.Manual(url.Trim());
+     }
      /// <summary>P12-02：保存后 active 悬空/非法时显式置未配置（此前无此方法，只能保持旧内存）。</summary>
      public void ClearActive()
      {
@@ -249,6 +277,9 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeAcceptsImages = false;
              _activeIncludeReasoning = true;
              _activeProxyInUse = false;
+             _activeProxyKind = HaloAgent.Engine.Abstractions.Types.ProxyKind.None;
+             _activeProxySource = "";
+             _activeProxyWarning = "";
              _activeBaseUrl = "";
              _activeApiKeySet = false;
              _activeConfigured = false;
@@ -1462,7 +1493,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     MaxTokens = _activeMaxTokens,
                     AcceptsImages = _activeAcceptsImages,
                     IncludeReasoning = _activeIncludeReasoning,
-                    ProxyInUse = _activeProxyInUse,
+                     ProxyInUse = _activeProxyInUse,
+                     ProxyKind = _activeProxyKind.ToString(),
+                     ProxySource = _activeProxySource,
+                     ProxyMaskedUrl = _globalEffectiveProxy.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual ? HaloAgent.Engine.Core.Net.HttpClientFactory.MaskProxy(_globalEffectiveProxy.Url ?? "") : null,
                     MaxTurns = _maxTurns,
                     Retry = _retry,
                     Configured = _activeConfigured,

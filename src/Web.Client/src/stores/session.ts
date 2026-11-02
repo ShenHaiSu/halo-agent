@@ -31,6 +31,9 @@ export const useSessionStore = defineStore('session', () => {
   const acceptsImages = ref(false);
   const includeReasoning = ref(true);
   const proxyInUse = ref(false);
+  const proxyKind = ref('None');
+  const proxySource = ref('');
+  const proxyMaskedUrl = ref<string | null>(null);
    const compactionSummary = ref<string | null>(null);
    const compactionRemoved = ref<number | null>(null);
    const compactionKept = ref<number | null>(null);
@@ -72,6 +75,9 @@ export const useSessionStore = defineStore('session', () => {
     if (typeof p.acceptsImages === 'boolean') acceptsImages.value = p.acceptsImages;
     if (typeof p.includeReasoning === 'boolean') includeReasoning.value = p.includeReasoning;
     if (typeof p.proxyInUse === 'boolean') proxyInUse.value = p.proxyInUse;
+    if (typeof p.proxyKind === 'string') proxyKind.value = p.proxyKind;
+    if (typeof p.proxySource === 'string') proxySource.value = p.proxySource;
+    if (typeof p.proxyMaskedUrl === 'string' || p.proxyMaskedUrl === null) proxyMaskedUrl.value = p.proxyMaskedUrl as string | null;
     if (typeof p.configured === 'boolean') configured.value = p.configured;
     const u = p.usage as { input?: number; output?: number } | undefined;
     if (u) usage.value = { input: u.input ?? 0, output: u.output ?? 0 };
@@ -181,6 +187,9 @@ export const useSessionStore = defineStore('session', () => {
     acceptsImages,
     includeReasoning,
     proxyInUse,
+    proxyKind,
+    proxySource,
+    proxyMaskedUrl,
      compactionSummary,
      compactionRemoved,
      compactionKept,

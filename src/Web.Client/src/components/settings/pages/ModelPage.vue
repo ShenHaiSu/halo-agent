@@ -46,7 +46,7 @@ const loading = ref(true);
 const saving = ref(false);
 const loadError = ref<string | null>(null);
 const migrationRequired = ref(false);
-const globalMode = ref('auto');
+const globalMode = ref('system');
 
 const tree = ref<ProvidersTree>({ activeProvider: '', activeModel: '', providers: [] });
 const originalJson = ref('');
@@ -75,7 +75,7 @@ function snapshotForDirty(): unknown {
       clearKey: p.clearKey,
       headersEnabled: p.headersEnabled,
       headers: p.headers,
-      useProxy: p.useProxy,
+      network: p.network,
       models: p.models.map((m) => ({
         id: m.id,
         displayName: m.displayName,
@@ -162,7 +162,8 @@ async function load(): Promise<void> {
     });
      tree.value = t;
      migrationRequired.value = s.migrationRequired === true;
-     globalMode.value = s.proxy?.mode ?? 'auto';
+     const gm = String(s.proxy?.mode ?? 'system').toLowerCase();
+     globalMode.value = gm === 'manual' ? 'manual' : gm === 'direct' || gm === 'auto' ? 'direct' : 'system';
      newProviderMode.value = false;
      newProviderId.value = '';
      confirmOverwrite.value = false;
@@ -202,7 +203,7 @@ function confirmNewProvider(): void {
     clearKey: false,
     headersEnabled: true,
     headers: [],
-    useProxy: true,
+    network: 'follow',
     models: [],
     expanded: true,
   });
@@ -267,7 +268,7 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
       clearKey: p.clearKey || undefined,
       headersEnabled: p.headersEnabled,
       headers: p.headers.filter((h) => h.key.trim() !== ''),
-      useProxy: p.useProxy,
+      network: p.network,
       models: p.models.map((m) => ({
         id: m.id,
         displayName: m.displayName,
@@ -318,7 +319,7 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
        clearKey: p.clearKey,
        headersEnabled: p.headersEnabled,
        headers: p.headers,
-       useProxy: p.useProxy,
+       network: p.network,
        models: p.models,
      })),
    });
@@ -414,8 +415,21 @@ onMounted(() => void load());
               p.apiKeySet || p.newKey.trim() !== '' ? 'key已设' : '无key'
             }}</span>
             <span class="mini">{{
-              p.useProxy ? (globalMode === 'direct' ? '全局direct下直连' : '走代理') : '直连'
+              p.effective
+                ? p.effective.inUse
+                  ? p.effective.source === 'global-system'
+                    ? '跟随系统走代理'
+                    : `走代理 ${p.effective.maskedUrl ?? ''}`.trim()
+                  : p.effective.source === 'bypass-local'
+                    ? '本地直连'
+                    : '直连'
+                : p.network === 'follow'
+                  ? '跟随全局'
+                  : p.network === 'proxy'
+                    ? '走代理'
+                    : '直连'
             }}</span>
+            <span v-if="p.effective?.warning" class="mini warn" role="status">{{ p.effective.warning }}</span>
             <HaloIcon
               name="chevron-down"
               :size="14"
@@ -485,26 +499,32 @@ onMounted(() => void load());
                   }
                 "
             /></SettingRow>
-            <SettingRow
-              compact
-              label="使用代理"
-              desc="连接模型时走不走全局代理；全局 direct 下置灰"
-            >
-              <div class="inline-row">
-                <HSwitch
-                  :model-value="p.useProxy"
-                  label="使用代理"
-                  :disabled="globalMode === 'direct'"
-                  @update:model-value="
-                    (v: boolean) => {
-                      p.useProxy = v;
-                      markDirty();
-                    }
-                  "
-                />
-                <span v-if="globalMode === 'direct'" class="hint">全局 direct 下无可用代理</span>
-              </div>
-            </SettingRow>
+             <SettingRow
+               compact
+               label="网络"
+               desc="全局决定走哪条路，单个服务可单独覆盖；本地/内网地址永远直连。走代理适合国外接口；直连适合国内/本地，延迟低"
+             >
+               <div class="inline-row">
+                 <HRadioGroup
+                   :model-value="p.network"
+                   name="network"
+                   direction="horizontal"
+                   @update:model-value="
+                     (v: string | number) => {
+                       p.network = v === 'proxy' ? 'proxy' : v === 'direct' ? 'direct' : 'follow';
+                       markDirty();
+                     }
+                   "
+                 >
+                   <HRadio value="follow" label="跟随全局" />
+                   <HRadio value="proxy" label="该服务走代理" />
+                   <HRadio value="direct" label="该服务直连" />
+                 </HRadioGroup>
+                 <span v-if="p.effective" class="hint">当前生效：{{
+                   p.effective.inUse ? `走代理（${p.effective.source}${p.effective.maskedUrl ? '/' + p.effective.maskedUrl : ''}）` : `直连（${p.effective.source}）`
+                 }}</span>
+               </div>
+             </SettingRow>
             <SettingRow
               compact
               label="自定义请求头"
@@ -537,7 +557,7 @@ onMounted(() => void load());
                 :api-key="p.newKey"
                 :provider-id="p.id"
                 :headers="p.headers as HeaderRow[]"
-                :use-proxy="p.useProxy"
+                :network="p.network"
                 :clear-key="p.clearKey"
                 :existing-models="p.models.map((m) => m.id)"
                 @probe-confirm="(names: string[]) => onProbeConfirm(p.id, names)"
@@ -772,8 +792,9 @@ onMounted(() => void load());
          >
          <HButton variant="secondary" :disabled="!dirty" @click="resetToSaved">放弃</HButton>
          <span v-if="dirty" class="dirty-hint" role="status">有未保存的改动</span>
-         <span v-if="migrationRequired" class="hint">旧配置已备份，保存需点两次确认覆盖</span>
-         <span v-else-if="overwriteRequired" class="hint" role="alert">检测到旧结构/损坏配置（{{ overwriteMsg }}），已备份，确认覆盖请再点一次保存</span>
+          <span v-if="migrationRequired" class="hint">旧配置已备份，保存需点两次确认覆盖</span>
+          <span v-else-if="overwriteRequired" class="hint" role="alert">检测到旧结构/损坏配置（{{ overwriteMsg }}），已备份，确认覆盖请再点一次保存</span>
+          <p class="fixed-note">全局决定走哪条路，单个服务可单独覆盖；本地/内网地址永远直连；"该服务走代理"但全局无可用代理时降级直连并出黄条（非静默）。</p>
        </div>
     </template>
   </div>
@@ -902,6 +923,14 @@ onMounted(() => void load());
   background: hsl(var(--bg-subtle));
   padding: 0 var(--space-1);
   border-radius: var(--radius-xs);
+}
+.mini.warn {
+  color: hsl(var(--warning));
+}
+.fixed-note {
+  font-size: var(--text-xs);
+  color: hsl(var(--fg-muted));
+  margin: var(--space-2) 0;
 }
 .active-dot {
   flex: none;

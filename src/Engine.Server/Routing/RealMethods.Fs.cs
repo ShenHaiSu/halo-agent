@@ -6,18 +6,25 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-     // ---------- system.diagnostics（契约要求 {}，不是 {ok:true}；P18 加 compact 最新一次，不持久化） ----------
-     public Task<object?> SystemDiagnosticsAsync(JsonElement? p, CancellationToken ct) =>
-         Task.FromResult<object?>(new
-         {
-             compact = new
-             {
-                 lastRemoved = _session.LastCompactRemoved,
-                 lastBefore = _session.LastCompactBefore,
-                 lastAfter = _session.LastCompactAfter,
-                 lastTsMs = _session.LastCompactTsMs,
-             },
-         });
+      // ---------- system.diagnostics（P18：compact + proxy 口径与 About 页复制诊断对齐） ----------
+      public Task<object?> SystemDiagnosticsAsync(JsonElement? p, CancellationToken ct) =>
+          Task.FromResult<object?>(new
+          {
+              compact = new
+              {
+                  lastRemoved = _session.LastCompactRemoved,
+                  lastBefore = _session.LastCompactBefore,
+                  lastAfter = _session.LastCompactAfter,
+                  lastTsMs = _session.LastCompactTsMs,
+              },
+              proxy = new
+              {
+                  kind = _session.BuildSnapshot().Agent.ProxyKind,
+                  source = _session.BuildSnapshot().Agent.ProxySource,
+                  maskedUrl = _session.BuildSnapshot().Agent.ProxyMaskedUrl,
+                  inUse = _session.BuildSnapshot().Agent.ProxyInUse,
+              },
+          });
 
     // ---------- tool.mcpStatus ----------
     public Task<object?> ToolMcpStatusAsync(JsonElement? p, CancellationToken ct)

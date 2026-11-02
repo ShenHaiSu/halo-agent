@@ -10,7 +10,7 @@ public static class BuiltinProviders
             DisplayName = "Ollama 本地",
             BaseUrl = "http://localhost:11434/v1",
             ApiKey = null,
-            UseProxy = false,
+            Network = "direct",
             Models = new List<ModelConfig>
             {
                 new() { Id = "qwen3:8b", Protocol = "chat" },
@@ -20,7 +20,7 @@ public static class BuiltinProviders
         {
             DisplayName = "DashScope",
             BaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            UseProxy = true,
+            Network = "follow",
             Models = new List<ModelConfig>
             {
                 new() { Id = "qwen-plus", Protocol = "chat" },
@@ -30,7 +30,7 @@ public static class BuiltinProviders
         {
             DisplayName = "DeepSeek",
             BaseUrl = "https://api.deepseek.com/v1",
-            UseProxy = true,
+            Network = "follow",
             Models = new List<ModelConfig>
             {
                 new() { Id = "deepseek-chat", Protocol = "chat" },
@@ -40,7 +40,7 @@ public static class BuiltinProviders
         {
             DisplayName = "OpenRouter",
             BaseUrl = "https://openrouter.ai/api/v1",
-            UseProxy = true,
+            Network = "follow",
             Models = new List<ModelConfig>
             {
                 new() { Id = "qwen/qwen3-8b", Protocol = "chat" },
@@ -50,7 +50,7 @@ public static class BuiltinProviders
         {
             DisplayName = "ZAI",
             BaseUrl = "https://api.z.ai/api/v1",
-            UseProxy = true,
+            Network = "follow",
             Models = new List<ModelConfig>
             {
                 new() { Id = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", Protocol = "chat" },

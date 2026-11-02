@@ -15,7 +15,7 @@ function provider(id: string, displayName: string, models: Array<{ id: string; d
     clearKey: false,
     headersEnabled: true,
     headers: [],
-    useProxy: true,
+    network: 'follow',
     models: models.map((m) => ({
       id: m.id,
       displayName: m.displayName ?? '',

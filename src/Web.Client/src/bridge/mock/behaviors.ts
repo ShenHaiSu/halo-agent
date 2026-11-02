@@ -161,7 +161,10 @@ export function getCurrentMockSessionId(): string {
        maxTokens: null,
        acceptsImages: false,
        includeReasoning: true,
-       proxyInUse: false,
+       proxyInUse: true,
+      proxyKind: 'System',
+      proxySource: 'global-system',
+      proxyMaskedUrl: null,
        maxTurns: 200,
        retry: 0,
        configured: agentConfigured,
@@ -186,7 +189,8 @@ function mockSettings(): unknown {
         apiKeySet: true,
         headersEnabled: true,
         headers: [],
-        useProxy: true,
+        network: 'follow',
+        effective: { inUse: true, source: 'global-system', maskedUrl: null, warning: null },
         modelCount: 2,
         models: [
            {
@@ -225,7 +229,8 @@ function mockSettings(): unknown {
         apiKeySet: false,
         headersEnabled: true,
         headers: [],
-        useProxy: true,
+        network: 'follow',
+        effective: { inUse: true, source: 'global-system', maskedUrl: null, warning: null },
         modelCount: 2,
         models: [
           {
@@ -249,7 +254,7 @@ function mockSettings(): unknown {
         ],
       },
     ],
-    proxy: { mode: 'auto', url: null },
+    proxy: { mode: 'system', url: null },
     retry: 0,
     maxTurns: 200,
     persona: '',
@@ -387,8 +392,8 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   'settings.get': { kind: 'ok', run: () => mockSettings() },
   'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
   'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
-  'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
-  'settings.probeModels': { kind: 'ok', run: () => ({ models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'] }) },
+  'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [], warnings: [] }) },
+  'settings.probeModels': { kind: 'ok', run: () => ({ models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'], via: { source: 'global-system', maskedUrl: null }, latencyMs: 123 }) },
   'settings.mcp.get': { kind: 'ok', run: () => ({ path: '(mock)/mcp.json', text: '{"mcpServers":{}}' }) },
   'settings.mcp.save': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
 

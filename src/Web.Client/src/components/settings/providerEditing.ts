@@ -13,6 +13,15 @@ export interface ModelEdit {
   expanded?: boolean;
 }
 
+export type ProviderNetwork = 'follow' | 'proxy' | 'direct';
+
+export interface ProviderEffective {
+  inUse: boolean;
+  source: string;
+  maskedUrl: string | null;
+  warning: string | null;
+}
+
 export interface ProviderEdit {
   id: string;
   displayName: string;
@@ -22,7 +31,9 @@ export interface ProviderEdit {
   clearKey: boolean;
   headersEnabled: boolean;
   headers: Array<{ key: string; value: string }>;
-  useProxy: boolean;
+  network: ProviderNetwork;
+  /** 只读：settings.get 下发的 effective（保存/脏比较不含它）。 */
+  effective?: ProviderEffective | null;
   models: ModelEdit[];
   expanded?: boolean;
 }
@@ -88,7 +99,8 @@ export function normalizeProvidersTree(raw: unknown): ProvidersTree {
           const key = typeof ho['key'] === 'string' ? ho['key'] : typeof ho['name'] === 'string' ? (ho['name'] as string) : '';
           return { key, value: typeof ho['value'] === 'string' ? (ho['value'] as string) : '' };
         }),
-        useProxy: o['useProxy'] !== false,
+        network: normalizeNetwork(o['network'], o['useProxy']),
+        effective: normalizeEffective(o['effective']),
         models,
       });
     }
@@ -115,6 +127,7 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
     if (seenP.has(p.id)) errs.push({ provider: p.id, field: 'id', message: 'provider.id 重复' });
     seenP.add(p.id);
      if (p.displayName.trim().length > 64) errs.push({ provider: p.id, field: 'displayName', message: '别称不超过 64 字' });
+    if (!isValidProviderNetwork(p.network)) errs.push({ provider: p.id, field: 'network', message: 'network 须为 follow/proxy/direct' });
     if (!p.baseUrl.trim()) errs.push({ provider: p.id, field: 'baseUrl', message: 'baseUrl 必填' });
     else {
       try {
@@ -149,6 +162,30 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
   else if (p.models.length === 0) errs.push({ provider: ap, model: am, field: 'active', message: 'active 不可指向空 provider' });
   else if (!p.models.some((m) => m.id === am)) errs.push({ provider: ap, model: am, field: 'active', message: 'active model 不存在' });
   return errs;
+}
+
+/** P18：network 归一化（兼容旧 useProxy 读入：false→direct，否则 follow）。 */
+export function normalizeNetwork(v: unknown, legacyUseProxy?: unknown): ProviderNetwork {
+  if (v === 'proxy' || v === 'direct' || v === 'follow') return v;
+  if (legacyUseProxy === false) return 'direct';
+  return 'follow';
+}
+
+/** P18：effective 只读透传（形状不对则丢弃）。 */
+export function normalizeEffective(v: unknown): ProviderEffective | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  if (typeof o['inUse'] !== 'boolean' || typeof o['source'] !== 'string') return null;
+  return {
+    inUse: o['inUse'] as boolean,
+    source: o['source'] as string,
+    maskedUrl: typeof o['maskedUrl'] === 'string' ? (o['maskedUrl'] as string) : null,
+    warning: typeof o['warning'] === 'string' ? (o['warning'] as string) : null,
+  };
+}
+
+/** P18：network 枚举校验。 */
+export function isValidProviderNetwork(n: string): boolean {
+  return n === 'follow' || n === 'proxy' || n === 'direct';
 }
 
 export function diffActive(a: ProvidersTree, b: ProvidersTree): boolean {

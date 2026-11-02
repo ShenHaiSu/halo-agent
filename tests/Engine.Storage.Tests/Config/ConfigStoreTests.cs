@@ -12,14 +12,14 @@ public class ConfigStoreTests
         ActiveModel = "deepseek-chat",
         Providers =
         {
-            ["deepseek"] = new ProviderConfig
-            {
-                BaseUrl = "https://api.deepseek.com/v1",
-                UseProxy = true,
-                Models = new() { new ModelConfig { Id = "deepseek-chat", Protocol = "chat", ContextWindow = 65536 } },
-            },
-        },
-    };
+             ["deepseek"] = new ProviderConfig
+             {
+                 BaseUrl = "https://api.deepseek.com/v1",
+                 Network = "follow",
+                 Models = new() { new ModelConfig { Id = "deepseek-chat", Protocol = "chat", ContextWindow = 65536 } },
+              },
+          },
+      };
 
     [Fact]
     public void Load_missing_file_returns_default()
@@ -92,34 +92,37 @@ public class ConfigStoreTests
         Assert.False(all.ContainsKey("dashscope"));
     }
 
-    [Fact]
-    public void Resolve_new_shape_folds_proxy()
-    {
-        var cfg = NewTree();
-        cfg.Proxy.Mode = "manual";
-        cfg.Proxy.Url = "http://127.0.0.1:7890";
-        var r = ConfigStore.Resolve(cfg);
-        Assert.Equal("deepseek", r.ProviderId);
-        Assert.Equal("deepseek-chat", r.ModelId);
-        Assert.Equal("http://127.0.0.1:7890", r.ProxyUrl);
-        Assert.True(r.ProxyInUse);
-        // useProxy=false 则直连
-        cfg.Providers["deepseek"].UseProxy = false;
-        var r2 = ConfigStore.Resolve(cfg);
-        Assert.Null(r2.ProxyUrl);
-        Assert.False(r2.ProxyInUse);
-        Assert.Equal("http://127.0.0.1:7890", r2.GlobalProxyUrl);
-    }
-
-    [Fact]
-    public void Resolve_auto_is_direct()
-    {
-        var cfg = NewTree();
-        cfg.Proxy.Mode = "auto";
-        var r = ConfigStore.Resolve(cfg);
-        Assert.Null(r.ProxyUrl);
-        Assert.False(r.GlobalProxyAvailable);
-    }
+     [Fact]
+     public void Resolve_new_shape_folds_proxy()
+     {
+         var cfg = NewTree();
+         cfg.Proxy.Mode = "manual";
+         cfg.Proxy.Url = "http://127.0.0.1:7890";
+         var r = ConfigStore.Resolve(cfg);
+         Assert.Equal("deepseek", r.ProviderId);
+         Assert.Equal("deepseek-chat", r.ModelId);
+         Assert.Equal("http://127.0.0.1:7890", r.ProxyUrl);
+         Assert.True(r.ProxyInUse);
+         Assert.Equal(HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual, r.ProxyKind);
+         Assert.Equal(HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalManual, r.ProxySource);
+         // network=direct 则直连
+         cfg.Providers["deepseek"].Network = "direct";
+         var r2 = ConfigStore.Resolve(cfg);
+         Assert.Null(r2.ProxyUrl);
+         Assert.False(r2.ProxyInUse);
+         Assert.Equal("http://127.0.0.1:7890", r2.GlobalProxyUrl);
+     }
+ 
+     [Fact]
+     public void Resolve_auto_is_direct()
+     {
+         var cfg = NewTree();
+         cfg.Proxy.Mode = "auto"; // 旧 auto→direct 守恒
+         var r = ConfigStore.Resolve(cfg);
+         Assert.Null(r.ProxyUrl);
+         Assert.False(r.GlobalProxyAvailable);
+         Assert.Equal(HaloAgent.Engine.Abstractions.Types.ProxyKind.None, r.ProxyKind);
+     }
 
     [Fact]
     public void Resolve_unconfigured_throws()

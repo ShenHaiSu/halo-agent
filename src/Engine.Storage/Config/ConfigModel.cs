@@ -4,9 +4,10 @@ namespace HaloAgent.Engine.Storage.Config;
 
 /// <summary>
 /// config.json 的模型（P10 新形状：Provider 1—N Model 全量树）。
+/// P18-proxy02：Provider 网络选项 network 取代 use_proxy；proxy.mode 三档 system/direct/manual。
 ///
 /// 破坏性：不再保留顶层 model/base_url/api_key/provider/context_window，
-/// 也不做旧文件自动迁移（见 ConfigStore嗅探/备份）。
+/// 也不再做旧文件自动迁移（见 ConfigStore嗅探/备份）。
 /// </summary>
 public sealed class ConfigModel
 {
@@ -35,7 +36,16 @@ public sealed class ProviderConfig
     [JsonPropertyName("headers_enabled")] public bool HeadersEnabled { get; set; } = true;
     [JsonPropertyName("headers")]
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    [JsonPropertyName("use_proxy")] public bool UseProxy { get; set; } = true;
+    /// <summary>P18-proxy02：follow | proxy | direct（取代 use_proxy）。</summary>
+    [JsonPropertyName("network")] public string Network { get; set; } = "follow";
+    /// <summary>P18-proxy02 预留扩展位：Provider 独立代理地址（本次只留位，不实现）。</summary>
+    [JsonPropertyName("proxy_override")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProxyOverride { get; set; }
+    /// <summary>旧 use_proxy 读兼容（一个版本）：network 缺失时回落判定；写时永不输出。</summary>
+    [JsonPropertyName("use_proxy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? UseProxyLegacy { get; set; }
     [JsonPropertyName("models")]
     public List<ModelConfig> Models { get; set; } = new();
 }
@@ -54,6 +64,6 @@ public sealed class ModelConfig
 
 public sealed class ProxyConfig
 {
-    [JsonPropertyName("mode")] public string? Mode { get; set; }   // auto / direct / manual
+    [JsonPropertyName("mode")] public string? Mode { get; set; }
     [JsonPropertyName("url")] public string? Url { get; set; }
 }

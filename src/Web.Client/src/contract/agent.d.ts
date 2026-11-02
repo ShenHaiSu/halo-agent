@@ -152,6 +152,9 @@ export interface StateSnapshot {
   acceptsImages?: boolean
   includeReasoning?: boolean
   proxyInUse?: boolean
+  proxyKind?: "None" | "Manual" | "System"
+  proxySource?: string
+  proxyMaskedUrl?: string | null
 }
   usage: {
   inputTotal?: number
@@ -465,9 +468,16 @@ export interface HaloMethods {
   acceptsImages?: boolean
   includeReasoningHistory?: boolean
 }[]
+  network?: "follow" | "proxy" | "direct"
+  effective?: {
+  inUse?: boolean
+  source?: string
+  maskedUrl?: string | null
+  warning?: string | null
+}
 }[]
   proxy?: {
-  mode?: "auto" | "direct" | "manual"
+  mode?: "system" | "direct" | "manual"
   url?: string | null
 }
   retry?: number
@@ -478,12 +488,13 @@ export interface HaloMethods {
 } }
   /** settings.saveNetwork */
   'settings.saveNetwork': { params: {
-  mode?: "auto" | "direct" | "manual"
+  mode?: "system" | "direct" | "manual"
   url?: string | null
   retry?: number
 }; result: {
   ok?: boolean
   notes?: string[]
+  warnings?: string[]
 } }
   /** settings.probeModels */
   'settings.probeModels': { params: {
@@ -493,8 +504,14 @@ export interface HaloMethods {
   headers?: HeaderPair[]
   useProxy?: boolean
   clearKey?: boolean
+  network?: "follow" | "proxy" | "direct"
 }; result: {
   models?: string[]
+  via?: {
+  source?: string
+  maskedUrl?: string | null
+}
+  latencyMs?: number
 } }
   /** settings.mcp.get */
   'settings.mcp.get': { params: void; result: {

@@ -126,18 +126,18 @@ if (!Directory.Exists(cwd))
     return 2;
 }
 
- using var llm = new OpenAiCompatibleClient(new LlmConfig
- {
-     BaseUrl = resolved.BaseUrl,
-     Model = resolved.ModelId,
-     ApiKey = resolved.ApiKey,
-     ProxyUrl = resolved.ProxyUrl,
-     Headers = resolved.Headers,
-     Protocol = llmProto,
-     MaxTokens = resolved.MaxTokens,
-     AcceptsImages = resolved.AcceptsImages,
-     IncludeReasoningHistory = resolved.IncludeReasoningHistory,
- });
+  using var llm = new OpenAiCompatibleClient(new LlmConfig
+  {
+      BaseUrl = resolved.BaseUrl,
+      Model = resolved.ModelId,
+      ApiKey = resolved.ApiKey,
+      Proxy = resolved.EffectiveProxy,
+      Headers = resolved.Headers,
+      Protocol = llmProto,
+      MaxTokens = resolved.MaxTokens,
+      AcceptsImages = resolved.AcceptsImages,
+      IncludeReasoningHistory = resolved.IncludeReasoningHistory,
+  });
 var tools = ToolRegistry.CreateBuiltin();
 var store = new SessionStore();
 store.StartNew();

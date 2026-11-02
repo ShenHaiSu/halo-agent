@@ -11,57 +11,84 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-    public Task<object?> SettingsGetAsync(JsonElement? p, CancellationToken ct)
-    {
-        var cfg = ConfigStore.Load();
-
-        // 旧形状嗅探：空新模型 + migrationRequired=true（Load 已备份一次）
-        bool migrationRequired = IsOldShapeOnDisk();
-
-        var mode = (cfg.Proxy.Mode ?? "auto").ToLowerInvariant();
-        if (mode is not ("auto" or "direct" or "manual")) mode = "auto";
-
-        var providers = cfg.Providers
-            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-             .Select(kv => new ProviderView
-             {
-                 Id = kv.Key,
-                 DisplayName = NormalizeAlias(kv.Key, kv.Value.DisplayName),
-                 BaseUrl = kv.Value.BaseUrl ?? "",
-                 ApiKeySet = !string.IsNullOrEmpty(kv.Value.ApiKey),
-                 HeadersEnabled = kv.Value.HeadersEnabled,
-                 Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
-                     .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
-                     .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
-                 UseProxy = kv.Value.UseProxy,
-                 ModelCount = kv.Value.Models.Count,
-                 Models = kv.Value.Models.Select(m => new ModelView
-                 {
-                     Id = m.Id,
-                     DisplayName = NormalizeAlias(m.Id, m.DisplayName),
-                     Protocol = (m.Protocol ?? "chat").ToLowerInvariant(),
-                     ContextWindow = m.ContextWindow,
-                     MaxTokens = m.MaxTokens,
-                     AcceptsImages = m.AcceptsImages,
-                     IncludeReasoningHistory = m.IncludeReasoningHistory,
-                 }).ToList(),
-             })
-            .ToList();
-
-        return Task.FromResult<object?>(new SettingsGetResult
-        {
-            ActiveProvider = cfg.ActiveProvider ?? "",
-            ActiveModel = cfg.ActiveModel ?? "",
-            MigrationRequired = migrationRequired,
-            Providers = providers,
-            Proxy = new ProxySettings { Mode = mode, Url = cfg.Proxy.Url },
-            Retry = cfg.Retry ?? 0,
-            MaxTurns = cfg.MaxTurns ?? 200,
-            Persona = cfg.Persona ?? "",
-            DataDir = _dataDir,
-            ConfigPath = Path.Combine(_dataDir, "config.json"),
-        });
-    }
+     public Task<object?> SettingsGetAsync(JsonElement? p, CancellationToken ct)
+     {
+         var cfg = ConfigStore.Load();
+         // 旧形状嗅探：空新模型 + migrationRequired=true（Load 已备份一次）
+         bool migrationRequired = IsOldShapeOnDisk();
+         var mode = ConfigStore.NormalizeGlobalMode(cfg.Proxy?.Mode);
+         var providers = cfg.Providers
+             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+              .Select(kv =>
+              {
+                  var network = ConfigStore.NormalizeProviderNetwork(kv.Value.Network, kv.Value.UseProxyLegacy);
+                  // P18：每个 Provider 下发 effective（inUse/source/maskedUrl + warning）
+                  var (eff, warn) = ConfigStore.TryResolveEffectiveProxy(cfg.Proxy ?? new ProxyConfig(), network);
+                  string source;
+                  if (!string.IsNullOrWhiteSpace(kv.Value.BaseUrl) && ConfigStore.IsBypassedUrl(kv.Value.BaseUrl))
+                  {
+                      eff = HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
+                      source = HaloAgent.Engine.Abstractions.Types.ProxySources.BypassLocal;
+                  }
+                  else if (network == "direct") source = HaloAgent.Engine.Abstractions.Types.ProxySources.ProviderDirect;
+                  else if (network == "proxy") source = HaloAgent.Engine.Abstractions.Types.ProxySources.ProviderProxy;
+                  else source = mode switch
+                  {
+                      "manual" => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalManual,
+                      "system" => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalSystem,
+                      _ => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalDirect,
+                  };
+                  string? masked = eff.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual
+                      ? HaloAgent.Engine.Core.Net.HttpClientFactory.MaskProxy(eff.Url ?? "") : null;
+                  return new ProviderView
+                  {
+                      Id = kv.Key,
+                      DisplayName = NormalizeAlias(kv.Key, kv.Value.DisplayName),
+                      BaseUrl = kv.Value.BaseUrl ?? "",
+                      ApiKeySet = !string.IsNullOrEmpty(kv.Value.ApiKey),
+                      HeadersEnabled = kv.Value.HeadersEnabled,
+                      Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
+                          .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                          .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
+                      Network = network,
+ #pragma warning disable CS0618
+                      UseProxy = network != "direct",
+ #pragma warning restore CS0618
+                      Effective = new ProviderEffective
+                      {
+                          InUse = eff.InUse,
+                          Source = source,
+                          MaskedUrl = masked,
+                          Warning = string.IsNullOrEmpty(warn) ? null : warn,
+                      },
+                      ModelCount = kv.Value.Models.Count,
+                      Models = kv.Value.Models.Select(m => new ModelView
+                      {
+                          Id = m.Id,
+                          DisplayName = NormalizeAlias(m.Id, m.DisplayName),
+                          Protocol = (m.Protocol ?? "chat").ToLowerInvariant(),
+                          ContextWindow = m.ContextWindow,
+                          MaxTokens = m.MaxTokens,
+                          AcceptsImages = m.AcceptsImages,
+                          IncludeReasoningHistory = m.IncludeReasoningHistory,
+                      }).ToList(),
+                  };
+              })
+             .ToList();
+         return Task.FromResult<object?>(new SettingsGetResult
+         {
+             ActiveProvider = cfg.ActiveProvider ?? "",
+             ActiveModel = cfg.ActiveModel ?? "",
+             MigrationRequired = migrationRequired,
+             Providers = providers,
+              Proxy = new ProxySettings { Mode = mode, Url = cfg.Proxy?.Url },
+             Retry = cfg.Retry ?? 0,
+             MaxTurns = cfg.MaxTurns ?? 200,
+             Persona = cfg.Persona ?? "",
+             DataDir = _dataDir,
+             ConfigPath = Path.Combine(_dataDir, "config.json"),
+         });
+     }
 
     private bool IsOldShapeOnDisk()
     {
@@ -109,17 +136,19 @@ public sealed partial class RealMethods
         foreach (var prop in pv.EnumerateObject())
         {
             var pid = prop.Name.Trim();
-            var entry = ParseProviderEntry(prop.Value);
-            cfg.Providers.TryGetValue(pid, out var existing);
+             var entry = ParseProviderEntry(prop.Value);
+             if (entry.NetworkRaw is not null && entry.Network is not ("follow" or "proxy" or "direct"))
+                 throw RpcException.ParamsInvalid($"服务商「{pid}」network 非法（须为 follow/proxy/direct，收到 {entry.NetworkRaw}）");
+             cfg.Providers.TryGetValue(pid, out var existing);
 
-             var pcfg = new ProviderConfig
-             {
-                 DisplayName = entry.HasDisplayName ? NormalizeAlias(pid, entry.DisplayName) : existing?.DisplayName,
-                 BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
-                 ApiKey = existing?.ApiKey,
-                 HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
-                 Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
-                 UseProxy = entry.UseProxy ?? existing?.UseProxy ?? true,
+              var pcfg = new ProviderConfig
+              {
+                  DisplayName = entry.HasDisplayName ? NormalizeAlias(pid, entry.DisplayName) : existing?.DisplayName,
+                  BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
+                  ApiKey = existing?.ApiKey,
+                  HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
+                  Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
+                  Network = entry.Network ?? ConfigStore.NormalizeProviderNetwork(existing?.Network, existing?.UseProxyLegacy ?? entry.UseProxy),
                  Models = entry.Models?.Select(m => new ModelConfig
                  {
                      Id = m.Id.Trim(),
@@ -184,60 +213,68 @@ public sealed partial class RealMethods
          });
     }
 
-     private sealed record ParsedProvider(
-         string? DisplayName, bool HasDisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
-         bool? HeadersEnabled, Dictionary<string, string>? Headers, bool? UseProxy,
-         List<ModelSaveEntry>? Models);
-
-    private static ParsedProvider ParseProviderEntry(JsonElement el)
-    {
-         bool hasDisplayName = el.TryGetProperty("displayName", out var dn);
-         string? displayName = hasDisplayName ? dn.GetString() : null;
-        string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
-        string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
-        bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
-        bool? headersEnabled = el.TryGetProperty("headersEnabled", out var he)
-            ? (he.ValueKind == JsonValueKind.True ? true : he.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
-        Dictionary<string, string>? headers = null;
-        if (el.TryGetProperty("headers", out var hv) && hv.ValueKind == JsonValueKind.Array)
-        {
-            headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var h in hv.EnumerateArray())
-            {
-                if (h.ValueKind != JsonValueKind.Object) continue;
-                var key = h.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
-                    : h.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
-                var val = h.TryGetProperty("value", out var v) ? v.GetString() : null;
-                if (string.IsNullOrWhiteSpace(key)) continue;
-                if (val is null) continue;
-                headers[key!] = val;
-            }
-        }
-        bool? useProxy = el.TryGetProperty("useProxy", out var up)
-            ? (up.ValueKind == JsonValueKind.True ? true : up.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
-        List<ModelSaveEntry>? models = null;
-        if (el.TryGetProperty("models", out var mv) && mv.ValueKind == JsonValueKind.Array)
-        {
-            models = new List<ModelSaveEntry>();
-            foreach (var m in mv.EnumerateArray())
-            {
-                if (m.ValueKind != JsonValueKind.Object) continue;
-                models.Add(new ModelSaveEntry
-                {
-                    Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
-                    DisplayName = m.TryGetProperty("displayName", out var mdn) ? mdn.GetString() : null,
-                    Protocol = m.TryGetProperty("protocol", out var pr) ? pr.GetString() : null,
-                    ContextWindow = m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : null,
-                    MaxTokens = m.TryGetProperty("maxTokens", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : null,
-                    AcceptsImages = m.TryGetProperty("acceptsImages", out var ai)
-                        ? (ai.ValueKind == JsonValueKind.True ? true : ai.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
-                    IncludeReasoningHistory = m.TryGetProperty("includeReasoningHistory", out var ir)
-                        ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
-                });
-            }
+      private sealed record ParsedProvider(
+          string? DisplayName, bool HasDisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
+          bool? HeadersEnabled, Dictionary<string, string>? Headers, string? Network, string? NetworkRaw, bool? UseProxy,
+          List<ModelSaveEntry>? Models);
+ 
+     private static ParsedProvider ParseProviderEntry(JsonElement el)
+     {
+          bool hasDisplayName = el.TryGetProperty("displayName", out var dn);
+          string? displayName = hasDisplayName ? dn.GetString() : null;
+         string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
+         string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
+         bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
+         bool? headersEnabled = el.TryGetProperty("headersEnabled", out var he)
+             ? (he.ValueKind == JsonValueKind.True ? true : he.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+         Dictionary<string, string>? headers = null;
+         if (el.TryGetProperty("headers", out var hv) && hv.ValueKind == JsonValueKind.Array)
+         {
+             headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+             foreach (var h in hv.EnumerateArray())
+             {
+                 if (h.ValueKind != JsonValueKind.Object) continue;
+                 var key = h.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
+                     : h.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
+                 var val = h.TryGetProperty("value", out var v) ? v.GetString() : null;
+                 if (string.IsNullOrWhiteSpace(key)) continue;
+                 if (val is null) continue;
+                 headers[key!] = val;
+             }
          }
-         return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, useProxy, models);
-     }
+         // P18：network 三选项（读时兼容旧 useProxy）
+         string? networkRaw = el.TryGetProperty("network", out var nw) ? nw.GetString() : null;
+         string? network = null;
+         if (networkRaw is not null)
+         {
+             var n = networkRaw.Trim().ToLowerInvariant();
+             network = n is ("follow" or "proxy" or "direct") ? n : n; // 非法值原样透出，由调用方拒存
+         }
+         bool? useProxy = el.TryGetProperty("useProxy", out var up)
+             ? (up.ValueKind == JsonValueKind.True ? true : up.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+         List<ModelSaveEntry>? models = null;
+         if (el.TryGetProperty("models", out var mv) && mv.ValueKind == JsonValueKind.Array)
+         {
+             models = new List<ModelSaveEntry>();
+             foreach (var m in mv.EnumerateArray())
+             {
+                 if (m.ValueKind != JsonValueKind.Object) continue;
+                 models.Add(new ModelSaveEntry
+                 {
+                     Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                     DisplayName = m.TryGetProperty("displayName", out var mdn) ? mdn.GetString() : null,
+                     Protocol = m.TryGetProperty("protocol", out var pr) ? pr.GetString() : null,
+                     ContextWindow = m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : null,
+                     MaxTokens = m.TryGetProperty("maxTokens", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : null,
+                     AcceptsImages = m.TryGetProperty("acceptsImages", out var ai)
+                         ? (ai.ValueKind == JsonValueKind.True ? true : ai.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                     IncludeReasoningHistory = m.TryGetProperty("includeReasoningHistory", out var ir)
+                         ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                 });
+             }
+          }
+          return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, network, networkRaw, useProxy, models);
+      }
 
      /// <summary>P14 别名原则：无别名一律存 null。空白/与 id 精确相等(Ordinal)均视为无别名。</summary>
      private static string? NormalizeAlias(string id, string? displayName)
@@ -316,52 +353,89 @@ public sealed partial class RealMethods
          }
      }
 
-    public Task<object?> SettingsSaveNetworkAsync(JsonElement? p, CancellationToken ct)
-    {
-        ConfigModel cfg;
-        try { cfg = ConfigStore.LoadForWrite(); }
-        catch (InvalidOperationException ex)
-        {
-            throw new RpcException(RpcError.Internal,
-                "配置文件损坏，已拒绝保存以免覆盖：" + ex.Message);
-        }
-
-        var notes = new List<string>();
-
-        var mode = p?.TryGetProperty("mode", out var mv) == true ? mv.GetString() : null;
-        if (mode is not null)
-        {
-            var normalized = mode.ToLowerInvariant() switch
-            {
-                "custom" => "manual",
-                "system" => "auto",
-                "auto" or "direct" or "manual" => mode.ToLowerInvariant(),
-                _ => throw RpcException.ParamsInvalid(
-                    "mode 只能是 auto/direct/manual（收到 " + mode + "）"),
-            };
-            cfg.Proxy.Mode = normalized;
-        }
-
-        if (p?.TryGetProperty("url", out var uv) == true)
-            cfg.Proxy.Url = NullIfBlank(uv.GetString());
-
-        if (p?.TryGetProperty("retry", out var rv) == true && rv.ValueKind == JsonValueKind.Number)
-            cfg.Retry = Math.Clamp(rv.GetInt32(), 0, 8);
-
-        // 瘦身：headers/headersEnabled/providerHeaders 已删除；收到则直接拒绝（破坏性口径）
-        if (p?.TryGetProperty("headers", out _) == true ||
-            p?.TryGetProperty("headersEnabled", out _) == true ||
-            p?.TryGetProperty("providerHeaders", out _) == true)
-            throw RpcException.ParamsInvalid("saveNetwork 已瘦身：仅支持 mode/url/retry，请求头请走 saveProviders");
-
-        ConfigStore.Save(cfg);
-
-        return Task.FromResult<object?>(new SettingsSaveNetworkResult
-        {
-            Ok = true,
-            Notes = notes,
-        });
-    }
+     public Task<object?> SettingsSaveNetworkAsync(JsonElement? p, CancellationToken ct)
+     {
+         ConfigModel cfg;
+         try { cfg = ConfigStore.LoadForWrite(); }
+         catch (InvalidOperationException ex)
+         {
+             throw new RpcException(RpcError.Internal,
+                 "配置文件损坏，已拒绝保存以免覆盖：" + ex.Message);
+         }
+         var proxyCfg = cfg.Proxy ??= new ProxyConfig();
+         var notes = new List<string>();
+         var warnings = new List<string>();
+         // P18：热切只看 mode/url（retry 不触发）
+         var oldMode = ConfigStore.NormalizeGlobalMode(cfg.Proxy?.Mode);
+         var oldUrl = (cfg.Proxy?.Url ?? "").Trim();
+         var mode = p?.TryGetProperty("mode", out var mv) == true ? mv.GetString() : null;
+         if (mode is not null)
+         {
+             var m = mode.Trim().ToLowerInvariant();
+             string normalized = m switch
+             {
+                 // P18 新三档
+                 "system" => "system",
+                 "direct" => "direct",
+                 "manual" => "manual",
+                 // 旧映射保留
+                 "custom" => "manual",
+                 // 旧 auto 实际=直连，守恒 + warning
+                 "auto" => "direct",
+                 _ => throw RpcException.ParamsInvalid(
+                     "mode 只能是 system/direct/manual（收到 " + mode + "）"),
+             };
+             if (m == "auto")
+                 warnings.Add("全局代理 auto 已按直连归一为 direct（旧 auto 实际即直连）");
+             proxyCfg.Mode = normalized;
+         }
+         if (p?.TryGetProperty("url", out var uv) == true)
+             proxyCfg.Url = NullIfBlank(uv.GetString());
+         if (p?.TryGetProperty("retry", out var rv) == true && rv.ValueKind == JsonValueKind.Number)
+             cfg.Retry = Math.Clamp(rv.GetInt32(), 0, 8);
+         // 瘦身：headers/headersEnabled/providerHeaders 已删除；收到则直接拒绝（破坏性口径）
+         if (p?.TryGetProperty("headers", out _) == true ||
+             p?.TryGetProperty("headersEnabled", out _) == true ||
+             p?.TryGetProperty("providerHeaders", out _) == true)
+             throw RpcException.ParamsInvalid("saveNetwork 已瘦身：仅支持 mode/url/retry，请求头请走 saveProviders");
+         // P18：manual 下 url 必填 + http(s) 校验，失败即拒存
+         if (ConfigStore.NormalizeGlobalMode(proxyCfg.Mode) == "manual")
+         {
+             if (string.IsNullOrWhiteSpace(proxyCfg.Url) || !ConfigStore.IsValidProxyUrl(proxyCfg.Url!))
+                 throw RpcException.ParamsInvalid("manual 模式下 url 必填且须为 http(s):// 开头");
+         }
+         ConfigStore.Save(cfg);
+         // P18：代理组合 warning（与 TryResolve 同源）进 Warnings
+         warnings.AddRange(ConfigValidation.Warnings(cfg));
+         // P18 热切：仅 mode/url 变化触发 Resolve→Reconfigure（retry 不触发）；失败回 warning 不回滚保存
+         var newMode = ConfigStore.NormalizeGlobalMode(proxyCfg.Mode);
+         var newUrl = (proxyCfg.Url ?? "").Trim();
+         if (!string.Equals(oldMode, newMode, StringComparison.Ordinal) || !string.Equals(oldUrl, newUrl, StringComparison.Ordinal))
+         {
+             try
+             {
+                 var resolvedNet = ConfigStore.Resolve(cfg);
+                 try { _session.ReconfigureActive(resolvedNet); }
+                 catch (NotSupportedException ex)
+                 {
+                     _session.ClearActive();
+                     warnings.Add("已保存，但生效模型协议暂不支持，已置为未配置态（" + ex.Message + "）");
+                 }
+             }
+             catch (Exception ex)
+             {
+                 // 代理组合永不抛；仅 active 非法（删 active 目标等）才到此分支
+                 _session.ClearActive();
+                 warnings.Add("已保存，但 active 指向无效，已置为未配置态，请重选 active 后再试（" + ex.Message + "）");
+             }
+         }
+         return Task.FromResult<object?>(new SettingsSaveNetworkResult
+         {
+             Ok = true,
+             Notes = notes,
+             Warnings = warnings.Distinct().ToList(),
+         });
+     }
 
     public async Task<object?> SettingsProbeModelsAsync(JsonElement? p, CancellationToken ct)
     {
@@ -422,31 +496,54 @@ public sealed partial class RealMethods
             catch { }
         }
 
-        // 代理：表单试算值优先（useProxy），否则读库折叠
-        string? proxyUrl = null;
-        bool? useProxyParam = p?.TryGetProperty("useProxy", out var upv) == true
-            ? (upv.ValueKind == JsonValueKind.True ? true : upv.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
-        try
-        {
-            var cfgForProxy = ConfigStore.Load();
-            var (avail, gurl) = ConfigStore.GlobalProxy(cfgForProxy);
-            bool useProxy = useProxyParam
-                ?? (providerId is not null && cfgForProxy.Providers.TryGetValue(providerId.Trim(), out var ppd) ? ppd.UseProxy : true);
-            proxyUrl = (avail && useProxy) ? gurl : null;
-        }
-        catch { }
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-        var client = new OpenAiCompatibleClient(new LlmConfig
-        {
-            BaseUrl = baseUrl!.Trim(),
-            Model = "",
-            ApiKey = apiKey,
-            ProxyUrl = proxyUrl,
-            Headers = headers,
-        });
+         // P18 代理：表单 network 试算值优先（读时兼容旧 useProxy），否则读库折叠；回包带 via + latencyMs
+         HaloAgent.Engine.Abstractions.Types.EffectiveProxy effProxy = HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
+         string effSource = HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalDirect;
+         string effWarn = "";
+         string? networkParam = p?.TryGetProperty("network", out var nwv) == true ? nwv.GetString() : null;
+ #pragma warning disable CS0618
+         bool? useProxyParam = p?.TryGetProperty("useProxy", out var upv) == true
+             ? (upv.ValueKind == JsonValueKind.True ? true : upv.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+ #pragma warning restore CS0618
+         if (networkParam is not null && networkParam.Trim().ToLowerInvariant() is not ("follow" or "proxy" or "direct"))
+             throw RpcException.ParamsInvalid("network 须为 follow/proxy/direct（收到 " + networkParam + "）");
+         try
+         {
+             var cfgForProxy = ConfigStore.Load();
+             string network = networkParam is not null
+                 ? ConfigStore.NormalizeProviderNetwork(networkParam)
+                 : useProxyParam is not null
+                     ? (useProxyParam == true ? "follow" : "direct")
+                     : (providerId is not null && cfgForProxy.Providers.TryGetValue(providerId.Trim(), out var ppd)
+                         ? ConfigStore.NormalizeProviderNetwork(ppd.Network, ppd.UseProxyLegacy) : "follow");
+             (effProxy, effWarn) = ConfigStore.TryResolveEffectiveProxy(cfgForProxy.Proxy ?? new ProxyConfig(), network);
+             // 旁路：probe 目标命中本地表则直连
+             if (ConfigStore.IsBypassedUrl(baseUrl))
+             {
+                 effProxy = HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
+                 effSource = HaloAgent.Engine.Abstractions.Types.ProxySources.BypassLocal;
+             }
+             else if (network == "direct") effSource = HaloAgent.Engine.Abstractions.Types.ProxySources.ProviderDirect;
+             else if (network == "proxy") effSource = HaloAgent.Engine.Abstractions.Types.ProxySources.ProviderProxy;
+             else effSource = ConfigStore.NormalizeGlobalMode(cfgForProxy.Proxy?.Mode) switch
+             {
+                 "manual" => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalManual,
+                 "system" => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalSystem,
+                 _ => HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalDirect,
+             };
+         }
+         catch { }
+         var sw = System.Diagnostics.Stopwatch.StartNew();
+         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+         cts.CancelAfter(TimeSpan.FromSeconds(10));
+         var client = new OpenAiCompatibleClient(new LlmConfig
+         {
+             BaseUrl = baseUrl!.Trim(),
+             Model = "",
+             ApiKey = apiKey,
+             Proxy = effProxy,
+             Headers = headers,
+         });
 
          try
          {
@@ -471,7 +568,7 @@ public sealed partial class RealMethods
                      BaseUrl = baseUrl!.Trim(),
                      Model = responsesModel!.Trim(),
                      ApiKey = apiKey,
-                     ProxyUrl = proxyUrl,
+                     Proxy = effProxy,
                      Headers = headers,
                      Protocol = LlmProtocol.Responses,
                  });
@@ -500,7 +597,15 @@ public sealed partial class RealMethods
                          TruncateForProbe(ex.Body));
                  }
              }
-             return new SettingsProbeModelsResult { Models = models.ToList() };
+             sw.Stop();
+             string? maskedProbe = effProxy.Kind == HaloAgent.Engine.Abstractions.Types.ProxyKind.Manual
+                 ? HaloAgent.Engine.Core.Net.HttpClientFactory.MaskProxy(effProxy.Url ?? "") : null;
+             return new SettingsProbeModelsResult
+             {
+                 Models = models.ToList(),
+                 Via = new ProbeVia { Source = effSource, MaskedUrl = maskedProbe },
+                 LatencyMs = sw.ElapsedMilliseconds,
+             };
          }
          catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
          {

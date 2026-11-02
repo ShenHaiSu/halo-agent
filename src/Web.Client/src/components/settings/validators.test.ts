@@ -58,6 +58,14 @@ describe('PROVIDER_ID_RE', () => {
 describe('validateNetworkForm', () => {
   it('直连合法', () =>
     expect(validateNetworkForm({ mode: 'direct', url: '', retry: 3 })).toEqual([]));
+  it('跟随系统合法', () =>
+    expect(validateNetworkForm({ mode: 'system', url: '', retry: 3 })).toEqual([]));
+  it('旧 auto 拒绝（已改为 system/direct/manual）', () =>
+    expect(
+      validateNetworkForm({ mode: 'auto', url: '', retry: 3 }).some(
+        (e) => e.field === 'mode'
+      )
+    ).toBe(true));
   it('manual 无地址拒绝', () =>
     expect(
       validateNetworkForm({ mode: 'manual', url: '', retry: 3 }).some(

@@ -1,3 +1,5 @@
+ using HaloAgent.Engine.Abstractions.Types;
+
 namespace HaloAgent.Engine.Core.Net;
 
 /// <summary>
@@ -12,12 +14,17 @@ namespace HaloAgent.Engine.Core.Net;
 ///   网页抓取：连接 10s / 总 30s
 ///   更新下载：连接 10s / 总 240s
 /// 由调用方传 timeoutSeconds 覆盖。
+///
+/// P18-proxy02：单重载 Create(EffectiveProxy, …)。
+///   None→UseProxy=false；Manual→WebProxy(url)+BypassList（含本地表 + NO_PROXY 复用）；
+///   System→UseProxy=true, Proxy=null（由 OS 含 PAC 动态解析；无系统代理自然直连）。
+/// System 旁路不靠工厂层（靠 Resolve 期预检 + WebFetch 逐 URL 预检）。
 /// </summary>
 public static class HttpClientFactory
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
-    public static HttpClient Create(string? proxyUrl, int timeoutSeconds)
+    public static HttpClient Create(EffectiveProxy proxy, int timeoutSeconds)
     {
         var handler = new SocketsHttpHandler
         {
@@ -26,26 +33,31 @@ public static class HttpClientFactory
             AutomaticDecompression = System.Net.DecompressionMethods.All,
         };
 
-        if (string.IsNullOrWhiteSpace(proxyUrl))
+        if (proxy.Kind == ProxyKind.None)
         {
-            // 直连（或跟随系统环境变量由调用方决定；这里默认为"不显式设代理"）
             handler.UseProxy = false;
         }
-        else
+        else if (proxy.Kind == ProxyKind.Manual)
         {
-            var proxy = new System.Net.WebProxy(proxyUrl);
+            var webProxy = new System.Net.WebProxy((proxy.Url ?? "").Trim());
+            var bypass = new List<string>(LocalBypassList());
             // 尊重 NO_PROXY 环境变量
             var noProxy = Environment.GetEnvironmentVariable("NO_PROXY")
                           ?? Environment.GetEnvironmentVariable("no_proxy");
             if (!string.IsNullOrWhiteSpace(noProxy))
             {
                 foreach (var host in noProxy.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    proxy.BypassList = (proxy.BypassList ?? Array.Empty<string>())
-                        .Append("^" + System.Text.RegularExpressions.Regex.Escape(host.Replace("*", "")) + ".*")
-                        .ToArray();
+                    bypass.Add("^" + System.Text.RegularExpressions.Regex.Escape(host.Replace("*", "")) + ".*");
             }
-            handler.Proxy = proxy;
+            webProxy.BypassList = bypass.ToArray();
+            handler.Proxy = webProxy;
             handler.UseProxy = true;
+        }
+        else
+        {
+            // System：交还 OS（含 PAC 动态解析）；无系统代理时自然直连
+            handler.UseProxy = true;
+            handler.Proxy = null;
         }
 
         var client = new HttpClient(handler)
@@ -54,6 +66,24 @@ public static class HttpClientFactory
         };
         return client;
     }
+
+    /// <summary>旧字符串重载（兼容保留）：非空合法 url→Manual，直连/system→对应档。</summary>
+    [Obsolete("Use Create(EffectiveProxy, int)")]
+    public static HttpClient Create(string? proxyUrl, int timeoutSeconds) =>
+        Create(string.IsNullOrWhiteSpace(proxyUrl) ? EffectiveProxy.None : EffectiveProxy.Manual(proxyUrl.Trim()), timeoutSeconds);
+
+    /// <summary>本地旁路表（WebProxy.BypassList 正则；大小写不敏感）。</summary>
+    public static IReadOnlyList<string> LocalBypassList() => new[]
+    {
+        @"^localhost.*",
+        @"^.*\.localhost$",
+        @"^127\..*",
+        @"^10\..*",
+        @"^172\.(1[6-9]|2[0-9]|3[01])\..*",
+        @"^192\.168\..*",
+        @"^.*\.local$",
+        @"^\[::1\].*",
+    };
 
     /// <summary>代理地址脱敏：去掉 user:pass@ 与路径，只留 scheme://host[:port]。</summary>
     public static string MaskProxy(string url)

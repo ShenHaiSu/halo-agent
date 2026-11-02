@@ -90,8 +90,14 @@ public sealed record AgentState
     public bool AcceptsImages { get; init; }
     /// <summary>回放历史是否携带 reasoning_content。</summary>
     public bool IncludeReasoning { get; init; } = true;
-    /// <summary>本次模型请求是否走代理（脱敏 bool）。</summary>
-    public bool ProxyInUse { get; init; }
+     /// <summary>本次模型请求是否走代理（脱敏 bool）。</summary>
+     public bool ProxyInUse { get; init; }
+     /// <summary>P18：None | Manual | System（诊断一律读此字段）。</summary>
+     public string ProxyKind { get; init; } = "None";
+     /// <summary>P18：global-direct|global-manual|global-system|provider-direct|provider-proxy|bypass-local。</summary>
+     public string ProxySource { get; init; } = "";
+     /// <summary>P18：代理地址脱敏（仅 Manual 有值）。</summary>
+     public string? ProxyMaskedUrl { get; init; }
     /// <summary>最大轮数。</summary>
     public int MaxTurns { get; init; }
     /// <summary>重试次数上限。</summary>

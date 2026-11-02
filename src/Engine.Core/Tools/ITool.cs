@@ -52,22 +52,20 @@ public sealed class ToolContext
 /// <summary>
 /// 工具宿主能力（由 Session 实现）。
 /// </summary>
-public interface IToolHost
-{
-    /// <summary>写文件前的 undo 快照</summary>
-    Task<UndoSnapshotResult> BackupAsync(string path, string action, CancellationToken ct);
-
-    /// <summary>推送工具实时输出（run_shell_command 用）</summary>
-    void PublishToolOutput(string toolCallId, string delta);
-
-    /// <summary>推送静默预警（level 0/1/2）</summary>
-    void PublishSilentAlert(string toolCallId, int level);
-
-    /// <summary>当前生效的网络代理（web_fetch 用）</summary>
-    string? ProxyUrl { get; }
-
-    /// <summary>数据目录（记忆工具用）</summary>
-    string DataDir { get; }
-}
+ public interface IToolHost
+ {
+     /// <summary>写文件前的 undo 快照</summary>
+     Task<UndoSnapshotResult> BackupAsync(string path, string action, CancellationToken ct);
+     /// <summary>推送工具实时输出（run_shell_command 用）</summary>
+     void PublishToolOutput(string toolCallId, string delta);
+     /// <summary>推送静默预警（level 0/1/2）</summary>
+     void PublishSilentAlert(string toolCallId, int level);
+     /// <summary>P18：非模型链路生效代理（WebFetch 用；System 不固化地址）</summary>
+     HaloAgent.Engine.Abstractions.Types.EffectiveProxy EffectiveProxy { get; }
+     /// <summary>兼容保留：EffectiveProxy 为 Manual 时的 Url，否则 null</summary>
+     string? ProxyUrl { get; }
+     /// <summary>数据目录（记忆工具用）</summary>
+     string DataDir { get; }
+ }
 
 public sealed record UndoSnapshotResult(bool BackedUp, string? SnapshotPath, string? Error);

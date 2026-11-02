@@ -62,7 +62,7 @@ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 /** 网络分页校验（P10 瘦身）：代理模式 + 地址 + 重试 0~8 */
 export function validateNetworkForm(f: { mode: string; url: string; retry: number }): FieldError[] {
   const errs: FieldError[] = [];
-  if (!['direct', 'auto', 'manual'].includes(f.mode))
+  if (!['direct', 'system', 'manual'].includes(f.mode))
     errs.push({ field: 'mode', message: '代理模式不合法' });
   if (f.mode === 'manual') {
     if (!f.url.trim()) errs.push({ field: 'url', message: '自定义代理请填写代理地址' });
@@ -72,6 +72,15 @@ export function validateNetworkForm(f: { mode: string; url: string; retry: numbe
   if (!isIntInRange(f.retry, 0, 8))
     errs.push({ field: 'retry', message: '重试次数需在 0 ~ 8 之间' });
   return errs;
+}
+
+/** P18：provider network 三选项。 */
+export const PROVIDER_NETWORKS = ['follow', 'proxy', 'direct'] as const;
+export type ProviderNetwork = (typeof PROVIDER_NETWORKS)[number];
+
+/** provider network 是否合法。 */
+export function isValidProviderNetwork(n: string): boolean {
+  return (PROVIDER_NETWORKS as readonly string[]).includes(n);
 }
 
  /** P13 responses：模型协议白名单（chat/responses 放行，其余禁用）。 */

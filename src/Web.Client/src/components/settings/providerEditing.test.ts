@@ -1,7 +1,7 @@
 // src/Web.Client/src/components/settings/providerEditing.test.ts
 // P10 providerEditing 纯函数单测：归一化/校验/dirty；左栏计数、空 provider、active 高亮、responses disabled、dirty 禁切 setActive。
  import { describe, expect, it } from 'vitest';
- import { diffActive, hasAlias, mainName, normalizeAlias, normalizeProvidersTree, trimOrNull, validateProvidersTree } from './providerEditing';
+ import { diffActive, hasAlias, mainName, normalizeAlias, normalizeNetwork, normalizeProvidersTree, trimOrNull, validateProvidersTree } from './providerEditing';
 
 const RAW = {
   activeProvider: 'deepseek',
@@ -14,12 +14,12 @@ const RAW = {
       apiKeySet: true,
       headersEnabled: true,
       headers: [],
-      useProxy: true,
+      network: 'follow',
       models: [
         { id: 'deepseek-chat', displayName: '', protocol: 'chat', contextWindow: 65536, maxTokens: null, acceptsImages: false, includeReasoningHistory: true },
       ],
     },
-    { id: 'empty', displayName: '', baseUrl: 'https://e.local/v1', apiKeySet: false, headersEnabled: true, headers: [], useProxy: true, models: [] },
+    { id: 'empty', displayName: '', baseUrl: 'https://e.local/v1', apiKeySet: false, headersEnabled: true, headers: [], network: 'direct', models: [] },
   ],
 };
 
@@ -105,3 +105,25 @@ describe('dirty 禁切 setActive', () => {
      expect(mainName('m1', '  m1  ')).toBe('m1');
    });
  });
+
+describe('P18 network', () => {
+  it('network 归一化默认 follow', () => {
+    const t = normalizeProvidersTree(RAW);
+    expect(t.providers[0]!.network).toBe('follow');
+  });
+  it('旧 useProxy=false 读入兼容为 direct', () => {
+    expect(normalizeNetwork(undefined, false)).toBe('direct');
+    expect(normalizeNetwork(undefined, true)).toBe('follow');
+    const t = normalizeProvidersTree({
+      providers: [{ id: 'x', baseUrl: 'https://x/v1', useProxy: false, models: [] }],
+    });
+    expect(t.providers[0]!.network).toBe('direct');
+  });
+  it('非法 network 拒绝保存', () => {
+    const t = normalizeProvidersTree({
+      providers: [{ id: 'x', baseUrl: 'https://x/v1', network: 'force-proxy', models: [] }],
+    });
+    // 归一化落回 follow（后端 saveProviders 侧直接拒存，此处断言前端归一不抛）
+    expect(t.providers[0]!.network).toBe('follow');
+  });
+});
