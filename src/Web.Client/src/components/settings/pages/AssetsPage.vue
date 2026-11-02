@@ -1,7 +1,8 @@
 <!-- src/Web.Client/src/components/settings/pages/AssetsPage.vue -->
 <!-- 资源分页：技能 / 记忆 / 人格三 Tab（HTabs pill + 计数 badge），脏态聚合 expose；Tab 切换前自确认；Ctrl+S 页级统一分发。 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { transport } from '@/transport';
 import HTabs from '@/components/base/HTabs.vue';
 import HButton from '@/components/base/HButton.vue';
 import HDialog from '@/components/base/HDialog.vue';
@@ -22,14 +23,24 @@ const skills = ref<(AssetChild & { count?: number }) | null>(null);
 const memory = ref<(AssetChild & { count?: number }) | null>(null);
 const persona = ref<(AssetChild & { count?: number }) | null>(null);
 
-const skillsCount = computed(() => skills.value?.count ?? 0);
-const memoryCount = computed(() => memory.value?.count ?? 0);
-const personaCount = computed(() => persona.value?.count ?? 0);
+/** 三项资源的条数（元数据预加载）。null 表示尚未返回或请求失败——徽章不显示数字，避免与真实的 0 混淆。 */
+const preloaded = ref<{ skills: number | null; memory: number | null; persona: number | null }>({
+  skills: null,
+  memory: null,
+  persona: null,
+});
+
+/** 计数取值：编辑器实时值 > 预加载快照 > 不渲染徽章。 */
+function pick(editorCount: number | undefined, preloaded: number | null): number | undefined {
+  if (editorCount !== undefined) return editorCount;
+  if (preloaded !== null) return preloaded;
+  return undefined;
+}
 
 const tabs = computed(() => [
-  { key: 'skills', label: '技能', badge: skillsCount.value },
-  { key: 'memory', label: '记忆', badge: memoryCount.value },
-  { key: 'persona', label: '人格', badge: personaCount.value },
+  { key: 'skills', label: '技能', badge: pick(skills.value?.count, preloaded.value.skills) },
+  { key: 'memory', label: '记忆', badge: pick(memory.value?.count, preloaded.value.memory) },
+  { key: 'persona', label: '人格', badge: pick(persona.value?.count, preloaded.value.persona) },
 ]);
 
 const activeChild = computed(() => {
@@ -64,6 +75,42 @@ function confirmTabSwitch(): void {
 function cancelTabSwitch(): void {
   pendingTab.value = null;
 }
+
+function countOf(r: unknown): number | null {
+  const items = (r as { items?: unknown } | null)?.items;
+  return Array.isArray(items) ? items.length : null;
+}
+
+/**
+ * 进入资源页即取三项条数：只读 list 的数组长度，不读正文。
+ * allSettled 逐项结算，单项失败只让该项保持 null（徽章不显示数字），不污染其余两项。
+ */
+async function preloadCounts(): Promise<void> {
+  const results = await Promise.allSettled([
+    transport.request('asset.skills.list', null),
+    transport.request('asset.memory.list', null),
+    transport.request('asset.personas.list', null),
+  ] as const);
+  const [s, m, p] = results;
+  if (s.status === 'fulfilled') preloaded.value.skills = countOf(s.value);
+  if (m.status === 'fulfilled') preloaded.value.memory = countOf(m.value);
+  if (p.status === 'fulfilled') preloaded.value.persona = countOf(p.value);
+}
+
+onMounted(() => {
+  void preloadCounts();
+});
+
+// 编辑器挂载期间把实时条数回写为"最后已知值"：编辑器销毁后徽章回落时不至于滞后。
+// 注意：这里必须判 undefined 而不是 ?? null——编辑器销毁时读到的是"未知"，不能当成 0。
+watch(
+  () => [skills.value?.count, memory.value?.count, persona.value?.count] as const,
+  ([s, m, p]) => {
+    if (s !== undefined) preloaded.value.skills = s;
+    if (m !== undefined) preloaded.value.memory = m;
+    if (p !== undefined) preloaded.value.persona = p;
+  },
+);
 
 /** Ctrl+S 页级统一分发：单一 preventDefault，按当前 Tab 存。 */
 function onKeydown(e: KeyboardEvent): void {
