@@ -1,4 +1,4 @@
-// src/Web.Client/src/components/usage/FilterForm.test.ts
+﻿// src/Web.Client/src/components/usage/FilterForm.test.ts
 // P16：provider 切换清空 model；P17：隐私遮蔽开关默认开、label 假名但 value 真值。
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
@@ -28,7 +28,6 @@ function mountForm(extra: Record<string, unknown> = {}): ReturnType<typeof mount
       toInput: '',
       providerId: 'openai',
       modelId: 'm1',
-      sessionId: '',
       providerDict: dict,
       activePreset: null,
       querying: false,

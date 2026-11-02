@@ -1,8 +1,9 @@
-<!-- src/Web.Client/src/components/usage/DetailTable.vue -->
+﻿<!-- src/Web.Client/src/components/usage/DetailTable.vue -->
 <!-- P17 用量明细表：分页。会话列已删除（后端 sessionId 保留），行 key 仍为 sessionId/turnId。 -->
 <script setup lang="ts">
 import HButton from '@/components/base/HButton.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
+import HSelect from '@/components/base/HSelect.vue';
 import { formatDateTime, formatNumber } from '@/utils/format';
 import ZhCell from './ZhCell.vue';
 import { resolveProviderDisplay } from './providerMask';
@@ -13,6 +14,7 @@ const props = defineProps<{
   total: number;
   page: number;
   pageSize: number;
+  pageSizeOptions: number[];
   loading: boolean;
   failed: boolean;
   maskOn: boolean;
@@ -20,6 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:page': [number];
+  'update:pageSize': [number];
 }>();
 
 /** 服务商显示：经 resolve 唯一入口；localStorage 非响应式，靠 maskOn prop 订阅切换（页容器先写存储再改 prop）。 */
@@ -80,9 +83,26 @@ function totalPages(total: number, pageSize: number): number {
     </div>
     <div
       v-if="!failed && total > 0"
-      class="mt-2 flex items-center justify-between text-xs text-fg-muted"
+      class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-fg-muted"
     >
-      <span>共 {{ formatNumber(total) }} 条</span>
+      <span class="flex items-center gap-2">
+        <span>共 {{ formatNumber(total) }} 条</span>
+        <label class="flex items-center gap-1">
+          每页
+          <span class="inline-block w-[88px]">
+            <HSelect
+              :model-value="String(pageSize)"
+              size="sm"
+              :disabled="loading"
+              @update:model-value="emit('update:pageSize', Number($event))"
+            >
+              <option v-for="n in pageSizeOptions" :key="n" :value="String(n)">
+                {{ n }} 条
+              </option>
+            </HSelect>
+          </span>
+        </label>
+      </span>
       <div class="flex items-center gap-2">
         <HButton
           variant="ghost"

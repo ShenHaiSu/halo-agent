@@ -1,9 +1,8 @@
-<!-- src/Web.Client/src/components/usage/FilterForm.vue -->
-<!-- P17 用量筛选表单：预设条 + 日期 + Provider/Model + SessionId + 隐私遮蔽开关 + 操作。 -->
+﻿<!-- src/Web.Client/src/components/usage/FilterForm.vue -->
+<!-- P17 用量筛选表单：预设条 + 日期 + Provider/Model + 隐私遮蔽开关 + 操作。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import HButton from '@/components/base/HButton.vue';
-import HInput from '@/components/base/HInput.vue';
 import HSelect from '@/components/base/HSelect.vue';
 import HSwitch from '@/components/base/HSwitch.vue';
 import { resolveProviderDisplay } from './providerMask';
@@ -15,7 +14,6 @@ const props = defineProps<{
   toInput: string;
   providerId: string;
   modelId: string;
-  sessionId: string;
   providerDict: ProviderDict;
   activePreset: UsagePresetKey | null;
   querying: boolean;
@@ -28,7 +26,6 @@ const emit = defineEmits<{
   'update:toInput': [string];
   'update:providerId': [string];
   'update:modelId': [string];
-  'update:sessionId': [string];
   'update:maskOn': [boolean];
   preset: [UsagePresetKey];
   submit: [];
@@ -122,15 +119,6 @@ function onProvider(v: string): void {
             {{ providerLabels[pid] ?? pid }}
           </option>
         </HSelect>
-        <span class="flex items-center gap-1.5">
-          <HSwitch
-            :model-value="maskOn"
-            label="隐私遮蔽"
-            :disabled="disabled"
-            @update:model-value="emit('update:maskOn', $event)"
-          />
-          隐私遮蔽（默认开）
-        </span>
       </label>
       <label class="flex flex-col gap-1 text-xs text-fg-muted">
         模型
@@ -144,18 +132,7 @@ function onProvider(v: string): void {
           <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ m.display }}</option>
         </HSelect>
       </label>
-      <label class="flex flex-col gap-1 text-xs text-fg-muted">
-        会话 ID（精确，可选）
-        <HInput
-          :model-value="sessionId"
-          :disabled="disabled"
-          size="sm"
-          placeholder="按会话 ID 筛查（列表不显示该列）"
-          clearable
-          @update:model-value="emit('update:sessionId', String($event))"
-        />
-      </label>
-      <div class="flex items-end gap-2">
+      <div class="flex flex-wrap items-end gap-2 md:col-span-2">
         <HButton variant="primary" size="sm" :loading="querying" @click="emit('submit')"
           >查询</HButton
         >
@@ -163,6 +140,15 @@ function onProvider(v: string): void {
         <HButton variant="ghost" size="sm" icon="download" @click="emit('export')"
           >导出 CSV</HButton
         >
+        <span class="ml-auto flex items-center gap-1.5 text-xs text-fg-muted">
+          <HSwitch
+            :model-value="maskOn"
+            label="隐私遮蔽"
+            :disabled="disabled"
+            @update:model-value="emit('update:maskOn', $event)"
+          />
+          隐私遮蔽
+        </span>
       </div>
     </div>
   </section>

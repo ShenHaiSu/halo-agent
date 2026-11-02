@@ -57,10 +57,10 @@ const fromInput = ref('');
 const toInput = ref('');
 const providerId = ref('');
 const modelId = ref('');
-const sessionId = ref('');
 const activePreset = ref<UsagePresetKey | null>('last7');
 const page = ref(1);
-const pageSize = 50;
+const pageSize = ref(20);
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 const providerDict = ref<ProviderDict>({});
 // P17-04 隐私遮蔽：默认开，切换只重绘 + 重渲染（不重查）。
 const maskOn = ref(isMaskEnabled());
@@ -94,14 +94,12 @@ function buildParams(withPage: boolean): Record<string, unknown> {
   };
   if (fromMs !== undefined) p.fromMs = fromMs;
   if (toMs !== undefined) p.toMs = toMs;
-  const sid = sessionId.value.trim();
   // 过滤恒用真值：遮蔽只做显示映射，绝不回写请求参数。
   if (providerId.value) p.providerId = providerId.value;
   if (modelId.value) p.modelId = modelId.value;
-  if (sid) p.sessionId = sid;
   if (withPage) {
     p.page = page.value;
-    p.pageSize = pageSize;
+    p.pageSize = pageSize.value;
   }
   return p;
 }
@@ -138,8 +136,32 @@ async function runQuery(): Promise<void> {
     toast.error('汇总加载失败，稍后重试');
   }
   if (q.status === 'fulfilled') {
-    rows.value = q.value.items ?? [];
-    total.value = q.value.total ?? 0;
+    let t = q.value.total ?? 0;
+    let items = q.value.items ?? [];
+    const tp = Math.max(1, Math.ceil(t / pageSize.value));
+    // 当前页越界（如筛选收窄 / 切大 pageSize 后总页数变小）→ 自动回退到最后一页并重取一次
+    if (page.value > tp) {
+      page.value = tp;
+      querying.value = true;
+      try {
+        const q2 = await transport.request<UsageQueryResult>('usage.query', buildParams(true));
+        if (id !== queryId.value) return;
+        t = q2.total ?? 0;
+        items = q2.items ?? [];
+        if (q2.degraded === true) degraded.value = true;
+      } catch {
+        queryFailed.value = true;
+        toast.error('明细加载失败，稍后重试');
+        if (summary.value) redrawCharts();
+        void loadStats();
+        querying.value = false;
+        return;
+      } finally {
+        if (id === queryId.value) querying.value = false;
+      }
+    }
+    rows.value = items;
+    total.value = t;
     queryFailed.value = false;
     if (q.value.degraded === true) degraded.value = true;
   } else {
@@ -164,7 +186,6 @@ async function onPreset(key: UsagePresetKey): Promise<void> {
   const keepDims = key === 'all';
   const prevProvider = providerId.value;
   const prevModel = modelId.value;
-  const prevSession = sessionId.value;
   const r = getPresetRange(key);
   fromInput.value = toInputValue(r.fromMs);
   toInput.value = toEndInputValue(r.toMs);
@@ -172,7 +193,6 @@ async function onPreset(key: UsagePresetKey): Promise<void> {
   if (keepDims) {
     providerId.value = prevProvider;
     modelId.value = prevModel;
-    sessionId.value = prevSession;
   }
   page.value = 1;
   await runQuery();
@@ -183,7 +203,6 @@ async function onReset(): Promise<void> {
   toInput.value = '';
   providerId.value = '';
   modelId.value = '';
-  sessionId.value = '';
   activePreset.value = null;
   page.value = 1;
   await runQuery();
@@ -198,6 +217,16 @@ function onDateEdit(which: 'from' | 'to', v: string): void {
 
 async function onPage(p: number): Promise<void> {
   page.value = p;
+  await runQuery();
+}
+
+async function onPageSize(ps: number): Promise<void> {
+  const next = PAGE_SIZE_OPTIONS.includes(ps) ? ps : 20;
+  if (next === pageSize.value) return;
+  pageSize.value = next;
+  // 用上次 total 预夹当前页，避免切大页长后停在空页；runQuery 内还会按最新 total 二次兜底。
+  const tp = Math.max(1, Math.ceil((total.value ?? 0) / pageSize.value));
+  if (page.value > tp) page.value = tp;
   await runQuery();
 }
 
@@ -457,7 +486,6 @@ onUnmounted(() => {
       :to-input="toInput"
       :provider-id="providerId"
       :model-id="modelId"
-      :session-id="sessionId"
       :provider-dict="providerDict"
       :active-preset="activePreset"
       :querying="querying"
@@ -467,7 +495,6 @@ onUnmounted(() => {
       @update:to-input="onDateEdit('to', $event)"
       @update:provider-id="providerId = $event"
       @update:model-id="modelId = $event"
-      @update:session-id="sessionId = $event"
       @update:mask-on="onMaskToggle"
       @preset="onPreset"
       @submit="runQuery"
@@ -540,10 +567,12 @@ onUnmounted(() => {
         :total="total"
         :page="page"
         :page-size="pageSize"
+        :page-size-options="PAGE_SIZE_OPTIONS"
         :loading="querying"
         :failed="queryFailed"
         :mask-on="maskOn"
         @update:page="onPage"
+        @update:page-size="onPageSize"
       />
     </template>
 
