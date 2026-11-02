@@ -54,9 +54,11 @@ const newProviderMode = ref(false);
 const newProviderId = ref('');
 const fieldErrors = ref<Record<string, string>>({});
 const pendingDeleteProvider = ref<string | null>(null);
-/** 方案A：migrationRequired 下保存要点两次确认覆盖（第二次才带 force=true）。 */
-const confirmOverwrite = ref(false);
-const pendingDeleteModel = ref<{ pid: string; mid: string } | null>(null);
+ /** 两步确认覆盖旧结构/损坏配置：migrationRequired（加载时嗅探）或 config.overwriteRequired（保存被拒回码）进入待确认态，第二次才带 force=true。 */
+ const confirmOverwrite = ref(false);
+ const overwriteRequired = ref(false);
+  const overwriteMsg = ref('');
+ const pendingDeleteModel = ref<{ pid: string; mid: string } | null>(null);
 
 const dirty = computed(() => JSON.stringify(snapshotForDirty()) !== originalJson.value);
 
@@ -158,14 +160,16 @@ async function load(): Promise<void> {
         m.expanded = j === 0;
       });
     });
-    tree.value = t;
-    migrationRequired.value = s.migrationRequired === true;
-    globalMode.value = s.proxy?.mode ?? 'auto';
-    newProviderMode.value = false;
-    newProviderId.value = '';
-    confirmOverwrite.value = false;
-    originalJson.value = JSON.stringify(snapshotForDirty());
-    fieldErrors.value = {};
+     tree.value = t;
+     migrationRequired.value = s.migrationRequired === true;
+     globalMode.value = s.proxy?.mode ?? 'auto';
+     newProviderMode.value = false;
+     newProviderId.value = '';
+     confirmOverwrite.value = false;
+     overwriteRequired.value = false;
+     overwriteMsg.value = '';
+     originalJson.value = JSON.stringify(snapshotForDirty());
+     fieldErrors.value = {};
   } catch (e) {
     loadError.value = (e as Error).message;
   } finally {
@@ -275,74 +279,95 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
       })),
     };
   }
-  return force ? { providers, force: true } : { providers };
-}
-
-/** 两步确认：migrationRequired 时第一次点击仅进入待确认态，第二次才带 force 保存。 */
-function onSaveClick(): void {
-  if (migrationRequired.value && !confirmOverwrite.value) {
-    confirmOverwrite.value = true;
-    toast.warning('旧配置文件已自动备份，确认用当前整树覆盖请再点一次保存');
-    return;
-  }
-  void save(migrationRequired.value && confirmOverwrite.value);
-}
-
-async function save(force = false): Promise<void> {
-  if (saving.value) return;
-  const errs = validateProvidersTree({
-    activeProvider: tree.value.activeProvider,
-    activeModel: tree.value.activeModel,
-    providers: tree.value.providers.map((p) => ({
-      id: p.id,
-      displayName: p.displayName,
-      baseUrl: p.baseUrl,
-      apiKeySet: p.apiKeySet,
-      newKey: p.newKey,
-      clearKey: p.clearKey,
-      headersEnabled: p.headersEnabled,
-      headers: p.headers,
-      useProxy: p.useProxy,
-      models: p.models,
-    })),
-  });
-  const map: Record<string, string> = {};
-  for (const e of errs) map[`${e.provider}/${e.model ?? '-'}.${e.field}`] = e.message;
-  fieldErrors.value = map;
-  if (errs.length > 0) {
-    toast.warning('请先修正表单中的错误');
-    return;
-  }
-  saving.value = true;
-  try {
-    const r = (await transport.request(
-      'settings.saveProviders',
-      toSavePayloadWithForce(force)
-    )) as {
-      ok?: boolean;
-      warnings?: string[];
-    };
-    if (r.ok === false) {
-      toast.error('保存失败（输入已保留）');
-      return;
-    }
-    for (const w of r.warnings ?? []) toast.warning(w);
-    // apiKey 已落盘：清空明文
-    tree.value.providers.forEach((p) => {
-      if (p.newKey) p.apiKeySet = true;
-      p.newKey = '';
-      p.clearKey = false;
-    });
-    originalJson.value = JSON.stringify(snapshotForDirty());
-    migrationRequired.value = false;
-    confirmOverwrite.value = false;
-    toast.success('已保存');
-  } catch (e) {
-    toast.error(`保存失败：${(e as Error).message}（输入已保留）`);
-  } finally {
-    saving.value = false;
-  }
-}
+   return force ? { providers, force: true } : { providers };
+ }
+ /** 两步确认：migrationRequired 或 config.overwriteRequired 时第一次点击仅进入待确认态，第二次才带 force 保存。 */
+ function needConfirm(): boolean {
+   return migrationRequired.value || overwriteRequired.value;
+ }
+ function onSaveClick(): void {
+   if (needConfirm() && !confirmOverwrite.value) {
+     confirmOverwrite.value = true;
+     toast.warning('旧配置文件已自动备份，确认用当前整树覆盖请再点一次保存');
+     return;
+   }
+   void save(needConfirm() && confirmOverwrite.value);
+ }
+ 
+ function rpcCode(e: unknown): string {
+   const o = (e ?? {}) as Record<string, unknown>;
+   if (typeof o['code'] === 'string') return o['code'] as string;
+   const d = o['data'] as Record<string, unknown> | undefined;
+   if (d && typeof d['code'] === 'string') return d['code'] as string;
+   const err = o['error'] as Record<string, unknown> | undefined;
+   if (err && typeof err['code'] === 'string') return err['code'] as string;
+   return '';
+ }
+ 
+ async function save(force = false): Promise<void> {
+   if (saving.value) return;
+   const errs = validateProvidersTree({
+     activeProvider: tree.value.activeProvider,
+     activeModel: tree.value.activeModel,
+     providers: tree.value.providers.map((p) => ({
+       id: p.id,
+       displayName: p.displayName,
+       baseUrl: p.baseUrl,
+       apiKeySet: p.apiKeySet,
+       newKey: p.newKey,
+       clearKey: p.clearKey,
+       headersEnabled: p.headersEnabled,
+       headers: p.headers,
+       useProxy: p.useProxy,
+       models: p.models,
+     })),
+   });
+   const map: Record<string, string> = {};
+   for (const e of errs) map[`${e.provider}/${e.model ?? '-'}.${e.field}`] = e.message;
+   fieldErrors.value = map;
+   if (errs.length > 0) {
+     toast.warning('请先修正表单中的错误');
+     return;
+   }
+   saving.value = true;
+   try {
+     const r = (await transport.request(
+       'settings.saveProviders',
+       toSavePayloadWithForce(force)
+     )) as {
+       ok?: boolean;
+       warnings?: string[];
+     };
+     if (r.ok === false) {
+       toast.error('保存失败（输入已保留）');
+       return;
+     }
+     for (const w of r.warnings ?? []) toast.warning(w);
+     // apiKey 已落盘：清空明文
+     tree.value.providers.forEach((p) => {
+       if (p.newKey) p.apiKeySet = true;
+       p.newKey = '';
+       p.clearKey = false;
+     });
+     originalJson.value = JSON.stringify(snapshotForDirty());
+     migrationRequired.value = false;
+     overwriteRequired.value = false;
+     overwriteMsg.value = '';
+     confirmOverwrite.value = false;
+     toast.success('已保存');
+   } catch (e) {
+     if (rpcCode(e) === 'config.overwriteRequired') {
+       overwriteRequired.value = true;
+       overwriteMsg.value = (e as Error).message;
+       confirmOverwrite.value = false;
+       toast.warning('配置文件为旧结构或已损坏，原文件已自动备份，确认用当前整树覆盖请再点一次保存（输入已保留）');
+       return;
+     }
+     toast.error(`保存失败：${(e as Error).message}（输入已保留）`);
+   } finally {
+     saving.value = false;
+   }
+ }
 
 function isDirty(): boolean {
   return dirty.value;
@@ -734,21 +759,22 @@ onMounted(() => void load());
           >+ 新建 Provider</HButton
         >
       </div>
-      <div class="page-actions">
-        <span class="hint">全局代理：{{ globalMode }}</span>
-        <HButton
-          :variant="migrationRequired && confirmOverwrite ? 'danger' : 'primary'"
-          :disabled="!dirty"
-          :loading="saving"
-          @click="onSaveClick"
-          >{{
-            migrationRequired && confirmOverwrite ? '确认覆盖旧配置并保存' : '保存 providers'
-          }}</HButton
-        >
-        <HButton variant="secondary" :disabled="!dirty" @click="resetToSaved">放弃</HButton>
-        <span v-if="dirty" class="dirty-hint" role="status">有未保存的改动</span>
-        <span v-if="migrationRequired" class="hint">旧配置已备份，保存需点两次确认覆盖</span>
-      </div>
+       <div class="page-actions">
+         <span class="hint">全局代理：{{ globalMode }}</span>
+         <HButton
+           :variant="needConfirm() && confirmOverwrite ? 'danger' : 'primary'"
+           :disabled="!dirty"
+           :loading="saving"
+           @click="onSaveClick"
+           >{{
+             needConfirm() && confirmOverwrite ? '确认覆盖旧配置并保存' : '保存 providers'
+           }}</HButton
+         >
+         <HButton variant="secondary" :disabled="!dirty" @click="resetToSaved">放弃</HButton>
+         <span v-if="dirty" class="dirty-hint" role="status">有未保存的改动</span>
+         <span v-if="migrationRequired" class="hint">旧配置已备份，保存需点两次确认覆盖</span>
+         <span v-else-if="overwriteRequired" class="hint" role="alert">检测到旧结构/损坏配置（{{ overwriteMsg }}），已备份，确认覆盖请再点一次保存</span>
+       </div>
     </template>
   </div>
   <HDialog

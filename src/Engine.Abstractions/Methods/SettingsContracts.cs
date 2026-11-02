@@ -59,7 +59,7 @@ public sealed record ProxySettings
 public sealed record SettingsSaveProvidersParams
 {
     public IReadOnlyDictionary<string, ProviderSaveEntry>? Providers { get; init; }
-    /// <summary>二次确认覆盖旧结构/损坏配置。前端仅在 migrationRequired 两步确认后传 true；默认 false 仍拒绝覆盖。</summary>
+     /// <summary>二次确认覆盖旧结构/损坏配置。前端仅在 migrationRequired 或 config.overwriteRequired 两步确认后传 true；默认 false 仍拒绝覆盖。</summary>
     public bool Force { get; init; }
 }
 

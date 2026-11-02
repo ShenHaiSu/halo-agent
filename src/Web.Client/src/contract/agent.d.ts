@@ -954,6 +954,7 @@ export const HaloErrorCodes = {
   'llm.timeout': '模型超时',
   'tool.failed': '工具执行失败',
   'ask.stale': '回答了一个已过期的询问',
+  'config.overwriteRequired': '配置文件为旧结构或已损坏，需二次确认强制覆盖',
   'internal': '引擎内部错误',
   'notSupported': '该功能未实现',
 } as const

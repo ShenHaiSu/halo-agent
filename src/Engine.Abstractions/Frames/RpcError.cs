@@ -32,17 +32,19 @@ public static class RpcError
     public const string ToolFailed = "tool.failed";
     /// <summary>回答了一个已过期的询问。</summary>
     public const string AskStale = "ask.stale";
-    /// <summary>引擎内部错误。</summary>
-    public const string Internal = "internal";
-    /// <summary>该功能未实现。</summary>
-    public const string NotSupported = "notSupported";
+     /// <summary>配置文件为旧结构或已损坏，需二次确认强制覆盖。</summary>
+     public const string ConfigOverwriteRequired = "config.overwriteRequired";
+     /// <summary>引擎内部错误。</summary>
+     public const string Internal = "internal";
+     /// <summary>该功能未实现。</summary>
+     public const string NotSupported = "notSupported";
 
     /// <summary>全部错误码（供 system.protocol 报告与测试校验）。</summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
-        MethodNotFound, ParamsInvalid, ProtocolVersion, StateBusy, StateNotConfigured,
-        SessionNotFound, AssetNotFound, FsNotFound, FsEscape, LlmError, LlmTimeout,
-        ToolFailed, AskStale, Internal, NotSupported,
+         MethodNotFound, ParamsInvalid, ProtocolVersion, StateBusy, StateNotConfigured,
+         SessionNotFound, AssetNotFound, FsNotFound, FsEscape, LlmError, LlmTimeout,
+         ToolFailed, AskStale, ConfigOverwriteRequired, Internal, NotSupported,
     };
 }
 

@@ -80,17 +80,18 @@ public sealed partial class RealMethods
         if (p is null || !p.Value.TryGetProperty("providers", out var pv) || pv.ValueKind != JsonValueKind.Object)
             throw RpcException.ParamsInvalid("providers（对象映射，键为 provider id）必填");
 
-        // 方案A：migrationRequired 两步确认后前端传 force=true，才允许覆盖旧结构/损坏配置。
-        bool force = p.Value.TryGetProperty("force", out var forceEl) && forceEl.ValueKind == JsonValueKind.True;
-
-        var warnings = new List<string>();
-        ConfigModel cfg;
-        try { cfg = ConfigStore.LoadForWrite(force); }
-        catch (InvalidOperationException ex)
-        {
-            throw new RpcException(RpcError.Internal,
-                "配置文件损坏或为旧结构，已拒绝保存以免覆盖：" + ex.Message);
-        }
+         // 覆盖语义：migrationRequired 或 config.overwriteRequired 两步确认后前端传 force=true，才允许覆盖旧结构/损坏配置。
+         bool force = p.Value.TryGetProperty("force", out var forceEl) && forceEl.ValueKind == JsonValueKind.True;
+ 
+         var warnings = new List<string>();
+         ConfigModel cfg;
+         try { cfg = ConfigStore.LoadForWrite(force); }
+         catch (InvalidOperationException ex)
+         {
+             throw new RpcException(RpcError.ConfigOverwriteRequired,
+                 "配置文件为旧结构或已损坏，已拒绝保存以免覆盖：" + ex.Message,
+                 "原文件已自动备份，确认用当前整树覆盖请再点一次保存");
+         }
         if (force)
             warnings.Add("已按二次确认覆盖旧结构或损坏的配置（原文件已自动备份为 .bak.*）");
 
