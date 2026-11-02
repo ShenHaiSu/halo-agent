@@ -296,7 +296,7 @@ function mockSettings(): unknown {
    for (const r of rows) {
      const k = `${r.providerId} ${r.modelId}`;
      const e = byModelMap.get(k) ?? { providerId: r.providerId, modelId: r.modelId, input: 0, cached: 0, output: 0, requests: 0 };
-     e.input += r.prompt; e.cached += r.cached; e.output += r.output; e.requests += 1;
+     e.input += r.prompt; e.cached += r.cached; e.output += r.output; e.requests += 1; // P21-F3：requests 按行累加，一行=一回合，非网络请求次数
      byModelMap.set(k, e);
    }
    const byModel = [...byModelMap.values()].map((m) => ({
@@ -304,7 +304,8 @@ function mockSettings(): unknown {
      input: m.input, cached: m.cached, output: m.output, requests: m.requests,
      hitRate: m.input > 0 ? m.cached / m.input : 0,
    }));
-   return { input, cached, output, total: input + output, requests: rows.length, hitRate: input > 0 ? cached / input : 0, byDay, byModel };
+   return { input, cached, output, total: input + output, requests: rows.length, // P21-F3：一行=一回合，非网络请求次数
+    hitRate: input > 0 ? cached / input : 0, byDay, byModel };
  }
 
 export const BEHAVIORS: Record<string, MockBehavior> = {

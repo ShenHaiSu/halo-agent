@@ -24,8 +24,8 @@ export const missOf = (input: number, cached: number): number => Math.max(0, inp
 
 /**
  * Token 左轴五等分刻度：max = interval×5，保证 5 段等分。
- * nice 取整 [1,2,5,10]×10^n（刻意不用 2.5，避免 interval 自带 .5 小数与中文单位的 1 位小数叠加歧义）。
- * interval 恒为整数（<1 钳到 1），小数只可能来自 formatZhCount 的单位换算（千/万/亿），tick 两两可区分。
+ * nice 取整 [1,2,5,10]×10^n（刻意不用 2.5，避免 interval 自带 .5 小数与中文单位的两位小数叠加歧义）。
+ * interval 恒为整数（<1 钳到 1），小数只可能来自 formatZhCount 的单位换算（万/亿/兆）两位小数，tick 两两可区分。
  */
 export function niceTokenScale(dataMax: number): { max: number; interval: number } {
   if (!Number.isFinite(dataMax) || dataMax <= 0) return { max: 5, interval: 1 };
@@ -174,7 +174,7 @@ export function renderModelPie(
           return (
             `${name}<br/>total: ${formatZhCount(total)}` +
             `<br/>input: ${formatZhCount(missOf(m.input, m.cached))} · cache: ${formatZhCount(m.cached)} · output: ${formatZhCount(m.output)}` +
-            `<br/>CacheRate: ${formatHitRate(m.input, m.hitRate)} · requests: ${formatNumber(m.requests)}`
+            `<br/>CacheRate: ${formatHitRate(m.input, m.hitRate)} · 回合数: ${formatNumber(m.requests)}`
           );
         },
       },

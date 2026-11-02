@@ -56,33 +56,29 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat('zh-CN').format(n);
 }
 
-/** P17-03 中文数量单位：千 / 万 / 亿 / 兆（1 兆 = 10^12，再往上不做）。
+/** P21 用量单位口径：<1万原始值；万（1万–1亿）；亿（1亿–1兆）；兆（≥1兆）。统一精确两位小数。
  *
- * 档位（舍入溢出进位）：n<1000 → formatNumber 精确；1000≤n<1万 → 千；
- * 1万≤n<1亿 → 万；1亿≤n<1e12 → 亿；≥1e12 → 兆。保留 1 位去尾零，
- * 档内舍入后触及上档（千≥10 / 万≥1000 / 亿≥10000）即升档重算。
+ * 档位：v<10000 → formatNumber 精确原始值（含千分位）；10000≤v<1e8 → 万；
+ * 1e8≤v<1e12 → 亿；≥1e12 → 兆。统一精确两位小数（不去零）。
+ * 档内舍入溢出才进位（万档 r≥10000 → 亿；亿档 r≥10000 → 兆），避免 10000.00万。
  * 轴 tick 可为浮点：先 Math.round 再进档。非有限数 → —；负数 → - + 绝对值。
  */
 export function formatZhCount(n: number): string {
   if (!Number.isFinite(n)) return '—';
   if (n < 0) return `-${formatZhCount(-n)}`;
   const v = Math.round(n);
-  if (v < 1000) return formatNumber(v);
-  const units: Array<{ limit: number; div: number; suffix: string; spill: number }> = [
-    { limit: 1e4, div: 1e3, suffix: '千', spill: 10 },
-    { limit: 1e8, div: 1e4, suffix: '万', spill: 1000 },
-    { limit: 1e12, div: 1e8, suffix: '亿', spill: 10000 },
-    { limit: Infinity, div: 1e12, suffix: '兆', spill: Infinity },
-  ];
-  let idx = units.findIndex((u) => v < u.limit);
-  if (idx < 0) idx = units.length - 1;
-  while (idx < units.length) {
-    const u = units[idx]!;
-    const r = Math.round((v / u.div) * 10) / 10;
-    if (r < u.spill) return `${Number.isInteger(r) ? String(r) : r.toFixed(1)}${u.suffix}`;
-    idx++;
+  if (v < 10000) return formatNumber(v);
+  const two = (x: number): string => (Math.round(x * 100) / 100).toFixed(2);
+  if (v < 1e8) {
+    const r = Math.round((v / 1e4) * 100) / 100;
+    if (r < 10000) return `${two(v / 1e4)}万`;
+    // 舍入溢出才进位：99999999 → 1.00亿
   }
-  return formatNumber(v);
+  if (v < 1e12) {
+    const r = Math.round((v / 1e8) * 100) / 100;
+    if (r < 10000) return `${two(v / 1e8)}亿`;
+  }
+  return `${two(v / 1e12)}兆`;
 }
 
 /** 1234 → 1.2k / 1234567 → 1.2M */

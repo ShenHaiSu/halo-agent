@@ -33,6 +33,7 @@ export interface UsageByModel {
   input: number;
   cached: number;
   output: number;
+  /** 一行=一回合，非网络请求次数 */
   requests: number;
   hitRate: number;
 }
@@ -42,6 +43,7 @@ export interface UsageSummary {
   cached: number;
   output: number;
   total: number;
+  /** 一行=一回合，非网络请求次数 */
   requests: number;
   hitRate: number;
   byDay: UsageByDay[];

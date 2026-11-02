@@ -1,5 +1,9 @@
 # 契约变更记录
 
+## P21-F3 口径说明（非变更，不升版本）
+
+- `usage.summary.requests` 实为回合数（turn 粒度，一行 `usage_events` = 一个 `turn_id`，`INSERT OR IGNORE` 去重），非 LLM 网络请求次数。字段名 `requests`、DB schema、统计逻辑均不动，前端展示改为“回合数”。
+
 > **规则**：已冻结的字段**不允许**改语义或类型。任何破坏性变更需升 contractVersion 并写迁移说明。
 > 只允许新增**可选**字段（不写 = 使用默认值）。
 

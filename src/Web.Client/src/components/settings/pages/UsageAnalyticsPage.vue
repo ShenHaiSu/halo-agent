@@ -80,6 +80,7 @@ const stats = ref<{ sizeBytes: number; rowCount: number } | null>(null);
 const showClearDialog = ref(false);
 const showFullClear = ref(false);
 const clearConfirmText = ref('');
+// 存回合数阈值，key 名保留兼容
 const monthlyLimitInput = ref<string>(localStorage.getItem('halo.usage.monthlyReqLimit') ?? '');
 const hitTipMinReq = ref(Number(localStorage.getItem('halo.usage.hitTip.minReq') ?? 50));
 const hitTipMinRate = ref(Number(localStorage.getItem('halo.usage.hitTip.minRate') ?? 0.2));
@@ -296,7 +297,7 @@ function checkMonthlyQuota(): void {
         warnedThisSession.value = true;
         sessionStorage.setItem('halo.usage.monthWarned', '1');
         toast.warning(
-          `本月请求数已达 ${formatZhCount(ms.requests)} 次，超过阈值 ${formatZhCount(limit)} 次`
+          `本月回合数已达 ${formatZhCount(ms.requests)} 次，超过阈值 ${formatZhCount(limit)} 次`
         );
       }
     })
@@ -596,7 +597,7 @@ onUnmounted(() => {
         </div>
         <div class="rounded-md border border-border-subtle bg-bg-elevated p-2.5">
           <div class="text-xs font-medium text-fg">配额告警</div>
-          <div class="mb-2 text-[11px] text-fg-muted">本月请求超阈值时提示一次/会话</div>
+          <div class="mb-2 text-[11px] text-fg-muted">本月回合超阈值时提示一次/会话</div>
           <div class="flex flex-wrap items-center gap-2">
             <label class="flex items-center gap-1 text-xs text-fg-muted">
               阈值
