@@ -113,25 +113,29 @@ function focusTrigger(): void {
 
  async function onSelect(providerId: string, modelId: string): Promise<void> {
    if (switching.value) return;
-   open.value = false;
-   focusTrigger();
-   if (providerId === session.provider && modelId === session.model) return;
+   // 同名点击直接关窗返回（保持现状，避免误 toast）
+   if (providerId === session.provider && modelId === session.model) { open.value = false; focusTrigger(); return; }
    switching.value = true;
    try {
      await transport.request('settings.setActive', { providerId, modelId });
      // P12-02：setActive 无事件推送（后端 PublishSnapshotAsync 为空实现），成功后主动拉快照补 session，
-     // 再刷新全树以同步 tree.active 高亮（双数据源：tree 来自 settings.get，高亮用 session）。
-     try {
-       const snap = await transport.request<{ agent?: Record<string, unknown>; session?: Record<string, unknown> }>('state.snapshot', null);
-       if (snap?.agent && typeof snap.agent === 'object') session.applySnapshotAgent(snap.agent);
-       if (snap?.session && typeof snap.session === 'object') session.applyInfo(snap.session);
-     } catch {
-       /* 快照补齐失败不影响 toast，下次 loadSnapshot 会补 */
-     }
+     // 再刷新全树以同步 tree.active 高亮（双数据源：tree 来自 settings.get，高亮用 session）。快照拉取不再吞错。
+     const snap = await transport.request<{ agent?: Record<string, unknown>; session?: Record<string, unknown> }>('state.snapshot', null);
+     if (snap?.agent && typeof snap.agent === 'object') session.applySnapshotAgent(snap.agent);
+     if (snap?.session && typeof snap.session === 'object') session.applyInfo(snap.session);
      await loadTree();
-     toast.success(`已切换：${providerId}/${modelId}`);
+     // 以快照为准判定成功（修复“假成功切换”：后端回 ok 但内存未置位时不再误 toast.success）
+     if (session.configured && session.provider === providerId && session.model === modelId) {
+       open.value = false; focusTrigger();
+       toast.success(`已切换：${providerId}/${modelId}`);
+     } else {
+       // 后端回 ok 但快照未生效：视为失败，保持面板打开 + 错误 toast
+       open.value = true;
+       toast.error(`切换未生效：引擎快照仍为未配置（${session.provider || '空'}/${session.model || '空'}），请重试或去模型设置页检查`);
+     }
    } catch (e) {
-     // 失败本地回滚：不改本地高亮（高亮源自 snapshot，未动），仅 toast。
+     // 失败保持面板可见，呼应“浮窗消失但没选中”的投诉
+     open.value = true;
      toast.error(`切换失败：${(e as Error).message}`);
    } finally {
      switching.value = false;

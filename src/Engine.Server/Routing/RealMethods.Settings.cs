@@ -339,7 +339,8 @@ public sealed partial class RealMethods
          {
              throw new RpcException(RpcError.NotSupported, ex.Message);
          }
-         _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}");
+         // notice 快照复核：仅快照确认已配置且指向本次目标时才发“已切换”提示，避免“假成功”误导。
+         try { var _snap = _session.BuildSnapshot().Agent; if (_snap.Configured && string.Equals(_snap.Provider, providerId, StringComparison.Ordinal) && string.Equals(_snap.Model, modelId, StringComparison.Ordinal)) _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}"); } catch { _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}"); }
          return Task.FromResult<object?>(new SettingsSetActiveResult { Ok = true });
      }
      // P12-02：此前为空实现（BuildSnapshot 后直接丢弃）。RealMethods 无 EventBus 成员，

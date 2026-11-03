@@ -239,6 +239,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeProxySource = resolved.ProxySource ?? "";
              _activeProxyWarning = resolved.ProxyWarning ?? "";
              _activeBaseUrl = resolved.BaseUrl ?? "";
+             _activeApiKeySet = !string.IsNullOrEmpty(resolved.ApiKey);
+             _activeConfigured = resolved.Configured;
              _maxTurns = resolved.MaxTurns;
              _retry = resolved.Retry;
              _persona = resolved.Persona ?? "";
