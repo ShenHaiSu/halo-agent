@@ -1,6 +1,17 @@
-# 契约变更记录
+ # 契约变更记录
 
-## P21-F3 口径说明（非变更，不升版本）
+ ## [4] — P24 会话 LLM 调用次数持久化（非破坏性，只做加法，不升版本）
+
+ - `usage.query items[] += llmCalls?`、`usage.summary result += llmCalls?`、`UsageByModel += llmCalls?`（老引擎/旧行缺字段按 0；`requests`=turn 行数口径不动，P21-F3 冻结保持）。
+ - DB：`usage_events += llm_calls INTEGER NOT NULL DEFAULT 0`（老库 `EnsureCreated` 内 `PRAGMA table_info` 检查后 `ALTER TABLE ADD COLUMN` 迁移）；`usage.export` CSV 新增“LLM调用”列（合计之后、命中率之前）。
+ - `KnownMethods` 无需新增；已跑 `node scripts/gen-contract-types.mjs` 重生成 `agent.d.ts`。
+
+ ## [4] — P23 Token 用量改造（非破坏性，只做加法，不升版本）
+
+ - `StateSnapshot.usage += lastCachedTokens?/estimatedInitialTokens?/sessionLlmCalls?`（`inputTotal/outputTotal/lastPromptTokens` 语义不动；`sessionLlmCalls` 缺字段按 0，老前端忽略）。
+ - `events.usage payload += cached?/llmCalls?`（`prompt/completion/dropped` 不动；缺字段按 0）。
+ - 无新方法（复用 `state.snapshot/usage.summary`），`KnownMethods` 无需新增；已跑 `node scripts/gen-contract-types.mjs` 重生成 `agent.d.ts`。
+ ## P21-F3 口径说明（非变更，不升版本）
 
 - `usage.summary.requests` 实为回合数（turn 粒度，一行 `usage_events` = 一个 `turn_id`，`INSERT OR IGNORE` 去重），非 LLM 网络请求次数。字段名 `requests`、DB schema、统计逻辑均不动，前端展示改为“回合数”。
 

@@ -35,18 +35,22 @@ public sealed class UsageByModel
     public long Output { get; set; }
     public long Requests { get; set; }
     public double HitRate { get; set; }
+    /// <summary>P24：按 (provider,model) 双键聚合的 LLM 调用次数。</summary>
+    public long LlmCalls { get; set; }
 }
 
-/// <summary>汇总结果。</summary>
-public sealed class UsageSummary
-{
-    public long Input { get; set; }
-    public long Cached { get; set; }
-    public long Output { get; set; }
-    public long Total { get; set; }
-    public long Requests { get; set; }
-    public double HitRate { get; set; }
-    public List<UsageByDay> ByDay { get; set; } = new();
-    public List<UsageByModel> ByModel { get; set; } = new();
-    public bool Degraded { get; set; }
-}
+ /// <summary>汇总结果。</summary>
+ public sealed class UsageSummary
+ {
+     public long Input { get; set; }
+     public long Cached { get; set; }
+     public long Output { get; set; }
+     public long Total { get; set; }
+     public long Requests { get; set; }
+     public double HitRate { get; set; }
+     /// <summary>P24：本筛选范围内落盘 turn 的 LLM 调用次数总和（零用量/中断 turn 不计入）。</summary>
+     public long LlmCalls { get; set; }
+     public List<UsageByDay> ByDay { get; set; } = new();
+     public List<UsageByModel> ByModel { get; set; } = new();
+     public bool Degraded { get; set; }
+ }

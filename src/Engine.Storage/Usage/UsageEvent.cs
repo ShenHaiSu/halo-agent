@@ -15,6 +15,8 @@ public sealed class UsageEvent
     public long CachedTokens { get; set; }
     public long CompletionTokens { get; set; }
     public long TotalTokens { get; set; }
+    /// <summary>P24：本 turn 内 LLM 成功调用次数（多 round/重试累加；零用量 turn 不落行故不持久化）。</summary>
+    public long LlmCalls { get; set; }
     public int Truncated { get; set; }
     public long RecordedMs { get; set; }
 }

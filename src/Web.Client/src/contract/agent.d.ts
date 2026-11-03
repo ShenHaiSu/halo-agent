@@ -160,6 +160,9 @@ export interface StateSnapshot {
   inputTotal?: number
   outputTotal?: number
   lastPromptTokens?: number | null
+  lastCachedTokens?: number | null
+  estimatedInitialTokens?: number | null
+  sessionLlmCalls?: number
 }
   queue: string[]
   pendingAsk?: PendingAsk | null
@@ -221,6 +224,7 @@ export interface UsageRow {
   output: number
   total: number
   hitRate: number
+  llmCalls?: number
   truncated?: number
 }
 
@@ -242,6 +246,7 @@ export interface UsageByModel {
   cached: number
   output: number
   requests: number
+  llmCalls?: number
   hitRate: number
 }
 
@@ -781,6 +786,7 @@ export interface HaloMethods {
   output: number
   total: number
   requests: number
+  llmCalls?: number
   hitRate: number
   byDay: UsageByDay[]
   byModel: UsageByModel[]
@@ -905,6 +911,8 @@ export interface HaloEventPayloads {
   'usage': {
   prompt?: number
   completion?: number
+  cached?: number
+  llmCalls?: number
   dropped?: boolean
 }
   /** notice */

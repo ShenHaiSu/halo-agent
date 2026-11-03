@@ -18,6 +18,13 @@ export const useSessionStore = defineStore('session', () => {
   const maxTurns = ref<number>(200);
   const retry = ref<number>(0);
   const usage = ref({ input: 0, output: 0 });
+  // P23 水位线：最近一次 prompt/cached（实测态）+ 系统提示词估算（空会话）+ 本会话 LLM 调用计数（内存瞬态）。
+  const lastPromptTokens = ref<number | null>(null);
+  const lastCachedTokens = ref<number | null>(null);
+  const estimatedInitialTokens = ref<number | null>(null);
+  const llmCalls = ref<number>(0);
+  // P23 冲突冻结：快照仅 session.id 切换时全量采纳；同会话快照晚到只填空（事件总值覆盖优先）。
+  const waterlineSession = ref<string>('');
   const windowMaximized = ref(false);
   const configured = ref(false);
   const provider = ref('');
@@ -79,8 +86,67 @@ export const useSessionStore = defineStore('session', () => {
     if (typeof p.proxySource === 'string') proxySource.value = p.proxySource;
     if (typeof p.proxyMaskedUrl === 'string' || p.proxyMaskedUrl === null) proxyMaskedUrl.value = p.proxyMaskedUrl as string | null;
     if (typeof p.configured === 'boolean') configured.value = p.configured;
-    const u = p.usage as { input?: number; output?: number } | undefined;
-    if (u) usage.value = { input: u.input ?? 0, output: u.output ?? 0 };
+    const u = p.usage as {
+      input?: number; output?: number;
+      inputTotal?: number; outputTotal?: number;
+      lastPromptTokens?: number | null; lastCachedTokens?: number | null;
+      estimatedInitialTokens?: number | null; sessionLlmCalls?: number;
+    } | undefined;
+    if (u) {
+      if (typeof u.input === 'number' || typeof u.output === 'number')
+        usage.value = { input: u.input ?? 0, output: u.output ?? 0 };
+      else if (typeof u.inputTotal === 'number' || typeof u.outputTotal === 'number')
+        usage.value = { input: u.inputTotal ?? 0, output: u.outputTotal ?? 0 };
+      applySnapshotWaterline(u, null);
+    }
+  }
+
+  /**
+   * P23：水位线快照采纳（冲突冻结）。
+   * - sid 与上次全量采纳不同 → 全量覆盖（含 llmCalls 缺字段按 0）。
+   * - 同会话晚到快照 → 只填空（null→值），llmCalls 仅在当前为 0 时采纳；事件已推进的值永不回退。
+   * - sid 为 null（调用方未提供会话上下文）→ 按同会话填空处理。
+   */
+  function applySnapshotWaterline(
+    u: {
+      lastPromptTokens?: number | null; lastCachedTokens?: number | null;
+      estimatedInitialTokens?: number | null; sessionLlmCalls?: number;
+    },
+    sid: string | null,
+  ): void {
+    const switched = sid !== null && sid !== waterlineSession.value;
+    if (switched) {
+      lastPromptTokens.value = typeof u.lastPromptTokens === 'number' ? u.lastPromptTokens : null;
+      lastCachedTokens.value = typeof u.lastCachedTokens === 'number' ? u.lastCachedTokens : null;
+      estimatedInitialTokens.value = typeof u.estimatedInitialTokens === 'number' ? u.estimatedInitialTokens : null;
+      llmCalls.value = typeof u.sessionLlmCalls === 'number' ? u.sessionLlmCalls : 0;
+      waterlineSession.value = sid as string;
+      return;
+    }
+    if (lastPromptTokens.value === null && typeof u.lastPromptTokens === 'number')
+      lastPromptTokens.value = u.lastPromptTokens;
+    if (lastCachedTokens.value === null && typeof u.lastCachedTokens === 'number')
+      lastCachedTokens.value = u.lastCachedTokens;
+    if (estimatedInitialTokens.value === null && typeof u.estimatedInitialTokens === 'number')
+      estimatedInitialTokens.value = u.estimatedInitialTokens;
+    if (llmCalls.value === 0 && typeof u.sessionLlmCalls === 'number' && u.sessionLlmCalls > 0)
+      llmCalls.value = u.sessionLlmCalls;
+  }
+
+  /** P23：切会话入口先清零（估算态），再由快照覆盖；同水位会话标记一起重置。 */
+  function resetWaterline(): void {
+    lastPromptTokens.value = null;
+    lastCachedTokens.value = null;
+    estimatedInitialTokens.value = null;
+    llmCalls.value = 0;
+    waterlineSession.value = '';
+  }
+
+  /** P23：usage 事件总值覆盖（优先于任何同会话快照）。 */
+  function applyUsageEvent(p: { prompt?: unknown; cached?: unknown; llmCalls?: unknown }): void {
+    if (typeof p.prompt === 'number') lastPromptTokens.value = p.prompt;
+    if (typeof p.cached === 'number') lastCachedTokens.value = p.cached;
+    if (typeof p.llmCalls === 'number') llmCalls.value = p.llmCalls;
   }
 
   function applySnapshotAgent(a: Record<string, unknown>): void {
@@ -171,30 +237,37 @@ export const useSessionStore = defineStore('session', () => {
     persona,
     maxTurns,
     retry,
-    usage,
-    windowMaximized,
-    isYolo,
-    modeLabel,
-    configured,
-    provider,
-    providerDisplay,
-    model,
-    modelDisplay,
-    protocol,
-    baseUrl,
-    contextWindow,
-    maxTokens,
-    acceptsImages,
-    includeReasoning,
-    proxyInUse,
-    proxyKind,
-    proxySource,
-    proxyMaskedUrl,
+     usage,
+     windowMaximized,
+     isYolo,
+     modeLabel,
+     configured,
+     provider,
+     providerDisplay,
+     model,
+     modelDisplay,
+     protocol,
+     baseUrl,
+     contextWindow,
+     maxTokens,
+     acceptsImages,
+     includeReasoning,
+     proxyInUse,
+     proxyKind,
+     proxySource,
+     proxyMaskedUrl,
      compactionSummary,
      compactionRemoved,
      compactionKept,
-    applyInfo,
-    applySnapshotAgent,
+     lastPromptTokens,
+     lastCachedTokens,
+     estimatedInitialTokens,
+     llmCalls,
+     applyInfo,
+     applySnapshotAgent,
+     applySnapshotWaterline,
+     applyUsageEvent,
+     resetWaterline,
     addUsage: (input: number, output: number): void => {
       usage.value.input += input;
       usage.value.output += output;

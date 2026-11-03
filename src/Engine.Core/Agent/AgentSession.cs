@@ -103,9 +103,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private int _lastCompactAfter;
      private long _lastCompactTsMs;
 
-    private long _usageIn;
-    private long _usageOut;
-    private long? _lastPromptTokens;
+     private long _usageIn;
+     private long _usageOut;
+     private long? _lastPromptTokens;
+     /// <summary>P23：最近一次 cached（多 round 取末轮覆盖，与 LastPrompt 同步；注释冻结，禁止改成累加）。</summary>
+     private long? _lastCachedTokens;
+     /// <summary>P23：系统提示词估算占用（空会话水位分子；收到首次 usage 后不再使用直到重置）。</summary>
+     private long? _estimatedInitialTokens;
+     /// <summary>P23：本会话 LLM 成功调用次数（内存瞬态，不落盘）。</summary>
+     private long _sessionLlmCalls;
     private int _roundUsed;
     private int _roundLimit;
      private string? _lastResponseId;
@@ -118,6 +124,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private long _turnCached;
      private long _turnCompletion;
      private bool _turnHasUsage;
+     /// <summary>P24：本 turn 内 LLM 成功调用次数（与 _sessionLlmCalls 同处递增；零用量 turn 不落行）。</summary>
+     private long _turnLlmCalls;
      private long _lastTsMs;
      private const int RepeatWarn = 3;
      private const int RepeatAbort = 6;
@@ -604,8 +612,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var repeatCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         int toolCallCount = 0;
-         // P16：turn 级用量累积（同 turn 多 round 只记一次，以最终累积为准）
-         _turnPrompt = 0; _turnCached = 0; _turnCompletion = 0; _turnHasUsage = false;
+          // P16：turn 级用量累积（同 turn 多 round 只记一次，以最终累积为准）
+          _turnPrompt = 0; _turnCached = 0; _turnCompletion = 0; _turnHasUsage = false; _turnLlmCalls = 0;
 
         while (true)
         {
@@ -682,26 +690,31 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             lock (_lock) isResponses = string.Equals(_activeProtocol, "responses", StringComparison.OrdinalIgnoreCase);
             var reply = isResponses ? await ResponsesWithRetryAsync(tools, ct, used).ConfigureAwait(false) : await ChatWithRetryAsync(tools, ct, used).ConfigureAwait(false);
 
-            // ===== 累积用量 =====
-            if (!reply.Usage.IsEmpty)
-            {
-                _usageIn += reply.Usage.PromptTokens;
-                _usageOut += reply.Usage.CompletionTokens;
-                _lastPromptTokens = reply.Usage.PromptTokens;
-                 // P16：turn 级累积（多 round 求和，FinishAsync 时一次落盘）
-                 _turnPrompt += reply.Usage.PromptTokens;
-                 _turnCached += reply.Usage.CachedTokens;
-                 _turnCompletion += reply.Usage.CompletionTokens;
-                 _turnHasUsage = true;
-
-                await _bus.PublishStateAsync(EventKinds.Usage,
-                    new UsagePayload
-                    {
-                        Prompt = reply.Usage.PromptTokens,
-                        Completion = reply.Usage.CompletionTokens,
-                        Dropped = _bus.ConsumeDroppedCount() > 0 ? true : null,
-                    }, ct).ConfigureAwait(false);
-            }
+             // ===== 累积用量 =====
+             if (!reply.Usage.IsEmpty)
+             {
+                 _usageIn += reply.Usage.PromptTokens;
+                 _usageOut += reply.Usage.CompletionTokens;
+                 // P23 冻结：多 round 取末轮 prompt 覆盖（末轮 prompt 已含全量历史，最接近真实水位）；禁止改成累加/首轮。
+                 // _turnPrompt/_turnCached 仍为 turn 内求和供落盘；事件 Prompt 为单轮值。求和 vs 末轮覆盖关系由单测锁定。
+                 lock (_lock) { _lastPromptTokens = reply.Usage.PromptTokens; _lastCachedTokens = reply.Usage.CachedTokens; }
+                  // P16：turn 级累积（多 round 求和，FinishAsync 时一次落盘）
+                  _turnPrompt += reply.Usage.PromptTokens;
+                  _turnCached += reply.Usage.CachedTokens;
+                  _turnCompletion += reply.Usage.CompletionTokens;
+                  _turnHasUsage = true;
+                 long llmCalls;
+                 lock (_lock) { llmCalls = _sessionLlmCalls; }
+                 await _bus.PublishStateAsync(EventKinds.Usage,
+                     new UsagePayload
+                     {
+                         Prompt = reply.Usage.PromptTokens,
+                         Completion = reply.Usage.CompletionTokens,
+                         Cached = reply.Usage.CachedTokens,
+                         LlmCalls = llmCalls,
+                         Dropped = _bus.ConsumeDroppedCount() > 0 ? true : null,
+                     }, ct).ConfigureAwait(false);
+             }
 
             // ===== 记录助手消息 =====
             Record(ToChatMessage(reply, interrupted: false, ord: used, turnId: turnId));
@@ -845,18 +858,19 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 continue;
             }
 
-            // 空回复也重试（几乎总是网络问题）
-            if (RetryPolicy.IsEmptyReply(reply))
-            {
-                if (attempt >= _retry) return reply;   // 不重试了：交给上层当"无输出"处理
-
-                attempt++;
-                await HandleRetryAsync(attempt, "空回复（模型没吐任何内容）", ct).ConfigureAwait(false);
-                continue;
-            }
-
-            _bus.FlushNow();   // 保证最后一个 token 不丢
-            return reply;
+             // P23 冻结：每次 _llm.ChatStreamAsync 成功返回即 +1（位置在空回复判定之前）——含被丢弃后 continue 的空回复中间态；取消/抛异常未返回不计。
+             // P24：turn 内计数同处递增（零用量回包跳过 usage 事件块，此处才能保证不漏计）。
+             lock (_lock) { _sessionLlmCalls++; _turnLlmCalls++; }
+             // 空回复也重试（几乎总是网络问题）
+             if (RetryPolicy.IsEmptyReply(reply))
+             {
+                 if (attempt >= _retry) return reply;   // 不重试了：交给上层当"无输出"处理
+                 attempt++;
+                 await HandleRetryAsync(attempt, "空回复（模型没吐任何内容）", ct).ConfigureAwait(false);
+                 continue;
+             }
+             _bus.FlushNow();   // 保证最后一个 token 不丢
+             return reply;
         }
     }
      /// <summary>P16-F2：断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。</summary>
@@ -941,37 +955,40 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
                 continue;
             }
-             bool wasStateless = stateless;
-             if (wasStateless)
+              bool wasStateless = stateless;
+               // P23 冻结：每次 _llm.ResponsesStreamAsync 成功返回即 +1（断链 continue 未发请求不计；取消/抛异常不计；空回复中间态计次）。
+               // P24：turn 内计数同处递增。
+               lock (_lock) { _sessionLlmCalls++; _turnLlmCalls++; }
+              if (wasStateless)
+              {
+                  // 无状态网关：不存链，靠全量重建；避免下次误带过期 id。
+                  SetResponseId(null);
+                  lock (_lock) _responsesSentCount = snap.Count;
+              }
+              else if (r.ResponseId is null)
+              {
+                  SetResponseId(null);
+                  lock (_lock) _responsesSentCount = snap.Count;
+                  try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "服务端未返回 response.id，已断链重建", Level = "info" }, ct).ConfigureAwait(false); } catch { }
+              }
+              else
+              {
+                  SetResponseId(r.ResponseId);
+                  lock (_lock) _responsesSentCount = snap.Count + 1;
+                  try
+                  {
+                      var hist = _store.LoadResponseId();
+                      if (string.IsNullOrEmpty(hist)) { try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "已重建上下文链", Level = "info" }, ct).ConfigureAwait(false); } catch { } }
+                  }
+                  catch { }
+              }
+             var reply = ToAssistantReply(r);
+             if (RetryPolicy.IsEmptyReply(reply))
              {
-                 // 无状态网关：不存链，靠全量重建；避免下次误带过期 id。
-                 SetResponseId(null);
-                 lock (_lock) _responsesSentCount = snap.Count;
-             }
-             else if (r.ResponseId is null)
-             {
-                 SetResponseId(null);
-                 lock (_lock) _responsesSentCount = snap.Count;
-                 try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "服务端未返回 response.id，已断链重建", Level = "info" }, ct).ConfigureAwait(false); } catch { }
-             }
-             else
-             {
-                 SetResponseId(r.ResponseId);
-                 lock (_lock) _responsesSentCount = snap.Count + 1;
-                 try
-                 {
-                     var hist = _store.LoadResponseId();
-                     if (string.IsNullOrEmpty(hist)) { try { await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload { Text = "已重建上下文链", Level = "info" }, ct).ConfigureAwait(false); } catch { } }
-                 }
-                 catch { }
-             }
-            var reply = ToAssistantReply(r);
-            if (RetryPolicy.IsEmptyReply(reply))
-            {
-                if (attempt >= _retry) { _bus.FlushNow(); return reply; }
-                attempt++;
-                await HandleRetryAsync(attempt, "空回复（模型没吐任何内容）", ct).ConfigureAwait(false);
-                continue;
+                 if (attempt >= _retry) { _bus.FlushNow(); return reply; }
+                 attempt++;
+                 await HandleRetryAsync(attempt, "空回复（模型没吐任何内容）", ct).ConfigureAwait(false);
+                 continue;
             }
             _bus.FlushNow();
             return reply;
@@ -1429,34 +1446,42 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  会话操作
     // ============================================================
 
-    public void ClearContext()
-    {
-        lock (_lock)
-        {
-            _messages.Clear();
-            _lastTsMs = 0;
-            PushSystemPromptLocked();
-        }
-        _store.Clear();
-        ClearResponseChain();
-        _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
-    }
+     public void ClearContext()
+     {
+         lock (_lock)
+         {
+             _messages.Clear();
+             _lastTsMs = 0;
+             // P23：水位与计数器会话隔离——回到估算态 B + 计数器归零。
+             _lastPromptTokens = null;
+             _lastCachedTokens = null;
+             _sessionLlmCalls = 0;
+             PushSystemPromptLocked();
+         }
+         _store.Clear();
+         ClearResponseChain();
+         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
+     }
 
-    public void StartNewSession()
-    {
-        lock (_lock)
-        {
-            _messages.Clear();
-            _lastTsMs = 0;
-            _fileAlways = false;
-            _commandAlways = false;
-        }
-        _store.StartNew();
-        ClearResponseChain();
-        lock (_lock) PushSystemPromptLocked();
-        _ = PublishSessionInfoAsync(CancellationToken.None);
-        _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
-    }
+     public void StartNewSession()
+     {
+         lock (_lock)
+         {
+             _messages.Clear();
+             _lastTsMs = 0;
+             _fileAlways = false;
+             _commandAlways = false;
+             // P23：回到估算态 B + 计数器归零。
+             _lastPromptTokens = null;
+             _lastCachedTokens = null;
+             _sessionLlmCalls = 0;
+         }
+         _store.StartNew();
+         ClearResponseChain();
+         lock (_lock) PushSystemPromptLocked();
+         _ = PublishSessionInfoAsync(CancellationToken.None);
+         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
+     }
 
      public (int count, int repaired) LoadHistory(string path)
      {
@@ -1488,26 +1513,30 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  metaMissingDir = true;
              }
          }
-        lock (_lock)
-        {
-            _messages.Clear();
-            PushSystemPromptLocked();
-            var chatMsgs = MessageAdapters.ToChatMessages(messages);
-            // P14-D4：旧数据读时回填（只动内存，不回写文件）。锚 = 历史文件 mtime。
-            if (chatMsgs.Any(m => m.TsMs == 0))
-            {
-                long anchor;
-                try { anchor = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds(); }
-                catch { anchor = _clock.UtcNowMs(); }
-                var baseTs = anchor - (long)chatMsgs.Count * 1000L;
-                for (var i = 0; i < chatMsgs.Count; i++)
-                    if (chatMsgs[i].TsMs == 0)
-                        chatMsgs[i] = chatMsgs[i] with { TsMs = baseTs + (i + 1) * 1000L };
-            }
-            _messages.AddRange(chatMsgs);
-            _lastTsMs = chatMsgs.Count == 0 ? 0 : chatMsgs.Max(m => m.TsMs);
-            if (restored) RefreshSystemPrompt();
-        }
+         lock (_lock)
+         {
+             _messages.Clear();
+             // P23：LoadHistory/resume 后从 0 起计（内存瞬态）；Last* 保持空，前端显示估算并在首次请求后纠正。不从历史文本反推精确值。
+             _lastPromptTokens = null;
+             _lastCachedTokens = null;
+             _sessionLlmCalls = 0;
+             PushSystemPromptLocked();
+             var chatMsgs = MessageAdapters.ToChatMessages(messages);
+             // P14-D4：旧数据读时回填（只动内存，不回写文件）。锚 = 历史文件 mtime。
+             if (chatMsgs.Any(m => m.TsMs == 0))
+             {
+                 long anchor;
+                 try { anchor = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds(); }
+                 catch { anchor = _clock.UtcNowMs(); }
+                 var baseTs = anchor - (long)chatMsgs.Count * 1000L;
+                 for (var i = 0; i < chatMsgs.Count; i++)
+                     if (chatMsgs[i].TsMs == 0)
+                         chatMsgs[i] = chatMsgs[i] with { TsMs = baseTs + (i + 1) * 1000L };
+             }
+             _messages.AddRange(chatMsgs);
+             _lastTsMs = chatMsgs.Count == 0 ? 0 : chatMsgs.Max(m => m.TsMs);
+             if (restored) RefreshSystemPrompt();
+         }
          ClearResponseChain();
          if (metaMissingDir)
          {
@@ -1573,12 +1602,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     Round = new RoundState { Used = _roundUsed, Limit = _roundLimit },
                 },
 
-                Usage = new UsageState
-                {
-                    InputTotal = _usageIn,
-                    OutputTotal = _usageOut,
-                    LastPromptTokens = _lastPromptTokens,
-                },
+                 Usage = new UsageState
+                 {
+                     InputTotal = _usageIn,
+                     OutputTotal = _usageOut,
+                     LastPromptTokens = _lastPromptTokens,
+                     LastCachedTokens = _lastCachedTokens,
+                     EstimatedInitialTokens = _estimatedInitialTokens,
+                     SessionLlmCalls = _sessionLlmCalls,
+                 },
                  Queue = _inbox.ToArray(),
                  PendingAsk = _pendingAsk?.Ask,
                  Turns = MessageProjector.ProjectSnapshotTurns(_messages),
@@ -1699,22 +1731,29 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         lock (_lock) PushSystemPromptLocked();
     }
 
-    private void PushSystemPromptLocked()
-    {
-        if (_messages.Count > 0 && _messages[0].Role == Role.System) return;
+     private void PushSystemPromptLocked()
+     {
+         if (_messages.Count > 0 && _messages[0].Role == Role.System)
+         {
+             // 已有 system：仍刷新估算（幂等，纯字符计算无 IO）。
+             try { _estimatedInitialTokens = TokenEstimator.Estimate(_messages[0].Content); } catch { }
+             return;
+         }
+         var prompt = SystemPromptBuilder.Build(
+             _cwd, _mode, _store.SessionId, _persona, _dataDir);
+         _messages.Insert(0, ChatMessage.System(prompt));
+         // P23：锁内仅做纯字符估算（复用已生成的字符串，不再同步重读文件）。
+         try { _estimatedInitialTokens = TokenEstimator.Estimate(prompt); } catch { }
+     }
 
-        var prompt = SystemPromptBuilder.Build(
-            _cwd, _mode, _store.SessionId, _persona, _dataDir);
-        _messages.Insert(0, ChatMessage.System(prompt));
-    }
-
-    private void RefreshSystemPrompt()
-    {
-        if (_messages.Count == 0 || _messages[0].Role != Role.System) return;
-
-        _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
-            _cwd, _mode, _store.SessionId, _persona, _dataDir));
-    }
+     private void RefreshSystemPrompt()
+     {
+         if (_messages.Count == 0 || _messages[0].Role != Role.System) return;
+         var prompt = SystemPromptBuilder.Build(
+             _cwd, _mode, _store.SessionId, _persona, _dataDir);
+         _messages[0] = ChatMessage.System(prompt);
+         try { _estimatedInitialTokens = TokenEstimator.Estimate(prompt); } catch { }
+     }
 
     private static ChatMessage ToChatMessage(AssistantReply reply, bool interrupted, int ord = 0, string? turnId = null)
     {
@@ -1784,33 +1823,36 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              }, ct).ConfigureAwait(false);
          await PublishBusyAsync(false, ct).ConfigureAwait(false);
      }
-     /// <summary>P16：每非空 turn exactly-once 落盘（靠 ux_usage_turn 幂等；失败不中断对话）。无 Usage 不记。</summary>
-     private void RecordTurnUsage(string turnId, bool truncated)
-     {
-         if (!_turnHasUsage) return;
-         _turnHasUsage = false;
-         try
-         {
-             string pid, pdisp, mid, mdisp, proto, sid;
-             lock (_lock)
-             {
-                 pid = _activeProviderId; pdisp = _activeProviderDisplay;
-                 mid = _activeModelId; mdisp = _activeModelDisplay; proto = _activeProtocol;
-             }
-             sid = _store.SessionId;
-             if (string.IsNullOrEmpty(mid)) mid = _llm.Model ?? "";
-             long now = _clock.UtcNowMs();
-             _usageStore.Record(new UsageEvent
-             {
-                 TsMs = now, SessionId = sid, TurnId = turnId,
-                 ProviderId = pid, ProviderDisplay = pdisp,
-                 ModelId = mid, ModelDisplay = mdisp ?? "",
-                 Protocol = string.IsNullOrEmpty(proto) ? "chat" : proto,
-                 PromptTokens = _turnPrompt, CachedTokens = _turnCached,
-                 CompletionTokens = _turnCompletion,
-                 TotalTokens = _turnPrompt + _turnCompletion,
-                 Truncated = truncated ? 1 : 0, RecordedMs = now,
-             });
+      /// <summary>P16：每非空 turn exactly-once 落盘（靠 ux_usage_turn 幂等；失败不中断对话）。无 Usage 不记。P24：落盘 turn 的 LLM 调用次数（_turnLlmCalls，多 round/重试累加；零用量 turn 不落行，其调用次数不持久化）。</summary>
+      private void RecordTurnUsage(string turnId, bool truncated)
+      {
+          if (!_turnHasUsage) return;
+          _turnHasUsage = false;
+          try
+          {
+              string pid, pdisp, mid, mdisp, proto, sid;
+              long turnLlmCalls;
+              lock (_lock)
+              {
+                  pid = _activeProviderId; pdisp = _activeProviderDisplay;
+                  mid = _activeModelId; mdisp = _activeModelDisplay; proto = _activeProtocol;
+                  turnLlmCalls = _turnLlmCalls;
+              }
+              sid = _store.SessionId;
+              if (string.IsNullOrEmpty(mid)) mid = _llm.Model ?? "";
+              long now = _clock.UtcNowMs();
+              _usageStore.Record(new UsageEvent
+              {
+                  TsMs = now, SessionId = sid, TurnId = turnId,
+                  ProviderId = pid, ProviderDisplay = pdisp,
+                  ModelId = mid, ModelDisplay = mdisp ?? "",
+                  Protocol = string.IsNullOrEmpty(proto) ? "chat" : proto,
+                  PromptTokens = _turnPrompt, CachedTokens = _turnCached,
+                  CompletionTokens = _turnCompletion,
+                  TotalTokens = _turnPrompt + _turnCompletion,
+                  LlmCalls = turnLlmCalls,
+                  Truncated = truncated ? 1 : 0, RecordedMs = now,
+              });
          }
          catch { }
      }

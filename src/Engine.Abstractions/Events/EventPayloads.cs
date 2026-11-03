@@ -135,16 +135,20 @@ public sealed record LlmRetryingPayload
     public string Reason { get; init; } = "";
 }
 
-/// <summary>usage 载荷。</summary>
-public sealed record UsagePayload
-{
-    /// <summary>prompt token 数。</summary>
-    public long Prompt { get; init; }
-    /// <summary>completion token 数。</summary>
-    public long Completion { get; init; }
-    /// <summary>本批是否因背压丢弃过 delta。</summary>
-    public bool? Dropped { get; init; }
-}
+ /// <summary>usage 载荷。</summary>
+ public sealed record UsagePayload
+ {
+     /// <summary>prompt token 数。</summary>
+     public long Prompt { get; init; }
+     /// <summary>completion token 数。</summary>
+     public long Completion { get; init; }
+     /// <summary>本批是否因背压丢弃过 delta。</summary>
+     public bool? Dropped { get; init; }
+     /// <summary>P23：本轮 cached token 数（默认 0，老前端忽略）。</summary>
+     public long Cached { get; init; }
+     /// <summary>P23：递增后的本会话 LLM 调用总值（默认 0，老前端忽略）。</summary>
+     public long LlmCalls { get; init; }
+ }
 
 /// <summary>notice 载荷。</summary>
 public sealed record NoticePayload

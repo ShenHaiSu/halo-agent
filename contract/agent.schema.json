@@ -636,23 +636,38 @@
             }
           }
         },
-        "usage": {
-          "type": "object",
-          "properties": {
-            "inputTotal": {
-              "type": "integer"
-            },
-            "outputTotal": {
-              "type": "integer"
-            },
-            "lastPromptTokens": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          }
-        },
+         "usage": {
+           "type": "object",
+           "properties": {
+             "inputTotal": {
+               "type": "integer"
+             },
+             "outputTotal": {
+               "type": "integer"
+             },
+             "lastPromptTokens": {
+               "type": [
+                 "integer",
+                 "null"
+               ]
+             },
+             "lastCachedTokens": {
+               "type": [
+                 "integer",
+                 "null"
+               ]
+             },
+             "estimatedInitialTokens": {
+               "type": [
+                 "integer",
+                 "null"
+               ]
+             },
+             "sessionLlmCalls": {
+               "type": "integer"
+             }
+           }
+         },
         "queue": {
           "type": "array",
           "items": {
@@ -867,14 +882,17 @@
         "total": {
           "type": "integer"
         },
-        "hitRate": {
-          "type": "number"
-        },
-        "truncated": {
-          "type": "integer"
-        }
-      },
-      "required": [
+         "hitRate": {
+           "type": "number"
+         },
+         "llmCalls": {
+           "type": "integer"
+         },
+         "truncated": {
+           "type": "integer"
+         }
+       },
+       "required": [
         "tsMs",
         "sessionId",
         "turnId",
@@ -936,12 +954,15 @@
         "output": {
           "type": "integer"
         },
-        "requests": {
-          "type": "integer"
-        },
-        "hitRate": {
-          "type": "number"
-        }
+         "requests": {
+           "type": "integer"
+         },
+         "llmCalls": {
+           "type": "integer"
+         },
+         "hitRate": {
+           "type": "number"
+         }
       },
       "required": [
         "providerId",
@@ -2883,12 +2904,15 @@
           "total": {
             "type": "integer"
           },
-          "requests": {
-            "type": "integer"
-          },
-          "hitRate": {
-            "type": "number"
-          },
+           "requests": {
+             "type": "integer"
+           },
+           "llmCalls": {
+             "type": "integer"
+           },
+           "hitRate": {
+             "type": "number"
+           },
           "byDay": {
             "type": "array",
             "items": {
@@ -3298,22 +3322,28 @@
         }
       }
     },
-    "usage": {
-      "payload": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "integer"
-          },
-          "completion": {
-            "type": "integer"
-          },
-          "dropped": {
-            "type": "boolean"
-          }
-        }
-      }
-    },
+     "usage": {
+       "payload": {
+         "type": "object",
+         "properties": {
+           "prompt": {
+             "type": "integer"
+           },
+           "completion": {
+             "type": "integer"
+           },
+           "cached": {
+             "type": "integer"
+           },
+           "llmCalls": {
+             "type": "integer"
+           },
+           "dropped": {
+             "type": "boolean"
+           }
+         }
+       }
+     },
     "notice": {
       "payload": {
         "type": "object",

@@ -56,9 +56,12 @@ public sealed class EngineState
     public int RoundUsed { get; private set; }
     public int RoundLimit { get; set; } = 200;
 
-    public long UsageInput { get; private set; }
-    public long UsageOutput { get; private set; }
-    public long? LastPromptTokens { get; private set; }
+     public long UsageInput { get; private set; }
+     public long UsageOutput { get; private set; }
+     public long? LastPromptTokens { get; private set; }
+     public long? LastCachedTokens { get; private set; }
+     public long? EstimatedInitialTokens { get; private set; }
+     public long SessionLlmCalls { get; private set; }
 
     public PendingAsk? PendingAsk { get; private set; }
     private int _askSeq;
@@ -227,17 +230,20 @@ public sealed class EngineState
                      ProxyKind = ProxyKind,
                      ProxySource = ProxySource,
                      ProxyMaskedUrl = ProxyMaskedUrl,
-                    MaxTurns = MaxTurns,
-                    Retry = Retry,
-                    Configured = Configured,
-                    Round = new RoundState { Used = RoundUsed, Limit = RoundLimit },
-                },
-                Usage = new UsageState
-                {
-                    InputTotal = UsageInput,
-                    OutputTotal = UsageOutput,
-                    LastPromptTokens = LastPromptTokens,
-                },
+                     MaxTurns = MaxTurns,
+                     Retry = Retry,
+                     Configured = Configured,
+                     Round = new RoundState { Used = RoundUsed, Limit = RoundLimit },
+                 },
+                 Usage = new UsageState
+                 {
+                     InputTotal = UsageInput,
+                     OutputTotal = UsageOutput,
+                     LastPromptTokens = LastPromptTokens,
+                     LastCachedTokens = LastCachedTokens,
+                     EstimatedInitialTokens = EstimatedInitialTokens,
+                     SessionLlmCalls = SessionLlmCalls,
+                 },
                 Queue = _queue.ToArray(),
                 PendingAsk = PendingAsk,
                 Turns = Array.Empty<TurnView>(),

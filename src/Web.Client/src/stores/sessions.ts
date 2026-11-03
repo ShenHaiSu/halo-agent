@@ -143,12 +143,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     switchDepth++;
     switching.value = true;
     messages.loading = true;
-     // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
-     stream.endTurn();
-     /* P15: turns store */
-     perms.clear();
-     queue.clear();
-     clearCollapsedTools();
+      // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
+      stream.endTurn();
+      // P23：切会话入口先清零水位线（估算态），再由快照覆盖；catch 分支同样保持已清零态。
+      sessionInfo.resetWaterline();
+      /* P15: turns store */
+      perms.clear();
+      queue.clear();
+      clearCollapsedTools();
     try {
       let resumed: { count?: number; messages?: unknown } | null = null;
       try {
@@ -212,18 +214,28 @@ export const useSessionsStore = defineStore('sessions', () => {
          else sessionInfo.applyInfo({ sessionId: id });
          const ag = snap?.agent;
          if (ag && typeof ag === 'object') sessionInfo.applySnapshotAgent(ag);
-         const us = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown } | undefined;
-         if (us && typeof us === 'object') {
-           sessionInfo.applyInfo({
-             usage: {
-               input: typeof us.inputTotal === 'number' ? us.inputTotal : 0,
-               output: typeof us.outputTotal === 'number' ? us.outputTotal : 0,
-             },
-           });
-         }
-       } catch {
-         sessionInfo.applyInfo({ sessionId: id });
-       }
+          const us = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown; lastPromptTokens?: unknown; lastCachedTokens?: unknown; estimatedInitialTokens?: unknown; sessionLlmCalls?: unknown } | undefined;
+          if (us && typeof us === 'object') {
+            sessionInfo.applyInfo({
+              usage: {
+                input: typeof us.inputTotal === 'number' ? us.inputTotal : 0,
+                output: typeof us.outputTotal === 'number' ? us.outputTotal : 0,
+              },
+            });
+            // P23：快照仅 session.id 切换采纳（此处 id 即新会话，全量覆盖；老引擎缺字段按 null/0）。
+            sessionInfo.applySnapshotWaterline(
+              {
+                lastPromptTokens: typeof us.lastPromptTokens === 'number' ? us.lastPromptTokens : null,
+                lastCachedTokens: typeof us.lastCachedTokens === 'number' ? us.lastCachedTokens : null,
+                estimatedInitialTokens: typeof us.estimatedInitialTokens === 'number' ? us.estimatedInitialTokens : null,
+                sessionLlmCalls: typeof us.sessionLlmCalls === 'number' ? us.sessionLlmCalls : 0,
+              },
+              id,
+            );
+          }
+        } catch {
+          sessionInfo.applyInfo({ sessionId: id });
+        }
     } finally {
       switchDepth--;
       if (switchDepth <= 0) { switchDepth = 0; switching.value = false; }
@@ -240,13 +252,15 @@ export const useSessionsStore = defineStore('sessions', () => {
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
-     messages.loading = true;
-     stream.endTurn();
-     /* P15: turns store */
-     perms.clear();
-     queue.clear();
-     clearCollapsedTools();
-     sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
+      messages.loading = true;
+      stream.endTurn();
+      // P23：新建入口先清零水位线，再由 loadSnapshot 覆盖。
+      sessionInfo.resetWaterline();
+      /* P15: turns store */
+      perms.clear();
+      queue.clear();
+      clearCollapsedTools();
+      sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
     try {
       const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
       if (token !== switchToken) return;

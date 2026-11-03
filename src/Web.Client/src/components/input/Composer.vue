@@ -16,6 +16,7 @@ import { useAutoResize } from '@/composables/useAutoResize';
 import { useFileDrop } from '@/composables/useFileDrop';
 import { copyText } from '@/utils/clipboard';
 import ModeSelector from './ModeSelector.vue';
+import ContextWaterline from './ContextWaterline.vue';
 import HTag from '@/components/base/HTag.vue';
 import PermissionCard from '@/components/ask/PermissionCard.vue';
 import RoundsCard from '@/components/ask/RoundsCard.vue';
@@ -69,18 +70,16 @@ const drop = useFileDrop((paths) => addAttachments(paths, true), {
  *  生成中   → 可以发，但走排队
  * =================================
  */
-const switching = computed(() => sessions.switching);
-const askPending = computed(() => perms.pending !== null);
-const canSend = computed(() => {
-  if (switching.value) return false;
-  if (askPending.value) return false;
-  const hasContent = text.value.trim().length > 0 || attachments.value.length > 0;
-  if (!hasContent) return false;
-  if (stream.busy) return queue.value.length < MAX_QUEUE;
-  return true;
-});
-
-const totalUsage = computed(() => session.usage.input + session.usage.output);
+ const switching = computed(() => sessions.switching);
+ const askPending = computed(() => perms.pending !== null);
+ const canSend = computed(() => {
+   if (switching.value) return false;
+   if (askPending.value) return false;
+   const hasContent = text.value.trim().length > 0 || attachments.value.length > 0;
+   if (!hasContent) return false;
+   if (stream.busy) return queue.value.length < MAX_QUEUE;
+   return true;
+ });
 
 const onInput = createInputHandler({
   ta,
@@ -380,7 +379,7 @@ defineExpose({
         <ModelSelector class="top-model" />
         <HTag v-if="session.persona" size="sm">{{ session.persona }}</HTag>
         <span class="top-spacer" />
-        <span v-if="totalUsage > 0" class="top-tokens">累计 {{ totalUsage }} tokens</span>
+        <ContextWaterline />
       </div>
 
       <textarea
@@ -485,11 +484,6 @@ defineExpose({
 }
 .top-model :deep(.trigger-label) {
   max-width: 200px;
-}
-.top-tokens {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  font-family: var(--font-mono);
 }
 .composer-input {
   width: 100%;

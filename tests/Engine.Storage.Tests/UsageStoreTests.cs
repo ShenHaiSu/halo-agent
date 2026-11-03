@@ -14,14 +14,14 @@ public sealed class UsageStoreTests
         return s;
     }
 
-    private static UsageEvent Ev(string sid, string tid, string pid, string mid, long p, long c, long o, long ts)
+    private static UsageEvent Ev(string sid, string tid, string pid, string mid, long p, long c, long o, long ts, long lc = 0)
     {
         return new UsageEvent
         {
             TsMs = ts, SessionId = sid, TurnId = tid,
             ProviderId = pid, ProviderDisplay = pid, ModelId = mid, ModelDisplay = mid,
             Protocol = "chat", PromptTokens = p, CachedTokens = c, CompletionTokens = o,
-            TotalTokens = p + o, Truncated = 0, RecordedMs = ts,
+            TotalTokens = p + o, LlmCalls = lc, Truncated = 0, RecordedMs = ts,
         };
     }
 
@@ -145,5 +145,73 @@ public sealed class UsageStoreTests
              Assert.Contains("\"openai-special\"", csv);
              Assert.Contains("\"sess-openai-1\"", csv);
          }
+     }
+
+     [Fact]
+     public void LlmCalls_roundtrip_query_summary_bymodel_export()
+     {
+         var store = NewStore(out var tmp);
+         using (tmp)
+         {
+             store.Record(Ev("s1", "t1", "openai", "m", 100, 10, 20, 1000, lc: 1));
+             store.Record(Ev("s1", "t2", "openai", "m", 200, 20, 30, 2000, lc: 3));
+             var (items, total) = store.Query(new UsageQuery { SessionId = "s1" });
+             Assert.Equal(2, total);
+             Assert.Equal(3, items.First(e => e.TurnId == "t2").LlmCalls);
+             var s = store.Summary(new UsageQuery { SessionId = "s1" });
+             Assert.Equal(4, s.LlmCalls);
+             Assert.Equal(2, s.Requests);
+             var m = Assert.Single(s.ByModel);
+             Assert.Equal(4, m.LlmCalls);
+             var (csv, truncated, _) = store.ExportCsv(new UsageQuery { SessionId = "s1" }, null);
+             Assert.False(truncated);
+             Assert.Contains("\"LLM调用\"", csv);
+         }
+     }
+
+     [Fact]
+     public void Legacy_db_without_llm_calls_column_gets_migrated()
+     {
+         using var tmp = new TempDataDir();
+         var db = Path.Combine(tmp.Dir, "usage.db");
+         // 手工建 P23 之前 schema（无 llm_calls 列）并写入一行旧数据。
+         using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + db))
+         {
+             conn.Open();
+             using var cmd = conn.CreateCommand();
+             cmd.CommandText = @"
+CREATE TABLE usage_events(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_ms INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  provider_display TEXT NOT NULL DEFAULT '',
+  model_id TEXT NOT NULL,
+  model_display TEXT NOT NULL DEFAULT '',
+  protocol TEXT NOT NULL DEFAULT 'chat',
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  recorded_ms INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX ux_usage_turn ON usage_events(session_id, turn_id);
+INSERT INTO usage_events
+(ts_ms, session_id, turn_id, provider_id, model_id, prompt_tokens, cached_tokens, completion_tokens, total_tokens, truncated, recorded_ms)
+VALUES (1000,'s-old','t-old','openai','m',100,10,20,120,0,1000);";
+             cmd.ExecuteNonQuery();
+         }
+         var store = new UsageStore(db);
+         store.EnsureCreated(); // 触发迁移
+         store.EnsureCreated(); // 幂等再跑一次
+         store.Record(Ev("s-old", "t-new", "openai", "m", 50, 5, 5, 2000, lc: 2));
+         var (items, total) = store.Query(new UsageQuery { SessionId = "s-old" });
+         Assert.Equal(2, total);
+         Assert.Equal(0, items.First(e => e.TurnId == "t-old").LlmCalls);
+         Assert.Equal(2, items.First(e => e.TurnId == "t-new").LlmCalls);
+         var s = store.Summary(new UsageQuery { SessionId = "s-old" });
+         Assert.Equal(2, s.LlmCalls);
      }
 }

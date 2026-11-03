@@ -100,13 +100,14 @@ public sealed class UsageMethodsTests : IDisposable
             TsMs = 1000, SessionId = "s1", TurnId = "t1",
             ProviderId = "openai", ModelId = "m", Protocol = "chat",
             PromptTokens = 100, CachedTokens = 25, CompletionTokens = 10,
-            TotalTokens = 110, RecordedMs = 1000,
+            TotalTokens = 110, LlmCalls = 3, RecordedMs = 1000,
         });
 
         dynamic? s = await real.UsageSummaryAsync(P("{}"), CancellationToken.None);
         Assert.NotNull(s);
         Assert.Equal(100L, (long)s!.GetType().GetProperty("input")!.GetValue(s)!);
         Assert.Equal(0.25, (double)s!.GetType().GetProperty("hitRate")!.GetValue(s)!);
+        Assert.Equal(3L, (long)s!.GetType().GetProperty("llmCalls")!.GetValue(s)!);
 
         dynamic? st = await real.UsageStatsAsync(null, CancellationToken.None);
         Assert.NotNull(st);
@@ -115,6 +116,11 @@ public sealed class UsageMethodsTests : IDisposable
         dynamic? q = await real.UsageQueryAsync(P("{\"page\":1,\"pageSize\":50}"), CancellationToken.None);
         Assert.NotNull(q);
         Assert.Equal(1L, (long)q!.GetType().GetProperty("total")!.GetValue(q)!);
+        var items = (System.Collections.IEnumerable)q!.GetType().GetProperty("items")!.GetValue(q)!;
+        object? first = null;
+        foreach (var it in items) { first = it; break; }
+        Assert.NotNull(first);
+        Assert.Equal(3L, (long)first!.GetType().GetProperty("llmCalls")!.GetValue(first)!);
     }
 }
  

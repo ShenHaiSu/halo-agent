@@ -480,15 +480,25 @@ export const useMessagesStore = defineStore('messages', () => {
         }
         const a = snap?.agent;
         if (a && typeof a === 'object') sessionStore.applySnapshotAgent(a);
-        const u = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown; input?: unknown; output?: unknown } | undefined;
-        if (u && typeof u === 'object') {
-          sessionStore.applyInfo({
-            usage: {
-              input: typeof u.inputTotal === 'number' ? u.inputTotal : typeof u.input === 'number' ? u.input : 0,
-              output: typeof u.outputTotal === 'number' ? u.outputTotal : typeof u.output === 'number' ? u.output : 0,
-            },
-          });
-        }
+         const u = snap?.usage as { inputTotal?: unknown; outputTotal?: unknown; input?: unknown; output?: unknown; lastPromptTokens?: unknown; lastCachedTokens?: unknown; estimatedInitialTokens?: unknown; sessionLlmCalls?: unknown } | undefined;
+         if (u && typeof u === 'object') {
+           sessionStore.applyInfo({
+             usage: {
+               input: typeof u.inputTotal === 'number' ? u.inputTotal : typeof u.input === 'number' ? u.input : 0,
+               output: typeof u.outputTotal === 'number' ? u.outputTotal : typeof u.output === 'number' ? u.output : 0,
+             },
+           });
+           // P23：三处快照读取同改（session/sessions/messages 口径一致）；sid 决定全量/填空采纳。
+           sessionStore.applySnapshotWaterline(
+             {
+               lastPromptTokens: typeof u.lastPromptTokens === 'number' ? u.lastPromptTokens : null,
+               lastCachedTokens: typeof u.lastCachedTokens === 'number' ? u.lastCachedTokens : null,
+               estimatedInitialTokens: typeof u.estimatedInitialTokens === 'number' ? u.estimatedInitialTokens : null,
+               sessionLlmCalls: typeof u.sessionLlmCalls === 'number' ? u.sessionLlmCalls : 0,
+             },
+             sessionStore.id || null,
+           );
+         }
       } catch {
         /* 会话元信息同步失败不影响消息绘制 */
       }

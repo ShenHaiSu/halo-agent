@@ -323,7 +323,7 @@ public sealed class StubMethods
      public Task<object?> UsageQuery(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { items = Array.Empty<object>(), total = 0 });
      public Task<object?> UsageSummary(JsonElement? _, CancellationToken ct) =>
-         Task.FromResult<object?>(new { input = 0, cached = 0, output = 0, total = 0, requests = 0, hitRate = 0.0, byDay = Array.Empty<object>(), byModel = Array.Empty<object>() });
+         Task.FromResult<object?>(new { input = 0, cached = 0, output = 0, total = 0, requests = 0, llmCalls = 0, hitRate = 0.0, byDay = Array.Empty<object>(), byModel = Array.Empty<object>() });
      public Task<object?> UsageStats(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { sizeBytes = 0, rowCount = 0 });
       public Task<object?> UsageExport(JsonElement? _, CancellationToken ct) =>

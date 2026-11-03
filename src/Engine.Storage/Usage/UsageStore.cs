@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS usage_events(
   cached_tokens INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
+  llm_calls INTEGER NOT NULL DEFAULT 0,
   truncated INTEGER NOT NULL DEFAULT 0,
   recorded_ms INTEGER NOT NULL
 );
@@ -70,6 +71,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_pm ON usage_events(provider_id, model_id, t
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);";
                     cmd.ExecuteNonQuery();
                 }
+                // P24：老库迁移（新库建表已含列；IF NOT EXISTS 对已存在表无操作，故此处补列）。
+                EnsureLlmCallsColumn(conn);
                 _created = true;
                 _degraded = false;
             }
@@ -105,6 +108,7 @@ CREATE TABLE IF NOT EXISTS usage_events(
   cached_tokens INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   total_tokens INTEGER NOT NULL DEFAULT 0,
+  llm_calls INTEGER NOT NULL DEFAULT 0,
   truncated INTEGER NOT NULL DEFAULT 0,
   recorded_ms INTEGER NOT NULL
 );
@@ -123,6 +127,36 @@ CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);
                 _created = true;
                 _degraded = true;
             }
+        }
+    }
+
+    /// <summary>P24：老库补列（幂等；列已存在则直接返回，异常吞掉走降级由上层判定）。</summary>
+    private static void EnsureLlmCallsColumn(SqliteConnection conn)
+    {
+        try
+        {
+            using var pragma = conn.CreateCommand();
+            pragma.CommandText = "PRAGMA table_info(usage_events);";
+            using var r = pragma.ExecuteReader();
+            while (r.Read())
+            {
+                if (string.Equals(r.GetString(1), "llm_calls", StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+        catch
+        {
+            return;
+        }
+        try
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE usage_events ADD COLUMN llm_calls INTEGER NOT NULL DEFAULT 0;";
+            alter.ExecuteNonQuery();
+        }
+        catch
+        {
+            /* 并发建库竞态：列可能已被另一连接加上，忽略 */
         }
     }
 
@@ -155,8 +189,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = @"INSERT OR IGNORE INTO usage_events
 (ts_ms, session_id, turn_id, provider_id, provider_display, model_id, model_display, protocol,
- prompt_tokens, cached_tokens, completion_tokens, total_tokens, truncated, recorded_ms)
-VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
+ prompt_tokens, cached_tokens, completion_tokens, total_tokens, llm_calls, truncated, recorded_ms)
+VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@lc,@tr,@rec);";
                 AddParam(cmd, "@ts", e.TsMs);
                 AddParam(cmd, "@sid", e.SessionId ?? "");
                 AddParam(cmd, "@tid", e.TurnId ?? "");
@@ -169,6 +203,7 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
                 AddParam(cmd, "@c", Math.Max(0, e.CachedTokens));
                 AddParam(cmd, "@o", Math.Max(0, e.CompletionTokens));
                 AddParam(cmd, "@t", e.PromptTokens + e.CompletionTokens);
+                AddParam(cmd, "@lc", Math.Max(0, e.LlmCalls));
                 AddParam(cmd, "@tr", e.Truncated);
                 AddParam(cmd, "@rec", e.RecordedMs);
                 cmd.ExecuteNonQuery();
@@ -208,8 +243,9 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
             CachedTokens = r.GetInt64(9),
             CompletionTokens = r.GetInt64(10),
             TotalTokens = r.GetInt64(11),
-            Truncated = r.GetInt32(12),
-            RecordedMs = r.GetInt64(13),
+            LlmCalls = r.IsDBNull(12) ? 0 : r.GetInt64(12),
+            Truncated = r.GetInt32(13),
+            RecordedMs = r.GetInt64(14),
         };
     }
 
@@ -235,7 +271,7 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
                 {
                     cmd.CommandText = "SELECT ts_ms, session_id, turn_id, provider_id, provider_display,"
                         + " model_id, model_display, protocol, prompt_tokens, cached_tokens,"
-                        + " completion_tokens, total_tokens, truncated, recorded_ms"
+                        + " completion_tokens, total_tokens, llm_calls, truncated, recorded_ms"
                         + " FROM usage_events WHERE " + BuildWhere(q, cmd)
                         + " ORDER BY ts_ms DESC, id DESC LIMIT @lim OFFSET @off;";
                     AddParam(cmd, "@lim", pageSize);
@@ -267,23 +303,25 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
                 {
                     cmd.CommandText = "SELECT ts_ms, session_id, turn_id, provider_id, provider_display,"
                         + " model_id, model_display, protocol, prompt_tokens, cached_tokens,"
-                        + " completion_tokens, total_tokens, truncated, recorded_ms"
+                        + " completion_tokens, total_tokens, llm_calls, truncated, recorded_ms"
                         + " FROM usage_events WHERE " + BuildWhere(q, cmd) + " ORDER BY ts_ms ASC;";
                     using var r = cmd.ExecuteReader();
                     while (r.Read()) rows.Add(ReadEvent(r));
                 }
-                long input = 0, cached = 0, output = 0;
+                long input = 0, cached = 0, output = 0, llmCalls = 0;
                 foreach (var e in rows)
                 {
                     input += e.PromptTokens;
                     cached += e.CachedTokens;
                     output += e.CompletionTokens;
+                    llmCalls += Math.Max(0, e.LlmCalls);
                 }
                 s.Input = input;
                 s.Cached = cached;
                 s.Output = output;
                 s.Total = input + output;
                 s.Requests = rows.Count;
+                s.LlmCalls = llmCalls;
                 s.HitRate = input > 0 ? (double)cached / input : 0;
                 s.ByDay = BuildByDay(rows, q);
                 s.ByModel = BuildByModel(rows);
@@ -347,6 +385,7 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
             m.Cached += e.CachedTokens;
             m.Output += e.CompletionTokens;
             m.Requests++;
+            m.LlmCalls += Math.Max(0, e.LlmCalls);
         }
         foreach (var m in map.Values)
             m.HitRate = m.Input > 0 ? (double)m.Cached / m.Input : 0;
@@ -364,14 +403,14 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
                  using var conn = Open();
                  var sb = new StringBuilder();
                  sb.Append("\"时间\",\"session_id\",\"turn_id\",\"provider\",\"model\",\"protocol\","
-                     + "\"输入\",\"缓存\",\"输出\",\"合计\",\"命中率\",\"截断\"\r\n");
+                     + "\"输入\",\"缓存\",\"输出\",\"合计\",\"LLM调用\",\"命中率\",\"截断\"\r\n");
                  int count = 0;
                  bool truncated = false;
                  using (var cmd = conn.CreateCommand())
                  {
                      cmd.CommandText = "SELECT ts_ms, session_id, turn_id, provider_id, provider_display,"
                          + " model_id, model_display, protocol, prompt_tokens, cached_tokens,"
-                         + " completion_tokens, total_tokens, truncated, recorded_ms"
+                         + " completion_tokens, total_tokens, llm_calls, truncated, recorded_ms"
                          + " FROM usage_events WHERE " + BuildWhere(q, cmd)
                          + " ORDER BY ts_ms DESC, id DESC LIMIT @lim;";
                      AddParam(cmd, "@lim", ExportLimit + 1);
@@ -392,6 +431,7 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@tr,@rec);";
                              time, e.SessionId, e.TurnId, provider, e.ModelId, e.Protocol,
                              e.PromptTokens.ToString(), e.CachedTokens.ToString(),
                              e.CompletionTokens.ToString(), e.TotalTokens.ToString(),
+                             Math.Max(0, e.LlmCalls).ToString(),
                              (hit * 100).ToString("F1") + "%", e.Truncated == 1 ? "1" : "0",
                          };
                          for (int i = 0; i < fields.Length; i++)

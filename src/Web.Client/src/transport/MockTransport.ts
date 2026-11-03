@@ -205,6 +205,9 @@ export class MockTransport implements Transport {
           this.snapshot.usage.outputTotal =
             (this.snapshot.usage.outputTotal ?? 0) + Number(p.completion ?? 0);
           this.snapshot.usage.lastPromptTokens = Number(p.prompt ?? 0);
+          // P23：Mock 真相源与真实引擎同增（cached/llmCalls 递增，模拟多轮放大）。
+          this.snapshot.usage.lastCachedTokens = Number(p.cached ?? 0);
+          this.snapshot.usage.sessionLlmCalls = (this.snapshot.usage.sessionLlmCalls ?? 0) + 1;
         }
         break;
       case 'round.started':

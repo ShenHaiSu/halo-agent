@@ -117,16 +117,22 @@ public sealed record RoundState
     public int Limit { get; init; }
 }
 
-/// <summary>用量统计。</summary>
-public sealed record UsageState
-{
-    /// <summary>累计输入 token。</summary>
-    public long InputTotal { get; init; }
-    /// <summary>累计输出 token。</summary>
-    public long OutputTotal { get; init; }
-    /// <summary>上次 prompt token 数（可为空）。</summary>
-    public long? LastPromptTokens { get; init; }
-}
+ /// <summary>用量统计。</summary>
+ public sealed record UsageState
+ {
+     /// <summary>累计输入 token。</summary>
+     public long InputTotal { get; init; }
+     /// <summary>累计输出 token。</summary>
+     public long OutputTotal { get; init; }
+     /// <summary>上次 prompt token 数（可为空）。</summary>
+     public long? LastPromptTokens { get; init; }
+     /// <summary>P23：最近一次 cached token 数（可为空，老快照缺字段按 null）。</summary>
+     public long? LastCachedTokens { get; init; }
+     /// <summary>P23：空会话系统提示词估算占用（可为空，老快照缺字段按 null）。</summary>
+     public long? EstimatedInitialTokens { get; init; }
+     /// <summary>P23：本会话 LLM 成功调用次数（内存瞬态，不落盘；缺字段按 0）。</summary>
+     public long SessionLlmCalls { get; init; }
+ }
 
 /// <summary>更新状态。</summary>
 public sealed record UpdateState

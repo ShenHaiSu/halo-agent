@@ -267,6 +267,8 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           stream.usage.lastCompletionTokens = Number(p.completion ?? 0);
           stream.usage.dropped = p.dropped === true;
           session.addUsage(Number(p.prompt ?? 0), Number(p.completion ?? 0));
+          // P23：事件总值覆盖优先（lastPrompt/cached/llmCalls 总值覆盖）。
+          session.applyUsageEvent(p);
           break;
         }
         case 'notice': {
@@ -415,6 +417,21 @@ export function dispatchFrames(frames: HaloFrame[]): void {
                     cwd: ss.cwd as string | undefined,
                     historyPath: (ss.historyPath ?? null) as string | null,
                   });
+                }
+                // P23：resync 全量快照同样补水位线（同会话只填空，不回退事件值）。
+                const uu = (snap as { usage?: Record<string, unknown> } | null)?.usage;
+                if (uu && typeof uu === 'object') {
+                  const st = useSessionStore();
+                  st.applySnapshotWaterline(
+                    {
+                      lastPromptTokens: typeof uu.lastPromptTokens === 'number' ? (uu.lastPromptTokens as number) : null,
+                      lastCachedTokens: typeof uu.lastCachedTokens === 'number' ? (uu.lastCachedTokens as number) : null,
+                      estimatedInitialTokens:
+                        typeof uu.estimatedInitialTokens === 'number' ? (uu.estimatedInitialTokens as number) : null,
+                      sessionLlmCalls: typeof uu.sessionLlmCalls === 'number' ? (uu.sessionLlmCalls as number) : 0,
+                    },
+                    st.id || null,
+                  );
                 }
               } catch {
                 /* 会话元信息同步失败不影响重载 */

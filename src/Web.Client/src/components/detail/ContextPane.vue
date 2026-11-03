@@ -1,15 +1,13 @@
 <!-- src/Web.Client/src/components/detail/ContextPane.vue -->
-<!-- 上下文分页：最大轮数 / 工作目录 / 会话 ID / 已用 tokens。 -->
+<!-- 上下文分页：最大轮数 / 工作目录 / 会话 ID / 人格（P23：删除“已用 Tokens”行，避免与水位线百分比取整差 ±1% 投诉）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useSessionStore } from '@/stores/session';
 import { useHostStore } from '@/stores/host';
-import { formatNumber } from '@/utils/format';
 
 const session = useSessionStore();
 const host = useHostStore();
 
-const used = computed(() => session.usage.input + session.usage.output);
 const cwd = computed(() => session.cwd || host.systemInfo?.cwd || '（未知）');
 </script>
 
@@ -26,10 +24,6 @@ const cwd = computed(() => session.cwd || host.systemInfo?.cwd || '（未知）'
     <div class="crow">
       <span class="clabel">最大轮数</span>
       <span class="cvalue font-mono">{{ session.maxTurns }}</span>
-    </div>
-    <div class="crow">
-      <span class="clabel">已用 Tokens</span>
-      <span class="cvalue font-mono">{{ formatNumber(used) }}</span>
     </div>
     <div v-if="session.persona" class="crow">
       <span class="clabel">当前人格</span>

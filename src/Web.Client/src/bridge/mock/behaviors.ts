@@ -6,16 +6,16 @@ export type MockBehavior =
   | { kind: 'throws'; code: string; message: string };
 
 // P09-fix2 D：Mock 多会话历史（?mock=1 下可复现切换，不再恒返空历史）。
- export interface MockChatMessage {
-   id: string;
-   role: string;
-   text: string;
-   tsMs: number;
-   reasoning?: string;
-   reasoningKind?: 'full' | 'summary';
-   responseId?: string;
-   toolCalls?: unknown[];
- }
+export interface MockChatMessage {
+  id: string;
+  role: string;
+  text: string;
+  tsMs: number;
+  reasoning?: string;
+  reasoningKind?: 'full' | 'summary';
+  responseId?: string;
+  toolCalls?: unknown[];
+}
 
 interface MockSessionData {
   id: string;
@@ -27,11 +27,16 @@ interface MockSessionData {
   messages: MockChatMessage[];
 }
 
- let mockMsgSeq = 0;
- function mockMsg(role: string, text: string, tsMs: number, extra?: Partial<MockChatMessage>): MockChatMessage {
-   mockMsgSeq += 1;
-   return { id: `m-mock-${mockMsgSeq}`, role, text, tsMs, ...extra };
- }
+let mockMsgSeq = 0;
+function mockMsg(
+  role: string,
+  text: string,
+  tsMs: number,
+  extra?: Partial<MockChatMessage>
+): MockChatMessage {
+  mockMsgSeq += 1;
+  return { id: `m-mock-${mockMsgSeq}`, role, text, tsMs, ...extra };
+}
 
 const mockNow = Date.now();
 const mockSessions = new Map<string, MockSessionData>([
@@ -46,23 +51,28 @@ const mockSessions = new Map<string, MockSessionData>([
       mtimeMs: mockNow - 3600000,
       messages: [
         mockMsg('user', '帮我看看这个项目用了哪些依赖', mockNow - 3600000),
-        mockMsg('assistant', '## 分析结果\n\n- 找到 3 个文件\n- 其中 `config.json` 需要修改', mockNow - 3590000, {
-          reasoning: '先列目录，再读 config。',
-          reasoningKind: 'summary',
-          responseId: 'resp-mock-1',
-          toolCalls: [
-            {
-              id: 'tc-mock-1',
-              name: 'web_search',
-              args: '{"query":"halo config"}',
-              ok: true,
-              output: 'mock output',
-              kind: 'unknown',
-              rawType: 'web_search',
-              payload: null,
-            },
-          ],
-        }),
+        mockMsg(
+          'assistant',
+          '## 分析结果\n\n- 找到 3 个文件\n- 其中 `config.json` 需要修改',
+          mockNow - 3590000,
+          {
+            reasoning: '先列目录，再读 config。',
+            reasoningKind: 'summary',
+            responseId: 'resp-mock-1',
+            toolCalls: [
+              {
+                id: 'tc-mock-1',
+                name: 'web_search',
+                args: '{"query":"halo config"}',
+                ok: true,
+                output: 'mock output',
+                kind: 'unknown',
+                rawType: 'web_search',
+                payload: null,
+              },
+            ],
+          }
+        ),
       ],
     },
   ],
@@ -111,15 +121,67 @@ function mockSummary(s: MockSessionData): unknown {
   };
 }
 
- function mockTurnViews(s: MockSessionData): unknown[] {
-   let seq=0; const turns: unknown[]=[]; let cur: Record<string,unknown>|null=null;
-   for (const m of s.messages) {
-     if (m.role === 'user') { if (cur) turns.push(cur); seq++; cur={ turnId: 't-mock-'+seq, user:{ id:m.id, role:'user', content:(m as unknown as {text:string}).text, tsMs:m.tsMs }, injected:[], process:[], final:{ id: 'm-f-'+seq, role:'assistant', content:'', tsMs:m.tsMs } }; }
-     else { if(!cur){ seq++; cur={ turnId: 't-mock-'+seq, user:{ id: 'm-u-'+seq, role:'user', content:'', tsMs:m.tsMs }, injected:[], process:[], final:{ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) } }; } else { const f=(cur as Record<string,unknown>).final as Record<string,unknown>; if(!f.content) cur.final={ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) }; else { ((cur as Record<string,unknown>).process as unknown[]).push({ id:m.id, role:'assistant', content:(m as unknown as {text:string}).text, tsMs:m.tsMs, ...(m as unknown as object) }); } } }
-   }
-   if(cur) turns.push(cur);
-   return turns;
- }
+function mockTurnViews(s: MockSessionData): unknown[] {
+  let seq = 0;
+  const turns: unknown[] = [];
+  let cur: Record<string, unknown> | null = null;
+  for (const m of s.messages) {
+    if (m.role === 'user') {
+      if (cur) turns.push(cur);
+      seq++;
+      cur = {
+        turnId: 't-mock-' + seq,
+        user: {
+          id: m.id,
+          role: 'user',
+          content: (m as unknown as { text: string }).text,
+          tsMs: m.tsMs,
+        },
+        injected: [],
+        process: [],
+        final: { id: 'm-f-' + seq, role: 'assistant', content: '', tsMs: m.tsMs },
+      };
+    } else {
+      if (!cur) {
+        seq++;
+        cur = {
+          turnId: 't-mock-' + seq,
+          user: { id: 'm-u-' + seq, role: 'user', content: '', tsMs: m.tsMs },
+          injected: [],
+          process: [],
+          final: {
+            id: m.id,
+            role: 'assistant',
+            content: (m as unknown as { text: string }).text,
+            tsMs: m.tsMs,
+            ...(m as unknown as object),
+          },
+        };
+      } else {
+        const f = (cur as Record<string, unknown>).final as Record<string, unknown>;
+        if (!f.content)
+          cur.final = {
+            id: m.id,
+            role: 'assistant',
+            content: (m as unknown as { text: string }).text,
+            tsMs: m.tsMs,
+            ...(m as unknown as object),
+          };
+        else {
+          ((cur as Record<string, unknown>).process as unknown[]).push({
+            id: m.id,
+            role: 'assistant',
+            content: (m as unknown as { text: string }).text,
+            tsMs: m.tsMs,
+            ...(m as unknown as object),
+          });
+        }
+      }
+    }
+  }
+  if (cur) turns.push(cur);
+  return turns;
+}
 
 /** Mock 用户发言 / 回放落盘：追加进当前会话，切走切回仍在。 */
 export function mockAppendMessage(role: string, text: string): void {
@@ -131,50 +193,63 @@ export function getCurrentMockSessionId(): string {
   return currentMockSessionId;
 }
 
- // P12-02：未配置态回归分支。默认保持 configured:true（历史行为），测试可经
- // setMockAgentConfigured(false) 切到 configured:false/provider='',model=''，复现切换器直开设置。
- let mockAgentConfigured = true;
- export function setMockAgentConfigured(v: boolean): void {
-   mockAgentConfigured = v;
- }
- function mockSnapshot(sessionId?: string): unknown {
-   const s = (sessionId ? mockSessions.get(sessionId) : undefined) ?? currentMockSession();
-   const agentConfigured = mockAgentConfigured;
-   return {
-     protocol: 1,
-     engine: { version: '0.0.0-mock', pid: 0, startedAtMs: Date.now(), osVersion: 'mock', isWin7: false },
-     session: { id: s.id, cwd: s.cwd, historyPath: s.historyPath },
-     agent: {
-       busy: false,
-       turnId: null,
-       mode: 'ask',
-       modeLabel: '询问模式',
-       persona: '',
-       provider: agentConfigured ? 'deepseek' : '',
-       providerDisplay: agentConfigured ? 'DeepSeek' : '',
-       model: agentConfigured ? 'deepseek-chat' : '',
-       modelDisplay: agentConfigured ? 'deepseek-chat' : '',
-       protocol: 'chat',
-       baseUrl: agentConfigured ? 'https://api.deepseek.com/v1' : '',
-       apiKeySet: agentConfigured,
-       contextWindow: agentConfigured ? 65536 : null,
-       maxTokens: null,
-       acceptsImages: false,
-       includeReasoning: true,
-       proxyInUse: true,
+// P12-02：未配置态回归分支。默认保持 configured:true（历史行为），测试可经
+// setMockAgentConfigured(false) 切到 configured:false/provider='',model=''，复现切换器直开设置。
+let mockAgentConfigured = true;
+export function setMockAgentConfigured(v: boolean): void {
+  mockAgentConfigured = v;
+}
+function mockSnapshot(sessionId?: string): unknown {
+  const s = (sessionId ? mockSessions.get(sessionId) : undefined) ?? currentMockSession();
+  const agentConfigured = mockAgentConfigured;
+  return {
+    protocol: 1,
+    engine: {
+      version: '0.0.0-mock',
+      pid: 0,
+      startedAtMs: Date.now(),
+      osVersion: 'mock',
+      isWin7: false,
+    },
+    session: { id: s.id, cwd: s.cwd, historyPath: s.historyPath },
+    agent: {
+      busy: false,
+      turnId: null,
+      mode: 'ask',
+      modeLabel: '询问模式',
+      persona: '',
+      provider: agentConfigured ? 'deepseek' : '',
+      providerDisplay: agentConfigured ? 'DeepSeek' : '',
+      model: agentConfigured ? 'deepseek-chat' : '',
+      modelDisplay: agentConfigured ? 'deepseek-chat' : '',
+      protocol: 'chat',
+      baseUrl: agentConfigured ? 'https://api.deepseek.com/v1' : '',
+      apiKeySet: agentConfigured,
+      contextWindow: agentConfigured ? 65536 : null,
+      maxTokens: null,
+      acceptsImages: false,
+      includeReasoning: true,
+      proxyInUse: true,
       proxyKind: 'System',
       proxySource: 'global-system',
       proxyMaskedUrl: null,
-       maxTurns: 200,
-       retry: 0,
-       configured: agentConfigured,
-       round: { used: 0, limit: 200 },
-     },
-     usage: { input: 0, output: 0 },
-     queue: { length: 0 },
-     turns: mockTurnViews(s),
-   };
- }
+      maxTurns: 200,
+      retry: 0,
+      configured: agentConfigured,
+      round: { used: 0, limit: 200 },
+    },
+    usage: {
+      input: 0,
+      output: 0,
+      lastPromptTokens: null,
+      lastCachedTokens: null,
+      estimatedInitialTokens: 2048,
+      sessionLlmCalls: 0,
+    },
+    queue: { length: 0 },
+    turns: mockTurnViews(s),
+  };
+}
 
 function mockSettings(): unknown {
   return {
@@ -193,15 +268,15 @@ function mockSettings(): unknown {
         effective: { inUse: true, source: 'global-system', maskedUrl: null, warning: null },
         modelCount: 2,
         models: [
-           {
-             id: 'deepseek-chat',
-             displayName: '',
-             protocol: 'chat',
-             contextWindow: 65536,
-             maxTokens: null,
-             acceptsImages: false,
-             includeReasoningHistory: true,
-           },
+          {
+            id: 'deepseek-chat',
+            displayName: '',
+            protocol: 'chat',
+            contextWindow: 65536,
+            maxTokens: null,
+            acceptsImages: false,
+            includeReasoningHistory: true,
+          },
           {
             id: 'shared-name',
             displayName: 'Shared',
@@ -211,15 +286,15 @@ function mockSettings(): unknown {
             acceptsImages: true,
             includeReasoningHistory: true,
           },
-           {
-             id: 'deepseek-reasoner',
-             displayName: '',
-             protocol: 'responses',
-             contextWindow: 128000,
-             maxTokens: null,
-             acceptsImages: false,
-             includeReasoningHistory: true,
-           },
+          {
+            id: 'deepseek-reasoner',
+            displayName: '',
+            protocol: 'responses',
+            contextWindow: 128000,
+            maxTokens: null,
+            acceptsImages: false,
+            includeReasoningHistory: true,
+          },
         ],
       },
       {
@@ -254,66 +329,172 @@ function mockSettings(): unknown {
         ],
       },
     ],
-     proxy: { mode: 'system', url: null },
-     retry: 0,
-     maxTurns: 200,
-     persona: '',
-     compactKeepTail: 2,
-     autoCompactOnLimit: false,
-     dataDir: '(mock)',
-     configPath: '(mock)/config.json',
-   };
- }
- // P16 mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
- function mockUsageRows(): unknown[] {
-   const day = 86400000;
-   const now = Date.now();
-   const mk = (i: number, ts: number, providerId: string, modelId: string, prompt: number, cached: number, output: number) => ({
-     tsMs: ts, sessionId: 's-mock-1', turnId: `t-mock-${i}`, providerId, providerDisplay: providerId,
-     modelId, modelDisplay: modelId, protocol: 'chat', prompt, cached, output,
-     total: prompt + output, hitRate: prompt > 0 ? cached / prompt : 0, truncated: 0,
-   });
-   return [
-     mk(1, now - 2 * day, 'openai', 'shared-name', 40000, 10000, 15000),
-     mk(2, now - 1 * day, 'openai', 'shared-name', 40000, 10000, 15000),
-     mk(3, now, 'openai', 'shared-name', 20000, 5000, 8000),
-     mk(4, now, 'other', 'shared-name', 20000, 5000, 7000),
-   ];
- }
- function mockUsageSummary(): unknown {
-   const rows = mockUsageRows() as { tsMs: number; providerId: string; modelId: string; prompt: number; cached: number; output: number }[];
-   const input = rows.reduce((a, r) => a + r.prompt, 0);
-   const cached = rows.reduce((a, r) => a + r.cached, 0);
-   const output = rows.reduce((a, r) => a + r.output, 0);
-   const byDayMap = new Map<string, { input: number; cached: number; output: number }>();
-   for (const r of rows) {
-     const d = new Date(r.tsMs);
-     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-     const e = byDayMap.get(key) ?? { input: 0, cached: 0, output: 0 };
-     e.input += r.prompt; e.cached += r.cached; e.output += r.output;
-     byDayMap.set(key, e);
-   }
-   const byDay = [...byDayMap.entries()].map(([day, v]) => ({ day, ...v })).sort((a, b) => (a.day < b.day ? -1 : 1));
-   const byModelMap = new Map<string, { providerId: string; modelId: string; input: number; cached: number; output: number; requests: number }>();
-   for (const r of rows) {
-     const k = `${r.providerId} ${r.modelId}`;
-     const e = byModelMap.get(k) ?? { providerId: r.providerId, modelId: r.modelId, input: 0, cached: 0, output: 0, requests: 0 };
-     e.input += r.prompt; e.cached += r.cached; e.output += r.output; e.requests += 1; // P21-F3：requests 按行累加，一行=一回合，非网络请求次数
-     byModelMap.set(k, e);
-   }
-   const byModel = [...byModelMap.values()].map((m) => ({
-     providerId: m.providerId, providerDisplay: m.providerId, modelId: m.modelId, modelDisplay: m.modelId,
-     input: m.input, cached: m.cached, output: m.output, requests: m.requests,
-     hitRate: m.input > 0 ? m.cached / m.input : 0,
-   }));
-   return { input, cached, output, total: input + output, requests: rows.length, // P21-F3：一行=一回合，非网络请求次数
-    hitRate: input > 0 ? cached / input : 0, byDay, byModel };
- }
+    proxy: { mode: 'system', url: null },
+    retry: 0,
+    maxTurns: 200,
+    persona: '',
+    compactKeepTail: 2,
+    autoCompactOnLimit: false,
+    dataDir: '(mock)',
+    configPath: '(mock)/config.json',
+  };
+}
+// P16 mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
+function mockUsageRows(): unknown[] {
+  const day = 86400000;
+  const now = Date.now();
+  const mk = (
+    i: number,
+    ts: number,
+    providerId: string,
+    modelId: string,
+    prompt: number,
+    cached: number,
+    output: number,
+    llmCalls: number
+  ) => ({
+    tsMs: ts,
+    sessionId: 's-mock-1',
+    turnId: `t-mock-${i}`,
+    providerId,
+    providerDisplay: providerId,
+    modelId,
+    modelDisplay: modelId,
+    protocol: 'chat',
+    prompt,
+    cached,
+    output,
+    total: prompt + output,
+    hitRate: prompt > 0 ? cached / prompt : 0,
+    llmCalls,
+    truncated: 0,
+  });
+  return [
+    mk(1, now - 2 * day, 'openai', 'shared-name', 40000, 10000, 15000, 1),
+    mk(2, now - 1 * day, 'openai', 'shared-name', 40000, 10000, 15000, 3),
+    mk(3, now, 'openai', 'shared-name', 20000, 5000, 8000, 2),
+    mk(4, now, 'other', 'shared-name', 20000, 5000, 7000, 1),
+  ];
+}
+function mockUsageSummary(): unknown {
+  const rows = mockUsageRows() as {
+    tsMs: number;
+    providerId: string;
+    modelId: string;
+    prompt: number;
+    cached: number;
+    output: number;
+    llmCalls: number;
+  }[];
+  const input = rows.reduce((a, r) => a + r.prompt, 0);
+  const cached = rows.reduce((a, r) => a + r.cached, 0);
+  const output = rows.reduce((a, r) => a + r.output, 0);
+  const llmCalls = rows.reduce((a, r) => a + r.llmCalls, 0);
+  const byDayMap = new Map<string, { input: number; cached: number; output: number }>();
+  for (const r of rows) {
+    const d = new Date(r.tsMs);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const e = byDayMap.get(key) ?? { input: 0, cached: 0, output: 0 };
+    e.input += r.prompt;
+    e.cached += r.cached;
+    e.output += r.output;
+    byDayMap.set(key, e);
+  }
+  const byDay = [...byDayMap.entries()]
+    .map(([day, v]) => ({ day, ...v }))
+    .sort((a, b) => (a.day < b.day ? -1 : 1));
+  const byModelMap = new Map<
+    string,
+    {
+      providerId: string;
+      modelId: string;
+      input: number;
+      cached: number;
+      output: number;
+      requests: number;
+      llmCalls: number;
+    }
+  >();
+  for (const r of rows) {
+    const k = `${r.providerId} ${r.modelId}`;
+    const e = byModelMap.get(k) ?? {
+      providerId: r.providerId,
+      modelId: r.modelId,
+      input: 0,
+      cached: 0,
+      output: 0,
+      requests: 0,
+      llmCalls: 0,
+    };
+    e.input += r.prompt;
+    e.cached += r.cached;
+    e.output += r.output;
+    e.requests += 1;
+    e.llmCalls += r.llmCalls; // P21-F3：requests 按行累加，一行=一回合，非网络请求次数
+    byModelMap.set(k, e);
+  }
+  const byModel = [...byModelMap.values()].map((m) => ({
+    providerId: m.providerId,
+    providerDisplay: m.providerId,
+    modelId: m.modelId,
+    modelDisplay: m.modelId,
+    input: m.input,
+    cached: m.cached,
+    output: m.output,
+    requests: m.requests,
+    llmCalls: m.llmCalls,
+    hitRate: m.input > 0 ? m.cached / m.input : 0,
+  }));
+  return {
+    input,
+    cached,
+    output,
+    total: input + output,
+    requests: rows.length,
+    llmCalls, // P21-F3：一行=一回合，非网络请求次数；P24：llmCalls 为落盘 turn 的调用次数总和
+    hitRate: input > 0 ? cached / input : 0,
+    byDay,
+    byModel,
+  };
+}
 
 export const BEHAVIORS: Record<string, MockBehavior> = {
-  'system.ping': { kind: 'ok', run: () => ({ pong: true, version: '0.0.0-mock', protocol: 1, pid: 0, uptimeMs: 12345, serverTimeMs: Date.now() }) },
-  'system.info': { kind: 'ok', run: () => ({ version: '0.0.0-mock', protocol: 1, pid: 0, osVersion: 'mock', isWin7: false, is64BitOs: true, is64BitProcess: true, runtime: 'mock', dataDir: '(mock)', startedAtMs: Date.now() }) },
-  'system.protocol': { kind: 'ok', run: () => ({ version: 1, encoding: 'ndjson', maxFrameBytes: 16777216, methods: Object.keys(BEHAVIORS), events: [] }) },
+  'system.ping': {
+    kind: 'ok',
+    run: () => ({
+      pong: true,
+      version: '0.0.0-mock',
+      protocol: 1,
+      pid: 0,
+      uptimeMs: 12345,
+      serverTimeMs: Date.now(),
+    }),
+  },
+  'system.info': {
+    kind: 'ok',
+    run: () => ({
+      version: '0.0.0-mock',
+      protocol: 1,
+      pid: 0,
+      osVersion: 'mock',
+      isWin7: false,
+      is64BitOs: true,
+      is64BitProcess: true,
+      runtime: 'mock',
+      dataDir: '(mock)',
+      startedAtMs: Date.now(),
+    }),
+  },
+  'system.protocol': {
+    kind: 'ok',
+    run: () => ({
+      version: 1,
+      encoding: 'ndjson',
+      maxFrameBytes: 16777216,
+      methods: Object.keys(BEHAVIORS),
+      events: [],
+    }),
+  },
   'system.diagnostics': { kind: 'ok', run: () => ({}) },
   'system.shutdown': { kind: 'ok', run: () => ({ ok: true }) },
 
@@ -359,7 +540,10 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
       return { count: s.messages.length, turns: mockTurnViews(s) };
     },
   },
-  'session.list': { kind: 'ok', run: () => ({ items: [...mockSessions.values()].map(mockSummary) }) },
+  'session.list': {
+    kind: 'ok',
+    run: () => ({ items: [...mockSessions.values()].map(mockSummary) }),
+  },
   'session.rename': {
     kind: 'ok',
     run: (p) => {
@@ -376,80 +560,155 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
       if (id) {
         mockSessions.delete(id);
         if (currentMockSessionId === id) {
-          currentMockSessionId = mockSessions.keys().next().value as string ?? id;
+          currentMockSessionId = (mockSessions.keys().next().value as string) ?? id;
         }
       }
       return { ok: true };
     },
   },
   'session.clear': { kind: 'ok', run: () => ({ ok: true }) },
-   'session.compact': { kind: 'ok', run: () => ({ removed: 0, summary: '', totalBefore: 0, totalAfter: 0, keptCount: 0 }) },
-  'session.setCwd': { kind: 'ok', run: (p) => ({ cwd: (p as { path?: string } | null)?.path ?? '(mock)' }) },
+  'session.compact': {
+    kind: 'ok',
+    run: () => ({ removed: 0, summary: '', totalBefore: 0, totalAfter: 0, keptCount: 0 }),
+  },
+  'session.setCwd': {
+    kind: 'ok',
+    run: (p) => ({ cwd: (p as { path?: string } | null)?.path ?? '(mock)' }),
+  },
 
   'state.snapshot': { kind: 'ok', run: () => mockSnapshot() },
-  'state.setMode': { kind: 'ok', run: (p) => ({ mode: (p as { mode?: string } | null)?.mode ?? 'ask', label: 'Mock' }) },
-  'state.setPersona': { kind: 'ok', run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '' }) },
-  'state.setMaxTurns': { kind: 'ok', run: (p) => ({ maxTurns: (p as { value?: number } | null)?.value ?? 200 }) },
-  'state.setRetry': { kind: 'ok', run: (p) => ({ retry: (p as { value?: number } | null)?.value ?? 0 }) },
+  'state.setMode': {
+    kind: 'ok',
+    run: (p) => ({ mode: (p as { mode?: string } | null)?.mode ?? 'ask', label: 'Mock' }),
+  },
+  'state.setPersona': {
+    kind: 'ok',
+    run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '' }),
+  },
+  'state.setMaxTurns': {
+    kind: 'ok',
+    run: (p) => ({ maxTurns: (p as { value?: number } | null)?.value ?? 200 }),
+  },
+  'state.setRetry': {
+    kind: 'ok',
+    run: (p) => ({ retry: (p as { value?: number } | null)?.value ?? 0 }),
+  },
 
-   'settings.get': { kind: 'ok', run: () => mockSettings() },
-   'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
-   'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
-   'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [], warnings: [] }) },
-   'settings.saveBehavior': { kind: 'ok', run: () => ({ ok: true, warnings: [] }) },
-   'settings.probeModels': { kind: 'ok', run: () => ({ models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'], via: { source: 'global-system', maskedUrl: null }, latencyMs: 123 }) },
-  'settings.mcp.get': { kind: 'ok', run: () => ({ path: '(mock)/mcp.json', text: '{"mcpServers":{}}' }) },
+  'settings.get': { kind: 'ok', run: () => mockSettings() },
+  'settings.saveProviders': { kind: 'ok', run: () => ({ ok: true, warnings: [], errors: [] }) },
+  'settings.setActive': { kind: 'ok', run: () => ({ ok: true }) },
+  'settings.saveNetwork': { kind: 'ok', run: () => ({ ok: true, notes: [], warnings: [] }) },
+  'settings.saveBehavior': { kind: 'ok', run: () => ({ ok: true, warnings: [] }) },
+  'settings.probeModels': {
+    kind: 'ok',
+    run: () => ({
+      models: ['deepseek-chat', 'probe-new-a', 'probe-new-b'],
+      via: { source: 'global-system', maskedUrl: null },
+      latencyMs: 123,
+    }),
+  },
+  'settings.mcp.get': {
+    kind: 'ok',
+    run: () => ({ path: '(mock)/mcp.json', text: '{"mcpServers":{}}' }),
+  },
   'settings.mcp.save': { kind: 'ok', run: () => ({ ok: true, notes: [] }) },
 
   'asset.skills.list': { kind: 'ok', run: () => ({ items: [], warnings: [] }) },
-  'asset.skills.get': { kind: 'ok', run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '', body: '', source: 'user' }) },
+  'asset.skills.get': {
+    kind: 'ok',
+    run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '', body: '', source: 'user' }),
+  },
   'asset.skills.save': { kind: 'ok', run: () => ({ ok: true }) },
   'asset.skills.delete': { kind: 'ok', run: () => ({ ok: true }) },
   'asset.skills.run': { kind: 'throws', code: 'notSupported', message: '技能执行尚未接通' },
   'asset.themes.list': { kind: 'ok', run: () => ({ items: [] }) },
   'asset.themes.get': { kind: 'throws', code: 'asset.notFound', message: 'Mock 环境无用户主题' },
   'asset.personas.list': { kind: 'ok', run: () => ({ items: [] }) },
-  'asset.personas.get': { kind: 'ok', run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '', body: '' }) },
+  'asset.personas.get': {
+    kind: 'ok',
+    run: (p) => ({ name: (p as { name?: string } | null)?.name ?? '', body: '' }),
+  },
   'asset.personas.save': { kind: 'ok', run: () => ({ ok: true }) },
   'asset.personas.delete': { kind: 'ok', run: () => ({ ok: true }) },
   'asset.memory.list': { kind: 'ok', run: () => ({ items: [] }) },
-  'asset.memory.get': { kind: 'ok', run: () => ({ name: '', description: '', mtype: '', scope: '', body: '' }) },
+  'asset.memory.get': {
+    kind: 'ok',
+    run: () => ({ name: '', description: '', mtype: '', scope: '', body: '' }),
+  },
   'asset.memory.save': { kind: 'ok', run: () => ({ ok: true, filename: 'mock.md' }) },
   'asset.memory.delete': { kind: 'ok', run: () => ({ ok: true }) },
 
-  'tool.list': { kind: 'ok', run: () => ({ items: [{ name: 'read_file', description: '读文件', source: 'builtin' }, { name: 'write_file', description: '写文件', source: 'builtin' }] }) },
+  'tool.list': {
+    kind: 'ok',
+    run: () => ({
+      items: [
+        { name: 'read_file', description: '读文件', source: 'builtin' },
+        { name: 'write_file', description: '写文件', source: 'builtin' },
+      ],
+    }),
+  },
   'tool.undoList': { kind: 'ok', run: () => ({ items: [] }) },
   'tool.undoRollback': { kind: 'ok', run: () => ({ ok: true, orig: '' }) },
   'tool.mcpStatus': { kind: 'ok', run: () => ({ servers: [] }) },
-  'tool.result': { kind: 'ok', run: (p) => { const o=(p as {toolCallId?:string;offset?:number;limit?:number}|null)??{}; return { toolCallId: o.toolCallId ?? '', argsSlice: '', outputSlice: '', argsTotal: 0, outputTotal: 0, found: false, reason: 'released' }; } },
+  'tool.result': {
+    kind: 'ok',
+    run: (p) => {
+      const o = (p as { toolCallId?: string; offset?: number; limit?: number } | null) ?? {};
+      return {
+        toolCallId: o.toolCallId ?? '',
+        argsSlice: '',
+        outputSlice: '',
+        argsTotal: 0,
+        outputTotal: 0,
+        found: false,
+        reason: 'released',
+      };
+    },
+  },
 
   'fs.listDir': { kind: 'ok', run: () => ({ items: [] }) },
   'fs.completePaths': { kind: 'ok', run: () => ({ items: [] }) },
-  'fs.validatePath': { kind: 'ok', run: (p) => ({ valid: true, normalized: (p as { path?: string } | null)?.path ?? '', isDir: true }) },
+  'fs.validatePath': {
+    kind: 'ok',
+    run: (p) => ({
+      valid: true,
+      normalized: (p as { path?: string } | null)?.path ?? '',
+      isDir: true,
+    }),
+  },
 
-   'update.check': { kind: 'ok', run: () => ({ available: false, latestVersion: null, notes: 'Mock 环境无更新源' }) },
-   'update.install': { kind: 'ok', run: () => ({ started: false }) },
- 
-   // usage 5 (P16 mock：3 天数据，两个 provider 同名模型各一行，验证双键拆分)
-   'usage.summary': { kind: 'ok', run: () => mockUsageSummary() },
-   'usage.query': {
-     kind: 'ok',
-     run: (p) => {
-       const o = (p as { page?: number; pageSize?: number } | null) ?? {};
-       const page = Math.max(1, o.page ?? 1);
-       const pageSize = Math.min(200, Math.max(1, o.pageSize ?? 50));
-       const items = mockUsageRows().slice((page - 1) * pageSize, page * pageSize);
-       return { items, total: mockUsageRows().length };
-     },
-   },
-   'usage.stats': { kind: 'ok', run: () => ({ sizeBytes: 123456, rowCount: mockUsageRows().length }) },
-   'usage.export': {
-     kind: 'ok',
-     run: () => ({ csv: '"时间","session_id","turn_id","provider","model","protocol","输入","缓存","输出","合计","命中率","截断"\r\n', truncated: false }),
-   },
-    'usage.clear': { kind: 'ok', run: () => ({ removed: 0 }) },
-    'usage.exportFile': {
-      kind: 'ok',
-      run: () => ({ path: '(mock)/usage.csv', wrote: 4, truncated: false }),
+  'update.check': {
+    kind: 'ok',
+    run: () => ({ available: false, latestVersion: null, notes: 'Mock 环境无更新源' }),
+  },
+  'update.install': { kind: 'ok', run: () => ({ started: false }) },
+
+  // usage 5 (P16 mock：3 天数据，两个 provider 同名模型各一行，验证双键拆分)
+  'usage.summary': { kind: 'ok', run: () => mockUsageSummary() },
+  'usage.query': {
+    kind: 'ok',
+    run: (p) => {
+      const o = (p as { page?: number; pageSize?: number } | null) ?? {};
+      const page = Math.max(1, o.page ?? 1);
+      const pageSize = Math.min(200, Math.max(1, o.pageSize ?? 50));
+      const items = mockUsageRows().slice((page - 1) * pageSize, page * pageSize);
+      return { items, total: mockUsageRows().length };
     },
- };
+  },
+  'usage.stats': {
+    kind: 'ok',
+    run: () => ({ sizeBytes: 123456, rowCount: mockUsageRows().length }),
+  },
+  'usage.export': {
+    kind: 'ok',
+    run: () => ({
+      csv: '"时间","session_id","turn_id","provider","model","protocol","输入","缓存","输出","合计","LLM调用","命中率","截断"\r\n',
+      truncated: false,
+    }),
+  },
+  'usage.clear': { kind: 'ok', run: () => ({ removed: 0 }) },
+  'usage.exportFile': {
+    kind: 'ok',
+    run: () => ({ path: '(mock)/usage.csv', wrote: 4, truncated: false }),
+  },
+};

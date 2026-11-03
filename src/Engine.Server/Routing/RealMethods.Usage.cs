@@ -70,6 +70,7 @@ public sealed partial class RealMethods
             cached = e.CachedTokens,
             output = e.CompletionTokens,
             total = e.TotalTokens,
+            llmCalls = e.LlmCalls,
             hitRate = HitRateOf(e.PromptTokens, e.CachedTokens),
             truncated = e.Truncated,
             degraded = _usageStore.Degraded,
@@ -89,6 +90,7 @@ public sealed partial class RealMethods
             output = s.Output,
             total = s.Total,
             requests = s.Requests,
+            llmCalls = s.LlmCalls,
             hitRate = s.HitRate,
             byDay = s.ByDay.Select(d => new { day = d.Day, input = d.Input, cached = d.Cached, output = d.Output }).ToList(),
             byModel = s.ByModel.Select(m => new
@@ -101,6 +103,7 @@ public sealed partial class RealMethods
                 cached = m.Cached,
                 output = m.Output,
                 requests = m.Requests,
+                llmCalls = m.LlmCalls,
                 hitRate = m.HitRate,
             }).ToList(),
             degraded = _usageStore.Degraded,

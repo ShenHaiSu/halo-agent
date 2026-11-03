@@ -61,7 +61,7 @@ const simpleScenario: Scenario = {
       kind: 'turn.finished',
       payload: { turnId: 'mock-turn-1', text: '我先列出目录看看有哪些压缩包。', truncated: false },
     },
-    { afterMs: 50, kind: 'usage', payload: { prompt: 1200, completion: 80 } },
+    { afterMs: 50, kind: 'usage', payload: { prompt: 1200, completion: 80, cached: 200, llmCalls: 1 } },
   ],
 };
 
@@ -127,7 +127,7 @@ const toolScenario: Scenario = {
       kind: 'turn.finished',
       payload: { turnId: 'mock-turn-1', text: '归档完成。', truncated: false },
     },
-    { afterMs: 50, kind: 'usage', payload: { prompt: 2400, completion: 210 } },
+    { afterMs: 50, kind: 'usage', payload: { prompt: 2400, completion: 210, cached: 400, llmCalls: 2 } },
   ],
 };
 
