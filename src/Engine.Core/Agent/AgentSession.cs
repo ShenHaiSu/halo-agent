@@ -130,10 +130,18 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private const int RepeatWarn = 3;
      private const int RepeatAbort = 6;
      private const int ContextMaxChars = 20_000;
-     /// <summary>P22：压缩保留轮数（实例字段，活会话经 ReconfigureActive 更新；/compact 与自动压缩共用）。</summary>
-     private int _compactKeepTail = 2;
-     /// <summary>P22：超限自动压缩开关（无头下无效，保持“必停”语义）。</summary>
-     private bool _autoCompactOnLimit;
+    /// <summary>P22：压缩保留轮数（实例字段，活会话经 ReconfigureActive 更新；/compact 与自动压缩共用）。</summary>
+    private int _compactKeepTail = 2;
+    /// <summary>P22：超限自动压缩开关（无头下无效，保持“必停”语义）。</summary>
+    private bool _autoCompactOnLimit;
+    /// <summary>
+    /// P24 紧急开关：为 false 时退回旧行为（不做取消权威化）。
+    /// 为什么需要：D1 的改动在「取消+网络异常」路径上改变了控制流，
+    /// 若线上出现非预期（如误判取消导致正常响应被丢弃），可一键回退而不发版。
+    /// 默认 true；通过环境变量 HALO_P24_CANCEL_AUTH=0 关闭。
+    /// </summary>
+    private static readonly bool CancelAuthEnabled =
+        Environment.GetEnvironmentVariable("HALO_P24_CANCEL_AUTH") != "0";
  
        public AgentSession(
            ILlmClient llm,
@@ -178,6 +186,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     // ============================================================
 
     public bool IsBusy => _busy;
+    /// <summary>P24：本 turn 已发起的 LLM 请求次数（用于断言“取消后不再发请求”）。</summary>
+    internal long TurnLlmCallsForTest { get { lock (_lock) return _turnLlmCalls; } }
+    /// <summary>P24：当前 turn 是否处于取消态（用于断言收尾时机）。</summary>
+    public bool IsTurnCancelling => _turnCts?.IsCancellationRequested == true;
     public string SessionId => _store.SessionId;
     public string? HistoryPath => _store.HistoryPath;
     public string Cwd => _cwd;
@@ -412,8 +424,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     {
         var cts = _turnCts;
         if (cts is null) return false;
-        try { cts.Cancel(); } catch { }
-        _pendingAsk?.Cancel();
+        try { cts.Cancel(); } catch { }      // ★ 必须先置取消态（D6 安全依赖此顺序）
+        var ask = _pendingAsk;               // ★ P24-D8：先取引用再置空，避免与 AnswerAsk 的写入竞态
+        _pendingAsk = null;
+        ask?.Cancel();
         return true;
     }
 
@@ -490,12 +504,21 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var slot = new PendingAskSlot { Ask = ask };
         _pendingAsk = slot;
 
-        await _bus.PublishStateAsync(
-            ask.Kind == "rounds" ? EventKinds.AskRounds : EventKinds.AskPermission,
-            ask, ct).ConfigureAwait(false);
-
+        // ★ P24-D6 为什么“取消早于 slot 建立”不会丢信号：
+        //   CancellationToken.Register 在 token 已取消时会同步执行回调，
+        //   因此即使 CancelTurn 在 _pendingAsk 赋值之前到达（_pendingAsk?.Cancel() 空操作），
+        //   cts.Cancel() 也已经把 turnCts 置为取消态，
+        //   随后这里的 Register 会立刻回调 slot.Cancel() → 询问立即返回 (false,false)。
+        //   单元测试 P24_CancelBeforeAskSlot_StillDenies 钉死该语义，禁止改成 WaitHandle 等写法。
+        //   注意：CancelTurn 里 cts.Cancel() 必须先于 _pendingAsk?.Cancel()（顺序不可调换）。
         try
         {
+            // ★ P24-D8：询问帧必须发出去（用 None），否则 ct 已取消时既不发帧、
+            //   又因抛在 try 之外导致 finally 不执行、_pendingAsk 残留到下一 turn。
+            await _bus.PublishStateAsync(
+                ask.Kind == "rounds" ? EventKinds.AskRounds : EventKinds.AskPermission,
+                ask, CancellationToken.None).ConfigureAwait(false);
+
             using var reg = ct.Register(slot.Cancel);
             var answer = await slot.Answer.ConfigureAwait(false);
             return answer;
@@ -541,7 +564,27 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          catch (OperationCanceledException)
          {
              try { RecordTurnUsage(turnId, true); } catch { }
-             await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+
+             // ★ P24-D2：流式中取消也必须发 turn.finished。
+             //   之前这里直接 PublishBusyAsync(false)，前端只收到 state.busyChanged{false}，
+             //   而它不清 currentTurn、不 finalizeTurn → 残稿不落地、无终态文案。
+             //   与工具边界取消（:746/:778）保持完全一致的收尾语义。
+             //   用 CancellationToken.None：_bus.PublishStateAsync 带已取消的 ct 会直接抛，收尾帧发不出去。
+             try
+             {
+                 var used = Math.Max(_roundUsed, 1);
+                await FinishAsync(turnId, "⏹ 生成已中断", truncated: true,
+                    ct: CancellationToken.None, finalUsed: used, byUser: true)
+                     .ConfigureAwait(false);
+             }
+             catch (Exception finEx)
+             {
+                 // 收尾失败不能掩盖取消本身（否则前端彻底无感知），但要留痕。
+                 // 兜底：至少让前端退出 busy，否则永久卡住。
+                 _log.LogWarning(finEx, "取消收尾失败，回落为裸 busy=false");
+                 await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+             }
+
              throw;
          }
          catch (Exception ex)
@@ -552,20 +595,25 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  new NoticePayload { Text = msg, Level = "error" },
                  CancellationToken.None).ConfigureAwait(false);
  
-             try {
+             try
+             {
                  int fu;
                  lock (_lock) fu = Math.Max(_roundUsed, 1);
                  try {
                      Record(ChatMessage.Assistant(msg) with { TurnId = turnId, Ord = fu });
                  } catch { }
-                 _bus.FlushDeltasBlocking();
-                 await _bus.PublishStateAsync(EventKinds.TurnFinished,
-                     new TurnFinishedPayload { TurnId = turnId, Text = msg, Truncated = true, Reason = ex.Message, FinalUsed = fu },
-                     CancellationToken.None).ConfigureAwait(false);
-                 try { RecordTurnUsage(turnId, true); } catch { }
-             } catch { }
- 
-             await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+                 // ★ P24-S1：改走统一出口；reason 保留原始异常信息便于排查。
+                 await FinishAsync(turnId, msg, truncated: true,
+                     ct: CancellationToken.None, finalUsed: fu, reason: ex.Message)
+                     .ConfigureAwait(false);
+             }
+             catch (Exception finEx)
+             {
+                 _log.LogWarning(finEx, "异常收尾失败，回落为裸 busy=false");
+                 await PublishBusyAsync(false, CancellationToken.None).ConfigureAwait(false);
+             }
+
+             throw;
              throw;
          }
         finally
@@ -743,10 +791,13 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     _bus.FlushDeltasBlocking();
                     await _bus.PublishStateAsync(EventKinds.RoundEnded,
                         new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used)
+                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used, byUser: true)
                         .ConfigureAwait(false);
                     return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
                 }
+                // ★ P24-D1（CP-4）：执行前兑现取消。上面的 :749 分支处理“循环进入时已取消”，
+                //   这里处理“上一个工具执行完之后、下一个开始之前”落下的取消，避免再起新工具。
+                EnsureNotCancelled(ct, "tool-before-execute");
 
                 var tc = reply.ToolCalls[i];
                 toolCallCount++;
@@ -775,7 +826,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                     _bus.FlushDeltasBlocking();
                     await _bus.PublishStateAsync(EventKinds.RoundEnded,
                         new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used)
+                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used, byUser: true)
                         .ConfigureAwait(false);
                     return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
                 }
@@ -819,7 +870,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
         while (true)
         {
-            ct.ThrowIfCancellationRequested();
+            EnsureNotCancelled(ct, "round-start");
 
             AssistantReply reply;
             try
@@ -850,10 +901,9 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                var reason = RetryPolicy.GetRetryReason(ex);
-                if (reason is null || attempt >= _retry) throw;
-
-                attempt++;
+                var (retry, next, reason) = ClassifyRetry(ex, attempt, ct);
+                if (!retry) throw;
+                attempt = next;
                 await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
                 continue;
             }
@@ -892,7 +942,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         bool rebuilt = false;
         while (true)
         {
-             ct.ThrowIfCancellationRequested();
+             EnsureNotCancelled(ct, "round-start");
              string? prev;
              List<ChatMessage> snap;
              bool includeReasoning;
@@ -949,9 +999,9 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
               }
             catch (Exception ex)
             {
-                var reason = RetryPolicy.GetRetryReason(ex);
-                if (reason is null || attempt >= _retry) throw;
-                attempt++;
+                var (retry, next, reason) = ClassifyRetry(ex, attempt, ct);
+                if (!retry) throw;
+                attempt = next;
                 await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
                 continue;
             }
@@ -1006,9 +1056,50 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         return new AssistantReply { Content = r.Content, ReasoningContent = r.ReasoningContent, ToolCalls = calls, Usage = r.Usage, TruncatedByLength = r.TruncatedByLength };
     }
 
+    /// <summary>
+    /// P24-D1：取消的唯一兑现点之一。任何可能阻塞/发起新请求的位置，必须先过这里。
+    /// 为什么不用 ct.ThrowIfCancellationRequested()：
+    ///   ① 需要统一的“取消收尾”语义（记录 + 事件），裸 Throw 分散在各处易漏；
+    ///   ② 需要日志留痕，便于线上定位“为什么没停”。
+    /// </summary>
+    private void EnsureNotCancelled(CancellationToken ct, string site)
+    {
+        if (!ct.IsCancellationRequested) return;
+        _log.LogInformation("[cancel] 在 {Site} 兑现取消", site);
+        throw new OperationCanceledException(ct);
+    }
+
+    /// <summary>
+    /// P24-D1：重试前的统一闸门。返回「要不要重试 + 下一次的 attempt 与原因」。
+    /// 取消已置位时直接抛 OCE（归一化），绝不返回 Retry=true。
+    /// 抽出来的唯一目的：让 ChatWithRetryAsync / ResponsesWithRetryAsync 不可能写得不一致。
+    /// </summary>
+    private (bool Retry, int Attempt, string Reason) ClassifyRetry(
+        Exception ex, int attempt, CancellationToken ct)
+    {
+        if (CancelAuthEnabled && ct.IsCancellationRequested)
+        {
+            _log.LogInformation("[cancel] 取消与异常同现（{Type}），放弃重试", ex.GetType().Name);
+            _log.LogInformation("[cancel][stat] d1-hit");
+            _bus.FlushNow();
+            throw new OperationCanceledException(ct);
+        }
+
+        var reason = RetryPolicy.GetRetryReason(ex);
+        if (reason is null || attempt >= _retry) return (false, attempt, "");
+        return (true, attempt + 1, reason);
+    }
+
     private async Task HandleRetryAsync(int attempt, string reason, CancellationToken ct)
     {
-        // 通知 UI：把本轮已吐出的半截流式输出撤掉（否则会"半截 + 完整"拼接）
+        // ★ P24-D1（CP-3）：这里必须显式判定，不能依赖「传进去的 ct 已取消，
+        //   所以 PublishStateAsync / Task.Delay 自然会抛」这种偶然兜底。
+        //   为什么这一处就能覆盖全部重试：
+        //     :857 / :955  catch (Exception) 分支
+        //     :869 / :990  空回复重试（★ 在 try/catch 之外，只有这里能拦住）
+        if (CancelAuthEnabled) EnsureNotCancelled(ct, "retry-before-notify");
+
+        // 通知 UI：把本轮已吐出的半截流式输出撤掉（否则会“半截 + 完整”拼接）
         await _bus.PublishStateAsync(EventKinds.LlmRetrying,
             new LlmRetryingPayload { Attempt = attempt, Max = _retry, Reason = reason },
             ct).ConfigureAwait(false);
@@ -1805,8 +1896,17 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }, ct).ConfigureAwait(false);
     }
 
-     private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null)
+    // ★ P24：参数已增至 7 个，新调用点必须使用命名参数，
+    //   禁止 FinishAsync(turnId, text, true, ct, 3, null, true) 这类位置写法。
+     private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null, bool byUser = false)
      {
+        // ★ P24：ByUser 蕴含 Truncated，违反即编程错误。
+        //   用 Debug.Fail 而非 throw：生产环境不因日志断言炸掉用户会话。
+        if (byUser && !truncated)
+        {
+            System.Diagnostics.Debug.Fail("P24: ByUser=true 必须 Truncated=true");
+            _log.LogError("P24: ByUser=true 但 Truncated=false（编程错误），已按截断处理");
+        }
          RecordTurnUsage(turnId, truncated);
          _bus.FlushDeltasBlocking();
          string? rid;
@@ -1820,6 +1920,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  ResponseId = rid,
                  FinalUsed = finalUsed,
                  Reason = reason,
+                 // ★ P24-D4：ByUser 只由「用户主动中断」的 3 个调用点置 true。
+                 ByUser = byUser,
              }, ct).ConfigureAwait(false);
          await PublishBusyAsync(false, ct).ConfigureAwait(false);
      }

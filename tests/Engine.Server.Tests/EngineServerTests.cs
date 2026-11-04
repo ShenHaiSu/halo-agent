@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Abstractions.Methods;
@@ -290,6 +291,61 @@ public class EngineServerTests
         var seqs = tc.SeenEventSeqs.ToArray();
         for (int i = 1; i < seqs.Length; i++)
             Assert.True(seqs[i] > seqs[i - 1], $"seq 乱序: {seqs[i - 1]} → {seqs[i]}");
+
+        cts.Cancel();
+        await Task.WhenAny(serverTask, Task.Delay(3000));
+    }
+
+    /// <summary>
+    /// P24-E7：agent.cancel 不被 session.compact 阻塞（D7：cancel 已移出 MutatingMethods）。
+    /// 修前：cancel 要等 5s 的 compact 释放锁 → 超时/缓慢 → 红。
+    /// </summary>
+    [Fact]
+    public async Task E7_cancel_not_blocked_by_compact()
+    {
+        var (client, server) = InProcChannel.CreatePair();
+        var router = new MethodRouter();
+        var state = new EngineState(Path.GetTempPath(), router);
+        var stub = new StubMethods(state);
+        router.RegisterAll(
+            ("system.ping", stub.SystemPing),
+            ("state.snapshot", stub.StateSnapshot));
+        // 长时间持锁的方法（模拟 session.compact 持锁 5s）
+        router.Register("session.compact", async (_, _) =>
+        {
+            await Task.Delay(5000).ConfigureAwait(false);
+            return (object?)null;
+        });
+        // agent.cancel 快速返回（语义：只置取消标志，不持锁）
+        router.Register("agent.cancel", (_, _) =>
+            Task.FromResult<object?>(new { cancelled = true }));
+
+        await using var s = server;
+        var cts = new CancellationTokenSource();
+        var serverTask = Task.Run(async () =>
+        {
+            await using var bus = new EventBus(s, NullLogger.Instance);
+            var fs = new FrameServer(s, state, bus, NullLogger.Instance, cts.Token);
+            await fs.RunAsync();
+        });
+
+        await using var c = client;
+        await using var tc = new TestClient(c);
+
+        // 先发 compact（不等），等 200ms 让它进锁
+        var compactTask = tc.RequestAsync<object>("session.compact", null, timeoutMs: 15000);
+        await Task.Delay(200);
+
+        // 再发 cancel：必须远早于 compact 完成就返回
+        var sw = Stopwatch.StartNew();
+        var cancelRes = await tc.RequestAsync<JsonElement>("agent.cancel", null, timeoutMs: 10000);
+        sw.Stop();
+
+        Assert.True(cancelRes.GetProperty("cancelled").GetBoolean());
+        Assert.True(sw.ElapsedMilliseconds < 2000,
+            $"agent.cancel 耗时 {sw.ElapsedMilliseconds}ms，被持锁方法阻塞");
+
+        await compactTask;
 
         cts.Cancel();
         await Task.WhenAny(serverTask, Task.Delay(3000));

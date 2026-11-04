@@ -369,7 +369,14 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /** turn.finished → 全量 parse 替换 final，折叠 process（auto），清 currentTurn 由 stream 侧处理。 */
-  function finalizeTurn(turnId: string, finalUsed: number, text: string, truncated: boolean, responseId?: string): void {
+  function finalizeTurn(
+    turnId: string,
+    finalUsed: number,
+    text: string,
+    truncated: boolean,
+    responseId?: string,
+    byUser = false,          // ★ P24-D4
+  ): void {
     const t = ensureTurn(turnId);
     // O3：若 round.ended 缺失，以 finalUsed 重切（ord<finalUsed 进 process）
     for (const k of Object.keys(drafts.value)) {
@@ -387,13 +394,39 @@ export const useMessagesStore = defineStore('messages', () => {
     t.final = {
       ...t.final,
       content: text,
-      truncatedByLength: truncated,
+      // ★ P24-D4：区分“用户中断”与“超长截断”。二者互斥（ByUser 优先）。
+      truncatedByUser: truncated && byUser,
+      truncatedByLength: truncated && !byUser,
       responseId: responseId ?? t.final.responseId,
       ord: finalUsed,
       streaming: false,
     };
     // auto 折叠：仅当 mode 为 auto（缺省）时由 TurnCard computed 体现；此处不强制写 userClosed
     if (!(turnId in processOpen.value)) processOpen.value[turnId] = 'auto';
+  }
+
+  /**
+   * P24-D5：用户中断时，把该 turn 下仍处于 running/pending/awaiting-user 的工具卡统一改判 cancelled。
+   * 为什么需要：
+   *   ① 引擎在“工具执行中被中断”的路径里，部分工具可能没有 tool.finished
+   *      （shell 被 TryKill 会发，但其他工具走 ExecuteToolCallAsync 的 catch OCE 分支，不一定发）；
+   *   ② ToolCard 在 is-live=false 时不自动折叠，running 态会永远转圈。
+   * 数据位置与 :443 的既有遍历保持一致（final + process 两处）。
+   */
+  function markRunningToolsCancelled(turnId: string): void {
+    const t = turns.value.find((x) => x.turnId === turnId);
+    if (!t) return;
+    const all: ToolCallInfo[][] = [
+      t.final.toolCalls ?? [],
+      ...t.process.map((m) => m.toolCalls ?? []),
+    ];
+    for (const list of all) {
+      for (const c of list) {
+        if (c.status === 'running' || c.status === 'pending' || c.status === 'awaiting-user') {
+          c.status = 'cancelled';
+        }
+      }
+    }
   }
 
   function appendOptimisticUser(content: string): string {
@@ -540,6 +573,7 @@ export const useMessagesStore = defineStore('messages', () => {
     clearTurnDrafts,
     moveRoundToProcess,
     finalizeTurn,
+    markRunningToolsCancelled,
     appendOptimisticUser,
     appendInjected,
     ensureToolCall,

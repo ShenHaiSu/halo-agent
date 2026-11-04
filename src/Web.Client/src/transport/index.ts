@@ -43,7 +43,7 @@ export const transport = {
   /** 引擎方法 */
   async request<T = unknown>(method: string, params: unknown = null): Promise<T> {
     if (shouldMock()) return mockAgent.request(method, params) as Promise<T>;
-    return agentBridge.request<T>(method, params);
+    return agentBridge.request<T>(method, params ?? null);
   },
 
   /** 拉事件 */

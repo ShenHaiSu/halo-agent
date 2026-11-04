@@ -23,6 +23,8 @@ import { BEHAVIORS, mockAppendMessage } from './behaviors';
 let seqCounter = 0;
 const events: HaloFrame[] = [];
 let busy = false;
+let currentTurnId = '';                    // ★ P24：当前 mock 回合 id（cancel 时用真实 id，不能硬编码 'mock'）
+const timers = new Set<number>();          // ★ P24：回放定时器句柄，cancel 时统一清理
 function emit(kind: string, payload: unknown): void {
   events.push({ t: 'evt', seq: ++seqCounter, k: kind, p: payload });
   // 限制内存
@@ -30,7 +32,16 @@ function emit(kind: string, payload: unknown): void {
 }
 
 function later(ms: number, fn: () => void): void {
-  window.setTimeout(fn, ms);
+  const h = window.setTimeout(() => {
+    timers.delete(h);
+    fn();
+  }, ms);
+  timers.add(h);
+}
+
+function clearTimers(): void {
+  for (const h of timers) window.clearTimeout(h);
+  timers.clear();
 }
 
 const SAMPLE_REPLY = [
@@ -62,6 +73,7 @@ const SAMPLE_REPLY = [
    busy = true;
 
    const turnId = `mock-turn-${Date.now()}`;
+   currentTurnId = turnId;                    // ★ P24：记录真实 turnId
    emit('turn.started', { turnId });
 
    // P13 responses 示例序列：summary 推理 → unknown 原生工具 → 带 responseId 收尾。
@@ -112,8 +124,21 @@ export function createMockAgent() {
         runMockTurn();
       }
       if (method === 'agent.cancel') {
-        emit('turn.finished', { turnId: 'mock', text: '', truncated: true, byUser: true });
+        // ★ P24：模拟真实引擎的取消时序（与 02/03 的引擎改动对齐）
+        //   1) 停掉后续 delta 定时器（否则取消后还在吐字）
+        //   2) 发 turn.finished{truncated:true, byUser:true, text:'⏹ 生成已中断', finalUsed:1}
+        //   3) 发 state.busyChanged{busy:false}
+        clearTimers();
         busy = false;
+        emit('turn.finished', {
+          turnId: currentTurnId,          // ★ 必须用真实 turnId，不能硬编码 'mock'
+          text: '⏹ 生成已中断',
+          truncated: true,
+          byUser: true,
+          finalUsed: 1,
+        });
+        emit('state.busyChanged', { busy: false, queueLength: 0 });
+        return { cancelled: true };
       }
       const b = BEHAVIORS[method];
       if (!b) {

@@ -48,7 +48,9 @@ public sealed class MutatingMethodsGuardTests
         };
         var extraWriteMethods = new[]
         {
-            "agent.prompt", "agent.queue", "agent.unqueue", "agent.cancel",
+            // ★ P24-D7：agent.cancel 已移出 MutatingMethods（它只置取消标志，不写业务状态；
+            //   留在锁内会被 session.compact 等长任务阻塞）。E7 钉死该语义。
+            "agent.prompt", "agent.queue", "agent.unqueue",
             "agent.answer", "agent.drain", "session.new", "session.resume",
             "system.shutdown",
         };

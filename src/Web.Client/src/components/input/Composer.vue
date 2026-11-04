@@ -206,10 +206,42 @@ function pushHistory(t: string): void {
 }
 
 async function cancel(): Promise<void> {
+  const stream = useStreamStore();
+  // 防抖：已经在取消中就别重复发 RPC（用户会连点）。
+  if (stream.cancelling) return;
+
+  // ★ P24-D3 阶段1：先在本地进入「正在中断」，不等 RPC 回来。
+  //   这是「点了有反应」的唯一保证——RPC 有往返延迟，等它必然显得没反应。
+  stream.beginCancel();
+
   try {
-    await transport.request('agent.cancel', {});
-  } catch {
-    /* 已结束 */
+    const r = (await transport.request<{ cancelled?: boolean }>('agent.cancel', null)) ?? {};
+    // 引擎明确说「没有可取消的回合」：说明在 RPC 到达前 turn 已自然结束。
+    // 此时不要报错（用户体验上属于正常竞态），但必须立刻退出取消态。
+    if (r.cancelled === false) {
+      stream.endCancel();
+      stream.busy = false;
+      if (!stream.currentTurn) {
+        // 已经完全收尾，给个轻提示，避免用户以为「取消生效了但其实已结束」
+        toast.info('当前没有正在生成的回合');
+      }
+      return;
+    }
+
+    // ★ P24-O4：cancelled === true 时，不依赖静默期定时器做提示——
+    //   定时器只负责“解锁输入框”，用户可感知的通知在这里补。
+    //   用 setTimeout 排到静默期之后再检查（不改 state 结构，避免 store 依赖 ui）。
+    window.setTimeout(() => {
+      const s = useStreamStore();
+      if (!s.cancelling) return;              // 已正常收尾
+      // 静默期已过仍未收尾：给一次明确提示（不阻塞、不重复）
+      toast.warning('引擎未确认中断，界面已解锁；若模型仍在输出请重启引擎');
+    }, 2100);                                  // 略大于 CANCEL_SILENCE_MS
+  } catch (e) {
+    // ★ P24-D3：失败必须可见。之前这里是 `catch { /* 已结束 */ }`，
+    //   导致引擎未就绪/桥异常/超时 时按钮「点了完全没反应」。
+    stream.endCancel();
+    toast.error(`取消失败：${(e as Error).message}`);
   }
 }
 
@@ -409,6 +441,7 @@ defineExpose({
 
       <ComposerToolbar
         :busy="stream.busy"
+        :cancelling="stream.cancelling"
         :can-send="canSend"
         :ask-pending="askPending"
         :cwd="session.cwd"

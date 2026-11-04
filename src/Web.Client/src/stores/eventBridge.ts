@@ -127,10 +127,20 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           }
           const text = typeof p.text === 'string' ? (p.text as string) : '';
           const truncated = p.truncated === true;
+          const byUser = p.byUser === true;                                  // ★ P24-D4
           const responseId = typeof p.responseId === 'string' ? (p.responseId as string) : undefined;
-          messages.finalizeTurn(turnId, finalUsed >= 1 ? finalUsed : 1, text, truncated, responseId);
+          // ★ P24-D5：中断兜底——把还没结束的工具卡改成 cancelled
+          if (byUser) messages.markRunningToolsCancelled(turnId);            // ★ P24-D5
+          messages.finalizeTurn(
+            turnId,
+            finalUsed >= 1 ? finalUsed : 1,
+            text,
+            truncated,
+            responseId,
+            byUser,                                                          // ★ P24-D4
+          );
           // truncated 回合 auto 保持展开直到手动收：不写 userClosed，TurnCard computed 处理
-          stream.endTurn();
+          stream.endTurn();            // 内部会 endCancel()（见 4.2）
           break;
         }
         case 'text.delta': {
@@ -210,8 +220,13 @@ export function dispatchFrames(frames: HaloFrame[]): void {
             const tid = t?.messageId ?? stream.currentTurn?.turnId;
             const used = Number(p.used ?? stream.currentTurn?.activeOrd ?? 1);
             if (tid) {
+              // ★ P24-D5：用户中断导致的工具未完成，不能显示成「失败」（红色 error）。
+              //   判定依据：ok=false 且该帧到达时刻晚于取消请求时刻（见上「判定依据」一节）。
+              //   不能用 p.output 文案判定（违反“判定结构化”铁律）。
+              const cancelled =
+                p.ok === false && stream.cancelling && performance.now() >= stream.cancelRequestedAt;
               messages.patchToolCall(tid, tcid, {
-                status: p.ok === false ? 'error' : 'done',
+                status: cancelled ? 'cancelled' : p.ok === false ? 'error' : 'done',
                 result: typeof p.output === 'string' ? (p.output as string) : undefined,
                 output: typeof p.output === 'string' ? (p.output as string) : undefined,
                 ok: typeof p.ok === 'boolean' ? (p.ok as boolean) : true,
@@ -379,6 +394,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           const stream = useStreamStore();
           stream.busy = p.busy === true;
           stream.queueLength = Number(p.queueLength ?? 0);
+          if (p.busy !== true) stream.endCancel();     // ★ P24-D3 兜底
           try {
             useQueueStore().syncFromEngine(Number(p.queueLength ?? 0));
           } catch {

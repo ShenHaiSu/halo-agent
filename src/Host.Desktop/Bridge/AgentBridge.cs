@@ -37,7 +37,7 @@ public sealed class AgentBridge
     ///（camelCase，由引擎侧 HaloJson 原样产生，直接取原文过桥）。
     /// 引擎业务错误 / 未就绪一律 throw（不断言、不吞错）。
     /// </summary>
-    public async Task<string> Request(string method, object? prms)
+    public async Task<string> Request(string method, object? prms = null)
     {
         if (string.IsNullOrWhiteSpace(method))
             throw new ArgumentException("method 不能为空");

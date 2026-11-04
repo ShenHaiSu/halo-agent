@@ -9,6 +9,7 @@ defineProps<{
   canSend: boolean;
   askPending: boolean;
   cwd: string;
+  cancelling?: boolean;        // ★ P24-D3
 }>();
 
  defineEmits<{
@@ -38,7 +39,7 @@ defineProps<{
     />
      <button type="button" class="cwd" :title="cwd || '未选择工作目录'" :disabled="busy || askPending" @click="$emit('pickCwd')">{{ cwd || '未选择工作目录' }}</button>
     <span class="bottom-spacer" />
-    <StopButton v-if="busy" @click="$emit('cancel')" />
+    <StopButton v-if="busy" :cancelling="cancelling" @click="$emit('cancel')" />
     <HButton
       variant="primary"
       size="sm"

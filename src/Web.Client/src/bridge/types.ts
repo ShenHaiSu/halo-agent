@@ -36,7 +36,8 @@
   * 调用方（agent.ts）负责 JSON.parse。isReady 返回布尔，不变。
   */
 export interface HaloAgent {
-  request(method: string, params: unknown): Promise<string>;
+  /** params 必须显式传 null（勿传 undefined：CefSharp 会映射为 Missing 导致 Missing-parameter）。 */
+  request(method: string, params?: unknown): Promise<string>;
   pollEvents(sinceSeq: number): Promise<string>;
   isReady(): Promise<boolean>;
 }

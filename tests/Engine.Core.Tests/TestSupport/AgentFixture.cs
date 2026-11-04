@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
+using HaloAgent.Engine.Abstractions.Serialization;
 using HaloAgent.Engine.Abstractions.Types;
 using HaloAgent.Engine.Core.Agent;
 using HaloAgent.Engine.Core.Events;
 using HaloAgent.Engine.Core.Llm;
 using HaloAgent.Engine.Core.Tools;
 using HaloAgent.Engine.Storage.Sessions;
+using HaloAgent.Engine.Storage.Usage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -35,6 +38,8 @@ public sealed class AgentFixture : IDisposable
     public EventBus Bus { get; }
     public ToolRegistry Tools { get; }
     public AgentSession Session { get; }
+    /// <summary>P24：P0-2。传进 Session 的 UsageStore，测试可直接查落库行数（不断言文件）。</summary>
+    public UsageStore Usage { get; }
 
     public AgentFixture(
         PermissionMode mode = PermissionMode.BypassPermissions,
@@ -62,8 +67,10 @@ public sealed class AgentFixture : IDisposable
         Bus = new EventBus(Sink, NullLogger.Instance);
         Bus.Start();
 
+        Usage = new UsageStore(Path.Combine(DataDir, "usage.db"));
         Session = new AgentSession(
-            Llm, Tools, Store, Bus, DataDir, Cwd, mode, string.Empty, maxTurns, retry, interactive);
+            Llm, Tools, Store, Bus, DataDir, Cwd, mode, string.Empty, maxTurns, retry, interactive,
+            usageStore: Usage);
     }
 
      /// <summary>历史序列（排除 system 提示词），即真正会发给端点的内容。</summary>
@@ -98,14 +105,30 @@ public sealed class AgentFixture : IDisposable
     /// <summary>等待某事件到达（EventBus 异步写出，直接断言会 flaky）。</summary>
     public async Task WaitForKindAsync(string kind, int timeoutMs = 5000)
     {
+        var hit = await TryWaitForKindAsync(kind, timeoutMs).ConfigureAwait(false);
+        if (hit is null)
+            throw new TimeoutException($"等待事件超时: {kind}（已有: {string.Join(",", Sink.Kinds())}）");
+    }
+    /// <summary>P24：P0-4。等待某事件到达，超时返回 null（不抛），供 R2 断言 payload 用。</summary>
+    public async Task<RecordingEventSink.RecordedEvent?> TryWaitForKindAsync(string kind, int timeoutMs = 5000)
+    {
         var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < timeoutMs)
         {
-            if (Sink.HasKind(kind)) return;
+            var hit = Sink.Snapshot().FirstOrDefault(e => e.Kind == kind);
+            if (hit is not null) return hit;
             await Task.Delay(20).ConfigureAwait(false);
         }
 
-        throw new TimeoutException($"等待事件超时: {kind}（已有: {string.Join(",", Sink.Kinds())}）");
+        return null;
+    }
+
+    /// <summary>P24：P0-4。把 RecordedEvent 的 Payload 反序列化为 C# 载荷（camelCase 命名策略）。</summary>
+    public static T PayloadOf<T>(RecordingEventSink.RecordedEvent ev)
+    {
+        if (ev.Payload is null) throw new InvalidOperationException("事件无 payload");
+        return JsonSerializer.Deserialize<T>(ev.Payload.Value.GetRawText(), HaloJson.Options)
+            ?? throw new InvalidOperationException($"事件 payload 反序列化失败: {typeof(T).Name}");
     }
 
     public void Dispose()

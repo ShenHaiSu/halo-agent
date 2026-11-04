@@ -9,6 +9,8 @@ public sealed class ScriptedReply
     public string? Reasoning { get; set; }
     public List<ToolCall> ToolCalls { get; } = new();
     public Usage Usage { get; set; } = new(0, 0);
+    /// <summary>P24-E5b：模拟超长截断（finish_reason=length）。</summary>
+    public bool TruncatedByLength { get; set; }
 
     /// <summary>流式分片粒度：每 N 个字符一块。设为 0 表示一次性给完。</summary>
     public int ChunkSize { get; set; } = 3;
@@ -17,6 +19,13 @@ public sealed class ScriptedReply
     public Exception? Throw { get; set; }
 
     public TimeSpan Delay { get; set; } = TimeSpan.Zero;
+
+    /// <summary>
+    /// P24：P0-1。为 true 时，Delay 用不可取消的等待（Task.Delay(x) 不传 ct），
+    /// 睡满后无条件抛 Throw（无视取消状态）。
+    /// 用途：构造「取消与 IOException 同现」的真实形态——流读取被取消时抛的正是 IOException。
+    /// </summary>
+    public bool UncancelableDelay { get; set; }
 
     /// <summary>便捷：追加一次工具调用。</summary>
     public void AddCall(string id, string name, string arguments)
@@ -100,12 +109,21 @@ public sealed class FakeLlmClient : ILlmClient
     {
         var reply = Next(messages, tools, sessionId);
 
-        if (reply.Delay > TimeSpan.Zero)
-            await Task.Delay(reply.Delay, ct).ConfigureAwait(false);
+        if (reply.UncancelableDelay)
+        {
+            // ★ P24-P0-1：不可取消延迟 + 睡满后无条件抛。模拟「底层读取被取消、
+            //   抛出的却不是 OCE」的竞态窗口。注意此处不检查 ct。
+            if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
+            if (reply.Throw is not null) throw reply.Throw;
+        }
+        else
+        {
+            if (reply.Delay > TimeSpan.Zero)
+                await Task.Delay(reply.Delay, ct).ConfigureAwait(false);
 
-        ct.ThrowIfCancellationRequested();
-        if (reply.Throw is not null) throw reply.Throw;
-
+            ct.ThrowIfCancellationRequested();
+            if (reply.Throw is not null) throw reply.Throw;
+        }
         if (!string.IsNullOrEmpty(reply.Reasoning))
         {
             foreach (var piece in Slice(reply.Reasoning, reply.ChunkSize))
@@ -155,9 +173,20 @@ public sealed class FakeLlmClient : ILlmClient
     public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
     {
         var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
-        if (reply.Throw is not null) throw reply.Throw;
-        if (!string.IsNullOrEmpty(reply.Reasoning)) foreach (var p in Slice(reply.Reasoning, reply.ChunkSize)) onEvent(new StreamEvent.ReasoningDelta(p));
-        if (!string.IsNullOrEmpty(reply.Content)) foreach (var p in Slice(reply.Content, reply.ChunkSize)) onEvent(new StreamEvent.TextDelta(p));
+        if (reply.UncancelableDelay)
+        {
+            // ★ P24-P0-1（responses 对称）：不可取消延迟 + 睡满后无条件抛。
+            if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
+            if (reply.Throw is not null) throw reply.Throw;
+        }
+        else
+        {
+            if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (reply.Throw is not null) throw reply.Throw;
+        }
+        if (!string.IsNullOrEmpty(reply.Reasoning)) foreach (var p in Slice(reply.Reasoning, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.ReasoningDelta(p)); }
+        if (!string.IsNullOrEmpty(reply.Content)) foreach (var p in Slice(reply.Content, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.TextDelta(p)); }
         await Task.Yield();
         return new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage };
     }
@@ -193,6 +222,7 @@ public sealed class FakeLlmClient : ILlmClient
         ReasoningContent = reply.Reasoning,
         ToolCalls = reply.ToolCalls.ToList(),
         Usage = reply.Usage,
+        TruncatedByLength = reply.TruncatedByLength,
     };
 
     private static IEnumerable<string> Slice(string text, int chunkSize)

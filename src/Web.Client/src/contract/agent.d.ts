@@ -852,6 +852,8 @@ export interface HaloEventPayloads {
   reason?: string | null
   responseId?: string | null
   finalUsed: number
+  /** P24：本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。 */
+  byUser?: boolean
 }
   /** text.delta */
   'text.delta': {

@@ -43,7 +43,7 @@ public sealed class FrameServer
     /// <summary>需要串行执行的方法（会改状态）。其余方法可并发。</summary>
      private static readonly HashSet<string> MutatingMethods = new(StringComparer.Ordinal)
      {
-         "agent.prompt", "agent.queue", "agent.unqueue", "agent.cancel", "agent.answer",
+         "agent.prompt", "agent.queue", "agent.unqueue", "agent.answer",
          "agent.drain", "session.new", "session.resume", "session.rename", "session.delete",
          "session.clear", "session.compact", "session.setCwd",
          "state.setMode", "state.setPersona",
@@ -55,6 +55,10 @@ public sealed class FrameServer
           "asset.personas.save", "asset.personas.delete", "asset.memory.save", "asset.memory.delete",
           "tool.undoRollback", "system.shutdown", "update.install",
           "usage.clear",
+         // ★ P24-D7：agent.cancel 已移出本集合。
+         //   它不写业务状态、不发模型请求，只把 turn 级 CTS 置取消。
+         //   留在锁内会让取消排在 session.compact（持锁最长 180s）等长任务后面，
+         //   表现为“点中止半天没反应”。取消必须永远是最快的路径。
      };
 
     public FrameServer(IFrameChannel channel, EngineState state, EventBus bus,

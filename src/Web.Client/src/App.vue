@@ -59,9 +59,17 @@ const composing = useComposition();
 const toast = useToast();
 
 async function cancelTurn(): Promise<void> {
+  const stream = useStreamStore();
+  if (stream.cancelling) return;            // 防抖，同按钮
+  stream.beginCancel();                     // ★ 同样给乐观反馈
   try {
-    await transport.request('agent.cancel', {});
+    const r = (await transport.request<{ cancelled?: boolean }>('agent.cancel', null)) ?? {};
+    if (r.cancelled === false) {
+      stream.endCancel();
+      stream.busy = false;
+    }
   } catch (e) {
+    stream.endCancel();
     toast.error(`取消失败：${(e as Error).message}`);
   }
 }

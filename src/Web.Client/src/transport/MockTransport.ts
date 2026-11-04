@@ -57,9 +57,19 @@ export class MockTransport implements Transport {
         return { accepted: true, reason: null } as unknown as HaloResult<M>;
       }
 
-      case 'agent.cancel':
+      case 'agent.cancel': {
         this.stopReplay();
+        // ★ P24：补偿真实引擎的收尾帧，否则前端只能靠静默期兜底
+        this.pushEvent('turn.finished', {
+          turnId: 'mock-turn-1',
+          text: '⏹ 生成已中断',
+          truncated: true,
+          byUser: true,
+          finalUsed: 1,
+        });
+        this.pushEvent('state.busyChanged', { busy: false, queueLength: 0 });
         return { cancelled: true } as unknown as HaloResult<M>;
+      }
 
       case 'state.setMode': {
         const p = params as unknown as { mode: NonNullable<StateSnapshot['agent']>['mode'] };

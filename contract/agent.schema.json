@@ -3149,6 +3149,10 @@
           "finalUsed": {
             "type": "integer",
             "minimum": 1
+          },
+          "byUser": {
+            "type": "boolean",
+            "description": "P24：本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。"
           }
         },
         "required": [

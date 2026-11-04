@@ -24,6 +24,15 @@ public sealed record TurnFinishedPayload
     public string? ResponseId { get; init; }
     /// <summary>P15：末轮序号（>=1 必需）。</summary>
     public int FinalUsed { get; init; }
+
+    /// <summary>
+    /// P24：本次截断是否由用户主动中断（点“停止”/Esc）造成。
+    /// 与 Truncated 的关系：
+    ///   - ByUser=true  ⇒ Truncated 必为 true（用户中断一定截断）
+    ///   - Truncated=true ⇏ ByUser=true（可能是超长截断 / 轮次超限 / 异常）
+    /// 前端据此区分文案：“已由你中断” vs “输出超长已截断” vs “请求失败”。
+    /// </summary>
+    public bool ByUser { get; init; }
 }
 
 /// <summary>text.delta 载荷。</summary>

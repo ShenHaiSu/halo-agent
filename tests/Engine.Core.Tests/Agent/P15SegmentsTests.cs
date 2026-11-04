@@ -56,8 +56,13 @@ public sealed class P15SegmentsTests
         cts.Cancel();
         // cancel 可能抛 OperationCanceledException（RunTurnAsync 透出），也可能返回中断结果
         try { await task; } catch (OperationCanceledException) { }
-        var kinds = fx.EventTrace();
-        // 取消路径应有 finished（可能是 OperationCanceledException 直接透出无 finished，允许其一）
+        // ★ P24-D2：取消必须有 turn.finished 收尾（旧规格容忍「无 finished」是 bug，见 01 §D2）。
+        var fin = await fx.TryWaitForKindAsync(EventKinds.TurnFinished, timeoutMs: 2000);
+        Assert.NotNull(fin);
+        var p = AgentFixture.PayloadOf<TurnFinishedPayload>(fin!);
+        Assert.True(p.Truncated);
+        Assert.Contains("中断", p.Text);
+        Assert.True(p.FinalUsed >= 1);
         // 至少 busy 已复位
         Assert.False(fx.Session.IsBusy);
     }

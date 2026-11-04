@@ -39,6 +39,14 @@ public static class RetryPolicy
 
         if (ex is OperationCanceledException) return null;   // 用户取消 / 超时归 HttpRequestException
 
+        // ★ P24-D1：IOException / HttpRequestException 可能是“取消”的包装形态。
+        //   本方法拿不到 CancellationToken，只能靠内层异常嗅探；
+        //   真正的权威判断在 AgentSession（see EnsureNotCancelled）。
+        if (ex is IOException io && HasCancellationInside(io))
+            return null;                      // 内部是取消 → 不值得重试
+        if (ex is HttpRequestException hre0 && HasCancellationInside(hre0))
+            return null;
+
         if (ex is HttpRequestException hre)
         {
             if (hre.InnerException is SocketException) return "连接失败";
@@ -49,6 +57,19 @@ public static class RetryPolicy
         if (ex is IOException) return "响应中断";
 
         return null;
+    }
+
+    /// <summary>
+    /// 嗅探异常链里是否藏着“取消”信号。
+    /// 只看内层类型，不看错误文本（遵循本类“判定结构化”铁律，见类注释第 2 条）。
+    /// </summary>
+    private static bool HasCancellationInside(Exception? ex)
+    {
+        for (var cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (cur is OperationCanceledException) return true;
+        }
+        return false;
     }
 
     /// <summary>空回复判定：没有工具调用、正文与思考都是空白。</summary>

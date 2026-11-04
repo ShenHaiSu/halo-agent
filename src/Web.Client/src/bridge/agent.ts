@@ -48,11 +48,11 @@ function parseBridgeJson(raw: unknown, what: string): unknown {
 }
 
 export const agentBridge = {
-  async request<T = unknown>(method: string, params: unknown): Promise<T> {
+  async request<T = unknown>(method: string, params: unknown = null): Promise<T> {
     if (!hasAgent()) throw new Error('引擎桥接不可用');
     let raw: string;
     try {
-      raw = await requireAgent().request(method, params);
+      raw = await requireAgent().request(method, params ?? null);
     } catch (e) {
       // 保留引擎返回的业务错误文本（前端需要原文显示）
       throw new Error(describeError(e));
