@@ -27,7 +27,29 @@ public class OpenAiCompatibleClientTests
         var http = new HttpClient(handler);
         return new OpenAiCompatibleClient(new LlmConfig { BaseUrl = "http://localhost:11434/v1", Model = "test" }, http);
     }
+    private sealed class ThrottledStream : MemoryStream
+    {
+        private readonly int _maxPerRead;
+        public ThrottledStream(byte[] data, int maxPerRead) : base(data, writable: false) { _maxPerRead = Math.Max(1, maxPerRead); }
+        public override int Read(byte[] buffer, int offset, int count) => base.Read(buffer, offset, Math.Min(count, _maxPerRead));
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => base.ReadAsync(buffer, offset, Math.Min(count, _maxPerRead), cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            int n = Math.Min(buffer.Length, _maxPerRead);
+            if (n <= 0) return ValueTask.FromResult(0);
+            return base.ReadAsync(buffer[..n], cancellationToken);
+        }
+    }
 
+    private static OpenAiCompatibleClient FragmentedSseClient(byte[] sseBytes, int maxPerRead, LlmProtocol protocol = LlmProtocol.Chat)
+    {
+        var handler = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrottledStream(sseBytes, maxPerRead)),
+        });
+        var http = new HttpClient(handler);
+        return new OpenAiCompatibleClient(new LlmConfig { BaseUrl = "http://localhost:11434/v1", Model = "test", Protocol = protocol }, http);
+    }
     private static OpenAiCompatibleClient SseClient(params string[] chunks)
     {
         var handler = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -37,6 +59,8 @@ public class OpenAiCompatibleClientTests
         var http = new HttpClient(handler);
         return new OpenAiCompatibleClient(new LlmConfig { BaseUrl = "http://localhost:11434/v1", Model = "test" }, http);
     }
+
+
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode code) =>
         new HttpResponseMessage(code)
@@ -185,5 +209,30 @@ public class OpenAiCompatibleClientTests
         var models = await client.ListModelsAsync(CancellationToken.None);
 
         Assert.Equal(new[] { "a-model", "b-model", "C-model" }, models.ToArray());
+    }
+
+    [Fact]
+    public async Task D9_chat_stream_multibyte_split_yields_clean_content()
+    {
+        // 中文 delta 被按字节逐个喂给底层的 stream：任何多字节字符都必然被切开。
+        var sse = Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"中断生成\"}}]}\n\ndata: [DONE]\n\n");
+        using var client = FragmentedSseClient(sse, maxPerRead: 1);
+
+        var reply = await client.ChatStreamAsync(Msgs(), null, _ => { }, CancellationToken.None);
+
+        Assert.Equal("中断生成", reply.Content);
+        Assert.DoesNotContain("�", reply.Content ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task D9_responses_stream_multibyte_split_yields_clean_content()
+    {
+        var sse = Encoding.UTF8.GetBytes("data: {\"type\":\"response.output_text.delta\",\"delta\":\"中断生成\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n");
+        using var client = FragmentedSseClient(sse, maxPerRead: 1, protocol: LlmProtocol.Responses);
+
+        var reply = await client.ResponsesStreamAsync(null, null, new List<object>(), null, _ => { }, CancellationToken.None);
+
+        Assert.Equal("中断生成", reply.Content);
+        Assert.DoesNotContain("�", reply.Content ?? string.Empty, StringComparison.Ordinal);
     }
 }

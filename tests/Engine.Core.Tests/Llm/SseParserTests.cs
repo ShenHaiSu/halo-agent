@@ -4,6 +4,11 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Llm;
 
+/// <summary>
+/// SseParser 用例。
+/// 约定：凡接收 byte[] 的 API，测试必须至少有 1 个用例按字节下标切分。
+/// 只按 string 切分 = 在「字符边界」这个更高抽象上测试，永远测不出「字符被切开」的缺陷（D9）。
+/// </summary>
 public class SseParserTests
 {
     private static byte[] Bytes(string s) => Encoding.UTF8.GetBytes(s);
@@ -17,6 +22,20 @@ public class SseParserTests
             result.AddRange(parser.Push(bytes, bytes.Length));
         }
         return result;
+    }
+
+    private static int IndexOfBytes(byte[] haystack, byte[] needle)
+    {
+        for (int i = 0; i + needle.Length <= haystack.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < needle.Length; j++)
+            {
+                if (haystack[i + j] != needle[j]) { match = false; break; }
+            }
+            if (match) return i;
+        }
+        return -1;
     }
 
     [Fact]
@@ -95,5 +114,103 @@ public class SseParserTests
         Assert.Single(flushed);
         Assert.Equal("tail", flushed[0]);
         Assert.Empty(parser.Finish());
+    }
+
+    // ================= D9：按字节下标切分（修前必红） =================
+
+    [Fact]
+    public void D9_multibyte_char_split_across_chunks_is_not_corrupted()
+    {
+        const string payload = "data: {\"t\":\"断\"}\n\n";
+        var all = Bytes(payload);
+
+        int idx = IndexOfBytes(all, Bytes("断"));
+        Assert.True(idx > 0);
+
+        foreach (var cut in new[] { idx + 1, idx + 2 })
+        {
+            var parser = new SseParser();
+            var events = new List<string>();
+            events.AddRange(parser.Push(all.AsSpan(0, cut).ToArray(), cut));
+            events.AddRange(parser.Push(all.AsSpan(cut).ToArray(), all.Length - cut));
+            events.AddRange(parser.Finish());
+
+            Assert.Single(events);
+            Assert.Equal("{\"t\":\"断\"}", events[0]);
+            Assert.DoesNotContain('\uFFFD', events[0]);
+            Assert.Equal(0, parser.ReplacementFallbackCount);
+        }
+    }
+
+    [Fact]
+    public void D9_byte_by_byte_push_reassembles_correctly()
+    {
+        const string payload = "data: {\"t\":\"中断生成\"}\n\n";
+        var all = Bytes(payload);
+
+        var parser = new SseParser();
+        var events = new List<string>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            events.AddRange(parser.Push(new[] { all[i] }, 1));
+        }
+        events.AddRange(parser.Finish());
+
+        Assert.Single(events);
+        Assert.Equal("{\"t\":\"中断生成\"}", events[0]);
+        Assert.DoesNotContain('\uFFFD', events[0]);
+    }
+
+    [Fact]
+    public void D9_finish_flushes_decoder_residual()
+    {
+        var all = Bytes("data: tail");
+        var head = all.AsSpan(0, all.Length - 1).ToArray();
+
+        var parser = new SseParser();
+        var events = new List<string>();
+        events.AddRange(parser.Push(head, head.Length));
+        events.AddRange(parser.Push(all.AsSpan(all.Length - 1).ToArray(), 1));
+        events.AddRange(parser.Finish());
+
+        Assert.Single(events);
+        Assert.Equal("tail", events[0]);
+        Assert.DoesNotContain('\uFFFD', events[0]);
+    }
+
+    [Fact]
+    public void D9_finish_emits_replacement_for_truly_truncated_tail()
+    {
+        // 流真的在多字节字符中间截断：Finish 必须输出 U+FFFD 而不是静默丢弃。
+        var all = Bytes("data: X断\n\n");
+        int idx = IndexOfBytes(all, Bytes("断"));
+        Assert.True(idx > 0);
+        var head = all.AsSpan(0, idx + 1).ToArray();
+
+        var parser = new SseParser();
+        var events = new List<string>();
+        events.AddRange(parser.Push(head, head.Length));
+        events.AddRange(parser.Finish());
+
+        Assert.Single(events);
+        Assert.Contains('\uFFFD', events[0]);
+    }
+
+    [Fact]
+    public void D9_crlf_split_across_chunks_does_not_double_newline()
+    {
+        var all = Bytes("data: a\r\n\r\ndata: b\r\n\r\n");
+        int i = Array.IndexOf(all, (byte)'\r');
+        Assert.True(i > 0);
+
+        var parser = new SseParser();
+        var events = new List<string>();
+        events.AddRange(parser.Push(all.AsSpan(0, i + 1).ToArray(), i + 1));
+        events.AddRange(parser.Push(all.AsSpan(i + 1).ToArray(), all.Length - i - 1));
+        events.AddRange(parser.Finish());
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal("a", events[0]);
+        Assert.Equal("b", events[1]);
     }
 }

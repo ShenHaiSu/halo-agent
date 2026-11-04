@@ -54,6 +54,11 @@ public sealed class WriteFileTool : ITool
             return ToolResult.Failure($"备份失败，已取消写入: {backup.Error}");
 
         // ③ 写入
+        // ★ D9-A3：写盘前检查 U+FFFD。只 Debug 留痕、不拒绝写入（用户可能真的想写这个符号）。
+        //   正常 SSE 解码修好后这里不应再出现；若出现，说明上游仍有解码点漏网。
+        if (content.Contains('\uFFFD'))
+            System.Diagnostics.Debug.WriteLine($"[write_file] content contains U+FFFD path={full}");
+
         try
         {
             await File.WriteAllTextAsync(full, content, System.Text.Encoding.UTF8, ct)
