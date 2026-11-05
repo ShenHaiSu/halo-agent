@@ -34,6 +34,11 @@ logs/
 # 发行产物（由 build-dist.ps1 生成，体积大，不入库）
 dist/
 
+# 安装器产物（由 build\installer.iss 的 OutputDir 生成）
+artifacts/
+
+# 注意：build/msgs/ 是 Inno 语言包等构建输入，必须入库，不要忽略
+
 # 编辑器
 .vscode/*
 !.vscode/settings.json
