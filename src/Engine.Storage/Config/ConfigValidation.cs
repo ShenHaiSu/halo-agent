@@ -31,10 +31,14 @@ public static class ConfigValidation
                 if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                     errs.Add(new(pid, null, "baseUrl", "baseUrl 必须是绝对 http(s) 地址"));
-             // network 枚举校验（非法直接拦；未知回落只发生在读归一，写前此处已拦）
-             var _net = (p.Network ?? "").Trim().ToLowerInvariant();
-             if (_net is not ("follow" or "proxy" or "direct"))
-                 errs.Add(new(pid, null, "network", "network 须为 follow/proxy/direct"));
+              // network 枚举校验（非法直接拦；未知回落只发生在读归一，写前此处已拦）
+              var _net = (p.Network ?? "").Trim().ToLowerInvariant();
+              if (_net is not ("follow" or "proxy" or "direct"))
+                  errs.Add(new(pid, null, "network", "network 须为 follow/proxy/direct"));
+              // P26：response_store 三档校验（非法直接拦）
+              var _rs = (p.ResponseStore ?? "").Trim().ToLowerInvariant();
+              if (_rs is not ("default" or "true" or "false"))
+                  errs.Add(new(pid, null, "response_store", "response_store 须为 default/true/false"));
              }
             // headers
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

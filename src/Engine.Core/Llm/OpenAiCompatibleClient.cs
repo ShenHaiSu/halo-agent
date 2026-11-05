@@ -1,6 +1,7 @@
-using System.Text;
-using System.Text.Json;
-using HaloAgent.Engine.Core.Net;
+ using System.Text;
+ using System.Text.Json;
+ using HaloAgent.Engine.Abstractions.Types;
+ using HaloAgent.Engine.Core.Net;
 
 namespace HaloAgent.Engine.Core.Llm;
 
@@ -489,52 +490,67 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
     // ============================================================
     //  Responses 协议
     // ============================================================
-    public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream)
-    {
-        EnsureResponses(_cfg);
-        if (instructions is not null && input.Count > 0)
-        {
-            foreach (var it in input)
-            {
-                try
-                {
-                    var j = System.Text.Json.JsonSerializer.Serialize(it);
-                    using var d = System.Text.Json.JsonDocument.Parse(j);
-                    if (d.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && d.RootElement.TryGetProperty("role", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.String && string.Equals(r.GetString(), "system", System.StringComparison.OrdinalIgnoreCase))
-                        throw new System.InvalidOperationException("system 不得同时进 instructions 与 input");
-                }
-                catch (System.InvalidOperationException) { throw; }
-                catch { }
-            }
-        }
-        var body = new System.Collections.Generic.Dictionary<string, object?>();
-        body["model"] = _cfg.Model;
-        if (previousResponseId is not null) body["previous_response_id"] = previousResponseId;
-        if (instructions is not null) body["instructions"] = instructions;
-        body["input"] = input;
-        if (tools is { Count: > 0 }) body["tools"] = tools;
-        body["stream"] = stream;
-         if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
-         body["user"] = ReqUser;
-         // store 可配置（默认 true，服务端持久化才能多轮链；网关不支持时靠重建兜底）。
-         body["store"] = _cfg.StoreResponses;
-        return body;
-    }
-    public async Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
-    {
-        EnsureResponses(_cfg);
-        using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: false), sessionId);
-        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-        var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!resp.IsSuccessStatusCode) throw new EndpointStatusException((int)resp.StatusCode, text);
-        return ParseResponsesResponse(text);
-    }
-    public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
-    {
-        EnsureResponses(_cfg);
-        using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: true), sessionId);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        if (!resp.IsSuccessStatusCode) { var b = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false); throw new EndpointStatusException((int)resp.StatusCode, b); }
+     public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream, bool stateless = false)
+     {
+         EnsureResponses(_cfg);
+         if (instructions is not null && input.Count > 0)
+         {
+             foreach (var it in input)
+             {
+                 try
+                 {
+                     var j = System.Text.Json.JsonSerializer.Serialize(it);
+                     using var d = System.Text.Json.JsonDocument.Parse(j);
+                     if (d.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && d.RootElement.TryGetProperty("role", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.String && string.Equals(r.GetString(), "system", System.StringComparison.OrdinalIgnoreCase))
+                         throw new System.InvalidOperationException("system 不得同时进 instructions 与 input");
+                 }
+                 catch (System.InvalidOperationException) { throw; }
+                 catch { }
+             }
+         }
+         var body = new System.Collections.Generic.Dictionary<string, object?>();
+         body["model"] = _cfg.Model;
+         if (previousResponseId is not null) body["previous_response_id"] = previousResponseId;
+         if (instructions is not null) body["instructions"] = instructions;
+         body["input"] = input;
+         if (tools is { Count: > 0 }) body["tools"] = tools;
+         body["stream"] = stream;
+          if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
+          body["user"] = ReqUser;
+         // ---- P26：store 三档 ----
+         // stateless 优先于配置：降级后必须彻底不发 true（D4），否则重发仍 400。
+         // Default 分支刻意什么都不做（不是写 null）：JsonSerializer 会把 null 写成 "store": null，那不是省略。
+         // 不要顺手在 Default 分支补写赋值——缺省=省略键是最大兼容档。
+         var mode = stateless ? StoreMode.False : _cfg.StoreMode;
+         switch (mode)
+         {
+             case StoreMode.True:
+                 body["store"] = true;
+                 break;
+             case StoreMode.False:
+                 body["store"] = false;
+                 break;
+             case StoreMode.Default:
+             default:
+                 break;
+         }
+         return body;
+     }
+     public async Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null, bool stateless = false)
+     {
+         EnsureResponses(_cfg);
+         using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: false, stateless: stateless), sessionId);
+         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+         var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+         if (!resp.IsSuccessStatusCode) throw new EndpointStatusException((int)resp.StatusCode, text);
+         return ParseResponsesResponse(text);
+     }
+     public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null, bool stateless = false)
+     {
+         EnsureResponses(_cfg);
+         using var req = Prepare(HttpMethod.Post, ResponsesUrl(), BuildResponsesBody(previousResponseId, instructions, input, tools, stream: true, stateless: stateless), sessionId);
+         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+         if (!resp.IsSuccessStatusCode) { var b = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false); throw new EndpointStatusException((int)resp.StatusCode, b); }
         var content = new StringBuilder();
         var reasoning = new StringBuilder();
         var usage = new Usage();

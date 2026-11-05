@@ -265,6 +265,7 @@ function mockSettings(): unknown {
         headersEnabled: true,
         headers: [],
         network: 'follow',
+        responseStore: 'default',
         effective: { inUse: true, source: 'global-system', maskedUrl: null, warning: null },
         modelCount: 2,
         models: [
@@ -305,6 +306,7 @@ function mockSettings(): unknown {
         headersEnabled: true,
         headers: [],
         network: 'follow',
+        responseStore: 'default',
         effective: { inUse: true, source: 'global-system', maskedUrl: null, warning: null },
         modelCount: 2,
         models: [

@@ -28,10 +28,10 @@ public sealed class ReconfigureActiveConfiguredTests : IDisposable
             => Task.FromResult(new AssistantReply { Content = "ok" });
         public Task<AssistantReply> ChatStreamAsync(IReadOnlyList<ChatMessage> m, IReadOnlyList<object>? t, Action<StreamEvent> e, CancellationToken ct, string? s = null)
             => Task.FromResult(new AssistantReply { Content = "ok" });
-        public object BuildResponsesBody(string? p, string? i, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? t, bool s) => new Dictionary<string, object?>();
-        public Task<ResponsesReply> ResponsesAsync(string? p, string? i, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? t, CancellationToken ct, string? s = null)
+        public object BuildResponsesBody(string? p, string? i, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? t, bool s, bool stateless = false) => new Dictionary<string, object?>();
+        public Task<ResponsesReply> ResponsesAsync(string? p, string? i, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? t, CancellationToken ct, string? s = null, bool stateless = false)
             => Task.FromResult(new ResponsesReply { Content = "ok" });
-        public Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
+        public Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null, bool stateless = false)
             => Task.FromResult(new ResponsesReply { Content = "ok" });
         public Task ValidateAsync(CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct)

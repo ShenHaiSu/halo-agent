@@ -74,11 +74,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private string _activeProviderDisplay = "";
     private string _activeModelId = "";
     private string _activeModelDisplay = "";
-    private string _activeProtocol = "chat";
-    private int? _activeContextWindow;
-    private int? _activeMaxTokens;
-    private bool _activeAcceptsImages;
-    private bool _activeIncludeReasoning = true;
+     private string _activeProtocol = "chat";
+     private StoreMode _activeStoreMode = StoreMode.Default;
+     private int? _activeContextWindow;
+     private int? _activeMaxTokens;
+     private bool _activeAcceptsImages;
+     private bool _activeIncludeReasoning = true;
      private bool _activeProxyInUse;
      private HaloAgent.Engine.Abstractions.Types.ProxyKind _activeProxyKind;
      private string _activeProxySource = "";
@@ -249,9 +250,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              MaxTokens = resolved.MaxTokens,
              AcceptsImages = resolved.AcceptsImages,
              IncludeReasoningHistory = resolved.IncludeReasoningHistory,
+             StoreMode = resolved.StoreMode,
          });
          string oldProto, oldModel, oldProv;
-         lock (_lock) { oldProto = _activeProtocol; oldModel = _activeModelId; oldProv = _activeProviderId; }
+         StoreMode oldStore;
+         lock (_lock) { oldProto = _activeProtocol; oldModel = _activeModelId; oldProv = _activeProviderId; oldStore = _activeStoreMode; }
          lock (_lock)
          {
              _globalEffectiveProxy = resolved.EffectiveProxy;
@@ -260,6 +263,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeModelId = resolved.ModelId ?? "";
              _activeModelDisplay = resolved.ModelDisplay ?? "";
              _activeProtocol = resolved.Protocol ?? "chat";
+             _activeStoreMode = resolved.StoreMode;
              _activeContextWindow = resolved.ContextWindow;
              _activeMaxTokens = resolved.MaxTokens;
              _activeAcceptsImages = resolved.AcceptsImages;
@@ -280,12 +284,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
                      _cwd, _mode, _store.SessionId, _persona, _dataDir, _tools.All));
          }
-          if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
-          {
-              lock (_lock) { _responsesStateless = false; }
-              ClearResponseChain();
-          }
-     }
+           if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal) || oldStore != resolved.StoreMode)
+           {
+               lock (_lock) { _responsesStateless = false; }
+               ClearResponseChain();
+           }
+      }
  
      /// <summary>设置全局生效代理（非模型链路用；未配置态回落）。</summary>
      public void SetGlobalProxy(HaloAgent.Engine.Abstractions.Types.EffectiveProxy proxy)
@@ -311,6 +315,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _activeModelId = "";
              _activeModelDisplay = "";
              _activeProtocol = "chat";
+            _activeStoreMode = StoreMode.Default;
              _activeContextWindow = null;
              _activeMaxTokens = null;
              _activeAcceptsImages = false;
@@ -907,7 +912,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              return reply;
         }
     }
-     /// <summary>断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。</summary>
+     /// <summary>
+     /// 断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。
+     /// P26 扩展：无状态网关（OpenCode 等）拒绝 store=true 时也须降级——否则降级机制对 store 类错误完全失效。
+     /// 关键词必须「够特异」：不得用 "store"/"response" 这类宽词，避免误伤「模型不存在」「restore」等无关错误。
+     /// </summary>
      internal static bool IsBrokenChain(EndpointStatusException ese)
      {
          if (ese.Status != 400 && ese.Status != 404) return false;
@@ -917,7 +926,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              || b.Contains("not_found", StringComparison.OrdinalIgnoreCase)
              || b.Contains("expired", StringComparison.OrdinalIgnoreCase)
              || b.Contains("invalid format", StringComparison.OrdinalIgnoreCase)
-             || b.Contains("invalid_previous_response", StringComparison.OrdinalIgnoreCase);
+             || b.Contains("invalid_previous_response", StringComparison.OrdinalIgnoreCase)
+             // ---- P26 新增：store 类不支持（无状态网关）----
+             || b.Contains("doesn't store responses", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("do not store responses", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("omit store", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("set it to false", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("store is not supported", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("store not supported", StringComparison.OrdinalIgnoreCase)
+             || b.Contains("storage is not enabled", StringComparison.OrdinalIgnoreCase);
      }
  
     private async Task<AssistantReply> ResponsesWithRetryAsync(List<object> chatTools, CancellationToken ct, int used = 1)
@@ -962,33 +979,47 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             ResponsesReply r;
             try
             {
-                r = await _llm.ResponsesStreamAsync(sendPrev, instructions, input, respTools, evt =>
-                {
-                    switch (evt)
-                    {
-                        case StreamEvent.TextDelta td: _bus.PublishDelta(EventKinds.TextDelta, td.Text, used); break;
-                        case StreamEvent.ReasoningDelta rd: _bus.PublishReasoningDelta(rd.Text, "summary", used); break;
-                        default: break;
-                    }
-                }, ct, _store.SessionId).ConfigureAwait(false);
-            }
-              catch (OperationCanceledException) { _bus.FlushNow(); throw; }
-              // 粘性无状态：首次断链后本会话不再试探 previous_response_id（换模型才重置）；单轮兜底保留以覆盖中途过期。
-              catch (EndpointStatusException ese) when (!rebuilt && IsBrokenChain(ese))
-              {
-                 lock (_lock) { _responsesStateless = true; }
-                 ClearResponseChain();
-                 rebuilt = true;
+                 r = await _llm.ResponsesStreamAsync(sendPrev, instructions, input, respTools, evt =>
+                 {
+                     switch (evt)
+                     {
+                         case StreamEvent.TextDelta td: _bus.PublishDelta(EventKinds.TextDelta, td.Text, used); break;
+                         case StreamEvent.ReasoningDelta rd: _bus.PublishReasoningDelta(rd.Text, "summary", used); break;
+                         default: break;
+                     }
+                 }, ct, _store.SessionId, stateless).ConfigureAwait(false);
+             }
+               catch (OperationCanceledException) { _bus.FlushNow(); throw; }
+               // 粘性无状态：首次断链后本会话不再试探 previous_response_id（换模型才重置）；单轮兜底保留以覆盖中途过期。
+               catch (EndpointStatusException ese) when (!rebuilt && IsBrokenChain(ese))
+               {
+                  lock (_lock) { _responsesStateless = true; }
+                  ClearResponseChain();
+                  rebuilt = true;
+                  try
+                  {
+                      await _bus.PublishStateAsync(EventKinds.Notice, new NoticePayload
+                      {
+                          Text = "该端点不支持服务端存储（store），已自动切换为无状态模式重发",
+                          Level = "info",
+                      }, CancellationToken.None).ConfigureAwait(false);
+                  }
+                  catch { }
+                   try { _log.LogWarning("responses 降级无状态 session={Sid} reason={Body}", _store.SessionId, Truncate(ese.Body ?? "", 300)); } catch { }
+                  continue;
+               }
+             catch (Exception ex)
+             {
+                 bool isStateless;
+                 lock (_lock) isStateless = _responsesStateless;
+                 if (isStateless)
+                     try { _log.LogWarning("responses 已降级无状态仍失败 session={Sid} reason={Msg}", _store.SessionId, ex.Message); } catch { }
+                 var (retry, next, reason) = ClassifyRetry(ex, attempt, ct);
+                 if (!retry) throw;
+                 attempt = next;
+                 await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
                  continue;
-              }
-            catch (Exception ex)
-            {
-                var (retry, next, reason) = ClassifyRetry(ex, attempt, ct);
-                if (!retry) throw;
-                attempt = next;
-                await HandleRetryAsync(attempt, reason, ct).ConfigureAwait(false);
-                continue;
-            }
+             }
               bool wasStateless = stateless;
                // 冻结：每次 _llm.ResponsesStreamAsync 成功返回即 +1（断链 continue 未发请求不计；取消/抛异常不计；空回复中间态计次）。
                // turn 内计数同处递增。
@@ -1584,7 +1615,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  if (isResp)
                  {
                      var (instr, inp) = ResponsesTranslators.TranslateMessages(summaryMessages);
-                     var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId).ConfigureAwait(false);
+                     var rr = await _llm.ResponsesAsync(null, instr, inp, null, ct, _store.SessionId, stateless: true).ConfigureAwait(false);
                      summary = rr.Content?.Trim();
                  }
                  else
@@ -1735,10 +1766,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _lastCachedTokens = null;
              _sessionLlmCalls = 0;
              PushSystemPromptLocked();
+             _responsesStateless = false;
          }
          _store.Clear();
          ClearResponseChain();
-         _ = _bus.PublishStateAsync(EventKinds.SessionContextCleared, null, CancellationToken.None);
      }
 
      public void StartNewSession()
@@ -1753,6 +1784,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _lastPromptTokens = null;
              _lastCachedTokens = null;
              _sessionLlmCalls = 0;
+             _responsesStateless = false;
          }
          _store.StartNew();
          ClearResponseChain();

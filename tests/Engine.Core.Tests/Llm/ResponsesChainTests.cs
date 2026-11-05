@@ -142,24 +142,30 @@ public class ResponsesChainTests
         Assert.Equal(expected, AgentSession.IsBrokenChain(new EndpointStatusException(status, body)));
     }
 
-    [Fact]
-    public void BuildResponsesBody_store_defaults_true_and_prev_omitted_when_null()
-    {
-        using var client = ResponsesSseClient(Completed);
-        var body = (Dictionary<string, object?>)client.BuildResponsesBody(null, "instr", Array.Empty<object>(), null, stream: false);
-        Assert.Equal(true, body["store"]);
-        Assert.DoesNotContain("previous_response_id", body);
-    }
-
-    [Fact]
-    public void BuildResponsesBody_store_respects_config_and_prev_present_when_set()
-    {
-        var handler = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
-        using var http = new HttpClient(handler);
-        using var client = new OpenAiCompatibleClient(
-            new LlmConfig { BaseUrl = "http://localhost:11434/v1", Model = "m", Protocol = LlmProtocol.Responses, StoreResponses = false }, http);
-        var body = (Dictionary<string, object?>)client.BuildResponsesBody("resp_1", null, Array.Empty<object>(), null, stream: true);
-        Assert.Equal(false, body["store"]);
-        Assert.Equal("resp_1", body["previous_response_id"]);
-    }
-}
+     [Fact]
+     public void BuildResponsesBody_default_mode_omits_store_and_prev_omitted_when_null()
+     {
+         // P26 / D6：原断言为 `store == true`，那是按实现反写的错误规格。
+         // 依据 docs/P13-responses-protocol/01-engine-llm.md:30「store=false 必带」，
+         // 且 P26 引入三档后缺省档为 Default（省略该键）。
+         using var client = ResponsesSseClient(Completed);
+         var body = (Dictionary<string, object?>)client.BuildResponsesBody(null, "instr", Array.Empty<object>(), null, stream: false);
+         Assert.False(body.ContainsKey("store"));            // ★ 缺省 = 省略键
+         Assert.DoesNotContain("previous_response_id", body);
+     }
+ 
+     [Theory]
+     [InlineData(HaloAgent.Engine.Abstractions.Types.StoreMode.True, true)]
+     [InlineData(HaloAgent.Engine.Abstractions.Types.StoreMode.False, false)]
+     public void BuildResponsesBody_explicit_mode_sends_bool_and_prev_present_when_set(HaloAgent.Engine.Abstractions.Types.StoreMode mode, bool expected)
+     {
+         var handler = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+         using var http = new HttpClient(handler);
+         using var client = new OpenAiCompatibleClient(
+             new LlmConfig { BaseUrl = "http://localhost:11434/v1", Model = "m", Protocol = LlmProtocol.Responses, StoreMode = mode }, http);
+ 
+         var body = (Dictionary<string, object?>)client.BuildResponsesBody("resp_1", null, Array.Empty<object>(), null, stream: true);
+         Assert.Equal(expected, body["store"]);
+         Assert.Equal("resp_1", body["previous_response_id"]);
+     }
+ }

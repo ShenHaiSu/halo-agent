@@ -13,36 +13,40 @@ export interface ModelEdit {
   expanded?: boolean;
 }
 
-export type ProviderNetwork = 'follow' | 'proxy' | 'direct';
-
-export interface ProviderEffective {
-  inUse: boolean;
-  source: string;
-  maskedUrl: string | null;
-  warning: string | null;
-}
-
-export interface ProviderEdit {
-  id: string;
-  displayName: string;
-  baseUrl: string;
-  apiKeySet: boolean;
-  newKey: string;
-  clearKey: boolean;
-  headersEnabled: boolean;
-  headers: Array<{ key: string; value: string }>;
-  network: ProviderNetwork;
-  /** 只读：settings.get 下发的 effective（保存/脏比较不含它）。 */
-  effective?: ProviderEffective | null;
-  models: ModelEdit[];
-  expanded?: boolean;
-}
-
-export interface ProvidersTree {
-  activeProvider: string;
-  activeModel: string;
-  providers: ProviderEdit[];
-}
+ export type ProviderNetwork = 'follow' | 'proxy' | 'direct';
+ 
+ export type ProviderResponseStore = 'default' | 'true' | 'false';
+ 
+ export interface ProviderEffective {
+   inUse: boolean;
+   source: string;
+   maskedUrl: string | null;
+   warning: string | null;
+ }
+ 
+ export interface ProviderEdit {
+   id: string;
+   displayName: string;
+   baseUrl: string;
+   apiKeySet: boolean;
+   newKey: string;
+   clearKey: boolean;
+   headersEnabled: boolean;
+   headers: Array<{ key: string; value: string }>;
+   network: ProviderNetwork;
+   /** responses 的 store 三档（P26）；默认 'default'（省略键）。 */
+   responseStore: ProviderResponseStore;
+   /** 只读：settings.get 下发的 effective（保存/脏比较不含它）。 */
+   effective?: ProviderEffective | null;
+   models: ModelEdit[];
+   expanded?: boolean;
+ }
+ 
+ export interface ProvidersTree {
+   activeProvider: string;
+   activeModel: string;
+   providers: ProviderEdit[];
+ }
 
  export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
  /** 别名原则：前后端统一用区分大小写精确相等(Ordinal)判定 alias==id，大小写变体视为有效别名。 */
@@ -100,6 +104,7 @@ export function normalizeProvidersTree(raw: unknown): ProvidersTree {
           return { key, value: typeof ho['value'] === 'string' ? (ho['value'] as string) : '' };
         }),
         network: normalizeNetwork(o['network'], o['useProxy']),
+        responseStore: normalizeResponseStore(o['responseStore'] ?? o['response_store']),
         effective: normalizeEffective(o['effective']),
         models,
       });
@@ -128,6 +133,7 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
     seenP.add(p.id);
      if (p.displayName.trim().length > 64) errs.push({ provider: p.id, field: 'displayName', message: '别称不超过 64 字' });
     if (!isValidProviderNetwork(p.network)) errs.push({ provider: p.id, field: 'network', message: 'network 须为 follow/proxy/direct' });
+    if (!isValidResponseStore(p.responseStore)) errs.push({ provider: p.id, field: 'responseStore', message: 'response_store 须为 default/true/false' });
     if (!p.baseUrl.trim()) errs.push({ provider: p.id, field: 'baseUrl', message: 'baseUrl 必填' });
     else {
       try {
@@ -183,11 +189,21 @@ export function normalizeEffective(v: unknown): ProviderEffective | null {
   };
 }
 
-/** network 枚举校验。 */
-export function isValidProviderNetwork(n: string): boolean {
-  return n === 'follow' || n === 'proxy' || n === 'direct';
-}
-
-export function diffActive(a: ProvidersTree, b: ProvidersTree): boolean {
-  return a.activeProvider !== b.activeProvider || a.activeModel !== b.activeModel;
-}
+ /** network 枚举校验。 */
+ export function isValidProviderNetwork(n: string): boolean {
+   return n === 'follow' || n === 'proxy' || n === 'direct';
+ }
+ 
+ /** response_store 归一化：非法/缺失一律回落 'default'（绝不回落 'true'）。 */
+ export function normalizeResponseStore(v: unknown): ProviderResponseStore {
+   return v === 'true' || v === 'false' ? v : 'default';
+ }
+ 
+ /** response_store 枚举校验。 */
+ export function isValidResponseStore(v: string): boolean {
+   return v === 'default' || v === 'true' || v === 'false';
+ }
+ 
+ export function diffActive(a: ProvidersTree, b: ProvidersTree): boolean {
+   return a.activeProvider !== b.activeProvider || a.activeModel !== b.activeModel;
+ }

@@ -152,45 +152,43 @@ public sealed class FakeLlmClient : ILlmClient
     {
         // 假客户端忽略重配置。
     }
-    public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream)
-    {
-        var d = new Dictionary<string, object?>();
-        d["model"] = Model;
-        if (previousResponseId is not null) d["previous_response_id"] = previousResponseId;
-        if (instructions is not null) d["instructions"] = instructions;
-        d["input"] = input;
-        if (tools is { Count: > 0 }) d["tools"] = tools;
-        d["stream"] = stream;
-        d["store"] = false;
-        return d;
-    }
-    public Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
-    {
-        var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
-        if (reply.Throw is not null) throw reply.Throw;
-        return Task.FromResult(new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage });
-    }
-    public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
-    {
-        var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
-        if (reply.UncancelableDelay)
-        {
-            // ★ （responses 对称）：不可取消延迟 + 睡满后无条件抛。
-            if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
-            if (reply.Throw is not null) throw reply.Throw;
-        }
-        else
-        {
-            if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay, ct).ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
-            if (reply.Throw is not null) throw reply.Throw;
-        }
-        if (!string.IsNullOrEmpty(reply.Reasoning)) foreach (var p in Slice(reply.Reasoning, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.ReasoningDelta(p)); }
-        if (!string.IsNullOrEmpty(reply.Content)) foreach (var p in Slice(reply.Content, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.TextDelta(p)); }
-        await Task.Yield();
-        return new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage };
-    }
-
+     public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream, bool stateless = false)
+     {
+         var d = new Dictionary<string, object?>();
+         d["model"] = Model;
+         if (previousResponseId is not null) d["previous_response_id"] = previousResponseId;
+         if (instructions is not null) d["instructions"] = instructions;
+         d["input"] = input;
+         if (tools is { Count: > 0 }) d["tools"] = tools;
+         d["stream"] = stream;
+         d["store"] = false;
+         return d;
+     }
+     public Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null, bool stateless = false)
+     {
+         var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
+         if (reply.Throw is not null) throw reply.Throw;
+         return Task.FromResult(new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage });
+     }
+     public async Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null, bool stateless = false)
+     {
+         var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
+         if (reply.UncancelableDelay)
+         {
+             if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
+             if (reply.Throw is not null) throw reply.Throw;
+         }
+         else
+         {
+             if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay, ct).ConfigureAwait(false);
+             ct.ThrowIfCancellationRequested();
+             if (reply.Throw is not null) throw reply.Throw;
+         }
+         if (!string.IsNullOrEmpty(reply.Reasoning)) foreach (var p in Slice(reply.Reasoning, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.ReasoningDelta(p)); }
+         if (!string.IsNullOrEmpty(reply.Content)) foreach (var p in Slice(reply.Content, reply.ChunkSize)) { ct.ThrowIfCancellationRequested(); onEvent(new StreamEvent.TextDelta(p)); }
+         await Task.Yield();
+         return new ResponsesReply { ResponseId = "resp-fake", Content = reply.Content, ReasoningContent = reply.Reasoning, ReasoningKind = "summary", ToolCalls = reply.ToolCalls.ToList(), Usage = reply.Usage };
+     }
     private ScriptedReply Next(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<object>? tools,

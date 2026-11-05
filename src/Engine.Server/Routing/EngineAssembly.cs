@@ -92,6 +92,7 @@ public static class EngineAssembly
              MaxTokens = resolved?.MaxTokens,
              AcceptsImages = resolved?.AcceptsImages ?? false,
              IncludeReasoningHistory = resolved?.IncludeReasoningHistory ?? true,
+             StoreMode = resolved?.StoreMode ?? HaloAgent.Engine.Abstractions.Types.StoreMode.Default,
          });
 
         // 2) 建工具

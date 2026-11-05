@@ -474,6 +474,8 @@ export interface HaloMethods {
   includeReasoningHistory?: boolean
 }[]
   network?: "follow" | "proxy" | "direct"
+  /** responses 的 store 三档：default=省略该键；true/false=显式发送。 */
+  responseStore?: "default" | "true" | "false"
   effective?: {
   inUse?: boolean
   source?: string

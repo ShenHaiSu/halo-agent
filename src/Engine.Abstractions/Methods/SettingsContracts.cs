@@ -30,8 +30,10 @@ public sealed record ProviderView
     public bool ApiKeySet { get; init; }
     public bool HeadersEnabled { get; init; } = true;
     public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
-    /// <summary>follow | proxy | direct。</summary>
-    public string Network { get; init; } = "follow";
+     /// <summary>follow | proxy | direct。</summary>
+     public string Network { get; init; } = "follow";
+     /// <summary>responses 的 store 三档：default=省略该键；true/false=显式发送。</summary>
+     public string ResponseStore { get; init; } = "default";
     /// <summary>兼容旧字段：Network != direct（读兼容；新客户端读 Network）。</summary>
     [Obsolete("Use Network")]
     public bool UseProxy { get; init; } = true;
@@ -85,10 +87,12 @@ public sealed record ProviderSaveEntry
     public string? BaseUrl { get; init; }
     public string? ApiKey { get; init; }
     public bool ClearKey { get; init; }
-    public bool? HeadersEnabled { get; init; }
-    public IReadOnlyList<HeaderPair>? Headers { get; init; }
-    /// <summary>follow | proxy | direct。</summary>
-    public string? Network { get; init; }
+     public bool? HeadersEnabled { get; init; }
+     public IReadOnlyList<HeaderPair>? Headers { get; init; }
+     /// <summary>follow | proxy | direct。</summary>
+     public string? Network { get; init; }
+     /// <summary>responses 的 store 三档：default | true | false。</summary>
+     public string? ResponseStore { get; init; }
     /// <summary>旧 useProxy 兼容一个版本（network 缺席时回落）。</summary>
     [Obsolete("Use Network")]
     public bool? UseProxy { get; init; }

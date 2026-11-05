@@ -50,7 +50,8 @@ public sealed partial class RealMethods
                       Headers = (kv.Value.Headers ?? new Dictionary<string, string>())
                           .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
                           .Select(h => new HeaderPair { Name = h.Key, Value = h.Value }).ToList(),
-                      Network = network,
+                       Network = network,
+                       ResponseStore = HaloAgent.Engine.Abstractions.Types.ResponseStores.Normalize(kv.Value.ResponseStore),
  #pragma warning disable CS0618
                       UseProxy = network != "direct",
  #pragma warning restore CS0618
@@ -141,18 +142,21 @@ public sealed partial class RealMethods
         {
             var pid = prop.Name.Trim();
              var entry = ParseProviderEntry(prop.Value);
-             if (entry.NetworkRaw is not null && entry.Network is not ("follow" or "proxy" or "direct"))
-                 throw RpcException.ParamsInvalid($"服务商「{pid}」network 非法（须为 follow/proxy/direct，收到 {entry.NetworkRaw}）");
-             cfg.Providers.TryGetValue(pid, out var existing);
-
-              var pcfg = new ProviderConfig
-              {
-                  DisplayName = entry.HasDisplayName ? NormalizeAlias(pid, entry.DisplayName) : existing?.DisplayName,
-                  BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
-                  ApiKey = existing?.ApiKey,
-                  HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
-                  Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
-                  Network = entry.Network ?? ConfigStore.NormalizeProviderNetwork(existing?.Network, existing?.UseProxyLegacy ?? entry.UseProxy),
+              if (entry.NetworkRaw is not null && entry.Network is not ("follow" or "proxy" or "direct"))
+                  throw RpcException.ParamsInvalid($"服务商「{pid}」network 非法（须为 follow/proxy/direct，收到 {entry.NetworkRaw}）");
+              if (entry.ResponseStoreRaw is not null && entry.ResponseStore is not ("default" or "true" or "false"))
+                  throw RpcException.ParamsInvalid($"服务商「{pid}」response_store 非法（须为 default/true/false，收到 {entry.ResponseStoreRaw}）");
+              cfg.Providers.TryGetValue(pid, out var existing);
+ 
+               var pcfg = new ProviderConfig
+               {
+                   DisplayName = entry.HasDisplayName ? NormalizeAlias(pid, entry.DisplayName) : existing?.DisplayName,
+                   BaseUrl = (entry.BaseUrl ?? existing?.BaseUrl ?? "").Trim().TrimEnd('/'),
+                   ApiKey = existing?.ApiKey,
+                   HeadersEnabled = entry.HeadersEnabled ?? existing?.HeadersEnabled ?? true,
+                   Headers = entry.Headers ?? new Dictionary<string, string>(existing?.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
+                   Network = entry.Network ?? ConfigStore.NormalizeProviderNetwork(existing?.Network, existing?.UseProxyLegacy ?? entry.UseProxy),
+                   ResponseStore = entry.ResponseStore ?? HaloAgent.Engine.Abstractions.Types.ResponseStores.Normalize(existing?.ResponseStore),
                  Models = entry.Models?.Select(m => new ModelConfig
                  {
                      Id = m.Id.Trim(),
@@ -217,68 +221,78 @@ public sealed partial class RealMethods
          });
     }
 
-      private sealed record ParsedProvider(
-          string? DisplayName, bool HasDisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
-          bool? HeadersEnabled, Dictionary<string, string>? Headers, string? Network, string? NetworkRaw, bool? UseProxy,
-          List<ModelSaveEntry>? Models);
+       private sealed record ParsedProvider(
+           string? DisplayName, bool HasDisplayName, string? BaseUrl, string? ApiKey, bool ClearKey,
+           bool? HeadersEnabled, Dictionary<string, string>? Headers, string? Network, string? NetworkRaw, bool? UseProxy,
+           string? ResponseStore, string? ResponseStoreRaw,
+           List<ModelSaveEntry>? Models);
  
-     private static ParsedProvider ParseProviderEntry(JsonElement el)
-     {
-          bool hasDisplayName = el.TryGetProperty("displayName", out var dn);
-          string? displayName = hasDisplayName ? dn.GetString() : null;
-         string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
-         string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
-         bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
-         bool? headersEnabled = el.TryGetProperty("headersEnabled", out var he)
-             ? (he.ValueKind == JsonValueKind.True ? true : he.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
-         Dictionary<string, string>? headers = null;
-         if (el.TryGetProperty("headers", out var hv) && hv.ValueKind == JsonValueKind.Array)
-         {
-             headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-             foreach (var h in hv.EnumerateArray())
-             {
-                 if (h.ValueKind != JsonValueKind.Object) continue;
-                 var key = h.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
-                     : h.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
-                 var val = h.TryGetProperty("value", out var v) ? v.GetString() : null;
-                 if (string.IsNullOrWhiteSpace(key)) continue;
-                 if (val is null) continue;
-                 headers[key!] = val;
-             }
-         }
-         // network 三选项（读时兼容旧 useProxy）
-         string? networkRaw = el.TryGetProperty("network", out var nw) ? nw.GetString() : null;
-         string? network = null;
-         if (networkRaw is not null)
-         {
-             var n = networkRaw.Trim().ToLowerInvariant();
-             network = n is ("follow" or "proxy" or "direct") ? n : n; // 非法值原样透出，由调用方拒存
-         }
-         bool? useProxy = el.TryGetProperty("useProxy", out var up)
-             ? (up.ValueKind == JsonValueKind.True ? true : up.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
-         List<ModelSaveEntry>? models = null;
-         if (el.TryGetProperty("models", out var mv) && mv.ValueKind == JsonValueKind.Array)
-         {
-             models = new List<ModelSaveEntry>();
-             foreach (var m in mv.EnumerateArray())
-             {
-                 if (m.ValueKind != JsonValueKind.Object) continue;
-                 models.Add(new ModelSaveEntry
-                 {
-                     Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
-                     DisplayName = m.TryGetProperty("displayName", out var mdn) ? mdn.GetString() : null,
-                     Protocol = m.TryGetProperty("protocol", out var pr) ? pr.GetString() : null,
-                     ContextWindow = m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : null,
-                     MaxTokens = m.TryGetProperty("maxTokens", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : null,
-                     AcceptsImages = m.TryGetProperty("acceptsImages", out var ai)
-                         ? (ai.ValueKind == JsonValueKind.True ? true : ai.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
-                     IncludeReasoningHistory = m.TryGetProperty("includeReasoningHistory", out var ir)
-                         ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
-                 });
-             }
+      private static ParsedProvider ParseProviderEntry(JsonElement el)
+      {
+           bool hasDisplayName = el.TryGetProperty("displayName", out var dn);
+           string? displayName = hasDisplayName ? dn.GetString() : null;
+          string? baseUrl = el.TryGetProperty("baseUrl", out var bv) ? bv.GetString() : null;
+          string? apiKey = el.TryGetProperty("apiKey", out var ak) ? ak.GetString() : null;
+          bool clearKey = el.TryGetProperty("clearKey", out var ck) && ck.ValueKind == JsonValueKind.True;
+          bool? headersEnabled = el.TryGetProperty("headersEnabled", out var he)
+              ? (he.ValueKind == JsonValueKind.True ? true : he.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+          Dictionary<string, string>? headers = null;
+          if (el.TryGetProperty("headers", out var hv) && hv.ValueKind == JsonValueKind.Array)
+          {
+              headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+              foreach (var h in hv.EnumerateArray())
+              {
+                  if (h.ValueKind != JsonValueKind.Object) continue;
+                  var key = h.TryGetProperty("key", out var k) ? k.GetString()?.Trim()
+                      : h.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null;
+                  var val = h.TryGetProperty("value", out var v) ? v.GetString() : null;
+                  if (string.IsNullOrWhiteSpace(key)) continue;
+                  if (val is null) continue;
+                  headers[key!] = val;
+              }
           }
-          return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, network, networkRaw, useProxy, models);
-      }
+          // network 三选项（读时兼容旧 useProxy）
+          string? networkRaw = el.TryGetProperty("network", out var nw) ? nw.GetString() : null;
+          string? network = null;
+          if (networkRaw is not null)
+          {
+              var n = networkRaw.Trim().ToLowerInvariant();
+              network = n is ("follow" or "proxy" or "direct") ? n : n; // 非法值原样透出，由调用方拒存
+          }
+          // P26：response_store 三档（default/true/false，严格小写；非法原样透出由调用方拒存）
+          string? responseStoreRaw = el.TryGetProperty("responseStore", out var rsw) ? rsw.GetString()
+              : el.TryGetProperty("response_store", out var rsn) ? rsn.GetString() : null;
+          string? responseStore = null;
+          if (responseStoreRaw is not null)
+          {
+              var rs = responseStoreRaw.Trim().ToLowerInvariant();
+              responseStore = rs is ("default" or "true" or "false") ? rs : rs;
+          }
+           bool? useProxy = el.TryGetProperty("useProxy", out var up)
+               ? (up.ValueKind == JsonValueKind.True ? true : up.ValueKind == JsonValueKind.False ? false : (bool?)null) : null;
+           List<ModelSaveEntry>? models = null;
+           if (el.TryGetProperty("models", out var mv) && mv.ValueKind == JsonValueKind.Array)
+           {
+               models = new List<ModelSaveEntry>();
+               foreach (var m in mv.EnumerateArray())
+               {
+                   if (m.ValueKind != JsonValueKind.Object) continue;
+                   models.Add(new ModelSaveEntry
+                   {
+                       Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                       DisplayName = m.TryGetProperty("displayName", out var mdn) ? mdn.GetString() : null,
+                       Protocol = m.TryGetProperty("protocol", out var pr) ? pr.GetString() : null,
+                       ContextWindow = m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : null,
+                       MaxTokens = m.TryGetProperty("maxTokens", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : null,
+                       AcceptsImages = m.TryGetProperty("acceptsImages", out var ai)
+                           ? (ai.ValueKind == JsonValueKind.True ? true : ai.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                       IncludeReasoningHistory = m.TryGetProperty("includeReasoningHistory", out var ir)
+                           ? (ir.ValueKind == JsonValueKind.True ? true : ir.ValueKind == JsonValueKind.False ? false : (bool?)null) : null,
+                   });
+               }
+            }
+            return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, network, networkRaw, useProxy, responseStore, responseStoreRaw, models);
+       }
 
      /// <summary>别名原则：无别名一律存 null。空白/与 id 精确相等(Ordinal)均视为无别名。</summary>
      private static string? NormalizeAlias(string id, string? displayName)
@@ -683,6 +697,8 @@ public sealed partial class RealMethods
                      Proxy = effProxy,
                      Headers = headers,
                      Protocol = LlmProtocol.Responses,
+                     // P26：ping 恒无状态——探测连通性，不探测持久化能力
+                     StoreMode = HaloAgent.Engine.Abstractions.Types.StoreMode.False,
                  });
                  try
                  {

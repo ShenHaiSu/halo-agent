@@ -76,6 +76,7 @@ function snapshotForDirty(): unknown {
       headersEnabled: p.headersEnabled,
       headers: p.headers,
       network: p.network,
+      responseStore: p.responseStore,
       models: p.models.map((m) => ({
         id: m.id,
         displayName: m.displayName,
@@ -204,6 +205,7 @@ function confirmNewProvider(): void {
     headersEnabled: true,
     headers: [],
     network: 'follow',
+     responseStore: 'default',
     models: [],
     expanded: true,
   });
@@ -269,6 +271,7 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
       headersEnabled: p.headersEnabled,
       headers: p.headers.filter((h) => h.key.trim() !== ''),
       network: p.network,
+      responseStore: p.responseStore,
       models: p.models.map((m) => ({
         id: m.id,
         displayName: m.displayName,
@@ -320,6 +323,7 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
        headersEnabled: p.headersEnabled,
        headers: p.headers,
        network: p.network,
+      responseStore: p.responseStore,
        models: p.models,
      })),
    });
@@ -524,6 +528,27 @@ onMounted(() => void load());
                    p.effective.inUse ? `走代理（${p.effective.source}${p.effective.maskedUrl ? '/' + p.effective.maskedUrl : ''}）` : `直连（${p.effective.source}）`
                  }}</span>
                </div>
+             </SettingRow>
+             <SettingRow
+               compact
+               label="服务端存储"
+               desc="控制 responses 协议请求体里的 store 字段。缺省=不发送该参数，由端点自行决定（兼容性最好）；true=服务端持久化，可省 token（仅官方等支持持久化的端点）；false=显式不持久化"
+             >
+               <HRadioGroup
+                 :model-value="p.responseStore"
+                 name="responseStore"
+                 direction="horizontal"
+                 @update:model-value="
+                   (v: string | number) => {
+                     p.responseStore = v === 'true' ? 'true' : v === 'false' ? 'false' : 'default';
+                     markDirty();
+                   }
+                 "
+               >
+                 <HRadio value="default" label="缺省" />
+                 <HRadio value="true" label="开启" />
+                 <HRadio value="false" label="关闭" />
+               </HRadioGroup>
              </SettingRow>
             <SettingRow
               compact

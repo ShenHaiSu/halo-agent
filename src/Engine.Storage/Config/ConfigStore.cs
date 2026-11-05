@@ -15,8 +15,10 @@ public sealed record ResolvedActiveModel
     public int? ContextWindow { get; init; }
     public int? MaxTokens { get; init; }
     public bool AcceptsImages { get; init; }
-    public bool IncludeReasoningHistory { get; init; } = true;
-    public string BaseUrl { get; init; } = "";
+     public bool IncludeReasoningHistory { get; init; } = true;
+     /// <summary>responses 的 store 三档（P26，来自 Provider 级配置）。</summary>
+     public HaloAgent.Engine.Abstractions.Types.StoreMode StoreMode { get; init; } = HaloAgent.Engine.Abstractions.Types.StoreMode.Default;
+     public string BaseUrl { get; init; } = "";
     public string? ApiKey { get; init; }
      /// <summary>兼容保留：仅 manual 有效时有值；诊断一律读 ProxyKind。</summary>
      public string? ProxyUrl { get; init; }
@@ -392,6 +394,8 @@ public static class ConfigStore
              MaxTokens = mdef.MaxTokens,
              AcceptsImages = mdef.AcceptsImages,
              IncludeReasoningHistory = mdef.IncludeReasoningHistory,
+             // P26：store 来自 Provider 级配置（不是模型级）。非法值回落 Default。
+             StoreMode = HaloAgent.Engine.Abstractions.Types.ResponseStores.ToStoreMode(pdef.ResponseStore),
              BaseUrl = baseUrl,
              ApiKey = string.IsNullOrEmpty(pdef.ApiKey) ? null : pdef.ApiKey,
              ProxyUrl = proxyUrl,

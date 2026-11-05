@@ -1653,14 +1653,23 @@
                     }
                   }
                 },
-                "network": {
-                  "type": "string",
-                  "enum": [
-                    "follow",
-                    "proxy",
-                    "direct"
-                  ]
-                },
+                 "network": {
+                   "type": "string",
+                   "enum": [
+                     "follow",
+                     "proxy",
+                     "direct"
+                   ]
+                 },
+                 "responseStore": {
+                   "type": "string",
+                   "enum": [
+                     "default",
+                     "true",
+                     "false"
+                   ],
+                   "description": "responses 的 store 三档：default=省略该键；true/false=显式发送。"
+                 },
                 "effective": {
                   "type": "object",
                   "properties": {

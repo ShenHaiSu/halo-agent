@@ -1,6 +1,7 @@
 // src/Web.Client/src/components/settings/providerEditing.test.ts
 // providerEditing 纯函数单测：归一化/校验/dirty；左栏计数、空 provider、active 高亮、responses disabled、dirty 禁切 setActive。
  import { describe, expect, it } from 'vitest';
+ import { PROVIDER_RESPONSE_STORES } from './validators';
  import { diffActive, hasAlias, mainName, normalizeAlias, normalizeNetwork, normalizeProvidersTree, trimOrNull, validateProvidersTree } from './providerEditing';
 
 const RAW = {
@@ -106,24 +107,55 @@ describe('dirty 禁切 setActive', () => {
    });
  });
 
-describe('network', () => {
-  it('network 归一化默认 follow', () => {
-    const t = normalizeProvidersTree(RAW);
-    expect(t.providers[0]!.network).toBe('follow');
-  });
-  it('旧 useProxy=false 读入兼容为 direct', () => {
-    expect(normalizeNetwork(undefined, false)).toBe('direct');
-    expect(normalizeNetwork(undefined, true)).toBe('follow');
-    const t = normalizeProvidersTree({
-      providers: [{ id: 'x', baseUrl: 'https://x/v1', useProxy: false, models: [] }],
-    });
-    expect(t.providers[0]!.network).toBe('direct');
-  });
-  it('非法 network 拒绝保存', () => {
-    const t = normalizeProvidersTree({
-      providers: [{ id: 'x', baseUrl: 'https://x/v1', network: 'force-proxy', models: [] }],
-    });
-    // 归一化落回 follow（后端 saveProviders 侧直接拒存，此处断言前端归一不抛）
-    expect(t.providers[0]!.network).toBe('follow');
-  });
-});
+ describe('network', () => {
+   it('network 归一化默认 follow', () => {
+     const t = normalizeProvidersTree(RAW);
+     expect(t.providers[0]!.network).toBe('follow');
+   });
+   it('旧 useProxy=false 读入兼容为 direct', () => {
+     expect(normalizeNetwork(undefined, false)).toBe('direct');
+     expect(normalizeNetwork(undefined, true)).toBe('follow');
+     const t = normalizeProvidersTree({
+       providers: [{ id: 'x', baseUrl: 'https://x/v1', useProxy: false, models: [] }],
+     });
+     expect(t.providers[0]!.network).toBe('direct');
+   });
+   it('非法 network 拒绝保存', () => {
+     const t = normalizeProvidersTree({
+       providers: [{ id: 'x', baseUrl: 'https://x/v1', network: 'force-proxy', models: [] }],
+     });
+     // 归一化落回 follow（后端 saveProviders 侧直接拒存，此处断言前端归一不抛）
+     expect(t.providers[0]!.network).toBe('follow');
+   });
+ });
+ 
+ describe('responseStore', () => {
+   it('R5 缺失时归一化为 default（不得回落 true）', () => {
+     const t = normalizeProvidersTree({
+       providers: [{ id: 'p', baseUrl: 'http://x/v1', models: [{ id: 'm', protocol: 'responses' }] }],
+     });
+     expect(t.providers[0]!.responseStore).toBe('default');
+   });
+ 
+   it('R5b 显式 true / false 保留', () => {
+     const t = normalizeProvidersTree({
+       providers: [
+         { id: 'a', baseUrl: 'http://x/v1', responseStore: 'true', models: [] },
+         { id: 'b', baseUrl: 'http://x/v1', responseStore: 'false', models: [] },
+       ],
+     });
+     expect(t.providers[0]!.responseStore).toBe('true');
+     expect(t.providers[1]!.responseStore).toBe('false');
+   });
+ 
+   it('R5c 非法值回落 default', () => {
+     const t = normalizeProvidersTree({
+       providers: [{ id: 'x', baseUrl: 'https://x/v1', responseStore: 'yes', models: [] }],
+     });
+     expect(t.providers[0]!.responseStore).toBe('default');
+   });
+ 
+   it('R6 前端三值与后端约定一致', () => {
+     expect(PROVIDER_RESPONSE_STORES).toEqual(['default', 'true', 'false']);
+   });
+ });

@@ -104,14 +104,23 @@ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
    return errs;
  }
 
-/** provider network 三选项。 */
-export const PROVIDER_NETWORKS = ['follow', 'proxy', 'direct'] as const;
-export type ProviderNetwork = (typeof PROVIDER_NETWORKS)[number];
-
-/** provider network 是否合法。 */
-export function isValidProviderNetwork(n: string): boolean {
-  return (PROVIDER_NETWORKS as readonly string[]).includes(n);
-}
+ /** provider network 三选项。 */
+ export const PROVIDER_NETWORKS = ['follow', 'proxy', 'direct'] as const;
+ export type ProviderNetwork = (typeof PROVIDER_NETWORKS)[number];
+ 
+ /** provider network 是否合法。 */
+ export function isValidProviderNetwork(n: string): boolean {
+   return (PROVIDER_NETWORKS as readonly string[]).includes(n);
+ }
+ 
+ /** provider response_store 三档。 */
+ export const PROVIDER_RESPONSE_STORES = ['default', 'true', 'false'] as const;
+ export type ProviderResponseStore = (typeof PROVIDER_RESPONSE_STORES)[number];
+ 
+ /** provider response_store 是否合法。 */
+ export function isValidResponseStore(v: string): boolean {
+   return (PROVIDER_RESPONSE_STORES as readonly string[]).includes(v);
+ }
 
  /** responses：模型协议白名单（chat/responses 放行，其余禁用）。 */
  export const SUPPORTED_MODEL_PROTOCOLS = ['chat', 'responses'] as const;

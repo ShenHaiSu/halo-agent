@@ -53,7 +53,7 @@ function mockTransportFor(opts: {
         activeProvider: '',
         activeModel: '',
         providers: [
-          { id: 'p1', displayName: 'P1', baseUrl: 'https://x', apiKeySet: true, headersEnabled: true, headers: [], network: 'follow', models: [{ id: 'm1', protocol: 'chat' }] },
+          { id: 'p1', displayName: 'P1', baseUrl: 'https://x', apiKeySet: true, headersEnabled: true, headers: [], network: 'follow', responseStore: 'default', models: [{ id: 'm1', protocol: 'chat' }] },
         ],
       } as never;
     }

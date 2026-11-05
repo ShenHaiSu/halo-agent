@@ -132,11 +132,11 @@ public sealed class UsageMethodsTests : IDisposable
              => Task.FromResult(new AssistantReply { Content = "ok" });
          public Task<AssistantReply> ChatStreamAsync(IReadOnlyList<ChatMessage> messages, IReadOnlyList<object>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
              => Task.FromResult(new AssistantReply { Content = "ok" });
-         public Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null)
+         public Task<ResponsesReply> ResponsesAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, CancellationToken ct, string? sessionId = null, bool stateless = false)
              => Task.FromResult(new ResponsesReply { Content = "ok" });
-         public Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null)
+         public Task<ResponsesReply> ResponsesStreamAsync(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, Action<StreamEvent> onEvent, CancellationToken ct, string? sessionId = null, bool stateless = false)
              => Task.FromResult(new ResponsesReply { Content = "ok" });
-         public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream) => new Dictionary<string, object?>();
+         public object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream, bool stateless = false) => new Dictionary<string, object?>();
          public Task ValidateAsync(CancellationToken ct) => Task.CompletedTask;
          public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(new[] { Model });
          public void Reconfigure(LlmConfig cfg) { }

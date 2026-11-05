@@ -193,43 +193,48 @@ public sealed class EndpointStatusException : Exception
         s.Length <= n ? s : s[..n] + "…";
 }
 
-public interface ILlmClient
-{
-    string Model { get; }
-    string? ProxyUrl { get; }
+ public interface ILlmClient
+ {
+     string Model { get; }
+     string? ProxyUrl { get; }
 
-    Task<AssistantReply> ChatAsync(
-        IReadOnlyList<ChatMessage> messages,
-        IReadOnlyList<object>? tools,
-        CancellationToken ct,
-        string? sessionId = null);
+     Task<AssistantReply> ChatAsync(
+         IReadOnlyList<ChatMessage> messages,
+         IReadOnlyList<object>? tools,
+         CancellationToken ct,
+         string? sessionId = null);
 
-    Task<AssistantReply> ChatStreamAsync(
-        IReadOnlyList<ChatMessage> messages,
-        IReadOnlyList<object>? tools,
-        Action<StreamEvent> onEvent,
-        CancellationToken ct,
-        string? sessionId = null);
-    Task<ResponsesReply> ResponsesAsync(
-        string? previousResponseId,
-        string? instructions,
-        IReadOnlyList<object> input,
-        IReadOnlyList<ResponsesToolDef>? tools,
-        CancellationToken ct,
-        string? sessionId = null);
-    Task<ResponsesReply> ResponsesStreamAsync(
-        string? previousResponseId,
-        string? instructions,
-        IReadOnlyList<object> input,
-        IReadOnlyList<ResponsesToolDef>? tools,
-        Action<StreamEvent> onEvent,
-        CancellationToken ct,
-        string? sessionId = null);
-    object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream);
-    Task ValidateAsync(CancellationToken ct);
-    Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct);
-    void Reconfigure(LlmConfig cfg);
-}
+     Task<AssistantReply> ChatStreamAsync(
+         IReadOnlyList<ChatMessage> messages,
+         IReadOnlyList<object>? tools,
+         Action<StreamEvent> onEvent,
+         CancellationToken ct,
+         string? sessionId = null);
+     Task<ResponsesReply> ResponsesAsync(
+         string? previousResponseId,
+         string? instructions,
+         IReadOnlyList<object> input,
+         IReadOnlyList<ResponsesToolDef>? tools,
+         CancellationToken ct,
+         string? sessionId = null,
+         bool stateless = false);
+     Task<ResponsesReply> ResponsesStreamAsync(
+         string? previousResponseId,
+         string? instructions,
+         IReadOnlyList<object> input,
+         IReadOnlyList<ResponsesToolDef>? tools,
+         Action<StreamEvent> onEvent,
+         CancellationToken ct,
+         string? sessionId = null,
+         bool stateless = false);
+     object BuildResponsesBody(string? previousResponseId, string? instructions, IReadOnlyList<object> input, IReadOnlyList<ResponsesToolDef>? tools, bool stream, bool stateless = false);
+     Task ValidateAsync(CancellationToken ct);
+     Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct);
+     void Reconfigure(LlmConfig cfg);
+ }
+
+ // P26：StoreMode 枚举与 ResponseStores 常量已移至 Abstractions.Types（Storage 禁止引用 Core）。
+ // 此处 using 已引入 HaloAgent.Engine.Abstractions.Types，StoreMode 即彼处定义。
 
  public sealed record LlmConfig
  {
@@ -245,8 +250,11 @@ public interface ILlmClient
      public int? MaxTokens { get; init; }
      public bool AcceptsImages { get; init; }
       public bool IncludeReasoningHistory { get; init; } = true;
-      /// <summary>responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
-      public bool StoreResponses { get; init; } = true;
+      /// <summary>
+      /// responses 的 store 三档（P26）。默认 Default = 省略该键，兼容无状态网关。
+      /// 来源：Provider 配置 response_store；见 docs/P26-response-fix/03-provider-config.md。
+      /// </summary>
+      public StoreMode StoreMode { get; init; } = StoreMode.Default;
   }
 /// <summary>发给模型的工具定义（OpenAI tools 格式）。</summary>
 public sealed record ToolDef

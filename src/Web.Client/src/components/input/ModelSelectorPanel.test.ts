@@ -16,6 +16,7 @@ function provider(id: string, displayName: string, models: Array<{ id: string; d
     headersEnabled: true,
     headers: [],
     network: 'follow',
+    responseStore: 'default',
     models: models.map((m) => ({
       id: m.id,
       displayName: m.displayName ?? '',
