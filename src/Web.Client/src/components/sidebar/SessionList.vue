@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/sidebar/SessionList.vue -->
+﻿<!-- src/Web.Client/src/components/sidebar/SessionList.vue -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useSessionsStore, type SessionListItem } from '@/stores/sessions';
@@ -11,6 +11,7 @@ import NewSessionButton from './NewSessionButton.vue';
 import HEmpty from '@/components/base/HEmpty.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSkeleton from '@/components/base/HSkeleton.vue';
+import { buildOffsets, computeVisible } from './virtualize';
 
 /**
  * 会话列表（见 04 §5.3 最终版）。
@@ -21,15 +22,17 @@ import HSkeleton from '@/components/base/HSkeleton.vue';
  *    ① 不需要测量（避免 getBoundingClientRect 引起的强制同步布局）
  *    ② 500 条时计算 O(1)，无抖动
  *  行高：
- *    item = 56px，group header = 28px
+ *    item = 56px，group header = 22px（须与 .group-head 实际渲染高度逐像素一致）
  *  buffer：上下各 5 个（快速滚动时不白屏）
+ *  注：分组标题是静态分隔行，不能使用 sticky —— transform 祖先会劫持吸附参照系，
+ *      padTop 与 scrollTop 不等时补偿量会暴露成可见错位。
  * ===================================================
  */
 const sessions = useSessionsStore();
 const toast = useToast();
 
 const ITEM_H = 56;
-const HEAD_H = 28;
+const HEAD_H = 22;
 const BUFFER = 5;
 
 type GroupKey = 'today' | 'yesterday' | 'week' | 'earlier';
@@ -100,31 +103,8 @@ const rows = computed<Row[]>(() => {
   return out;
 });
 
-/** 精确累加偏移（混合行高时取整会累积偏差） */
-function buildOffsets(hs: number[]): number[] {
-  const out = new Array<number>(hs.length + 1);
-  out[0] = 0;
-  for (let i = 0; i < hs.length; i++) out[i + 1] = out[i]! + hs[i]!;
-  return out;
-}
-
-/** 二分查找 y 所在行 */
-function findStartRow(offsets: number[], y: number): number {
-  const n = offsets.length - 1;
-  if (n <= 0) return 0;
-  if (y <= 0) return 0;
-  if (y >= offsets[n]!) return n - 1;
-  let lo = 0;
-  let hi = n - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (offsets[mid + 1]! <= y) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
-const offsets = computed(() => buildOffsets(rows.value.map((r) => r.h)));
+/** 偏移累加复用 virtualize.ts（Row 结构兼容 RowLike，直接传对象数组） */
+const offsets = computed(() => buildOffsets(rows.value));
 const totalHeight = computed(() => offsets.value[offsets.value.length - 1] ?? 0);
 
 const viewport = ref<HTMLElement | null>(null);
@@ -161,18 +141,9 @@ onMounted(() => {
 });
 onBeforeUnmount(() => ro?.disconnect());
 
-const visible = computed(() => {
-  const off = offsets.value;
-  const n = off.length - 1;
-  if (n <= 0) return { start: 0, end: 0, padTop: 0 };
-  const first = findStartRow(off, scrollTop.value);
-  const start = Math.max(0, first - BUFFER);
-  const bottomY = scrollTop.value + viewportH.value;
-  let last = first;
-  while (last < n && off[last]! < bottomY) last++;
-  const end = Math.min(n, last + BUFFER);
-  return { start, end, padTop: off[start] ?? 0 };
-});
+const visible = computed(() =>
+  computeVisible(offsets.value, scrollTop.value, viewportH.value, BUFFER)
+);
 
 const slice = computed(() => rows.value.slice(visible.value.start, visible.value.end));
 
@@ -211,7 +182,7 @@ async function createNew(): Promise<void> {
     <div
       ref="viewport"
       class="sess-viewport"
-      role="list"
+      role="group"
       aria-label="会话列表"
       @scroll.passive="onScroll"
     >
@@ -224,8 +195,13 @@ async function createNew(): Promise<void> {
       <template v-else-if="rows.length">
         <div class="sess-spacer" :style="{ height: `${totalHeight}px` }">
           <div class="sess-window" :style="{ transform: `translateY(${visible.padTop}px)` }">
-            <template v-for="r in slice" :key="r.key">
-              <SessionGroupHeader v-if="r.kind === 'header'" :label="r.label" :height="r.h" />
+            <template v-for="(r, i) in slice" :key="r.key">
+              <SessionGroupHeader
+                v-if="r.kind === 'header'"
+                :label="r.label"
+                :height="r.h"
+                :first="visible.start + i === 0"
+              />
               <SessionItem v-else :session="r.session" :height="r.h" />
             </template>
           </div>
