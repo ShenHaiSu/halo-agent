@@ -38,6 +38,7 @@ AppPublisher=HaloAgent
 ; {autopf} 在 PrivilegesRequired=lowest 下解析为 {localappdata}\Programs
 ; 在 admin 下解析为 {pf}。避免写死 "Program Files"，也避开 WOW64 重定向。
 DefaultDirName={autopf}\HaloAgent
+DisableDirPage=no
 DefaultGroupName=HaloAgent
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
