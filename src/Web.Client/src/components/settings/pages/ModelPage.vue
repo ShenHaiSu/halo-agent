@@ -1,45 +1,32 @@
 <!-- src/Web.Client/src/components/settings/pages/ModelPage.vue -->
-<!-- 单列嵌套手风琴（ProviderCard > ProviderHeader + ProviderBody 含 ModelList），Model 永为 Provider 子节点。 -->
+<!-- P27 定稿：左 220px Provider 一级列表（不展示 Model）+ 右单卷轴双区块（连接 / 模型密表）。
+     依据 docs/P27-FrontEnd-Enhance/定稿-Provider-Model双区块版.md。
+     无 tab / 锚点条 / tag / 描述段 / 生效行；说明只以 ⓘ 存在。 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
-import SettingRow from '../fields/SettingRow.vue';
-import SecretField from '../fields/SecretField.vue';
-import HeadersEditor, { type HeaderRow } from '../fields/HeadersEditor.vue';
-import ModelProbe from '../fields/ModelProbe.vue';
-import HaloIcon from '@/components/icons/HaloIcon.vue';
-import HInput from '@/components/base/HInput.vue';
-import HRadioGroup from '@/components/base/HRadioGroup.vue';
-import HRadio from '@/components/base/HRadio.vue';
 import HButton from '@/components/base/HButton.vue';
 import HSpinner from '@/components/base/HSpinner.vue';
-import HSwitch from '@/components/base/HSwitch.vue';
 import HDialog from '@/components/base/HDialog.vue';
-import { headerPlaceholderTooltip } from '../fields/headerPlaceholders';
+import HaloIcon from '@/components/icons/HaloIcon.vue';
+import type { HeaderRow } from '../fields/HeadersEditor.vue';
+import ProviderTree from '../provider/ProviderTree.vue';
+import ProviderConnForm from '../provider/ProviderConnForm.vue';
+import ModelDenseTable from '../provider/ModelDenseTable.vue';
 import {
-  hasAlias,
   mainName,
   normalizeProvidersTree,
   validateProvidersTree,
+  type ProviderEdit,
   type ProvidersTree,
 } from '../providerEditing';
-
-/** 上下文/输出上限预设（input + ButtonGroup，不用滑杆）。1M = 1000000，2M = 2000000。 */
-const CTX_PRESETS = [
-  { label: '128K', value: 128000 },
-  { label: '256K', value: 256000 },
-  { label: '512K', value: 512000 },
-  { label: '1M', value: 1000000 },
-  { label: '2M', value: 2000000 },
-] as const;
-const MAXTOK_PRESETS = [
-  { label: '5k', value: 5000 },
-  { label: '20k', value: 20000 },
-  { label: '50k', value: 50000 },
-  { label: '60k', value: 60000 },
-  { label: '128k', value: 128000 },
-] as const;
+import {
+  DENSITY_STORAGE_KEY,
+  canSetActive,
+  normalizeDensity,
+  type Density,
+} from '../providerFormat';
 
 const toast = useToast();
 const loading = ref(true);
@@ -50,23 +37,60 @@ const globalMode = ref('system');
 
 const tree = ref<ProvidersTree>({ activeProvider: '', activeModel: '', providers: [] });
 const originalJson = ref('');
-const newProviderMode = ref(false);
-const newProviderId = ref('');
+/** 右侧当前展示的 Provider id（UI 态，不入 dirty 快照） */
+const currentId = ref('');
 const fieldErrors = ref<Record<string, string>>({});
 const pendingDeleteProvider = ref<string | null>(null);
- /** 两步确认覆盖旧结构/损坏配置：migrationRequired（加载时嗅探）或 config.overwriteRequired（保存被拒回码）进入待确认态，第二次才带 force=true。 */
- const confirmOverwrite = ref(false);
- const overwriteRequired = ref(false);
-  const overwriteMsg = ref('');
- const pendingDeleteModel = ref<{ pid: string; mid: string } | null>(null);
+const pendingDeleteModel = ref<string | null>(null);
+/** 拉取状态文案（UI 态；ModelProbe 弹窗确认并入后刷新） */
+const fetchStatus = ref('未拉取');
+/** 两步确认覆盖旧结构/损坏配置 */
+const confirmOverwrite = ref(false);
+const overwriteRequired = ref(false);
+const overwriteMsg = ref('');
+
+/** 密度偏好：紧凑 28px / 舒适 32px（localStorage: density，见定稿 §7） */
+const density = ref<Density>('dense');
 
 const dirty = computed(() => JSON.stringify(snapshotForDirty()) !== originalJson.value);
 
-/** 快照排除 expanded(UI 态)，新建空 Card 纳入 dirty。 */
+const current = computed<ProviderEdit | undefined>(() =>
+  tree.value.providers.find((p) => p.id === currentId.value)
+);
+
+/** 当前 Provider 的字段错误（去掉 `${id}/` 前缀） */
+const currentErrors = computed<Record<string, string>>(() => {
+  const pid = currentId.value;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fieldErrors.value)) {
+    const prefix = `${pid}/-.`;
+    if (k.startsWith(prefix)) out[k.slice(prefix.length)] = v;
+    else if (k.startsWith(`${pid}/`)) {
+      // 模型级错误留在密表内展示
+    }
+  }
+  return out;
+});
+
+/** 当前 Provider 的模型级错误：`${modelId}.${field}` */
+const modelErrors = computed<Record<string, string>>(() => {
+  const pid = currentId.value;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fieldErrors.value)) {
+    const prefix = `${pid}/`;
+    if (!k.startsWith(prefix)) continue;
+    const rest = k.slice(prefix.length); // `${modelId}.${field}`
+    if (rest.startsWith('-.')) continue;
+    const dot = rest.lastIndexOf('.');
+    if (dot <= 0) continue;
+    out[`${rest.slice(0, dot)}.${rest.slice(dot + 1)}`] = v;
+  }
+  return out;
+});
+
+/** 快照排除 expanded(UI 态)，与原有 dirty 语义完全一致。 */
 function snapshotForDirty(): unknown {
   return {
-    newProviderMode: newProviderMode.value,
-    newProviderId: newProviderId.value,
     providers: tree.value.providers.map((p) => ({
       id: p.id,
       displayName: p.displayName,
@@ -94,32 +118,22 @@ function markDirty(): void {
   fieldErrors.value = {};
 }
 
-function toggleProvider(id: string): void {
-  const p = tree.value.providers.find((x) => x.id === id);
-  if (p) p.expanded = !p.expanded;
-}
-
-function toggleModel(pid: string, mid: string, idx: number): void {
-  const p = tree.value.providers.find((x) => x.id === pid);
-  const m = p?.models[idx];
-  if (m && m.id === mid) m.expanded = !m.expanded;
-}
-
-const headersTooltip = headerPlaceholderTooltip();
-
-function formatCtx(n: number | null): string {
-  if (n === null || n === undefined) return '';
-  if (n >= 1000000) {
-    const m = n / 1000000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+function applyDensity(): void {
+  try {
+    window.localStorage.setItem(DENSITY_STORAGE_KEY, density.value);
+  } catch {
+    /* 隐私模式忽略 */
   }
-  if (n >= 1000) return `${Math.round(n / 1000)}K`;
-  return String(n);
+}
+
+function setDensity(d: Density): void {
+  density.value = d;
+  applyDensity();
 }
 
 /** 探测勾选确认：去重合并进 model 列表（精确 Ordinal 匹配），走正常保存链。 */
-function onProbeConfirm(pid: string, names: string[]): void {
-  const p = tree.value.providers.find((x) => x.id === pid);
+function onProbeConfirm(names: string[]): void {
+  const p = current.value;
   if (!p) return;
   const have = new Set(p.models.map((m) => m.id));
   let added = 0;
@@ -134,11 +148,12 @@ function onProbeConfirm(pid: string, names: string[]): void {
       maxTokens: null,
       acceptsImages: false,
       includeReasoningHistory: true,
-      expanded: true,
+      expanded: false,
     });
     have.add(id);
     added += 1;
   }
+  fetchStatus.value = `已拉取到 ${names.length} 个`;
   markDirty();
   toast.success(added > 0 ? `已加入 ${added} 个（未保存）` : '所选均已在列表');
 }
@@ -155,23 +170,24 @@ async function load(): Promise<void> {
       proxy?: { mode?: string };
     };
     const t = normalizeProvidersTree(s);
-    t.providers.forEach((p, i) => {
-      p.expanded = i === 0;
-      p.models.forEach((m, j) => {
-        m.expanded = j === 0;
+    t.providers.forEach((p) => {
+      p.expanded = false;
+      p.models.forEach((m) => {
+        m.expanded = false;
       });
     });
-     tree.value = t;
-     migrationRequired.value = s.migrationRequired === true;
-     const gm = String(s.proxy?.mode ?? 'system').toLowerCase();
-     globalMode.value = gm === 'manual' ? 'manual' : gm === 'direct' || gm === 'auto' ? 'direct' : 'system';
-     newProviderMode.value = false;
-     newProviderId.value = '';
-     confirmOverwrite.value = false;
-     overwriteRequired.value = false;
-     overwriteMsg.value = '';
-     originalJson.value = JSON.stringify(snapshotForDirty());
-     fieldErrors.value = {};
+    tree.value = t;
+    currentId.value = t.providers[0]?.id ?? '';
+    migrationRequired.value = s.migrationRequired === true;
+    const gm = String(s.proxy?.mode ?? 'system').toLowerCase();
+    globalMode.value =
+      gm === 'manual' ? 'manual' : gm === 'direct' || gm === 'auto' ? 'direct' : 'system';
+    confirmOverwrite.value = false;
+    overwriteRequired.value = false;
+    overwriteMsg.value = '';
+    fetchStatus.value = '未拉取';
+    originalJson.value = JSON.stringify(snapshotForDirty());
+    fieldErrors.value = {};
   } catch (e) {
     loadError.value = (e as Error).message;
   } finally {
@@ -179,22 +195,16 @@ async function load(): Promise<void> {
   }
 }
 
-function startNewProvider(): void {
-  if (dirty.value && !window.confirm('有未保存的改动，继续将丢失？')) return;
-  newProviderMode.value = true;
-  newProviderId.value = '';
+function selectProvider(id: string): void {
+  if (id === currentId.value) return;
+  if (dirty.value && !window.confirm('有未保存改动，切换将丢失，继续？')) return;
+  currentId.value = id;
+  fieldErrors.value = {};
+  fetchStatus.value = '未拉取';
 }
 
-function confirmNewProvider(): void {
-  const id = newProviderId.value.trim();
-  if (!/^[a-z0-9][a-z0-9-_]{0,63}$/.test(id)) {
-    toast.warning('注册名称须匹配 ^[a-z0-9][a-z0-9-_]{0,63}$');
-    return;
-  }
-  if (tree.value.providers.some((p) => p.id === id)) {
-    toast.warning('该注册名称已存在');
-    return;
-  }
+function createProvider(id: string): void {
+  if (dirty.value && !window.confirm('有未保存改动，继续将丢失？')) return;
   tree.value.providers.push({
     id,
     displayName: '',
@@ -205,17 +215,16 @@ function confirmNewProvider(): void {
     headersEnabled: true,
     headers: [],
     network: 'follow',
-     responseStore: 'default',
+    responseStore: 'default',
     models: [],
-    expanded: true,
+    expanded: false,
   });
-  newProviderMode.value = false;
-  newProviderId.value = '';
+  currentId.value = id;
   markDirty();
 }
 
-function addModel(pid: string): void {
-  const p = tree.value.providers.find((x) => x.id === pid);
+function addModel(): void {
+  const p = current.value;
   if (!p) return;
   p.models.push({
     id: '',
@@ -230,19 +239,28 @@ function addModel(pid: string): void {
   markDirty();
 }
 
-function deleteModel(pid: string, mid: string): void {
-  pendingDeleteModel.value = { pid, mid };
+function requestDeleteModel(mid: string): void {
+  pendingDeleteModel.value = mid;
 }
 
 function confirmDeleteModel(): void {
-  const d = pendingDeleteModel.value;
+  const mid = pendingDeleteModel.value;
   pendingDeleteModel.value = null;
-  if (!d) return;
-  const p = tree.value.providers.find((x) => x.id === d.pid);
-  if (!p) return;
-  p.models = p.models.filter((m) => m.id !== d.mid);
+  const p = current.value;
+  if (!p || mid === null) return;
+  p.models = p.models.filter((m) => m.id !== mid);
+  // 删命中 active 的模型：同时清 active（后端亦不容 active 指向不存在模型）
+  if (tree.value.activeProvider === p.id && tree.value.activeModel === mid) {
+    tree.value.activeProvider = '';
+    tree.value.activeModel = '';
+  }
   markDirty();
   toast.success('已删除模型（未保存）');
+}
+
+function requestDeleteProvider(): void {
+  if (!current.value) return;
+  pendingDeleteProvider.value = current.value.id;
 }
 
 function confirmDeleteProvider(): void {
@@ -255,8 +273,28 @@ function confirmDeleteProvider(): void {
     tree.value.activeProvider = '';
     tree.value.activeModel = '';
   }
+  if (currentId.value === pid) currentId.value = tree.value.providers[0]?.id ?? '';
   markDirty();
   toast.success('已删除 Provider（未保存）');
+}
+
+/** 设为使用中：空 Provider 禁止；dirty 时确认后仍可切。 */
+function setActive(): void {
+  const p = current.value;
+  if (!p) return;
+  if (!canSetActive(p)) {
+    toast.warning('空 Provider 不可设为使用中，请先添加模型');
+    return;
+  }
+  if (dirty.value && !window.confirm('有未保存改动，仍切换使用中的模型？')) return;
+  // 沿用现有模型（默认第一个），不擅自新建
+  const mid = p.models.some((m) => m.id === tree.value.activeModel)
+    ? tree.value.activeModel
+    : p.models[0]!.id;
+  tree.value.activeProvider = p.id;
+  tree.value.activeModel = mid;
+  markDirty();
+  toast.success(`已设为使用中：${p.id} / ${mainName(mid, p.models.find((m) => m.id === mid)?.displayName)}`);
 }
 
 function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
@@ -283,96 +321,97 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
       })),
     };
   }
-   return force ? { providers, force: true } : { providers };
- }
- /** 两步确认：migrationRequired 或 config.overwriteRequired 时第一次点击仅进入待确认态，第二次才带 force 保存。 */
- function needConfirm(): boolean {
-   return migrationRequired.value || overwriteRequired.value;
- }
- function onSaveClick(): void {
-   if (needConfirm() && !confirmOverwrite.value) {
-     confirmOverwrite.value = true;
-     toast.warning('旧配置文件已自动备份，确认用当前整树覆盖请再点一次保存');
-     return;
-   }
-   void save(needConfirm() && confirmOverwrite.value);
- }
- 
- function rpcCode(e: unknown): string {
-   const o = (e ?? {}) as Record<string, unknown>;
-   if (typeof o['code'] === 'string') return o['code'] as string;
-   const d = o['data'] as Record<string, unknown> | undefined;
-   if (d && typeof d['code'] === 'string') return d['code'] as string;
-   const err = o['error'] as Record<string, unknown> | undefined;
-   if (err && typeof err['code'] === 'string') return err['code'] as string;
-   return '';
- }
- 
- async function save(force = false): Promise<void> {
-   if (saving.value) return;
-   const errs = validateProvidersTree({
-     activeProvider: tree.value.activeProvider,
-     activeModel: tree.value.activeModel,
-     providers: tree.value.providers.map((p) => ({
-       id: p.id,
-       displayName: p.displayName,
-       baseUrl: p.baseUrl,
-       apiKeySet: p.apiKeySet,
-       newKey: p.newKey,
-       clearKey: p.clearKey,
-       headersEnabled: p.headersEnabled,
-       headers: p.headers,
-       network: p.network,
+  return force ? { providers, force: true } : { providers };
+}
+
+/** 两步确认：migrationRequired 或 config.overwriteRequired 时第一次点击仅进入待确认态。 */
+function needConfirm(): boolean {
+  return migrationRequired.value || overwriteRequired.value;
+}
+
+function onSaveClick(): void {
+  if (needConfirm() && !confirmOverwrite.value) {
+    confirmOverwrite.value = true;
+    toast.warning('旧配置文件已自动备份，确认用当前整树覆盖请再点一次保存');
+    return;
+  }
+  void save(needConfirm() && confirmOverwrite.value);
+}
+
+function rpcCode(e: unknown): string {
+  const o = (e ?? {}) as Record<string, unknown>;
+  if (typeof o['code'] === 'string') return o['code'] as string;
+  const d = o['data'] as Record<string, unknown> | undefined;
+  if (d && typeof d['code'] === 'string') return d['code'] as string;
+  const err = o['error'] as Record<string, unknown> | undefined;
+  if (err && typeof err['code'] === 'string') return err['code'] as string;
+  return '';
+}
+
+async function save(force = false): Promise<void> {
+  if (saving.value) return;
+  const errs = validateProvidersTree({
+    activeProvider: tree.value.activeProvider,
+    activeModel: tree.value.activeModel,
+    providers: tree.value.providers.map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      baseUrl: p.baseUrl,
+      apiKeySet: p.apiKeySet,
+      newKey: p.newKey,
+      clearKey: p.clearKey,
+      headersEnabled: p.headersEnabled,
+      headers: p.headers,
+      network: p.network,
       responseStore: p.responseStore,
-       models: p.models,
-     })),
-   });
-   const map: Record<string, string> = {};
-   for (const e of errs) map[`${e.provider}/${e.model ?? '-'}.${e.field}`] = e.message;
-   fieldErrors.value = map;
-   if (errs.length > 0) {
-     toast.warning('请先修正表单中的错误');
-     return;
-   }
-   saving.value = true;
-   try {
-     const r = (await transport.request(
-       'settings.saveProviders',
-       toSavePayloadWithForce(force)
-     )) as {
-       ok?: boolean;
-       warnings?: string[];
-     };
-     if (r.ok === false) {
-       toast.error('保存失败（输入已保留）');
-       return;
-     }
-     for (const w of r.warnings ?? []) toast.warning(w);
-     // apiKey 已落盘：清空明文
-     tree.value.providers.forEach((p) => {
-       if (p.newKey) p.apiKeySet = true;
-       p.newKey = '';
-       p.clearKey = false;
-     });
-     originalJson.value = JSON.stringify(snapshotForDirty());
-     migrationRequired.value = false;
-     overwriteRequired.value = false;
-     overwriteMsg.value = '';
-     confirmOverwrite.value = false;
-     toast.success('已保存');
-   } catch (e) {
-     if (rpcCode(e) === 'config.overwriteRequired') {
-       overwriteRequired.value = true;
-       overwriteMsg.value = (e as Error).message;
-       confirmOverwrite.value = false;
-       toast.warning('配置文件为旧结构或已损坏，原文件已自动备份，确认用当前整树覆盖请再点一次保存（输入已保留）');
-       return;
-     }
-     toast.error(`保存失败：${(e as Error).message}（输入已保留）`);
-   } finally {
-     saving.value = false;
-   }
- }
+      models: p.models,
+    })),
+  });
+  const map: Record<string, string> = {};
+  for (const e of errs) map[`${e.provider}/${e.model ?? '-'}.${e.field}`] = e.message;
+  fieldErrors.value = map;
+  if (errs.length > 0) {
+    toast.warning('请先修正表单中的错误');
+    return;
+  }
+  saving.value = true;
+  try {
+    const r = (await transport.request('settings.saveProviders', toSavePayloadWithForce(force))) as {
+      ok?: boolean;
+      warnings?: string[];
+    };
+    if (r.ok === false) {
+      toast.error('保存失败（输入已保留）');
+      return;
+    }
+    for (const w of r.warnings ?? []) toast.warning(w);
+    // apiKey 已落盘：清空明文
+    tree.value.providers.forEach((p) => {
+      if (p.newKey) p.apiKeySet = true;
+      p.newKey = '';
+      p.clearKey = false;
+    });
+    originalJson.value = JSON.stringify(snapshotForDirty());
+    migrationRequired.value = false;
+    overwriteRequired.value = false;
+    overwriteMsg.value = '';
+    confirmOverwrite.value = false;
+    toast.success('已保存');
+  } catch (e) {
+    if (rpcCode(e) === 'config.overwriteRequired') {
+      overwriteRequired.value = true;
+      overwriteMsg.value = (e as Error).message;
+      confirmOverwrite.value = false;
+      toast.warning(
+        '配置文件为旧结构或已损坏，原文件已自动备份，确认用当前整树覆盖请再点一次保存（输入已保留）'
+      );
+      return;
+    }
+    toast.error(`保存失败：${(e as Error).message}（输入已保留）`);
+  } finally {
+    saving.value = false;
+  }
+}
 
 function isDirty(): boolean {
   return dirty.value;
@@ -381,493 +420,258 @@ function resetToSaved(): void {
   void load();
 }
 defineExpose({ isDirty, resetToSaved });
-onMounted(() => void load());
+
+// 密度偏好：挂到本页容器上（--settings-ih 由 CSS 变量下发给 FieldRow/input）
+onMounted(() => {
+  try {
+    density.value = normalizeDensity(window.localStorage.getItem(DENSITY_STORAGE_KEY));
+  } catch {
+    density.value = 'dense';
+  }
+  void load();
+});
+
+watch(density, applyDensity);
 </script>
 
 <template>
-  <div class="page">
-    <h2 class="page-title">模型</h2>
-    <div v-if="migrationRequired" class="migrate" role="alert">
+  <div class="mpage" :class="{ roomy: density === 'roomy' }">
+    <!-- 顶栏 sticky：标题 | 紧凑/舒适 | dirty | 保存 | 放弃 -->
+    <div class="mpage-top">
+      <h2 class="mpage-title">模型</h2>
+      <div class="seg" role="group" aria-label="密度">
+        <button
+          type="button"
+          class="seg-btn"
+          :class="{ on: density === 'dense' }"
+          :aria-pressed="density === 'dense'"
+          @click="setDensity('dense')"
+        >
+          紧凑
+        </button>
+        <button
+          type="button"
+          class="seg-btn"
+          :class="{ on: density === 'roomy' }"
+          :aria-pressed="density === 'roomy'"
+          @click="setDensity('roomy')"
+        >
+          舒适
+        </button>
+      </div>
+      <span class="spacer" />
+      <span v-if="dirty" class="dirty-tag" role="status">有未保存的改动</span>
+      <HButton
+        size="sm"
+        :variant="needConfirm() && confirmOverwrite ? 'danger' : 'primary'"
+        :disabled="!dirty"
+        :loading="saving"
+        @click="onSaveClick"
+        >{{ needConfirm() && confirmOverwrite ? '确认覆盖并保存' : '保存' }}</HButton
+      >
+      <HButton size="sm" variant="secondary" :disabled="!dirty" @click="resetToSaved">放弃</HButton>
+    </div>
+
+    <div v-if="migrationRequired" class="mpage-note" role="alert">
+      <HaloIcon name="alert" :size="13" />
       配置结构已升级（旧文件已自动备份），请重建 providers 后保存。
     </div>
-    <div v-if="loading" class="page-state"><HSpinner size="sm" /><span>加载中…</span></div>
-    <div v-else-if="loadError" class="page-state err" role="alert">
+    <div v-if="overwriteRequired" class="mpage-note" role="alert">
+      <HaloIcon name="alert" :size="13" />
+      检测到旧结构/损坏配置（{{ overwriteMsg }}），已备份，确认覆盖请再点一次保存。
+    </div>
+
+    <div v-if="loading" class="mpage-state"><HSpinner size="sm" /><span>加载中…</span></div>
+    <div v-else-if="loadError" class="mpage-state err" role="alert">
       <span>读取设置失败：{{ loadError }}</span>
       <HButton size="sm" variant="secondary" @click="load">重试</HButton>
     </div>
-    <template v-else>
-      <div class="prov-list">
-        <section
-          v-for="p in tree.providers"
-          :key="p.id"
-          class="prov-card"
-          :class="{ active: p.id === tree.activeProvider }"
-        >
-          <button
-            type="button"
-            class="prov-head"
-            :aria-expanded="!!p.expanded"
-            :aria-label="`${mainName(p.id, p.displayName)}（${p.models.length} 个模型），${p.expanded ? '收起' : '展开'}详情`"
-            @click="toggleProvider(p.id)"
-          >
-            <span v-if="p.id === tree.activeProvider" class="active-dot" aria-label="使用中" />
-            <span v-else class="active-dot off" aria-hidden="true" />
-            <span class="prov-main">{{ mainName(p.id, p.displayName) }}</span>
-            <span v-if="hasAlias(p.id, p.displayName)" class="prov-sub">{{ p.id }}</span>
-            <span class="badge">{{ p.models.length }}</span>
-            <span class="mini">{{
-              p.apiKeySet || p.newKey.trim() !== '' ? 'key已设' : '无key'
-            }}</span>
-            <span class="mini">{{
-              p.effective
-                ? p.effective.inUse
-                  ? p.effective.source === 'global-system'
-                    ? '跟随系统走代理'
-                    : `走代理 ${p.effective.maskedUrl ?? ''}`.trim()
-                  : p.effective.source === 'bypass-local'
-                    ? '本地直连'
-                    : '直连'
-                : p.network === 'follow'
-                  ? '跟随全局'
-                  : p.network === 'proxy'
-                    ? '走代理'
-                    : '直连'
-            }}</span>
-            <span v-if="p.effective?.warning" class="mini warn" role="status">{{ p.effective.warning }}</span>
-            <HaloIcon
-              name="chevron-down"
-              :size="14"
-              class="chev"
-              :class="{ open: !!p.expanded }"
-              aria-hidden="true"
-            />
-          </button>
-          <div v-if="p.expanded" class="prov-body">
-            <div class="addr-key">
-              <SettingRow
-                compact
-                label="接口地址"
-                desc="绝对 http(s)，保存时 Trim 并去尾 /；responses 协议在该地址下走 /responses 路径"
-                required
-                :error="fieldErrors[`${p.id}/-.baseUrl`] ?? null"
-              >
-                <HInput
-                  :model-value="p.baseUrl"
-                  placeholder="https://"
-                  @update:model-value="
-                    (v: string) => {
-                      p.baseUrl = v;
-                      markDirty();
-                    }
-                  "
-                />
-              </SettingRow>
-              <SettingRow
-                compact
-                label="API Key"
-                :desc="
-                  p.apiKeySet
-                    ? '保存后不再回显；留空=不改。已设置（为安全起见不显示明文）。'
-                    : '保存后不再回显；留空=不改'
-                "
-              >
-                <SecretField
-                  v-model="p.newKey"
-                  :api-key-set="p.apiKeySet"
-                  :clear-key="p.clearKey"
-                  :show-clear="p.apiKeySet"
-                  @update:model-value="markDirty"
-                  @update:clear-key="
-                    (v: boolean) => {
-                      p.clearKey = v;
-                      markDirty();
-                    }
-                  "
-                />
-              </SettingRow>
-            </div>
-            <SettingRow
-              compact
-              label="注册名称"
-              desc="不可改（改名=新建+删旧），正则 ^[a-z0-9][a-z0-9-_]{0,63}$"
-              ><HInput :model-value="p.id" :disabled="true" @update:model-value="() => {}"
-            /></SettingRow>
-            <SettingRow compact label="别称" desc="展示用，可空回落 id；留空=清除"
-              ><HInput
-                :model-value="p.displayName"
-                :placeholder="p.id"
-                @update:model-value="
-                  (v: string) => {
-                    p.displayName = v;
-                    markDirty();
-                  }
-                "
-            /></SettingRow>
-             <SettingRow
-               compact
-               label="网络"
-               desc="全局决定走哪条路，单个服务可单独覆盖；本地/内网地址永远直连。走代理适合国外接口；直连适合国内/本地，延迟低"
-             >
-               <div class="inline-row">
-                 <HRadioGroup
-                   :model-value="p.network"
-                   name="network"
-                   direction="horizontal"
-                   @update:model-value="
-                     (v: string | number) => {
-                       p.network = v === 'proxy' ? 'proxy' : v === 'direct' ? 'direct' : 'follow';
-                       markDirty();
-                     }
-                   "
-                 >
-                   <HRadio value="follow" label="跟随全局" />
-                   <HRadio value="proxy" label="该服务走代理" />
-                   <HRadio value="direct" label="该服务直连" />
-                 </HRadioGroup>
-                 <span v-if="p.effective" class="hint">当前生效：{{
-                   p.effective.inUse ? `走代理（${p.effective.source}${p.effective.maskedUrl ? '/' + p.effective.maskedUrl : ''}）` : `直连（${p.effective.source}）`
-                 }}</span>
-               </div>
-             </SettingRow>
-             <SettingRow
-               compact
-               label="服务端存储"
-               desc="控制 responses 协议请求体里的 store 字段。缺省=不发送该参数，由端点自行决定（兼容性最好）；true=服务端持久化，可省 token（仅官方等支持持久化的端点）；false=显式不持久化"
-             >
-               <HRadioGroup
-                 :model-value="p.responseStore"
-                 name="responseStore"
-                 direction="horizontal"
-                 @update:model-value="
-                   (v: string | number) => {
-                     p.responseStore = v === 'true' ? 'true' : v === 'false' ? 'false' : 'default';
-                     markDirty();
-                   }
-                 "
-               >
-                 <HRadio value="default" label="缺省" />
-                 <HRadio value="true" label="开启" />
-                 <HRadio value="false" label="关闭" />
-               </HRadioGroup>
-             </SettingRow>
-            <SettingRow
-              compact
-              label="自定义请求头"
-              desc="该 Provider 专属"
-              :tooltip="headersTooltip"
-            >
-              <HSwitch
-                :model-value="p.headersEnabled"
-                label="自定义请求头开关"
-                @update:model-value="
-                  (v: boolean) => {
-                    p.headersEnabled = v;
-                    markDirty();
-                  }
-                "
-              />
-              <HeadersEditor
-                :model-value="p.headers as HeaderRow[]"
-                @update:model-value="
-                  (v: HeaderRow[]) => {
-                    p.headers = v;
-                    markDirty();
-                  }
-                "
-              />
-            </SettingRow>
-            <SettingRow compact label="探测模型" desc="/models 探活（带头、走对代理）">
-              <ModelProbe
-                :base-url="p.baseUrl"
-                :api-key="p.newKey"
-                :provider-id="p.id"
-                :headers="p.headers as HeaderRow[]"
-                :network="p.network"
-                :clear-key="p.clearKey"
-                :existing-models="p.models.map((m) => m.id)"
-                @probe-confirm="(names: string[]) => onProbeConfirm(p.id, names)"
-              />
-            </SettingRow>
-            <div class="models-head">
-              <h3>模型（{{ p.models.length }}）</h3>
-              <HButton size="sm" variant="secondary" @click="addModel(p.id)">+ 添加模型</HButton>
-            </div>
-            <div v-if="p.models.length === 0" class="empty-hint" role="status">
-              该 Provider 下暂无模型，点右上添加。
-            </div>
-            <div v-for="(m, mi) in p.models" :key="m.id || `new-${mi}`" class="model-card">
-              <div class="model-head" @click="toggleModel(p.id, m.id, mi)">
-                <span class="mmain">{{ mainName(m.id, m.displayName) || '(未命名)' }}</span>
-                <span v-if="hasAlias(m.id, m.displayName)" class="msub">{{ m.id }}</span>
-                <span class="proto-badge" :class="{ resp: m.protocol === 'responses' }">{{
-                  m.protocol === 'responses' ? 'resp' : 'chat'
-                }}</span>
-                <span v-if="m.contextWindow" class="mctx">{{ formatCtx(m.contextWindow) }}</span>
-                <span v-if="m.acceptsImages" class="mimg" aria-label="支持图片">图</span>
-                <span
-                  v-if="p.id === tree.activeProvider && m.id === tree.activeModel"
-                  class="active-dot"
-                  aria-label="使用中"
-                  >●</span
-                >
-                <button
-                  type="button"
-                  class="chev-btn"
-                  :aria-expanded="!!m.expanded"
-                  :aria-label="`${mainName(m.id, m.displayName)}，${m.expanded ? '收起' : '展开'}详情`"
-                  @click.stop="toggleModel(p.id, m.id, mi)"
-                >
-                  <HaloIcon
-                    name="chevron-down"
-                    :size="14"
-                    class="chev"
-                    :class="{ open: !!m.expanded }"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-              <div v-if="m.expanded" class="model-body">
-                <SettingRow
-                  compact
-                  label="实际请求名称"
-                  desc="发给模型端点的 model 字段（chat 走 /chat/completions，responses 走 /responses）"
-                  required
-                >
-                  <HInput
-                    :model-value="m.id"
-                    placeholder="如 deepseek-chat"
-                    @update:model-value="
-                      (v: string) => {
-                        m.id = v;
-                        markDirty();
-                      }
-                    "
-                  />
-                </SettingRow>
-                <SettingRow
-                  compact
-                  label="协议"
-                  desc="chat 与 responses 均可用；responses 在接口地址下走 /responses 路径"
-                >
-                  <HRadioGroup
-                    :model-value="m.protocol"
-                    direction="horizontal"
-                    @update:model-value="
-                      (v: string | number) => {
-                        m.protocol = String(v);
-                        markDirty();
-                      }
-                    "
-                  >
-                    <HRadio value="chat" label="chat" />
-                    <HRadio value="responses" label="responses" />
-                  </HRadioGroup>
-                </SettingRow>
-                <SettingRow compact label="别称" desc="展示用，可空回落实际请求名称；留空=清除"
-                  ><HInput
-                    :model-value="m.displayName"
-                    :placeholder="m.id"
-                    @update:model-value="
-                      (v: string) => {
-                        m.displayName = v;
-                        markDirty();
-                      }
-                    "
-                /></SettingRow>
-                <SettingRow
-                  compact
-                  label="上下文最大值"
-                  desc="0或留空=未知（不做配额估算）；预设在上"
-                >
-                  <div class="num-wrap">
-                    <div class="preset-group" role="group" aria-label="上下文预设">
-                      <HButton
-                        v-for="preset in CTX_PRESETS"
-                        :key="preset.value"
-                        size="sm"
-                        :variant="m.contextWindow === preset.value ? 'primary' : 'secondary'"
-                        :aria-pressed="m.contextWindow === preset.value"
-                        @click="
-                          m.contextWindow = preset.value;
-                          markDirty();
-                        "
-                        >{{ preset.label }}</HButton
-                      >
-                    </div>
-                    <HInput
-                      :model-value="m.contextWindow === null ? '' : String(m.contextWindow)"
-                      type="number"
-                      placeholder="0=默认未知，如 128000"
-                      @update:model-value="
-                        (v: string) => {
-                          const n = Math.trunc(Number(v));
-                          m.contextWindow = !v || !Number.isFinite(n) || n <= 0 ? null : n;
-                          markDirty();
-                        }
-                      "
-                    />
-                  </div>
-                </SettingRow>
-                <SettingRow compact label="输出 token 最大值" desc="0或留空=不限制；预设在上">
-                  <div class="num-wrap">
-                    <div class="preset-group" role="group" aria-label="输出上限预设">
-                      <HButton
-                        v-for="preset in MAXTOK_PRESETS"
-                        :key="preset.value"
-                        size="sm"
-                        :variant="m.maxTokens === preset.value ? 'primary' : 'secondary'"
-                        :aria-pressed="m.maxTokens === preset.value"
-                        @click="
-                          m.maxTokens = preset.value;
-                          markDirty();
-                        "
-                        >{{ preset.label }}</HButton
-                      >
-                    </div>
-                    <HInput
-                      :model-value="m.maxTokens === null ? '' : String(m.maxTokens)"
-                      type="number"
-                      placeholder="0=默认不限制，如 20000"
-                      @update:model-value="
-                        (v: string) => {
-                          const n = Math.trunc(Number(v));
-                          m.maxTokens = !v || !Number.isFinite(n) || n <= 0 ? null : n;
-                          markDirty();
-                        }
-                      "
-                    />
-                  </div>
-                </SettingRow>
-                <SettingRow compact label="图片" desc="false 时前端禁贴图、后端硬拦"
-                  ><HSwitch
-                    :model-value="m.acceptsImages"
-                    label="图片开关"
-                    @update:model-value="
-                      (v: boolean) => {
-                        m.acceptsImages = v;
-                        markDirty();
-                      }
-                    "
-                /></SettingRow>
-                <SettingRow compact label="携带历史 reasoning" desc="默认开；关则发送侧 strip"
-                  ><HSwitch
-                    :model-value="m.includeReasoningHistory"
-                    label="携带历史 reasoning"
-                    @update:model-value="
-                      (v: boolean) => {
-                        m.includeReasoningHistory = v;
-                        markDirty();
-                      }
-                    "
-                /></SettingRow>
-                <div class="row-actions">
-                  <HButton size="sm" variant="ghost" @click="deleteModel(p.id, m.id)"
-                    >删除模型</HButton
-                  >
-                </div>
-              </div>
-            </div>
-            <div class="row-actions">
-              <HButton size="sm" variant="ghost" @click="pendingDeleteProvider = p.id"
-                >删除该 Provider</HButton
-              >
-            </div>
-          </div>
-        </section>
-        <section v-if="newProviderMode" class="prov-card creating" aria-label="新建 Provider">
-          <SettingRow
-            compact
-            label="注册名称"
-            desc="不可改（改名=新建+删旧），正则 ^[a-z0-9][a-z0-9-_]{0,63}$"
-            required
-          >
-            <HInput
-              :model-value="newProviderId"
-              placeholder="如 deepseek"
-              @update:model-value="(v: string) => (newProviderId = v)"
-            />
-          </SettingRow>
-          <div class="row-actions">
-            <HButton size="sm" variant="primary" @click="confirmNewProvider">创建</HButton>
+
+    <div v-else class="mpage-main">
+      <!-- 左：Provider 一级列表 -->
+      <aside class="mpage-tree">
+        <ProviderTree
+          :providers="tree.providers"
+          :current-id="currentId"
+          :active-provider="tree.activeProvider"
+          @select="selectProvider"
+          @create="createProvider"
+        />
+      </aside>
+
+      <!-- 右：单卷轴双区块 -->
+      <div class="mpage-detail">
+        <template v-if="current">
+          <div class="detail-head">
+            <h3 class="detail-title">{{ mainName(current.id, current.displayName) }}</h3>
+            <span class="detail-id">{{ current.id }}</span>
             <HButton
               size="sm"
-              variant="ghost"
-              @click="
-                newProviderMode = false;
-                newProviderId = '';
-              "
-              >取消</HButton
+              variant="secondary"
+              :disabled="current.models.length === 0"
+              title="把该 Provider 设为使用中"
+              @click="setActive"
             >
+              设为使用中
+            </HButton>
           </div>
-        </section>
-        <HButton v-if="!newProviderMode" size="sm" variant="secondary" @click="startNewProvider"
-          >+ 新建 Provider</HButton
-        >
+
+          <ProviderConnForm
+            :provider="current"
+            :errors="currentErrors"
+            :global-mode="globalMode"
+            :fetch-status="fetchStatus"
+            @change="markDirty"
+            @update:clear-key="
+              (v: boolean) => {
+                if (!current) return;
+                current.clearKey = v;
+                markDirty();
+              }
+            "
+            @update:headers-enabled="
+              (v: boolean) => {
+                if (!current) return;
+                current.headersEnabled = v;
+                markDirty();
+              }
+            "
+            @update:headers="
+              (rows: HeaderRow[]) => {
+                if (!current) return;
+                current.headers = rows;
+                markDirty();
+              }
+            "
+            @probe-confirm="onProbeConfirm"
+            @request-delete="requestDeleteProvider"
+          />
+
+          <ModelDenseTable
+            :provider-id="current.id"
+            :models="current.models"
+            :tree="tree"
+            :errors="modelErrors"
+            @change="markDirty"
+            @add-model="addModel"
+            @delete-model="requestDeleteModel"
+            @set-active="setActive"
+          />
+        </template>
+
+        <div v-else class="mpage-empty" role="status">
+          <p>还没有 Provider。点左侧「新建 Provider」开始配置，或用「模型列表」拉取可用模型。</p>
+        </div>
       </div>
-       <div class="page-actions">
-         <span class="hint">全局代理：{{ globalMode }}</span>
-         <HButton
-           :variant="needConfirm() && confirmOverwrite ? 'danger' : 'primary'"
-           :disabled="!dirty"
-           :loading="saving"
-           @click="onSaveClick"
-           >{{
-             needConfirm() && confirmOverwrite ? '确认覆盖旧配置并保存' : '保存 providers'
-           }}</HButton
-         >
-         <HButton variant="secondary" :disabled="!dirty" @click="resetToSaved">放弃</HButton>
-         <span v-if="dirty" class="dirty-hint" role="status">有未保存的改动</span>
-          <span v-if="migrationRequired" class="hint">旧配置已备份，保存需点两次确认覆盖</span>
-          <span v-else-if="overwriteRequired" class="hint" role="alert">检测到旧结构/损坏配置（{{ overwriteMsg }}），已备份，确认覆盖请再点一次保存</span>
-          <p class="fixed-note">全局决定走哪条路，单个服务可单独覆盖；本地/内网地址永远直连；"该服务走代理"但全局无可用代理时降级直连并出黄条（非静默）。</p>
-       </div>
-    </template>
+    </div>
+
+    <!-- 底栏 sticky：全局代理 + dirty -->
+    <div class="mpage-foot">
+      <span class="foot-hint">全局代理：{{ globalMode }}</span>
+      <span class="spacer" />
+      <span v-if="dirty" class="dirty-tag" role="status">有未保存的改动</span>
+    </div>
+
+    <HDialog
+      :open="pendingDeleteProvider !== null"
+      title="删除 Provider？"
+      @close="pendingDeleteProvider = null"
+    >
+      <p>
+        将删除 {{ pendingDeleteProvider }} 及其下全部模型（未保存）。若命中 active，需先选新
+        active 或置未配置态。
+      </p>
+      <template #footer>
+        <HButton size="sm" variant="ghost" @click="pendingDeleteProvider = null">取消</HButton>
+        <HButton size="sm" variant="danger" @click="confirmDeleteProvider">删除</HButton>
+      </template>
+    </HDialog>
+    <HDialog
+      :open="pendingDeleteModel !== null"
+      title="删除模型？"
+      @close="pendingDeleteModel = null"
+    >
+      <p>将删除 {{ pendingDeleteModel }}（未保存）。若命中 active，需先选新 active。</p>
+      <template #footer>
+        <HButton size="sm" variant="ghost" @click="pendingDeleteModel = null">取消</HButton>
+        <HButton size="sm" variant="danger" @click="confirmDeleteModel">删除</HButton>
+      </template>
+    </HDialog>
   </div>
-  <HDialog
-    :open="pendingDeleteProvider !== null"
-    title="删除 Provider？"
-    @close="pendingDeleteProvider = null"
-  >
-    <p>
-      将删除 {{ pendingDeleteProvider }} 及其下全部模型（未保存）。若命中 active，需先选新 active
-      或置未配置态。
-    </p>
-    <template #footer>
-      <HButton size="sm" variant="ghost" @click="pendingDeleteProvider = null">取消</HButton>
-      <HButton size="sm" variant="primary" @click="confirmDeleteProvider">删除</HButton>
-    </template>
-  </HDialog>
-  <HDialog
-    :open="pendingDeleteModel !== null"
-    title="删除模型？"
-    @close="pendingDeleteModel = null"
-  >
-    <p>将删除该模型（未保存）。若命中 active，需先选新 active。</p>
-    <template #footer>
-      <HButton size="sm" variant="ghost" @click="pendingDeleteModel = null">取消</HButton>
-      <HButton size="sm" variant="primary" @click="confirmDeleteModel">删除</HButton>
-    </template>
-  </HDialog>
 </template>
 
 <style scoped>
-.page {
-  max-width: none;
+.mpage {
+  /* 唯一高度变量：紧凑 28 / 舒适 32（body.roomy 的等价物，只作用于本页） */
+  --settings-ih: 28px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  min-width: 0;
 }
-.page-title {
-  font-size: var(--text-base);
+.mpage.roomy {
+  --settings-ih: 32px;
+}
+/* 行高统一的控件：input / select / textarea 引用 --settings-ih */
+.mpage :deep(input:not([type='checkbox']):not([type='radio'])),
+.mpage :deep(select),
+.mpage :deep(textarea) {
+  transition:
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+.mpage :deep(input:not([type='number']):not([type='checkbox']):not([type='radio'])),
+.mpage :deep(select) {
+  height: var(--settings-ih);
+}
+.mpage :deep(input:focus-visible),
+.mpage :deep(select:focus-visible),
+.mpage :deep(textarea:focus-visible) {
+  /* focus 环：accent 边框 + 3px 15% 光晕（定稿 §3） */
+  box-shadow: 0 0 0 3px hsl(var(--accent) / 0.15);
+}
+
+.mpage-top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) 0;
+  background: hsl(var(--bg));
+  border-bottom: 1px solid hsl(var(--border-subtle));
+  flex-wrap: wrap;
+}
+.mpage-title {
+  margin: 0;
+  font-size: var(--text-lg);
   font-weight: 600;
-  margin: 0 0 var(--space-2);
+  color: hsl(var(--fg));
 }
-.migrate {
-  padding: var(--space-2) var(--space-3);
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+.dirty-tag {
+  font-size: var(--text-2xs);
+  color: hsl(var(--warning));
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mpage-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-top: var(--space-1-5);
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-sm);
   background: hsl(var(--warning-subtle));
   color: hsl(var(--warning));
-  border-radius: var(--radius-sm);
-  margin-bottom: var(--space-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
-.page-state {
+.mpage-state {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -875,274 +679,137 @@ onMounted(() => void load());
   font-size: var(--text-sm);
   padding: var(--space-4) 0;
 }
-.page-state.err {
+.mpage-state.err {
   color: hsl(var(--danger));
   flex-direction: column;
   align-items: flex-start;
 }
-.prov-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-}
-.prov-card {
-  border: 1px solid hsl(var(--border-subtle));
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-1-5);
-}
-.prov-card.active {
-  border-color: hsl(var(--accent));
-}
-.prov-card.creating {
-  padding: var(--space-1) var(--space-2) var(--space-2);
-}
-.prov-head {
-  width: 100%;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-0-5) var(--space-1-5);
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  min-width: 0;
-  text-align: left;
-}
-.prov-head:hover {
-  background: hsl(var(--bg-muted));
-}
-.prov-head:focus-visible {
-  outline: 2px solid hsl(var(--accent) / 0.4);
-  outline-offset: 1px;
-}
-.prov-main {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: hsl(var(--fg));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.prov-sub {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.badge {
-  flex: none;
-  font-size: var(--text-2xs);
-  background: hsl(var(--bg-muted));
-  color: hsl(var(--fg-muted));
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-}
-.mini {
-  flex: none;
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  background: hsl(var(--bg-subtle));
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-xs);
-}
-.mini.warn {
-  color: hsl(var(--warning));
-}
-.fixed-note {
-  font-size: var(--text-xs);
-  color: hsl(var(--fg-muted));
-  margin: var(--space-2) 0;
-}
-.active-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: hsl(var(--accent));
-  color: hsl(var(--accent));
-  font-size: 6px;
-  line-height: 1;
-}
-.active-dot.off {
-  background: transparent;
-  visibility: hidden;
-}
-.chev {
-  margin-left: auto;
-  flex: none;
-  color: hsl(var(--fg-subtle));
-  transition: transform 0.12s ease;
-}
-.chev.open {
-  transform: rotate(180deg);
-}
-.prov-body {
-  padding: 0 var(--space-2) var(--space-1-5);
-  min-width: 0;
-}
-.addr-key {
+.mpage-main {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 1fr;
-  min-width: 0;
-}
-.inline-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.models-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: var(--space-2) 0 var(--space-1);
-}
-.models-head h3 {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-.empty-hint {
-  font-size: var(--text-xs);
-  color: hsl(var(--fg-subtle));
-  padding: var(--space-1) 0;
-}
-.model-card {
-  border: 1px solid hsl(var(--border-subtle));
-  border-radius: var(--radius-sm);
-  margin-bottom: var(--space-1);
-  margin-left: var(--space-2);
-  min-width: 0;
-}
-.model-head {
-  width: 100%;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-0-5) var(--space-1-5);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  min-width: 0;
-}
-.model-head:hover {
-  background: hsl(var(--bg-muted));
-}
-.chev-btn {
-  margin-left: auto;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  border-radius: var(--radius-xs);
-  padding: var(--space-0-5);
-  cursor: pointer;
-  color: hsl(var(--fg-subtle));
-}
-.chev-btn:focus-visible {
-  outline: 2px solid hsl(var(--accent) / 0.4);
-  outline-offset: 1px;
-}
-.mmain {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: hsl(var(--fg));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.msub {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.proto-badge {
-  flex: none;
-  font-size: var(--text-2xs);
-  background: hsl(var(--bg-muted));
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-xs);
-}
-.mctx {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  flex: none;
-}
-.mimg {
-  font-size: var(--text-2xs);
-  color: hsl(var(--accent));
-  flex: none;
-}
-.model-body {
-  padding: 0 var(--space-2) var(--space-2);
-  min-width: 0;
-}
-.row-actions {
-  display: flex;
-  gap: var(--space-2);
-  margin: var(--space-2) 0 0;
-}
-.num-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-  min-width: 0;
-}
-.preset-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-.hint {
-  font-size: var(--text-xs);
-  color: hsl(var(--fg-subtle));
-}
-.page-actions {
-  display: flex;
-  align-items: center;
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: var(--space-2);
   padding: var(--space-2) 0;
+}
+.mpage-tree {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.mpage-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) 0 var(--space-1-5);
+}
+.detail-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: hsl(var(--fg));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: hsl(var(--fg-subtle));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.detail-head > :last-child {
+  margin-left: auto;
+  flex: none;
+}
+.mpage-empty {
+  padding: var(--space-6) var(--space-2);
+  text-align: center;
+  color: hsl(var(--fg-subtle));
+  font-size: var(--text-sm);
+}
+.mpage-foot {
   position: sticky;
   bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) 0;
   background: hsl(var(--bg));
   border-top: 1px solid hsl(var(--border-subtle));
-  flex-wrap: wrap;
+  min-width: 0;
 }
-.dirty-hint {
+.foot-hint {
+  font-size: var(--text-2xs);
+  color: hsl(var(--fg-muted));
+}
+/* 三段 seg：底 bg-muted，选中白底 accent 字 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: hsl(var(--bg-muted));
+  border-radius: var(--radius-md);
+  flex: none;
+}
+.seg-btn {
+  height: 24px;
+  padding: 0 var(--space-2-5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: hsl(var(--fg-muted));
   font-size: var(--text-xs);
-  color: hsl(var(--warning));
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 130ms ease-out,
+    color 130ms ease-out;
 }
-@media (min-width: 860px) {
-  .addr-key {
-    grid-template-columns: 1fr 1fr;
-    gap: 0 var(--space-2);
+.seg-btn:hover {
+  color: hsl(var(--fg));
+}
+.seg-btn.on {
+  background: hsl(var(--bg-elevated));
+  color: hsl(var(--accent));
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.seg-btn:focus-visible {
+  outline: 2px solid hsl(var(--accent) / 0.4);
+  outline-offset: 1px;
+}
+/* 响应式：<920px 左右变上下 */
+@media (max-width: 920px) {
+  .mpage-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mpage-tree {
+    max-height: 30vh;
+    border-bottom: 1px solid hsl(var(--border-subtle));
+    padding-bottom: var(--space-1-5);
   }
 }
-@media (max-width: 700px) {
-  .model-card {
-    margin-left: 0;
-  }
-  .model-head {
-    flex-wrap: wrap;
-  }
-  .mmain,
-  .msub,
-  .mctx {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+@media (prefers-reduced-motion: reduce) {
+  .seg-btn,
+  .mpage :deep(input),
+  .mpage :deep(select),
+  .mpage :deep(textarea) {
+    transition: none;
   }
 }
 </style>
