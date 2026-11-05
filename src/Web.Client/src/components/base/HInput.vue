@@ -65,7 +65,7 @@ const countState = computed(() => {
 });
 
  const classes = computed(() => [
-   'w-full min-w-0 rounded-md border-2 bg-bg-elevated text-fg',
+   'w-full min-w-0 rounded-md border bg-bg-elevated text-fg',
    'transition-colors duration-fast ease-out',
    'placeholder:text-fg-subtle',
    'disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-muted disabled:text-fg-subtle disabled:opacity-60',

@@ -34,7 +34,7 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>();
 const attrs = useAttrs();
 
  const classes = computed(() => [
-   'w-full appearance-none rounded-md border-2 bg-bg-elevated text-fg',
+   'w-full appearance-none rounded-md border bg-bg-elevated text-fg',
    'pr-8 pl-3 transition-colors duration-fast ease-out',
    props.size === 'sm' ? 'h-7 text-xs' : 'h-8 text-sm',
    props.error

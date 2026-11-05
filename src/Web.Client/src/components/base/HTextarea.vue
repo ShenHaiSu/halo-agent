@@ -54,7 +54,7 @@ const el = ref<HTMLTextAreaElement | null>(null);
 const value = computed(() => props.modelValue ?? '');
 
  const classes = computed(() => [
-   'w-full min-w-0 resize-none rounded-md border-2 bg-bg-elevated px-3 py-2 text-sm text-fg',
+   'w-full min-w-0 resize-none rounded-md border bg-bg-elevated px-3 py-2 text-sm text-fg',
    'transition-colors duration-fast ease-out',
    'placeholder:text-fg-subtle',
    'disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-bg-muted disabled:text-fg-subtle disabled:opacity-60',
