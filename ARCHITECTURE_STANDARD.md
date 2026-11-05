@@ -244,3 +244,44 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 5. **中文字体回退机制**：
    * Win10/11 默认拥有新版 `Microsoft YaHei UI` 和 `Segoe UI Emoji`，而 Win7 只有旧版 `Microsoft YaHei` 且不支持彩色 Emoji 字体。
    * 前端全局 `font-family` 必须配置合理回退栈，严禁使用纯 Emoji 字符充当功能图标，**所有图标一律使用 SVG（如 Lucide / Iconify）**。
+---
+
+## 七、 命名铁律：禁止阶段性 Pxx 前缀（永久有效，违者打回）
+
+> **背景**：`P0–P24` 为历史阶段施工编号，已于 `docs/prefix-cleanup/`（原 `docs/P24-prefix-delete/`，B0–B5 全绿）一次性清除。
+> 为防止前缀污染复发，特立此铁律。**本条与第一章版本锁定同级，任何提交不得违反。**
+
+### 1. 禁止对象（全仓一刀切）
+
+以下位置**一律禁止**出现 `Pxx` 阶段前缀（`xx` 为 0–24 等任意数字）：
+
+* **代码文件名**（含测试/脚本/契约）：如 `P10Fix3SetCwdTests.cs`、`p11-chat-render.test.ts`、`p5-verify.ps1`；
+* **注释**（`//`、`///`、`<!-- -->`、`#`、schema `description` 等）：如 `// P24-D1：…`、`<!-- P12-01 …-->`；
+* **函数名 / 方法名**：如 `P24_CancelBeforeAskSlot_StillDenies`、`P18_Compacted_HasTurns_Additive`；
+* **变量名 / 常量名 / 类型名 / 字段名**：如 `HALO_P24_CANCEL_AUTH`、`P1_BACKEND_EVENTBUS`、`P14FixtureWithClock`；
+* **测试文案**（`describe/it/test` 标题）：如 `'P23-R3: switching 中…'`；
+* **编译符号 / 环境变量 / 日志 tag / 全局挂载名**：如 `P1_BACKEND_ROUTING`、`__p5diag`、`[p5diag]`。
+
+### 2. 禁止模式（正则即门禁口径）
+
+* 文件名（大小写不敏感）：`p[0-9]{1,2}[-_.]`；
+* 内容（大小写敏感）：`P[0-9]{1,2}[-_][\w\u4e00-\u9fa5]+`（覆盖 `P24-D1`、`P10-fix3 C`、`P11-C`、`P12-02`、`P15-D8`、`P09-fix2 D`、`HALO_P24_*`、`P1_BACKEND_*` 等一切变体）。
+
+### 3. 正确替代写法
+
+* 注释只留语义：`// P08-fix 03：跑轮中切换会 corrupt…` → `// 跑轮中切换会 corrupt…`；
+* 标识符语义化：`P10Fix3SetCwdTests` → `SetCwdGuardTests`、`P24CancelTests` → `CancelSemanticsTests`、
+  `P1_BACKEND_EVENTBUS` → `BACKEND_EVENTBUS`、`HALO_P24_CANCEL_AUTH` → `HALO_CANCEL_AUTH`；
+* 测试文案去编号：`'P23-R3: switching 中 turn.finished 正常收口'` → `'switching 中 turn.finished 正常收口'`；
+* 需要追溯历史时，链到归档文档而不是编号：`对应 docs/P16-response/fix/04-回归验证.md` 此类写法一律改写为语义描述。
+
+### 4. 唯一例外（白名单，门禁内显式放行，此外一律打回）
+
+1. `docs/P*` 历史归档目录**永久冻结**：25 个阶段目录、167 个文件只读，引用它们的 `docs/Pxx…` 路径字符串（如 `docs/P22-bundle/11`）允许保留；
+2. 已发布兼容符号的一版过渡期（如旧环境变量回退读取行），必须在门禁脚本中逐行白名单并注明删除版本。
+
+### 5. 强制执行
+
+* 门禁脚本：`scripts/check-no-pxx-prefix.ps1`（范围 `src/ tests/ scripts/ contract/ build/`，排除构建产物与 `wwwroot`）。
+* 每次提交/合入前必须本地跑通并 `PASS (zero hits)`；CI 应同口径拦截，命中即失败。
+* 评审发现新增 `Pxx` 前缀，无论功能是否正确，**直接打回**，先更名再谈逻辑。
