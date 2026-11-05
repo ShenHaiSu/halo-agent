@@ -1,5 +1,12 @@
  # 契约变更记录
 
+ ## [4] — Tool 模块改造（非破坏性，只做加法，不升版本）
+ 
+ - `tool.finished payload += skipped?/skipReason?`（截断批次未执行时置位；老前端忽略即按普通结果展示）。
+ - `AskKind enum += "network"`（web_fetch 独立权限档；老前端落到默认展示）。
+ - 未新增方法，`KnownMethods` 无需改动；已跑 `node scripts/gen-contract-types.mjs` 重生成 `agent.d.ts`。
+ - 前端 `toolMeta`/`toolArgs` 映射表对齐真实引擎工具名（`edit`/`grep_search`/`run_shell_command`），并移除幽灵条目。
+ 
  ## [4] — 会话 LLM 调用次数持久化（非破坏性，只做加法，不升版本）
 
  - `usage.query items[] += llmCalls?`、`usage.summary result += llmCalls?`、`UsageByModel += llmCalls?`（老引擎/旧行缺字段按 0；`requests`=turn 行数口径不动，冻结保持）。

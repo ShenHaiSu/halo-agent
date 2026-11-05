@@ -37,7 +37,8 @@ public sealed class ToolRegistry
         new WebFetchTool(),
     });
 
-    public IReadOnlyList<ITool> All => _ordered;
+     public IReadOnlyList<ITool> All => _ordered;
+     public IReadOnlyList<ITool> Tools => All;
     public IEnumerable<string> Names => _ordered.Select(t => t.Name);
     public ITool? Get(string name) => _tools.GetValueOrDefault(name);
     public bool Has(string name) => _tools.ContainsKey(name);

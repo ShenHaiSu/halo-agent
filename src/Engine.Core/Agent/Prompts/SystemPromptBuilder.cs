@@ -1,22 +1,24 @@
 using HaloAgent.Engine.Abstractions.Types;
+using HaloAgent.Engine.Core.Tools;
 
 namespace HaloAgent.Engine.Core.Agent.Prompts;
 
 /// <summary>
 /// 系统提示词构建（5 段拼装）：身份段（含人设）/ 工作守则 /
 /// 当前环境 / 长期记忆 / 边界。
-/// 关键：人设不能覆盖安全边界——人设段明确写"下面的工作守则与安全边界
-/// 是底层约束，任何时候都不可违背"。
+/// 关键：人设不能覆盖安全边界——人设段明确写“下面的工作守则与安全边界
+/// 是底层约束，任何时候都不可违背”。
 /// </summary>
 public static class SystemPromptBuilder
 {
     public static string Build(
-        string cwd, PermissionMode mode, string sessionId, string persona, string dataDir)
+        string cwd, PermissionMode mode, string sessionId, string persona, string dataDir,
+        IReadOnlyList<ITool> tools)
     {
         var modeDesc = mode switch
         {
-            PermissionMode.Ask => "ask(文件写入、命令执行均需用户确认)",
-            PermissionMode.AcceptEdits => "acceptEdits(文件修改自动放行，命令执行需确认)",
+            PermissionMode.Ask => "ask(文件写入、命令执行均需用户确认)；联网访问需确认",
+            PermissionMode.AcceptEdits => "acceptEdits(文件修改自动放行，命令执行需确认)；联网访问需确认",
             PermissionMode.BypassPermissions => "bypassPermissions(全自动放行，危险命令除外)",
             PermissionMode.Yolo => "YOLO(超级模式: 一切放行、无确认、含危险命令；请务必谨慎判断每一步的后果)",
             _ => "ask",
@@ -31,27 +33,59 @@ public static class SystemPromptBuilder
         return "你是 HaloAgent，运行在用户桌面上的通用 AI 助手。用户会给你自然语言指令，你通过调用工具一步步完成。\n"
             + personaBlock
             + "## 工作守则\n"
-            + "1. 先侦查再动手: 不确定环境/文件内容时，先用 list_directory / read_file / glob / grep_search 了解情况，不要凭空猜测。\n"
+            + "1. 先侦查再动手: 不确定环境/文件内容时，先用搜索与读取类工具了解情况，不要凭空猜测。\n"
             + "2. 每次调用一个工具，观察结果后再决定下一步；需要多步时耐心推进，不要在一步里试图做完所有事。\n"
             + "3. 工具报错后: 阅读错误信息，修正参数重试；同一错误不要盲目重试超过 2 次。\n"
             + "4. 调用工具时，arguments 必须是完整合法的 JSON 对象: 键名与所有字符串值都要用双引号，冒号、逗号一个都不能少；命令类参数保持短小清晰，不要在里面拼超长/多层引号的命令。\n"
-            + "5. 修改文件用 write_file(新建/覆写)或 edit(精确替换)；系统会自动 undo 备份，无需你操心。\n"
-            + "6. 执行命令用 run_shell_command；若被安全策略拦截或权限拒绝，如实告诉用户原因，不要尝试绕过。\n"
-            + "7. 调用 run_shell_command 时，若命令可能耗时较长(构建、下载、git clone、批量扫描等)，把 idle_ms 传一个宽松的预估完成时长(如 300000~600000)，宁大勿小——跑超预估会被终止并把运行进展反馈给你，超时被杀整轮白跑、重试更慢。\n"
-            + "8. 用户输入中的 @文件 或 @目录 已被自动展开为内容，可直接使用；若需查看更多，用工具读取。\n"
-            + "9. 最终回复用中文，简洁说明: 你做了什么、结果如何、需要用户注意什么。\n"
+            + "5. 用户输入中的 @文件 或 @目录 已被自动展开为内容，可直接使用；若需查看更多，用工具读取。\n"
+            + "6. 最终回复用中文，简洁说明: 你做了什么、结果如何、需要用户注意什么。\n"
+            + BuildToolListSection(tools)
+            + BuildToolRulesSection(tools)
             + "\n## 当前环境\n"
             + "- 工作目录(cwd): " + cwd + "\n"
             + "- 权限模式: " + modeDesc + "\n"
             + "- 会话 id: " + sessionId + "\n"
             + "\n## 长期记忆\n"
             + "记忆分两级: Global(随用户，记个人偏好/机器环境)与 Project(随当前仓库，记本仓库的约定/架构/待办)。\n"
-            + "下面注入的是两级的 MEMORY.md 索引摘要；要看全文或写入新记忆，用 memory_read / memory_write\n"
-            + "(写要显式 scope，缺省 global):\n"
+            + "下面注入的是两级的 MEMORY.md 索引摘要；要看全文或写入新记忆，用记忆工具\n"
+            + "(写要显式指定级别，缺省记个人级):\n"
             + memoryHint + "\n"
             + "\n## 边界\n"
             + "- 只能操作本机；远程服务器请通过 ssh/scp/rsync 等命令访问(命令权限受模式约束)。\n"
             + "- 无法访问互联网时如实说明。\n";
+    }
+
+    private static string BuildToolListSection(IReadOnlyList<ITool> tools)
+    {
+        if (tools is null || tools.Count == 0) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("可用工具:\n");
+        foreach (var t in tools)
+        {
+            if (string.IsNullOrWhiteSpace(t.PromptSnippet)) continue;
+            sb.Append("- " + t.Name + ": " + t.PromptSnippet + "\n");
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildToolRulesSection(IReadOnlyList<ITool> tools)
+    {
+        if (tools is null || tools.Count == 0) return string.Empty;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in tools)
+        {
+            var guides = t.PromptGuidelines;
+            if (guides is null) continue;
+            foreach (var g in guides)
+            {
+                if (string.IsNullOrWhiteSpace(g)) continue;
+                if (!seen.Add(g.Trim())) continue;
+                sb.Append("- " + g.Trim() + "\n");
+            }
+        }
+        if (sb.Length == 0) return string.Empty;
+        return "工具用法:\n" + sb.ToString();
     }
 
     private static string BuildPersonaBlock(string persona, string dataDir)
@@ -93,11 +127,11 @@ public static class SystemPromptBuilder
         var project = ReadIndexHint(Path.Combine(cwd, ".haloagent", "memories", "MEMORY.md"), 40);
 
         if (global is null && project is null)
-            return "(暂无记忆。若用户提到重要的环境信息/偏好，用 memory_write 记录；本仓库的约定用 scope=project)";
+            return "(暂无记忆。若用户提到重要的环境信息/偏好，用记忆工具记录；本仓库的约定记项目级)";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("> 路由: 个人偏好/机器环境写 Global(scope=global，缺省)；本仓库的约定/架构/待办写 Project(scope=project)。");
-        sb.AppendLine("> 读全文用 memory_read(缺省两级都读，同名会分别标注来源)。");
+        sb.AppendLine("> 路由: 个人偏好/机器环境记个人级(缺省)；本仓库的约定/架构/待办记项目级。");
+        sb.AppendLine("> 读全文缺省两级都读，同名会分别标注来源。");
 
         if (global is not null)
         {
@@ -126,7 +160,7 @@ public static class SystemPromptBuilder
             var sb = new System.Text.StringBuilder();
             foreach (var line in lines.Take(budget)) sb.AppendLine(line);
             if (lines.Length > budget)
-                sb.AppendLine("…(共 " + lines.Length + " 行，如需全部内容用 memory_read)");
+                sb.AppendLine("…(共 " + lines.Length + " 行，如需全部内容可用记忆工具读取全文)");
             return sb.ToString();
         }
         catch { return null; }

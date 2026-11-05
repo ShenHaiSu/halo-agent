@@ -7,22 +7,51 @@ namespace HaloAgent.Engine.Core.Tools;
 /// 工具接口。每个工具必须是<b>幂等可重入</b>的（同一参数多次调用结果一致），
 /// 除了写文件/跑命令这类天然有副作用的（由 undo 与权限体系兜底）。
 /// </summary>
-public interface ITool
-{
-    /// <summary>工具名（与契约 tools 列表逐字一致）</summary>
-    string Name { get; }
-
-    /// <summary>给模型看的描述（与契约逐字一致）</summary>
-    string Description { get; }
-
-    /// <summary>JSON Schema（与契约逐字一致）</summary>
-    JsonElement ParameterSchema { get; }
-
-    /// <summary>需要的权限类别</summary>
-    PermissionChecker.Operation Operation { get; }
-
-    Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct);
-}
+ public interface ITool
+ {
+     /// <summary>工具名（与契约 tools 列表逐字一致）</summary>
+     string Name { get; }
+ 
+     /// <summary>给模型看的描述（与契约逐字一致）</summary>
+     string Description { get; }
+ 
+     /// <summary>JSON Schema（与契约逐字一致）</summary>
+     JsonElement ParameterSchema { get; }
+ 
+     /// <summary>需要的权限类别</summary>
+     PermissionChecker.Operation Operation { get; }
+ 
+     Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct);
+ 
+     /// <summary>
+     /// 执行模式。默认 Parallel。
+     /// 什么时候要声明 Sequential：工具会改变全局状态（如切换工作目录、修改进程环境）、
+     /// 或内部已有无法重入的全局锁。
+     /// </summary>
+     ToolExecutionMode ExecutionMode => ToolExecutionMode.Parallel;
+ 
+     /// <summary>
+     /// 一行摘要，用于系统提示的「可用工具」段落。
+     /// 规范：动词开头、不带句号、不超过 30 字。为 null 表示不列进该段落。
+     /// </summary>
+     string? PromptSnippet => null;
+ 
+     /// <summary>
+     /// 可执行的规则条目，用于系统提示的「规则」段落。
+     /// 规范：祈使句，讲「用 A 而不是 B」「把改动合并进一次调用」这类可执行指令；
+     /// 不重复 Description 里已有的能力描述。
+     /// </summary>
+     IReadOnlyList<string> PromptGuidelines => Array.Empty<string>();
+ }
+ 
+ /// <summary>工具执行模式。</summary>
+ public enum ToolExecutionMode
+ {
+     /// <summary>可与同批其它调用并发（默认）。</summary>
+     Parallel = 0,
+     /// <summary>不可并发：声明后整批降级为串行。</summary>
+     Sequential = 1,
+ }
 
 /// <summary>工具执行结果。</summary>
 public sealed record ToolResult(bool Ok, string Output)
@@ -38,16 +67,22 @@ public sealed record ToolResult(bool Ok, string Output)
 ///   - 工具不该能改会话状态
 ///   - 工具不该能发任意事件（只能通过 Host 的受限接口）
 /// </summary>
-public sealed class ToolContext
-{
-    public string Cwd { get; init; } = string.Empty;
-    public string SessionId { get; init; } = string.Empty;
-    public IToolHost Host { get; init; } = null!;
-    public CancellationToken Ct { get; init; }
-
-    /// <summary>当前工具调用 id（事件关联用）</summary>
-    public string? ToolCallId { get; init; }
-}
+ public sealed class ToolContext
+ {
+     public string Cwd { get; init; } = string.Empty;
+     public string SessionId { get; init; } = string.Empty;
+     public IToolHost Host { get; init; } = null!;
+     public CancellationToken Ct { get; init; }
+ 
+     /// <summary>当前工具调用 id（事件关联用）</summary>
+     public string? ToolCallId { get; init; }
+ 
+     /// <summary>
+     /// 已校验参数（阶段 02 引入的桥接）。工具可优先用它读取强类型值；
+     /// 为 null 时（如单测直接构造 ToolContext）退回 args.GetStringOrNull 旧路径。
+     /// </summary>
+     public ToolArguments? TypedArgs { get; init; }
+ }
 
 /// <summary>
 /// 工具宿主能力（由 Session 实现）。

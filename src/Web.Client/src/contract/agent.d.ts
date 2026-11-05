@@ -5,7 +5,7 @@
 export type PermissionMode = "ask" | "acceptEdits" | "bypassPermissions" | "yolo"
 
 /** AskKind */
-export type AskKind = "command" | "write" | "rounds"
+export type AskKind = "command" | "write" | "rounds" | "network"
 
 /** MessageRole */
 export type MessageRole = "user" | "assistant" | "tool" | "system"
@@ -887,6 +887,10 @@ export interface HaloEventPayloads {
   used?: number
   outputTotal?: number
   truncated?: boolean
+  /** true 表示该调用未实际执行（如输出被 token 上限截断） */
+  skipped?: boolean
+  /** 未执行的原因分类：truncated | blocked（省略即普通执行） */
+  skipReason?: string
 }
   /** tool.outputDelta */
   'tool.outputDelta': {

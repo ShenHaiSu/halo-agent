@@ -44,19 +44,18 @@ export function toolMeta(name: string, kind?: string): ToolMeta {
     };
   }
 
-  const TABLE: Record<string, ToolMeta> = {
-    read_file: { label: '读取文件', icon: 'file-text', badgeVariant: 'default', mutates: false },
-    write_file: { label: '写入文件', icon: 'file-pen', badgeVariant: 'warning', mutates: true },
-    edit_file: { label: '修改文件', icon: 'edit', badgeVariant: 'warning', mutates: true },
-    delete_file: { label: '删除文件', icon: 'trash', badgeVariant: 'danger', mutates: true },
-    list_directory: { label: '列出目录', icon: 'folder', badgeVariant: 'default', mutates: false },
-    glob: { label: '查找文件', icon: 'search', badgeVariant: 'default', mutates: false },
-    grep: { label: '搜索内容', icon: 'search', badgeVariant: 'default', mutates: false },
-    run_shell: { label: '执行命令', icon: 'terminal', badgeVariant: 'warning', mutates: true },
-    web_search: { label: '联网搜索', icon: 'link', badgeVariant: 'default', mutates: false },
-    web_fetch: { label: '抓取网页', icon: 'link', badgeVariant: 'default', mutates: false },
-    todo_write: { label: '更新计划', icon: 'check', badgeVariant: 'default', mutates: false },
-  };
+   const TABLE: Record<string, ToolMeta> = {
+     list_directory: { label: '列出目录', icon: 'folder', badgeVariant: 'default', mutates: false },
+     read_file: { label: '读取文件', icon: 'file-text', badgeVariant: 'default', mutates: false },
+     write_file: { label: '写入文件', icon: 'file-pen', badgeVariant: 'warning', mutates: true },
+     edit: { label: '修改文件', icon: 'edit', badgeVariant: 'warning', mutates: true },
+     glob: { label: '查找文件', icon: 'search', badgeVariant: 'default', mutates: false },
+     grep_search: { label: '搜索内容', icon: 'search', badgeVariant: 'default', mutates: false },
+     run_shell_command: { label: '执行命令', icon: 'terminal', badgeVariant: 'warning', mutates: true },
+     memory_write: { label: '写入记忆', icon: 'brainstorm', badgeVariant: 'default', mutates: false },
+     memory_read: { label: '读取记忆', icon: 'brainstorm', badgeVariant: 'default', mutates: false },
+     web_fetch: { label: '抓取网页', icon: 'link', badgeVariant: 'default', mutates: false },
+   };
 
   return TABLE[name] ?? { label: name, icon: 'info', badgeVariant: 'default', mutates: false };
 }
@@ -67,42 +66,45 @@ export function toolMeta(name: string, kind?: string): ToolMeta {
 // ---------------------------------------------------------------------------
 
 export type ToolVisualState =
-  | 'pending'
-  | 'running'
-  | 'awaiting-user'
-  | 'done'
-  | 'error'
-  | 'cancelled';
-
-export function deriveState(tool: ToolCallInfo, awaitingUser: boolean): ToolVisualState {
-  if (tool.status === 'cancelled') return 'cancelled';
-  if (tool.status === 'error') return 'error';
-  if (tool.status === 'done') return tool.ok === false ? 'error' : 'done';
-  if (awaitingUser) return 'awaiting-user';
-  if (tool.status === 'running') return 'running';
-  return 'pending';
-}
-
-/** 状态文案唯一实现（ToolCard 头部与未知工具链共用）。 */
-export function toolStatusText(state: ToolVisualState): string {
-  switch (state) {
-    case 'pending':
-      return '排队中';
-    case 'running':
-      return '执行中';
-    case 'awaiting-user':
-      return '等待授权';
-    case 'done':
-      return '成功';
-    case 'error':
-      return '失败';
-    case 'cancelled':
-      return '已中断';
-    default:
-      return '未知';
-  }
-}
-
+   | 'pending'
+   | 'running'
+   | 'awaiting-user'
+   | 'done'
+   | 'error'
+   | 'cancelled'
+   | 'skipped';
+ 
+ export function deriveState(tool: ToolCallInfo, awaitingUser: boolean): ToolVisualState {
+   if (tool.status === 'cancelled') return 'cancelled';
+   if (tool.status === 'error') return 'error';
+   if (tool.skipped && tool.status === 'done') return 'skipped';
+   if (tool.status === 'done') return tool.ok === false ? 'error' : 'done';
+   if (awaitingUser) return 'awaiting-user';
+   if (tool.status === 'running') return 'running';
+   return 'pending';
+ }
+ 
+ /** 状态文案唯一实现（ToolCard 头部与未知工具链共用）。 */
+ export function toolStatusText(state: ToolVisualState): string {
+   switch (state) {
+     case 'pending':
+       return '排队中';
+     case 'running':
+       return '执行中';
+     case 'awaiting-user':
+       return '等待授权';
+     case 'done':
+       return '成功';
+     case 'error':
+       return '失败';
+     case 'cancelled':
+       return '已中断';
+     case 'skipped':
+       return '未执行';
+     default:
+       return '未知';
+   }
+ }
 // ---------------------------------------------------------------------------
 // 折叠记忆单源（ui.collapsedTools 为准）。
 // collapsedToolIds 为其薄代理：ToolCard 引用点零变更；pinia 未挂载时回退本地 Set。

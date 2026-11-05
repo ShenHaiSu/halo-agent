@@ -79,23 +79,28 @@ public sealed record ToolStartedPayload
 }
 
 /// <summary>tool.finished 载荷。</summary>
-public sealed record ToolFinishedPayload
-{
-    /// <summary>工具调用 id。</summary>
-    public string ToolCallId { get; init; } = "";
-    /// <summary>工具名。</summary>
-    public string Name { get; init; } = "";
-    /// <summary>是否成功。</summary>
-    public bool Ok { get; init; }
-    /// <summary>输出。</summary>
-    public string Output { get; init; } = "";
-    /// <summary>归属轮序号。</summary>
-    public int Used { get; init; } = 1;
-    /// <summary>截断前输出总长。</summary>
-    public int OutputTotal { get; init; }
-    /// <summary>是否截断。</summary>
-    public bool Truncated { get; init; }
-}
+ /// <summary>tool.finished 载荷。</summary>
+ public sealed record ToolFinishedPayload
+ {
+     /// <summary>工具调用 id。</summary>
+     public string ToolCallId { get; init; } = "";
+     /// <summary>工具名。</summary>
+     public string Name { get; init; } = "";
+     /// <summary>是否成功。</summary>
+     public bool Ok { get; init; }
+     /// <summary>输出。</summary>
+     public string Output { get; init; } = "";
+     /// <summary>归属轮序号。</summary>
+     public int Used { get; init; } = 1;
+     /// <summary>截断前输出总长。</summary>
+     public int OutputTotal { get; init; }
+     /// <summary>是否截断。</summary>
+     public bool Truncated { get; init; }
+     /// <summary>true 表示未实际执行（如截断）。缺省 false。</summary>
+     public bool? Skipped { get; init; }
+     /// <summary>未执行原因：truncated | blocked。缺省 null。</summary>
+     public string? SkipReason { get; init; }
+ }
 
 /// <summary>tool.outputDelta 载荷。</summary>
 public sealed record ToolOutputDeltaPayload

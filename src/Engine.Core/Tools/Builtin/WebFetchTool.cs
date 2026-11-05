@@ -18,7 +18,13 @@ namespace HaloAgent.Engine.Core.Tools.Builtin;
 /// </summary>
 public sealed class WebFetchTool : ITool
 {
-    private const int DefaultMaxChars = 8000;
+     public string? PromptSnippet => "抓取网页转纯文本";
+
+     public IReadOnlyList<string> PromptGuidelines => new[]
+     {
+         "需要查网上资料时用 web_fetch；抓不到就如实说明，不要编造内容",
+     };
+
 
     public string Name => "web_fetch";
     public string Description =>
@@ -34,19 +40,20 @@ public sealed class WebFetchTool : ITool
       ""required"": [""url""]
     }").RootElement.Clone();
 
-    public PermissionChecker.Operation Operation => PermissionChecker.Operation.ReadFile;
+     public PermissionChecker.Operation Operation => PermissionChecker.Operation.Network;
 
     public async Task<ToolResult> ExecuteAsync(
         JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var url = args.GetStringOrNull("url");
-        if (string.IsNullOrWhiteSpace(url)) return ToolResult.Failure("url 不能为空");
+         var url = ctx.TypedArgs?.StringOrNull("url") ?? args.GetStringOrNull("url");
+         if (string.IsNullOrWhiteSpace(url)) return ToolResult.Failure("url 不能为空");
 
-        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            return ToolResult.Failure("url 必须以 http:// 或 https:// 开头");
+         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+             !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+             return ToolResult.Failure("url 必须以 http:// 或 https:// 开头");
 
-        var maxChars = (int)Math.Min(args.GetLongOrNull("max_chars") ?? DefaultMaxChars, 200_000);
+         var maxCharsRaw = ctx.TypedArgs?.LongOrNull("max_chars") ?? args.GetLongOrNull("max_chars");
+         var maxChars = (int)Math.Min(maxCharsRaw ?? ToolLimits.WebFetchDefaultMaxChars, ToolLimits.WebFetchMaxChars);
 
          HttpClient client;
          try

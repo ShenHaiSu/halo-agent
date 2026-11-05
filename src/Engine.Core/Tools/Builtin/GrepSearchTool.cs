@@ -7,9 +7,6 @@ namespace HaloAgent.Engine.Core.Tools.Builtin;
 
 public sealed class GrepSearchTool : ITool
 {
-    private const int MaxResults = 200;
-    private const int MaxFileBytes = 8 * 1024 * 1024;
-
     private static readonly HashSet<string> NoiseDirs = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git", "node_modules", "target", "bin", "obj", ".vs", ".idea",
@@ -17,39 +14,56 @@ public sealed class GrepSearchTool : ITool
     };
 
     public string Name => "grep_search";
-    public string Description => "在文件中按正则搜索文本内容,返回 路径:行号:内容";
+    public string Description =>
+        "在文件中按正则搜索文本内容,返回 路径:行号:内容" +
+        $"。缺省返回前 {ToolLimits.GrepDefaultLimit} 条，最多 {ToolLimits.GrepMaxLimit} 条";
 
-    public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
-      ""type"": ""object"",
-      ""properties"": {
-        ""pattern"": { ""type"": ""string"", ""description"": ""正则表达式,如 'TODO|FIXME'"" },
-        ""path"":    { ""type"": ""string"", ""description"": ""搜索目录或文件,缺省当前工作目录"" },
-        ""glob"":    { ""type"": ""string"", ""description"": ""只搜索匹配该 glob 的文件,如 '*.rs'"" }
-      },
-      ""required"": [""pattern""]
-    }").RootElement.Clone();
+    public string? PromptSnippet => "按内容搜索文件";
+
+    public IReadOnlyList<string> PromptGuidelines => new[]
+    {
+        "找内容用 grep_search，不要跑 findstr/grep/Select-String",
+        "正则写简单些，复杂正则容易超时",
+    };
+
+    public JsonElement ParameterSchema { get; } = JsonDocument.Parse(
+        "{\"type\": \"object\"," +
+        "\"properties\": {" +
+        "\"pattern\": { \"type\": \"string\", \"description\": \"正则表达式,如 'TODO|FIXME'\" }," +
+        "\"path\":    { \"type\": \"string\", \"description\": \"搜索目录或文件,缺省当前工作目录\" }," +
+        "\"glob\":    { \"type\": \"string\", \"description\": \"只搜索匹配该 glob 的文件,如 '*.rs'\" }," +
+        "\"limit\":   { \"type\": \"integer\", \"description\": \"最多返回条数，缺省 " + ToolLimits.GrepDefaultLimit + "，最多 " + ToolLimits.GrepMaxLimit + "\" }" +
+        "}," +
+        "\"required\": [\"pattern\"]}").RootElement.Clone();
 
     public PermissionChecker.Operation Operation => PermissionChecker.Operation.ReadFile;
 
     public Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var pattern = args.GetStringOrNull("pattern");
+        var pattern = ctx.TypedArgs?.StringOrNull("pattern") ?? args.GetStringOrNull("pattern");
         if (string.IsNullOrEmpty(pattern)) return Task.FromResult(ToolResult.Failure("pattern 不能为空"));
 
-        Regex re;
-        try
-        {
-            // 超时保护：防灾难性回溯（用户输入的正则不可信）
-            re = new Regex(pattern, RegexOptions.Compiled, TimeSpan.FromSeconds(5));
-        }
-        catch (ArgumentException ex)
-        {
-            return Task.FromResult(ToolResult.Failure($"正则表达式无效: {ex.Message}"));
-        }
+         Regex re;
+         try
+         {
+             // 超时保护：防灾难性回溯（用户输入的正则不可信）
+             re = new Regex(pattern, RegexOptions.Compiled, TimeSpan.FromSeconds(ToolLimits.GrepRegexTimeoutSeconds));
+         }
+         catch (ArgumentException ex)
+         {
+             // offset 是定位问题的关键，必须保留；常见笔误（字符范围写反）给一句中文提示
+             var hint = ex.Message.Contains("range in reverse order", StringComparison.OrdinalIgnoreCase)
+                 ? "（提示：字符范围顺序颠倒，如 [z-a] 应改为 [a-z]）"
+                 : "";
+             return Task.FromResult(ToolResult.Failure($"正则表达式无效: {ex.Message}{hint}"));
+         }
 
-        var pathRaw = args.GetStringOrNull("path");
+        var pathRaw = ctx.TypedArgs?.StringOrNull("path") ?? args.GetStringOrNull("path");
         var target = pathRaw is null ? ctx.Cwd : ToolPaths.Resolve(ctx.Cwd, pathRaw);
-        var globFilter = args.GetStringOrNull("glob");
+        var globFilter = ctx.TypedArgs?.StringOrNull("glob") ?? args.GetStringOrNull("glob");
+
+        var limitRaw = ctx.TypedArgs?.LongOrNull("limit") ?? args.GetLongOrNull("limit");
+        var limit = (int)Math.Clamp(limitRaw ?? ToolLimits.GrepDefaultLimit, 1, ToolLimits.GrepMaxLimit);
 
         var files = new List<string>();
         if (File.Exists(target)) files.Add(target);
@@ -75,7 +89,7 @@ public sealed class GrepSearchTool : ITool
 
             FileInfo fi;
             try { fi = new FileInfo(file); } catch { continue; }
-            if (fi.Length > MaxFileBytes) continue;
+            if (fi.Length > ToolLimits.GrepMaxFileBytes) continue;
 
             string text;
             try { text = File.ReadAllText(file); } catch { continue; }   // 二进制/不可读跳过
@@ -93,12 +107,12 @@ public sealed class GrepSearchTool : ITool
                 if (!hit) continue;
 
                 var shown = line.TrimEnd('\r');
-                if (shown.Length > 400) shown = shown[..400] + "…";
+                if (shown.Length > ToolLimits.GrepMaxLineChars) shown = shown.Substring(0, ToolLimits.GrepMaxLineChars) + "…";
                 results.Add($"{file}:{lineNo}:{shown}");
 
-                if (results.Count >= MaxResults * 2) break;   // 多收一点用于计数
+                if (results.Count >= limit * 2) break;   // 多收一点用于计数
             }
-            if (results.Count >= MaxResults * 2) break;
+            if (results.Count >= limit * 2) break;
         }
 
         if (results.Count == 0)
@@ -106,9 +120,9 @@ public sealed class GrepSearchTool : ITool
 
         var sb = new StringBuilder();
         sb.Append($"找到 {results.Count} 条匹配（扫描 {scanned} 个文件）:\n");
-        foreach (var r in results.Take(MaxResults)) sb.Append(r).Append('\n');
-        if (results.Count > MaxResults)
-            sb.Append($"…(还有 {results.Count - MaxResults} 条未显示)\n");
+        foreach (var r in results.Take(limit)) sb.Append(r).Append('\n');
+        if (results.Count > limit)
+            sb.Append($"…(还有 {results.Count - limit} 条未显示；调大 limit 或缩小 path)\n");
 
         return Task.FromResult(ToolResult.Success(sb.ToString()));
     }

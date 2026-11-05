@@ -153,6 +153,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         var usage = new Usage();
         var acc = new ToolCallAccumulator();
         var sse = new SseParser();
+        bool truncated = false;
 
         using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         var chunk = new byte[8192];
@@ -165,7 +166,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
             {
                 foreach (var line in sse.Finish())
                 {
-                    if (ApplyStreamLine(line, content, reasoning, ref usage, acc, onEvent))
+                    if (ApplyStreamLine(line, content, reasoning, ref usage, acc, ref truncated, onEvent))
                     {
                         done = true;
                         break;
@@ -176,7 +177,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
 
             foreach (var line in sse.Push(chunk, n))
             {
-                if (ApplyStreamLine(line, content, reasoning, ref usage, acc, onEvent))
+                if (ApplyStreamLine(line, content, reasoning, ref usage, acc, ref truncated, onEvent))
                 {
                     done = true;
                     break;
@@ -190,6 +191,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
             ReasoningContent = reasoning.Length == 0 ? null : reasoning.ToString(),
             ToolCalls = acc.Finish(),
             Usage = usage,
+            TruncatedByLength = truncated,
         };
     }
 
@@ -200,6 +202,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         StringBuilder reasoning,
         ref Usage usage,
         ToolCallAccumulator acc,
+        ref bool truncated,
         Action<StreamEvent> onEvent)
     {
         if (line == "[DONE]") return true;
@@ -266,12 +269,15 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                     }
                 }
 
-                if (choice.TryGetProperty("finish_reason", out var fr) &&
-                    fr.ValueKind == JsonValueKind.String &&
-                    fr.GetString() == "length")
-                {
-                    throw new InvalidOperationException("模型输出超过上下文长度被截断(length)");
-                }
+                 if (choice.TryGetProperty("finish_reason", out var fr) &&
+                     fr.ValueKind == JsonValueKind.String &&
+                     fr.GetString() == "length")
+                 {
+                     // 阶段 04：不再抛异常。截断要交给主循环做「整批不执行 + 回灌错误」，
+                     // 抛异常会让整回合失败重试，重试仍可能再截断。truncated 已在外层读取。
+                     System.Diagnostics.Debug.WriteLine("[OpenAi] 模型输出因 token 上限被截断（length），本批 tool call 将不执行");
+                     truncated = true;
+                 }
             }
         }
         return false;
@@ -547,9 +553,10 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
             if (n == 0) { foreach (var line in sse.Finish()) { if (ApplyResponsesLine(line, content, reasoning, ref usage, acc, unknowns, ref responseId, ref incompleteReason, ref truncated, onEvent)) { done = true; break; } } break; }
             foreach (var line in sse.Push(chunk, n)) { if (ApplyResponsesLine(line, content, reasoning, ref usage, acc, unknowns, ref responseId, ref incompleteReason, ref truncated, onEvent)) { done = true; break; } }
         }
-        if (incompleteReason == "max_output_tokens" || truncated) throw new InvalidOperationException("模型输出超过上下文长度被截断(max_output_tokens)");
-        if (incompleteReason is not null && incompleteReason != "completed") throw new InvalidOperationException("Responses incomplete: " + incompleteReason);
-        return new ResponsesReply { ResponseId = responseId, Content = content.Length == 0 ? null : content.ToString(), ReasoningContent = reasoning.Length == 0 ? null : reasoning.ToString(), ReasoningKind = "summary", ToolCalls = acc.Finish(), UnknownOutputs = unknowns, Usage = usage, TruncatedByLength = truncated, IncompleteReason = incompleteReason };
+         if (incompleteReason == "max_output_tokens" || truncated)
+             System.Diagnostics.Debug.WriteLine("[OpenAi] 模型输出因 max_output_tokens 被截断，本批 tool call 将不执行");
+         if (incompleteReason is not null && incompleteReason != "completed" && incompleteReason != "max_output_tokens") throw new InvalidOperationException("Responses incomplete: " + incompleteReason);
+         return new ResponsesReply { ResponseId = responseId, Content = content.Length == 0 ? null : content.ToString(), ReasoningContent = reasoning.Length == 0 ? null : reasoning.ToString(), ReasoningKind = "summary", ToolCalls = acc.Finish(), UnknownOutputs = unknowns, Usage = usage, TruncatedByLength = truncated || incompleteReason == "max_output_tokens", IncompleteReason = incompleteReason };
     }
     private static bool ApplyResponsesLine(string line, StringBuilder content, StringBuilder reasoning, ref Usage usage, FunctionCallAccumulator acc, List<UnknownOutput> unknowns, ref string? responseId, ref string? incompleteReason, ref bool truncated, Action<StreamEvent> onEvent)
     {

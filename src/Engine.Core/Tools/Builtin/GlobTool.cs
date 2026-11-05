@@ -27,27 +27,39 @@ public sealed class GlobTool : ITool
     };
 
     public string Name => "glob";
-    public string Description => "按文件名/路径模式查找文件,模式支持通配符 * ? 与 ** 递归";
+    public string Description =>
+        "按文件名/路径模式查找文件,模式支持通配符 * ? 与 ** 递归" +
+        $"。缺省返回前 {ToolLimits.GlobDefaultLimit} 条，最多 {ToolLimits.GlobMaxLimit} 条";
 
-    public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
-      ""type"": ""object"",
-      ""properties"": {
-        ""pattern"": { ""type"": ""string"", ""description"": ""glob 模式,如 '**/*.zip' 或 'src/**/*.rs'"" },
-        ""path"":    { ""type"": ""string"", ""description"": ""搜索起点目录,缺省为当前工作目录"" }
-      },
-      ""required"": [""pattern""]
-    }").RootElement.Clone();
+    public string? PromptSnippet => "按文件名模式查找文件";
+
+    public IReadOnlyList<string> PromptGuidelines => new[]
+    {
+        "找文件用 glob（按名字/路径模式），不要跑 dir/find/ls",
+    };
+
+    public JsonElement ParameterSchema { get; } = JsonDocument.Parse(
+        "{\"type\": \"object\"," +
+        "\"properties\": {" +
+        "\"pattern\": { \"type\": \"string\", \"description\": \"glob 模式,如 '**/*.zip' 或 'src/**/*.rs'\" }," +
+        "\"path\":    { \"type\": \"string\", \"description\": \"搜索起点目录,缺省为当前工作目录\" }," +
+        "\"limit\":   { \"type\": \"integer\", \"description\": \"最多返回条数，缺省 " + ToolLimits.GlobDefaultLimit + "，最多 " + ToolLimits.GlobMaxLimit + "\" }" +
+        "}," +
+        "\"required\": [\"pattern\"]}").RootElement.Clone();
 
     public PermissionChecker.Operation Operation => PermissionChecker.Operation.ReadFile;
 
     public Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var pattern = args.GetStringOrNull("pattern");
+        var pattern = ctx.TypedArgs?.StringOrNull("pattern") ?? args.GetStringOrNull("pattern");
         if (string.IsNullOrEmpty(pattern)) return Task.FromResult(ToolResult.Failure("pattern 不能为空"));
 
-        var rootRaw = args.GetStringOrNull("path");
+        var rootRaw = ctx.TypedArgs?.StringOrNull("path") ?? args.GetStringOrNull("path");
         var root = rootRaw is null ? ctx.Cwd : ToolPaths.Resolve(ctx.Cwd, rootRaw);
         if (!Directory.Exists(root)) return Task.FromResult(ToolResult.Failure($"目录不存在: {root}"));
+
+        var limitRaw = ctx.TypedArgs?.LongOrNull("limit") ?? args.GetLongOrNull("limit");
+        var limit = (int)Math.Clamp(limitRaw ?? ToolLimits.GlobDefaultLimit, 1, ToolLimits.GlobMaxLimit);
 
         if (!pattern.Contains('/')) pattern = "**/" + pattern;
 
@@ -81,12 +93,12 @@ public sealed class GlobTool : ITool
         if (matches.Count == 0)
             return Task.FromResult(ToolResult.Success($"在 {root} 下没有匹配 {pattern} 的文件"));
 
-        var shown = matches.Take(500).ToList();
+        var shown = matches.Take(limit).ToList();
         var sb = new StringBuilder();
-        sb.Append($"匹配 {matches.Count} 个文件:\n");
+        sb.Append($"匹配 {matches.Count} 个文件(显示前 {shown.Count} 个):\n");
         foreach (var m in shown) sb.Append(m).Append('\n');
         if (matches.Count > shown.Count)
-            sb.Append($"…(还有 {matches.Count - shown.Count} 个未显示)\n");
+            sb.Append($"…(还有 {matches.Count - shown.Count} 个未显示；调大 limit(最多 {ToolLimits.GlobMaxLimit}) 可看更多)\n");
 
         return Task.FromResult(ToolResult.Success(sb.ToString()));
     }

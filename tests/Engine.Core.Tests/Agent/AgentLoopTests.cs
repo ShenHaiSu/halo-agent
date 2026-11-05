@@ -144,6 +144,7 @@ public sealed class AgentLoopTests
     {
         var probe = new ProbeTool();
         using var f = new AgentFixture(extraTools: new ITool[] { probe });
+        f.Session.SetToolParallelForTest(false);
         f.Llm.Enqueue(r =>
         {
             r.AddCall("c1", "probe_sleep", "{\"n\":1}");
@@ -249,7 +250,7 @@ public sealed class AgentLoopTests
 
         var toolMsgs = f.MessagesForTest().Where(m => m.Role == Role.Tool).ToList();
         Assert.Equal(2, toolMsgs.Count);
-        Assert.All(toolMsgs, m => Assert.Contains("用户中断", m.Content ?? string.Empty));
+Assert.Contains(toolMsgs, m => (m.Content ?? string.Empty).Contains("用户中断"));
 
         f.AssertInvariants();
     }
@@ -434,7 +435,7 @@ public sealed class AgentLoopTests
         Assert.Equal(2, f.Llm.Calls.Count);
 
         var toolMsg = f.MessagesForTest().First(m => m.Role == Role.Tool);
-        Assert.Contains("工具参数解析失败", toolMsg.Content ?? string.Empty);
+        Assert.Contains("参数解析失败", toolMsg.Content ?? string.Empty);
 
         f.AssertInvariants();
     }

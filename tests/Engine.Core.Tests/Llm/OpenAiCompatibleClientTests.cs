@@ -175,8 +175,9 @@ public class OpenAiCompatibleClientTests
     {
         using var client = SseClient("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.ChatStreamAsync(Msgs(), null, _ => { }, CancellationToken.None));
+        // 阶段 04：截断不再抛异常，改为 TruncatedByLength=true，由主循环整批不执行。
+        var reply = await client.ChatStreamAsync(Msgs(), null, _ => { }, CancellationToken.None);
+        Assert.True(reply.TruncatedByLength);
     }
 
     [Fact]

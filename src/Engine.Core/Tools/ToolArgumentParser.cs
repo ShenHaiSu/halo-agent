@@ -27,8 +27,12 @@ public static class ToolArgumentParser
         // ② 正常解析
         if (TryParseObject(text, out var obj)) return obj;
 
-        // ③ 截断修补
-        if (TryRepairTruncated(text, out obj)) return obj;
+         // ③ 截断修补
+         if (TryRepairTruncated(text, out obj))
+         {
+             System.Diagnostics.Debug.WriteLine("[ToolArgumentParser] arguments 为截断修补结果，长度=" + text.Length);
+             return obj;
+         }
 
         var shown = text.Length > 200 ? text[..200] + "…" : text;
         throw new ToolArgumentException($"不是合法的 JSON 对象：「{shown}」");

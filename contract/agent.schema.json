@@ -125,14 +125,15 @@
         "yolo"
       ]
     },
-    "AskKind": {
-      "type": "string",
-      "enum": [
-        "command",
-        "write",
-        "rounds"
-      ]
-    },
+     "AskKind": {
+       "type": "string",
+       "enum": [
+         "command",
+         "write",
+         "rounds",
+         "network"
+       ]
+     },
     "MessageRole": {
       "type": "string",
       "enum": [
@@ -3265,9 +3266,17 @@
           "outputTotal": {
             "type": "integer"
           },
-          "truncated": {
-            "type": "boolean"
-          }
+           "truncated": {
+             "type": "boolean"
+           },
+           "skipped": {
+             "type": "boolean",
+             "description": "true 表示该调用未实际执行（如输出被 token 上限截断）"
+           },
+           "skipReason": {
+             "type": "string",
+             "description": "未执行的原因分类：truncated | blocked（省略即普通执行）"
+           }
         }
       }
     },

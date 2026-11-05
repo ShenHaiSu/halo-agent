@@ -17,7 +17,7 @@ namespace HaloAgent.Engine.Core.Permissions;
 /// </summary>
 public static class PermissionChecker
 {
-    public enum Operation { ReadFile, WriteFile, RunCommand }
+     public enum Operation { ReadFile, WriteFile, RunCommand, Network }
 
     public static PermDecision Check(
         PermissionMode mode,
@@ -74,17 +74,25 @@ public static class PermissionChecker
                 _ => PermDecision.Allow,
             },
 
-            Operation.RunCommand => mode switch
-            {
-                PermissionMode.Ask or PermissionMode.AcceptEdits => interactive
-                    ? PermDecision.NeedAsk("命令执行确认", "", null, allowAlways: true)
-                    : PermDecision.Deny(PermissionPolicies.NeedBypass),
-                _ => PermDecision.Allow,
-            },
-
-            _ => PermDecision.Deny("未知操作"),
-        };
-    }
+             Operation.RunCommand => mode switch
+             {
+                 PermissionMode.Ask or PermissionMode.AcceptEdits => interactive
+                     ? PermDecision.NeedAsk("命令执行确认", "", null, allowAlways: true)
+                     : PermDecision.Deny(PermissionPolicies.NeedBypass),
+                 _ => PermDecision.Allow,
+             },
+ 
+             Operation.Network => mode switch
+             {
+                 PermissionMode.Ask or PermissionMode.AcceptEdits => interactive
+                     ? PermDecision.NeedAsk("联网访问确认", "HaloAgent 想要访问外部网络", null, allowAlways: false)
+                     : PermDecision.Deny("该模式下联网要确认，无头模式直接拒绝。要自动联网就加 --permission bypassPermissions"),
+                 _ => PermDecision.Allow,
+             },
+ 
+             _ => PermDecision.Deny("未知操作"),
+         };
+     }
 
     /// <summary>
     /// 快捷：判断某个模式是否会在**无头模式**下直接拒绝该操作。

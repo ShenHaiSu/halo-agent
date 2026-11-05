@@ -233,34 +233,37 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           }
           break;
         }
-        case 'tool.finished': {
-          const p = asRecord(f.p);
-          const stream = useStreamStore();
-          const tcid = String(p.toolCallId ?? '');
-          if (tcid) {
-            const t = stream.activeTools.get(tcid);
-            const tid = t?.messageId ?? stream.currentTurn?.turnId;
-            const used = Number(p.used ?? stream.currentTurn?.activeOrd ?? 1);
-            if (tid) {
-              // ★ 用户中断导致的工具未完成，不能显示成「失败」（红色 error）。
-              //   判定依据：ok=false 且该帧到达时刻晚于取消请求时刻（见上「判定依据」一节）。
-              //   不能用 p.output 文案判定（违反“判定结构化”铁律）。
-              const cancelled =
-                p.ok === false && stream.cancelling && performance.now() >= stream.cancelRequestedAt;
-              messages.patchToolCall(tid, tcid, {
-                status: cancelled ? 'cancelled' : p.ok === false ? 'error' : 'done',
-                result: typeof p.output === 'string' ? (p.output as string) : undefined,
-                output: typeof p.output === 'string' ? (p.output as string) : undefined,
-                ok: typeof p.ok === 'boolean' ? (p.ok as boolean) : true,
-                outputTotal: typeof p.outputTotal === 'number' ? (p.outputTotal as number) : undefined,
-                truncated: p.truncated === true,
-                used: used >= 1 ? used : 1,
-              });
-            }
-            stream.removeTool(tcid);
-          }
-          break;
-        }
+         case 'tool.finished': {
+           const p = asRecord(f.p);
+           const stream = useStreamStore();
+           const tcid = String(p.toolCallId ?? '');
+           if (tcid) {
+             const t = stream.activeTools.get(tcid);
+             const tid = t?.messageId ?? stream.currentTurn?.turnId;
+             const used = Number(p.used ?? stream.currentTurn?.activeOrd ?? 1);
+             if (tid) {
+               // ★ 用户中断导致的工具未完成，不能显示成「失败」（红色 error）。
+               //   判定依据：ok=false 且该帧到达时刻晚于取消请求时刻（见上「判定依据」一节）。
+               //   不能用 p.output 文案判定（违反“判定结构化”铁律）。
+               const cancelled =
+                 p.ok === false && stream.cancelling && performance.now() >= stream.cancelRequestedAt;
+               const skipped = p.skipped === true;
+               messages.patchToolCall(tid, tcid, {
+                 status: cancelled ? 'cancelled' : p.ok === false ? 'error' : 'done',
+                 result: typeof p.output === 'string' ? (p.output as string) : undefined,
+                 output: typeof p.output === 'string' ? (p.output as string) : undefined,
+                 ok: typeof p.ok === 'boolean' ? (p.ok as boolean) : true,
+                 outputTotal: typeof p.outputTotal === 'number' ? (p.outputTotal as number) : undefined,
+                 truncated: p.truncated === true,
+                 skipped,
+                 skipReason: typeof p.skipReason === 'string' ? (p.skipReason as string) : undefined,
+                 used: used >= 1 ? used : 1,
+               });
+             }
+             stream.removeTool(tcid);
+           }
+           break;
+         }
         case 'tool.outputDelta': {
           const p = asRecord(f.p);
           const stream = useStreamStore();

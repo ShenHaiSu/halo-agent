@@ -173,6 +173,35 @@ public class SchemaConformanceTests
             Assert.Equal(kind, ev.Kind);
         }
     }
+
+    [Fact]
+    public void ToolFinished_payload_roundtrips_skipped()
+    {
+        var payload = new ToolFinishedPayload
+        {
+            ToolCallId = "c1", Name = "write_file", Ok = false, Output = "未执行",
+            Skipped = true, SkipReason = "truncated",
+        };
+        var el = JsonSerializer.SerializeToElement(payload, HaloJson.Options);
+        Assert.True(el.TryGetProperty("skipped", out var sk) && sk.GetBoolean());
+        Assert.Equal("truncated", el.GetProperty("skipReason").GetString());
+
+        // 可选不写时不出现
+        var plain = JsonSerializer.SerializeToElement(
+            new ToolFinishedPayload { ToolCallId = "c2", Name = "read_file", Ok = true, Output = "ok" },
+            HaloJson.Options);
+        Assert.False(plain.TryGetProperty("skipped", out _));
+    }
+
+    [Fact]
+    public void AskKind_accepts_network()
+    {
+        var askKind = Schema.RootElement.GetProperty("types").GetProperty("AskKind");
+        var values = new List<string>();
+        foreach (var item in askKind.GetProperty("enum").EnumerateArray())
+            values.Add(item.GetString() ?? string.Empty);
+        Assert.Contains("network", values);
+    }
 }
 
 /// <summary>

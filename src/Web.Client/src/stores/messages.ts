@@ -12,25 +12,27 @@ export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ToolCallKind = 'function' | 'unknown';
 export type ReasoningKind = 'full' | 'summary';
 
-export interface ToolCallInfo {
-  id: string;
-  name: string;
-  arguments: string;
-  result?: string;
-  ok?: boolean;
-  status: 'pending' | 'running' | 'awaiting-user' | 'done' | 'error' | 'cancelled';
-  output?: string;
-  alertLevel?: number;
-  startedAt?: number;
-  durationMs?: number;
-  kind?: ToolCallKind;
-  rawType?: string | null;
-  payload?: Record<string, unknown> | null;
-  used?: number;
-  argsTotal?: number;
-  outputTotal?: number;
-  truncated?: boolean;
-}
+ export interface ToolCallInfo {
+   id: string;
+   name: string;
+   arguments: string;
+   result?: string;
+   ok?: boolean;
+   status: 'pending' | 'running' | 'awaiting-user' | 'done' | 'error' | 'cancelled';
+   output?: string;
+   alertLevel?: number;
+   startedAt?: number;
+   durationMs?: number;
+   kind?: ToolCallKind;
+   rawType?: string | null;
+   payload?: Record<string, unknown> | null;
+   used?: number;
+   argsTotal?: number;
+   outputTotal?: number;
+   truncated?: boolean;
+   skipped?: boolean;
+   skipReason?: string;
+ }
 
 export interface MessageItem {
   id: string;

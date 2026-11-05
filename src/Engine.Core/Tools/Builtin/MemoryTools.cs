@@ -87,38 +87,44 @@ public sealed class MemoryStore
         var desc = string.IsNullOrWhiteSpace(description) ? $"关于「{name}」的记忆" : description!;
         var type = string.IsNullOrWhiteSpace(mtype) ? "project" : mtype!;
 
-        var body = $"---\nname: {name}\ndescription: {desc}\ntype: {type}\n---\n\n{content}";
-        try { await File.WriteAllTextAsync(path, body, Encoding.UTF8, ct).ConfigureAwait(false); }
-        catch (Exception ex) { return ToolResult.Failure($"写入记忆失败: {ex.Message}"); }
+         return await FileMutationQueue.RunAsync(path, async () =>
+         {
+             var body = $"---\nname: {name}\ndescription: {desc}\ntype: {type}\n---\n\n{content}";
+             try { await File.WriteAllTextAsync(path, body, Encoding.UTF8, ct).ConfigureAwait(false); }
+             catch (Exception ex) { return ToolResult.Failure($"写入记忆失败: {ex.Message}"); }
 
-        await UpdateIndexAsync(dir, name, desc, slug, ct).ConfigureAwait(false);
+             await UpdateIndexAsync(dir, name, desc, slug, ct).ConfigureAwait(false);
 
-        var where = scope == MemoryScope.Project ? $"\n位置: {dir}\n" : "";
-        return ToolResult.Success(
-            $"已保存{scope.ToLabel()}记忆「{name}」(共 {content.Length} 字)。索引已更新。{where}");
-    }
+             var where = scope == MemoryScope.Project ? $"\n位置: {dir}\n" : "";
+             return ToolResult.Success(
+                 $"已保存{scope.ToLabel()}记忆「{name}」(共 {content.Length} 字)。索引已更新。{where}");
+         }).ConfigureAwait(false);
+     }
 
     private static async Task UpdateIndexAsync(
         string dir, string name, string description, string slug, CancellationToken ct)
     {
-        var indexPath = Path.Combine(dir, "MEMORY.md");
-        var line = $"- [{name}]({slug}.md) — {description}";
+         var indexPath = Path.Combine(dir, "MEMORY.md");
+         var line = $"- [{name}]({slug}.md) — {description}";
 
-        var lines = new List<string>();
-        if (File.Exists(indexPath))
-        {
-            try { lines = (await File.ReadAllLinesAsync(indexPath, ct).ConfigureAwait(false)).ToList(); }
-            catch { }
-        }
-        if (lines.Count == 0) lines.Add("# 记忆索引\n");
+         await FileMutationQueue.RunAsync(indexPath, async () =>
+         {
+             var lines = new List<string>();
+             if (File.Exists(indexPath))
+             {
+                 try { lines = (await File.ReadAllLinesAsync(indexPath, ct).ConfigureAwait(false)).ToList(); }
+                 catch { }
+             }
+             if (lines.Count == 0) lines.Add("# 记忆索引\n");
 
-        // 去掉同名旧行（防重复）
-        lines.RemoveAll(l => l.Contains($"]({slug}.md)", StringComparison.OrdinalIgnoreCase));
-        lines.Add(line);
+             // 去掉同名旧行（防重复）
+             lines.RemoveAll(l => l.Contains($"]({slug}.md)", StringComparison.OrdinalIgnoreCase));
+             lines.Add(line);
 
-        try { await File.WriteAllLinesAsync(indexPath, lines, ct).ConfigureAwait(false); }
-        catch { /* 索引更新失败不影响记忆本身 */ }
-    }
+             try { await File.WriteAllLinesAsync(indexPath, lines, ct).ConfigureAwait(false); }
+             catch { /* 索引更新失败不影响记忆本身 */ }
+         }).ConfigureAwait(false);
+     }
 
     public async Task<List<MemoryFile>> ListAsync(CancellationToken ct)
     {
@@ -200,12 +206,20 @@ public sealed class MemoryStore
 
 public sealed class MemoryWriteTool : ITool
 {
-    public string Name => "memory_write";
-    public string Description =>
-        "写入一条长期记忆(跨会话保留)。记忆分两级:Global(随用户走,记个人偏好/机器环境)" +
-        "与 Project(随当前仓库走,记本仓库的约定/架构/待办);scope 缺省 global。" +
-        "适合记录:用户机器环境、常用配置/路径、用户偏好、重要决策、本仓库约定。" +
-        "内容用 markdown,第一句是结论";
+     public string Name => "memory_write";
+     public string Description =>
+         "写入一条长期记忆(跨会话保留)。记忆分两级:Global(随用户走,记个人偏好/机器环境)" +
+         "与 Project(随当前仓库走,记本仓库的约定/架构/待办);scope 缺省 global。" +
+         "适合记录:用户机器环境、常用配置/路径、用户偏好、重要决策、本仓库约定。" +
+         "内容用 markdown,第一句是结论";
+
+     public string? PromptSnippet => "写入长期记忆";
+
+     public IReadOnlyList<string> PromptGuidelines => new[]
+     {
+         "用户提到重要的环境信息、偏好或本仓库约定时，用 memory_write 记下来",
+         "个人偏好用 scope=global，本仓库约定用 scope=project",
+     };
 
     public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
       ""type"": ""object"",
@@ -223,32 +237,39 @@ public sealed class MemoryWriteTool : ITool
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var name = args.GetStringOrNull("name");
-        var content = args.GetStringOrNull("content");
-        if (string.IsNullOrEmpty(name)) return ToolResult.Failure("name 不能为空");
-        if (content is null) return ToolResult.Failure("content 不能为空");
+         var name = ctx.TypedArgs?.StringOrNull("name") ?? args.GetStringOrNull("name");
+         var content = ctx.TypedArgs?.StringOrNull("content") ?? args.GetStringOrNull("content");
+         if (string.IsNullOrEmpty(name)) return ToolResult.Failure("name 不能为空");
+         if (content is null) return ToolResult.Failure("content 不能为空");
 
-        var scopeRaw = args.GetStringOrNull("scope");
-        if (!MemoryScopeExtensions.TryParse(scopeRaw, out var scope))
-            return ToolResult.Failure(
-                $"scope 只能是 global 或 project(收到「{scopeRaw}」)。" +
-                "个人偏好/机器环境用 global,本仓库的约定用 project");
+         var scopeRaw = ctx.TypedArgs?.StringOrNull("scope") ?? args.GetStringOrNull("scope");
+         if (!MemoryScopeExtensions.TryParse(scopeRaw, out var scope))
+             return ToolResult.Failure(
+                 $"scope 只能是 global 或 project(收到「{scopeRaw}」)。" +
+                 "个人偏好/机器环境用 global,本仓库的约定用 project");
 
-        var store = new MemoryStore(ctx.Host.DataDir, ctx.Cwd);
-        return await store.WriteAsync(
-            name, content,
-            args.GetStringOrNull("description"),
-            args.GetStringOrNull("mtype"),
-            scope, ct).ConfigureAwait(false);
+         var store = new MemoryStore(ctx.Host.DataDir, ctx.Cwd);
+         return await store.WriteAsync(
+             name, content,
+             ctx.TypedArgs?.StringOrNull("description") ?? args.GetStringOrNull("description"),
+             ctx.TypedArgs?.StringOrNull("mtype") ?? args.GetStringOrNull("mtype"),
+             scope, ct).ConfigureAwait(false);
     }
 }
 
 public sealed class MemoryReadTool : ITool
 {
-    public string Name => "memory_read";
-    public string Description =>
-        "读取长期记忆。可按名字精确读取,或按关键词搜索。会话开始已自动注入两级的 MEMORY.md 索引摘要。" +
-        "缺省两级都读:同名的两条都会返回并标注来源(项目在前)";
+     public string Name => "memory_read";
+     public string Description =>
+         "读取长期记忆。可按名字精确读取,或按关键词搜索。会话开始已自动注入两级的 MEMORY.md 索引摘要。" +
+         "缺省两级都读:同名的两条都会返回并标注来源(项目在前)";
+
+     public string? PromptSnippet => "读取长期记忆";
+
+     public IReadOnlyList<string> PromptGuidelines => new[]
+     {
+         "需要历史背景时用 memory_read，缺省两级都读",
+     };
 
     public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
       ""type"": ""object"",
@@ -264,11 +285,20 @@ public sealed class MemoryReadTool : ITool
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var store = new MemoryStore(ctx.Host.DataDir, ctx.Cwd);
-        var query = args.GetStringOrNull("query");
-        var name = args.GetStringOrNull("name");
+         var store = new MemoryStore(ctx.Host.DataDir, ctx.Cwd);
+         var query = ctx.TypedArgs?.StringOrNull("query") ?? args.GetStringOrNull("query");
+         var name = ctx.TypedArgs?.StringOrNull("name") ?? args.GetStringOrNull("name");
+         var scopeRaw = ctx.TypedArgs?.StringOrNull("scope") ?? args.GetStringOrNull("scope");
 
-        var all = await store.ListAsync(ct).ConfigureAwait(false);
+         var all = await store.ListAsync(ct).ConfigureAwait(false);
+         var scopeLabel = "";
+         var trimmed = scopeRaw?.Trim().ToLowerInvariant();
+         if (trimmed == "global" || trimmed == "project")
+         {
+             var want = trimmed == "global" ? MemoryScope.Global : MemoryScope.Project;
+             scopeLabel = want.ToLabel();
+             all = all.Where(m => m.Scope == want).ToList();
+         }
 
         // 按名字精确读
         if (!string.IsNullOrWhiteSpace(name))
@@ -276,7 +306,7 @@ public sealed class MemoryReadTool : ITool
             var slug = MemoryStore.Slugify(name);
             var hits = all.Where(m => m.Filename.Equals(slug, StringComparison.OrdinalIgnoreCase)
                                    || m.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (hits.Count == 0) return ToolResult.Success($"未找到名为「{name}」的记忆");
+             if (hits.Count == 0) return ToolResult.Success(string.IsNullOrEmpty(scopeLabel) ? $"未找到名为「{name}」的记忆" : $"未找到名为「{name}」的{scopeLabel}记忆");
 
             var sb = new StringBuilder();
             foreach (var h in hits)
@@ -284,30 +314,30 @@ public sealed class MemoryReadTool : ITool
             return ToolResult.Success(sb.ToString());
         }
 
-        // 按关键词搜索
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            var q = query.Trim();
+         // 按关键词搜索
+         if (!string.IsNullOrWhiteSpace(query))
+         {
+             var q = query.Trim();
             var hits = all.Where(m =>
                 m.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 m.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 m.Body.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
-            if (hits.Count == 0) return ToolResult.Success($"没有匹配「{q}」的记忆");
+             if (hits.Count == 0) return ToolResult.Success(string.IsNullOrEmpty(scopeLabel) ? $"没有匹配「{q}」的记忆" : $"没有匹配「{q}」的{scopeLabel}记忆");
 
             var sb = new StringBuilder();
             foreach (var group in hits.GroupBy(h => h.Scope))
             {
                 sb.Append($"## {group.Key.ToLabel()}记忆\n");
-                foreach (var h in group)
-                    sb.Append($"- {h.Name}: {h.Description}\n");
+                 foreach (var h in group)
+                     sb.Append($"- {h.Name}: {h.Description}\n");
                 sb.Append('\n');
             }
             return ToolResult.Success(sb.ToString());
         }
 
         // 都读：索引
-        if (all.Count == 0) return ToolResult.Success("(暂无记忆)");
+         if (all.Count == 0) return ToolResult.Success(string.IsNullOrEmpty(scopeLabel) ? "(暂无记忆)" : $"(暂无{scopeLabel}记忆)");
 
         var list = new StringBuilder("记忆索引（项目在前）:\n");
         foreach (var group in all.GroupBy(h => h.Scope))

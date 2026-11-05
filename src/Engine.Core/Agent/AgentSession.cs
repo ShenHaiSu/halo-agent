@@ -143,6 +143,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private static readonly bool CancelAuthEnabled =
         (Environment.GetEnvironmentVariable("HALO_CANCEL_AUTH")
             ?? Environment.GetEnvironmentVariable("HALO_P24_CANCEL_AUTH")) != "0";
+     /// <summary>默认值来自环境变量；测试可经 SetToolParallelForTest 覆盖。</summary>
+     private static readonly bool ToolParallelDefault =
+         (Environment.GetEnvironmentVariable("HALO_TOOL_PARALLEL") ?? "1") != "0";
+ 
+     /// <summary>实例级开关：构造时取默认，单测可改。</summary>
+     private bool _toolParallelEnabled = ToolParallelDefault;
+ 
+     /// <summary>仅测试用：切换并行开关。</summary>
+     public void SetToolParallelForTest(bool enabled) => _toolParallelEnabled = enabled;
  
        public AgentSession(
            ILlmClient llm,
@@ -269,7 +278,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _autoCompactOnLimit = resolved.AutoCompactOnLimit;
              if (_messages.Count > 0 && _messages[0].Role == Role.System)
                  _messages[0] = ChatMessage.System(SystemPromptBuilder.Build(
-                     _cwd, _mode, _store.SessionId, _persona, _dataDir));
+                     _cwd, _mode, _store.SessionId, _persona, _dataDir, _tools.All));
          }
           if (!string.Equals(oldProto, resolved.Protocol ?? "chat", StringComparison.OrdinalIgnoreCase) || !string.Equals(oldModel, resolved.ModelId ?? "", StringComparison.Ordinal) || !string.Equals(oldProv, resolved.ProviderId ?? "", StringComparison.Ordinal))
           {
@@ -780,58 +789,32 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 return new TurnResult(text, toolCallCount, false, _usageIn, _usageOut);
             }
 
-            // ===== 逐个执行工具 =====
-            for (int i = 0; i < reply.ToolCalls.Count; i++)
-            {
-                if (ct.IsCancellationRequested)
-                {
-                    // I-3/给剩余 tool_calls 补占位 + 合成 assistant 占位
-                    for (int j = i; j < reply.ToolCalls.Count; j++)
-                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply) with { TurnId = turnId, Ord = used });
-                    Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
-                    _bus.FlushDeltasBlocking();
-                    await _bus.PublishStateAsync(EventKinds.RoundEnded,
-                        new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used, byUser: true)
-                        .ConfigureAwait(false);
-                    return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
-                }
-                // ★ （CP-4）：执行前兑现取消。上面的 :749 分支处理“循环进入时已取消”，
-                //   这里处理“上一个工具执行完之后、下一个开始之前”落下的取消，避免再起新工具。
-                EnsureNotCancelled(ct, "tool-before-execute");
-
-                var tc = reply.ToolCalls[i];
-                toolCallCount++;
-
-                var output = await ExecuteToolCallAsync(tc, ct, used).ConfigureAwait(false);
-
-                // ===== 重复刹车：提醒 =====
-                var sig = tc.Function.Name + "|" + tc.Function.Arguments;
-                repeatCounts.TryGetValue(sig, out var count);
-                repeatCounts[sig] = ++count;
-
-                if (count >= RepeatWarn && count < RepeatAbort)
-                {
-                    output += "\n\n⚠ 同一个调用（工具 + 参数完全一样）你已经重复第 " + count + " 次了，"
-                              + "结果不会变。换参数/换工具/换思路，或直接汇报现状与卡点；"
-                              + "再重复到 " + RepeatAbort + " 次本轮会被中止。";
-                }
-
-                Record(ChatMessage.Tool(tc.Id, output) with { TurnId = turnId, Ord = used });
-
-                if (ct.IsCancellationRequested)
-                {
-                    for (int j = i + 1; j < reply.ToolCalls.Count; j++)
-                        Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply) with { TurnId = turnId, Ord = used });
-                    Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
-                    _bus.FlushDeltasBlocking();
-                    await _bus.PublishStateAsync(EventKinds.RoundEnded,
-                        new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
-                    await FinishAsync(turnId, "⏹ 生成已中断", truncated: true, ct: CancellationToken.None, finalUsed: used, byUser: true)
-                        .ConfigureAwait(false);
-                    return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
-                }
-            }
+             // ===== 截断保护：本批 tool call 全部不执行 =====
+             if (reply.TruncatedByLength && reply.ToolCalls.Count > 0)
+             {
+                 await FailToolCallsFromTruncatedMessageAsync(reply.ToolCalls, turnId, used, ct).ConfigureAwait(false);
+                 toolCallCount += reply.ToolCalls.Count;
+ 
+                 // 落盘一条 assistant 提示（让下一轮模型看到「上一批没执行」的原因）
+                 var notice = "⚠ 上一条回复因输出长度上限被截断，其中的 " + reply.ToolCalls.Count
+                            + " 个工具调用均未执行（参数可能不完整）。请缩短单次调用内容后重发。";
+                 Record(ChatMessage.User(notice) with { TurnId = turnId, Ord = used });
+ 
+                 await _bus.PublishStateAsync(EventKinds.Notice,
+                     new NoticePayload { Text = notice, Level = "warn" }, ct).ConfigureAwait(false);
+                 // 不 return：继续下一轮，让模型自己重发
+                 continue;
+             }
+ 
+             // ===== 执行本批工具调用 =====
+             var toolBatch = await ExecuteToolBatchAsync(reply.ToolCalls, turnId, used, ct, repeatCounts).ConfigureAwait(false);
+             toolCallCount += toolBatch.ExecutedCount;
+ 
+             if (toolBatch.Aborted)
+             {
+                 // 两处取消分支内部已处理占位 + assistant 提示 + FinishAsync
+                 return toolBatch.AbortedResult!;
+             }
 
             // ===== I-2：轮边界插入排队消息 =====
             var injected = TryDrain();
@@ -1109,182 +1092,385 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         await Task.Delay(delay, ct).ConfigureAwait(false);
     }
 
-    // ============================================================
-    //  工具执行（权限 + 分发）
-    // ============================================================
-
-    private async Task<string> ExecuteToolCallAsync(ToolCall tc, CancellationToken ct, int used = 1)
-    {
-        var callId = tc.Id;
-        var name = tc.Function.Name;
-        _currentToolCallId = callId;
-
-        // ---------- I-4/I-5/I-6：参数解析 ----------
-        JsonElement args;
-        try
-        {
-            args = ToolArgumentParser.Parse(tc.Function.Arguments);
-        }
-        catch (Exception ex)
-        {
-            var msg = "工具参数解析失败: " + ex.Message + "\n"
-                      + "请按工具定义的 JSON Schema 重新构造 arguments 后再次调用。";
-            await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
-            return msg;
-        }
-
-        var tool = _tools.Get(name);
-        if (tool is null)
-        {
-            string friendly;
-            if (name.StartsWith("mcp__", StringComparison.Ordinal))
-            {
-                friendly = "MCP 工具 `" + name + "` 在当前会话中尚未接入（MCP server 未连接或 mcp.json 未配置），无法执行。"
-                           + "请检查数据目录下的 mcp.json 配置后重试，或改用内置工具完成任务。";
-            }
-            else if (string.Equals(name, "skill", StringComparison.Ordinal))
-            {
-                friendly = "skill 不是可直接调用的工具：请先用 read_file 查看对应技能目录下 SKILL.md 的正文，"
-                           + "按里面的步骤用内置工具执行；不要再以 tool_call 形式调用 skill。";
-            }
-            else
-            {
-                var avail = string.Join(", ", _tools.Names);
-                friendly = "未知工具: " + name + "。可用工具: " + avail;
-            }
-            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, friendly, ct, used).ConfigureAwait(false);
-            return friendly;
-        }
-
-        // ---------- 权限判定 ----------
-        CommandRisk risk = CommandRisk.Safe;
-        string command = "";
-
-        if (tool.Operation == PermissionChecker.Operation.RunCommand)
-        {
-            command = args.TryGetProperty("command", out var cEl) && cEl.ValueKind == JsonValueKind.String
-                ? cEl.GetString() ?? ""
-                : "";
-
-            if (string.IsNullOrWhiteSpace(command))
-            {
-                var msg = "command 不能为空: 请传入要执行的完整命令字符串，如 {\"command\": \"ls -la\"}";
-                await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
-                await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
-                return msg;
-            }
-
-            risk = DangerousCommandInspector.Inspect(command, new InspectorOptions
-            {
-                Cwd = _cwd,
-                Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                MaxDepth = 3,
-            });
-        }
-
-        // 会话级"总是允许"快捷路径
-        var alreadyAlways = tool.Operation switch
-        {
-            PermissionChecker.Operation.WriteFile => _fileAlways,
-            PermissionChecker.Operation.RunCommand => _commandAlways && risk.Kind != CommandRiskKind.Blocked
-                                                      && risk.Kind != CommandRiskKind.Uncertain,
-            _ => false,
-        };
-
-        PermDecision decision;
-        if (alreadyAlways)
-        {
-            decision = PermDecision.Allow;
-        }
-        else
-        {
-            decision = PermissionChecker.Check(_mode, tool.Operation, risk, _askInteractive);
-        }
-
-        if (decision.Kind == PermDecisionKind.Deny)
-        {
-            await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
-            await EmitToolFinishedAsync(callId, name, false, decision.Reason ?? "已拒绝", ct, used)
-                .ConfigureAwait(false);
-            return "操作未执行: " + decision.Reason;
-        }
-
-        if (decision.Kind == PermDecisionKind.NeedAsk)
-        {
-            var answer = await AskPermissionAsync(new PermissionAsk
-            {
-                Kind = tool.Operation == PermissionChecker.Operation.WriteFile ? "write" : "command",
-                Title = decision.Title ?? "确认",
-                Body = tool.Operation == PermissionChecker.Operation.RunCommand ? command
-                       : (decision.Body ?? ""),
-                Warning = decision.Warning,
-                AllowAlways = decision.AllowAlways,
-            }, ct).ConfigureAwait(false);
-
-            if (!answer.Allow)
-            {
-                await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
-                await EmitToolFinishedAsync(callId, name, false, PermissionPolicies.UserDenied, ct, used)
-                    .ConfigureAwait(false);
-                return "操作未执行: " + PermissionPolicies.UserDenied;
-            }
-
-            if (answer.Always && decision.AllowAlways)
-            {
-                switch (tool.Operation)
-                {
-                    case PermissionChecker.Operation.WriteFile: _fileAlways = true; break;
-                    case PermissionChecker.Operation.RunCommand: _commandAlways = true; break;
-                    default: break;
-                }
-                await _bus.PublishStateAsync(EventKinds.Notice,
-                    new NoticePayload { Text = "🔓 本会话都自动放行这类操作了", Level = "info" },
-                    ct).ConfigureAwait(false);
-            }
-        }
-
-        // ---------- 执行 ----------
-        long? idleMs = null;
-        if (name == "run_shell_command" &&
-            args.TryGetProperty("idle_ms", out var idleEl) &&
-            idleEl.ValueKind == JsonValueKind.Number)
-        {
-            idleMs = idleEl.GetInt64();
-        }
-
-        await EmitToolStartedAsync(callId, name, ArgsPreview(args), idleMs, ct, used).ConfigureAwait(false);
-
-        try
-        {
-            var result = await tool.ExecuteAsync(args, new ToolContext
-            {
-                Cwd = _cwd,
-                SessionId = _store.SessionId,
-                Host = _self,
-                Ct = ct,
-                ToolCallId = callId,
-            }, ct).ConfigureAwait(false);
-
-            var output = result.Output ?? "";
-            await EmitToolFinishedAsync(callId, name, result.Ok, output, ct, used).ConfigureAwait(false);
-            return output;
-        }
-        catch (OperationCanceledException)
-        {
-            var msg = "⏹ 用户中断，该工具调用未执行。";
-            await EmitToolFinishedAsync(callId, name, false, msg, CancellationToken.None, used)
-                .ConfigureAwait(false);
-            return msg;
-        }
-        catch (Exception ex)
-        {
-            var msg = "工具 " + name + " 执行失败: " + ex.Message;
-            await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
-            return msg;
-        }
-    }
+     // ============================================================
+     //  工具执行（预检 + 执行 + 并行批次）
+     // ============================================================
+ 
+     /// <summary>预检成功的产物：参数已校验、权限已放行，可以直接执行。</summary>
+     private sealed record PreparedToolCall(
+         ToolCall ToolCall,
+         ITool Tool,
+         ToolArguments Args,
+         JsonElement RawArgs,
+         string ArgsPreview);
+ 
+     /// <summary>预检直接定论（不执行工具）：工具不存在 / 参数错 / 权限拒绝 / 已取消。</summary>
+     private sealed record ImmediateToolOutcome(string Output, bool Ok);
+ 
+     private sealed record BatchEntry(ToolCall ToolCall, object Prepared)
+     {
+         public string? Output { get; init; }
+     }
+ 
+     private sealed record ToolBatchOutcome(int ExecutedCount, bool Aborted, TurnResult? AbortedResult);
+ 
+     private async Task<string> ExecuteToolCallAsync(ToolCall tc, CancellationToken ct, int used = 1)
+     {
+         var prepared = await PrepareToolCallAsync(tc, ct, used).ConfigureAwait(false);
+         if (prepared is ImmediateToolOutcome immediate)
+             return immediate.Output;
+         var p = (PreparedToolCall)prepared;
+         return await ExecutePreparedAsync(p, ct, used).ConfigureAwait(false);
+     }
+ 
+     private async Task<object> PrepareToolCallAsync(ToolCall tc, CancellationToken ct, int used)
+     {
+         var callId = tc.Id;
+         var name = tc.Function.Name;
+         _currentToolCallId = callId;
+ 
+         // ---------- 失败点 1：JSON 解析 ----------
+         JsonElement args;
+         try
+         {
+             args = ToolArgumentParser.Parse(tc.Function.Arguments);
+         }
+         catch (Exception ex)
+         {
+             var msg = "工具 \"" + name + "\" 参数解析失败: " + ex.Message + "\n"
+                     + "请按工具定义的 JSON Schema 重新构造 arguments 后再次调用。";
+             await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
+             await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
+             return new ImmediateToolOutcome(msg, false);
+         }
+ 
+         // ---------- 失败点 2：工具不存在（含 MCP / skill 友好文案，保持现状）----------
+         var tool = _tools.Get(name);
+         if (tool is null)
+         {
+             var friendly = BuildUnknownToolMessage(name);
+             await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+             await EmitToolFinishedAsync(callId, name, false, friendly, ct, used).ConfigureAwait(false);
+             return new ImmediateToolOutcome(friendly, false);
+         }
+ 
+         // ---------- 失败点 3：schema 校验 ----------
+         ToolArguments typed;
+         try
+         {
+             typed = ToolArguments.Bind(name, tool.ParameterSchema, args);
+         }
+         catch (ToolValidationException vex)
+         {
+             await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+             await EmitToolFinishedAsync(callId, name, false, vex.Message, ct, used).ConfigureAwait(false);
+             return new ImmediateToolOutcome(vex.Message, false);
+         }
+ 
+         // ---------- 权限判定（用 typed 读取强类型值）----------
+         CommandRisk risk = CommandRisk.Safe;
+         string command = "";
+         if (tool.Operation == PermissionChecker.Operation.RunCommand)
+         {
+             command = typed.StringOrNull("command") ?? "";
+             if (string.IsNullOrWhiteSpace(command))
+             {
+                 // schema 里 command 是 required string，走到这里说明实现不一致。保留兜底。
+                 var msg = "command 不能为空: 请传入要执行的完整命令字符串，如 {\"command\": \"ls -la\"}";
+                 await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
+                 await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
+                 return new ImmediateToolOutcome(msg, false);
+             }
+             risk = DangerousCommandInspector.Inspect(command, new InspectorOptions
+             {
+                 Cwd = _cwd,
+                 Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                 MaxDepth = 3,
+             });
+         }
+ 
+         var perm = await CheckPermissionAsync(tool, risk, command, ct).ConfigureAwait(false);
+         if (perm is not null)
+         {
+             await EmitToolStartedAsync(callId, name, ArgsPreview(args), null, ct, used).ConfigureAwait(false);
+             await EmitToolFinishedAsync(callId, name, false, perm, ct, used).ConfigureAwait(false);
+             return new ImmediateToolOutcome(perm, false);
+         }
+ 
+         return new PreparedToolCall(tc, tool, typed, args, ArgsPreview(args));
+     }
+ 
+     private string BuildUnknownToolMessage(string name)
+     {
+         if (name.StartsWith("mcp__", StringComparison.Ordinal))
+         {
+             return "MCP 工具 `" + name + "` 在当前会话中尚未接入（MCP server 未连接或 mcp.json 未配置），无法执行。"
+                 + "请检查数据目录下的 mcp.json 配置后重试，或改用内置工具完成任务。";
+         }
+         if (string.Equals(name, "skill", StringComparison.Ordinal))
+         {
+             return "skill 不是可直接调用的工具：请先用 read_file 查看对应技能目录下 SKILL.md 的正文，"
+                 + "按里面的步骤用内置工具执行；不要再以 tool_call 形式调用 skill。";
+         }
+         var avail = string.Join(", ", _tools.Names);
+         return "未知工具: " + name + "。可用工具: " + avail;
+     }
+ 
+     private async Task<string?> CheckPermissionAsync(ITool tool, CommandRisk risk, string command, CancellationToken ct)
+     {
+         // 会话级“总是允许”快捷路径
+         var alreadyAlways = tool.Operation switch
+         {
+             PermissionChecker.Operation.WriteFile => _fileAlways,
+             PermissionChecker.Operation.RunCommand => _commandAlways && risk.Kind != CommandRiskKind.Blocked
+                                                       && risk.Kind != CommandRiskKind.Uncertain,
+             _ => false,
+         };
+ 
+         PermDecision decision;
+         if (alreadyAlways)
+         {
+             decision = PermDecision.Allow;
+         }
+         else
+         {
+             decision = PermissionChecker.Check(_mode, tool.Operation, risk, _askInteractive);
+         }
+ 
+         if (decision.Kind == PermDecisionKind.Deny)
+             return "操作未执行: " + decision.Reason;
+ 
+         if (decision.Kind == PermDecisionKind.NeedAsk)
+         {
+             string kind = tool.Operation == PermissionChecker.Operation.WriteFile ? "write"
+                 : tool.Operation == PermissionChecker.Operation.RunCommand ? "command"
+                 : tool.Operation == PermissionChecker.Operation.Network ? "network"
+                 : "command";
+             var answer = await AskPermissionAsync(new PermissionAsk
+             {
+                 Kind = kind,
+                 Title = decision.Title ?? "确认",
+                 Body = tool.Operation == PermissionChecker.Operation.RunCommand ? command
+                        : (decision.Body ?? ""),
+                 Warning = decision.Warning,
+                 AllowAlways = decision.AllowAlways,
+             }, ct).ConfigureAwait(false);
+ 
+             if (!answer.Allow)
+                 return "操作未执行: " + PermissionPolicies.UserDenied;
+ 
+             if (answer.Always && decision.AllowAlways)
+             {
+                 switch (tool.Operation)
+                 {
+                     case PermissionChecker.Operation.WriteFile: _fileAlways = true; break;
+                     case PermissionChecker.Operation.RunCommand: _commandAlways = true; break;
+                     default: break;
+                 }
+                 await _bus.PublishStateAsync(EventKinds.Notice,
+                     new NoticePayload { Text = "🔓 本会话都自动放行这类操作了", Level = "info" },
+                     ct).ConfigureAwait(false);
+             }
+         }
+ 
+         return null;
+     }
+ 
+     private async Task<string> ExecutePreparedAsync(PreparedToolCall p, CancellationToken ct, int used)
+     {
+         var callId = p.ToolCall.Id;
+         var name = p.ToolCall.Function.Name;
+ 
+         long? idleMs = name == "run_shell_command" ? p.Args.LongOrNull("idle_ms") : null;
+         await EmitToolStartedAsync(callId, name, p.ArgsPreview, idleMs, ct, used).ConfigureAwait(false);
+ 
+         try
+         {
+             var result = await p.Tool.ExecuteAsync(p.RawArgs, new ToolContext
+             {
+                 Cwd = _cwd,
+                 SessionId = _store.SessionId,
+                 Host = _self,
+                 Ct = ct,
+                 ToolCallId = callId,
+                 TypedArgs = p.Args,
+             }, ct).ConfigureAwait(false);
+ 
+             var output = result.Output ?? "";
+             await EmitToolFinishedAsync(callId, name, result.Ok, output, ct, used).ConfigureAwait(false);
+             return output;
+         }
+         catch (OperationCanceledException)
+         {
+             var msg = "⏹ 用户中断，该工具调用未执行。";
+             await EmitToolFinishedAsync(callId, name, false, msg, CancellationToken.None, used)
+                 .ConfigureAwait(false);
+             return msg;
+         }
+         catch (Exception ex)
+         {
+             // ---------- 失败点 4：执行期异常 ----------
+             var msg = "工具 \"" + name + "\" 执行失败: " + ex.Message;
+             await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
+             return msg;
+         }
+     }
+ 
+     private async Task<ToolBatchOutcome> ExecuteToolBatchAsync(
+         IReadOnlyList<ToolCall> toolCalls, string turnId, int used, CancellationToken ct,
+         Dictionary<string, int> repeatCounts)
+     {
+         var parallel = _toolParallelEnabled && ShouldRunParallel(toolCalls);
+ 
+         // 每批一个 linked CTS：中止时全部工具一起收手
+         using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+         var batchToken = batchCts.Token;
+ 
+         // ---------- 阶段 1：串行预检（entries 顺序 == assistant 源序）----------
+         var entries = new List<BatchEntry>(toolCalls.Count);
+         for (int i = 0; i < toolCalls.Count; i++)
+         {
+             if (ct.IsCancellationRequested)
+                 return await AbortBatchAsync(toolCalls, i, turnId, used).ConfigureAwait(false);
+ 
+             EnsureNotCancelled(ct, "tool-before-execute");
+ 
+             var prepared = await PrepareToolCallAsync(toolCalls[i], batchToken, used).ConfigureAwait(false);
+             entries.Add(new BatchEntry(toolCalls[i], prepared));
+ 
+             if (ct.IsCancellationRequested)
+                 return await AbortBatchAsync(toolCalls, i + 1, turnId, used).ConfigureAwait(false);
+         }
+ 
+         // ---------- 阶段 2：执行 ----------
+         if (parallel)
+         {
+             // 用索引对齐，保证回填时能对上源序
+             var tasks = new Task<string>[(entries.Count)];
+             var hasTask = new bool[entries.Count];
+             for (int i = 0; i < entries.Count; i++)
+             {
+                 if (entries[i].Prepared is PreparedToolCall p)
+                 {
+                     int idx = i;
+                     tasks[idx] = Task.Run(() => ExecutePreparedAsync(p, batchToken, used));
+                     hasTask[idx] = true;
+                 }
+             }
+ 
+             try
+             {
+                 var waiting = new List<Task>();
+                 for (int i = 0; i < tasks.Length; i++)
+                     if (hasTask[i] && tasks[i] is not null) waiting.Add(tasks[i]);
+                 if (waiting.Count > 0)
+                     await Task.WhenAll(waiting).ConfigureAwait(false);
+             }
+             catch
+             {
+                 // ExecutePreparedAsync 内部已 catch 所有异常并返回文本，走到这里说明是
+                 // ThreadAbort/OOM 级别。仍然继续，让下面的 Result 取到各自结果。
+             }
+ 
+             // 按源序回填
+             for (int i = 0; i < entries.Count; i++)
+             {
+                 if (hasTask[i] && tasks[i] is { } t && t.IsCompletedSuccessfully)
+                     entries[i] = entries[i] with { Output = t.Result };
+                 else if (hasTask[i] && tasks[i] is { } t2 && t2.IsFaulted)
+                     entries[i] = entries[i] with { Output = "工具 \"" + entries[i].ToolCall.Function.Name + "\" 执行失败: " + (t2.Exception?.GetBaseException().Message ?? "未知错误") };
+                 else if (hasTask[i] && tasks[i] is { } t3 && t3.IsCanceled)
+                     entries[i] = entries[i] with { Output = "⏹ 用户中断，该工具调用未执行。" };
+             }
+         }
+         else
+         {
+             for (int i = 0; i < entries.Count; i++)
+             {
+                 if (entries[i].Prepared is not PreparedToolCall p) continue;
+                 var output = await ExecutePreparedAsync(p, batchToken, used).ConfigureAwait(false);
+                 entries[i] = entries[i] with { Output = output };
+             }
+         }
+ 
+         // ---------- 阶段 3：按源序落盘 + 重复刹车 ----------
+         // 即使已取消也要先落盘已完成的结果，否则这些结果会丢。未执行的尾部由 AbortBatchAsync 补占位。
+         int executed = 0;
+         for (int i = 0; i < entries.Count; i++)
+         {
+             var e = entries[i];
+             var hasResult = e.Output is not null || e.Prepared is ImmediateToolOutcome;
+             if (!hasResult) break;   // 从这里开始都是被取消打断的
+ 
+             var output = e.Output ?? ((ImmediateToolOutcome)e.Prepared).Output;
+ 
+             var sig = e.ToolCall.Function.Name + "|" + e.ToolCall.Function.Arguments;
+             repeatCounts.TryGetValue(sig, out var count);
+             repeatCounts[sig] = ++count;
+             if (count >= RepeatWarn && count < RepeatAbort)
+             {
+                 output += "\n\n⚠ 同一个调用（工具 + 参数完全一样）你已经重复第 " + count + " 次了，"
+                         + "结果不会变。换参数/换工具/换思路，或直接汇报现状与卡点；"
+                         + "再重复到 " + RepeatAbort + " 次本轮会被中止。";
+             }
+ 
+             Record(ChatMessage.Tool(e.ToolCall.Id, output) with { TurnId = turnId, Ord = used });
+             executed++;
+         }
+ 
+         if (ct.IsCancellationRequested)
+             return await AbortBatchAsync(toolCalls, executed, turnId, used).ConfigureAwait(false);
+ 
+         return new ToolBatchOutcome(executed, false, null);
+     }
+ 
+     private bool ShouldRunParallel(IReadOnlyList<ToolCall> calls)
+     {
+         if (calls.Count <= 1) return false;   // 单调用不走并发
+         // 任一工具声明 Sequential → 整批降级。
+         // 名字找不到时（未知工具）按 Parallel 处理：它只走 immediate 分支，不参与并发。
+         foreach (var tc in calls)
+         {
+             var tool = _tools.Get(tc.Function.Name);
+             if (tool is not null && tool.ExecutionMode == ToolExecutionMode.Sequential) return false;
+         }
+         return true;
+     }
+ 
+     /// <summary>
+     /// 取消批次：从 fromIndex 起给剩余调用补占位，记「生成已中断」，结束回合。
+     /// fromIndex 是「已成功落盘的条目数」，前面的不重复补。
+     /// </summary>
+     private async Task<ToolBatchOutcome> AbortBatchAsync(
+         IReadOnlyList<ToolCall> toolCalls, int fromIndex, string turnId, int used)
+     {
+         for (int j = fromIndex; j < toolCalls.Count; j++)
+             Record(ChatMessage.Tool(toolCalls[j].Id, HistoryRepair.PlaceholderToolReply)
+                 with { TurnId = turnId, Ord = used });
+ 
+         Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
+         _bus.FlushDeltasBlocking();
+         await _bus.PublishStateAsync(EventKinds.RoundEnded,
+             new RoundEndedPayload { Used = used, HasTools = true }, CancellationToken.None).ConfigureAwait(false);
+         await FinishAsync(turnId, "⏹ 生成已中断", truncated: true,
+             ct: CancellationToken.None, finalUsed: used, byUser: true).ConfigureAwait(false);
+ 
+         return new ToolBatchOutcome(fromIndex, true,
+             new TurnResult("⏹ 生成已中断", fromIndex, true, _usageIn, _usageOut));
+     }
+ 
+     private async Task FailToolCallsFromTruncatedMessageAsync(
+         IReadOnlyList<ToolCall> calls, string turnId, int used, CancellationToken ct)
+     {
+         foreach (var tc in calls)
+         {
+             var msg = "工具调用 \"" + tc.Function.Name + "\" 未执行: 上一条回复因输出 token 上限被截断，"
+                     + "参数可能不完整。请缩短内容后重新发起该调用（例如把一次写入拆成多次 edit）。";
+             await EmitToolStartedAsync(tc.Id, tc.Function.Name, "", null, ct, used).ConfigureAwait(false);
+             await EmitToolFinishedAsync(tc.Id, tc.Function.Name, false, msg, ct, used, skipped: true, skipReason: "truncated").ConfigureAwait(false);
+             Record(ChatMessage.Tool(tc.Id, msg) with { TurnId = turnId, Ord = used });
+         }
+     }
 
     // ============================================================
     //  轮次续跑询问
@@ -1832,7 +2018,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              return;
          }
          var prompt = SystemPromptBuilder.Build(
-             _cwd, _mode, _store.SessionId, _persona, _dataDir);
+             _cwd, _mode, _store.SessionId, _persona, _dataDir, _tools.All);
          _messages.Insert(0, ChatMessage.System(prompt));
          // 锁内仅做纯字符估算（复用已生成的字符串，不再同步重读文件）。
          try { _estimatedInitialTokens = TokenEstimator.Estimate(prompt); } catch { }
@@ -1842,7 +2028,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      {
          if (_messages.Count == 0 || _messages[0].Role != Role.System) return;
          var prompt = SystemPromptBuilder.Build(
-             _cwd, _mode, _store.SessionId, _persona, _dataDir);
+             _cwd, _mode, _store.SessionId, _persona, _dataDir, _tools.All);
          _messages[0] = ChatMessage.System(prompt);
          try { _estimatedInitialTokens = TokenEstimator.Estimate(prompt); } catch { }
      }
@@ -1881,21 +2067,25 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }, ct).ConfigureAwait(false);
     }
 
-    private async Task EmitToolFinishedAsync(
-        string callId, string name, bool ok, string output, CancellationToken ct, int used = 1)
-    {
-        await _bus.PublishStateAsync(EventKinds.ToolFinished,
-            new ToolFinishedPayload
-            {
-                ToolCallId = callId,
-                Name = name,
-                Ok = ok,
-                Output = TruncateHead(output),
-                Used = used,
-                OutputTotal = output.Length,
-                Truncated = output.Length > MessageProjector.ParamHead,
-            }, ct).ConfigureAwait(false);
-    }
+     private async Task EmitToolFinishedAsync(
+         string callId, string name, bool ok, string output,
+         CancellationToken ct, int used = 1,
+         bool? skipped = null, string? skipReason = null)
+     {
+         await _bus.PublishStateAsync(EventKinds.ToolFinished,
+             new ToolFinishedPayload
+             {
+                 ToolCallId = callId,
+                 Name = name,
+                 Ok = ok,
+                 Output = TruncateHead(output),
+                 Used = used,
+                 OutputTotal = output.Length,
+                 Truncated = output.Length > MessageProjector.ParamHead,
+                 Skipped = skipped,
+                 SkipReason = skipReason,
+             }, ct).ConfigureAwait(false);
+     }
 
     // ★ 参数已增至 7 个，新调用点必须使用命名参数，
     //   禁止 FinishAsync(turnId, text, true, ct, 3, null, true) 这类位置写法。

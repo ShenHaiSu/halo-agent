@@ -23,6 +23,8 @@ public sealed class UndoStore
 {
     public const int MaxSnapshots = 500;
 
+    private static readonly object ManifestLock = new();
+
     public sealed record Snapshot
     {
         [JsonPropertyName("session")] public string Session { get; init; } = "";
@@ -50,40 +52,43 @@ public sealed class UndoStore
             var sessionRoot = Path.Combine(Paths.UndoFilesDir, sid);
             Directory.CreateDirectory(sessionRoot);
 
-            var all = ReadManifest();
-            var seq = all.Count(s => s.Session == sid);
-            var snapRel = $"{ts}-{seq:D4}.bak";
-            var snapAbs = Path.Combine(sessionRoot, snapRel);
-
-            File.Copy(file, snapAbs, overwrite: true);
-
-            var record = new Snapshot
+            lock (ManifestLock)
             {
-                Session = sid,
-                TsMs = ts,
-                Orig = Path.GetFullPath(file),
-                Snap = Path.Combine(sid, snapRel).Replace('\\', '/'),
-                Action = action,
-                Gen = CurrentGen,
-            };
+                var all = ReadManifestLocked();
+                var seq = all.Count(s => s.Session == sid);
+                var snapRel = $"{ts}-{seq:D4}.bak";
+                var snapAbs = Path.Combine(sessionRoot, snapRel);
 
-            all.Add(record);
+                File.Copy(file, snapAbs, overwrite: true);
 
-            // 保留最近 N 条
-            while (all.Count > MaxSnapshots)
-            {
-                var oldest = all[0];
-                all.RemoveAt(0);
-                try
+                var record = new Snapshot
                 {
-                    var p = Path.Combine(Paths.UndoFilesDir, oldest.Snap.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(p)) File.Delete(p);
-                }
-                catch { }
-            }
+                    Session = sid,
+                    TsMs = ts,
+                    Orig = Path.GetFullPath(file),
+                    Snap = Path.Combine(sid, snapRel).Replace('\\', '/'),
+                    Action = action,
+                    Gen = CurrentGen,
+                };
 
-            WriteManifest(all);
-            return record;
+                all.Add(record);
+
+                // 保留最近 N 条
+                while (all.Count > MaxSnapshots)
+                {
+                    var oldest = all[0];
+                    all.RemoveAt(0);
+                    try
+                    {
+                        var p = Path.Combine(Paths.UndoFilesDir, oldest.Snap.Replace('/', Path.DirectorySeparatorChar));
+                        if (File.Exists(p)) File.Delete(p);
+                    }
+                    catch { }
+                }
+
+                WriteManifestLocked(all);
+                return record;
+            }
         }
         catch
         {
@@ -94,9 +99,12 @@ public sealed class UndoStore
     /// <summary>列出全部快照（新 → 旧）。</summary>
     public static List<Snapshot> List()
     {
-        var all = ReadManifest();
-        all.Reverse();
-        return all;
+        lock (ManifestLock)
+        {
+            var all = ReadManifestLocked();
+            all.Reverse();
+            return all;
+        }
     }
 
     /// <summary>回滚指定快照。回滚前先给当前状态再打一个快照（防误操作）。</summary>
@@ -112,7 +120,7 @@ public sealed class UndoStore
         var dir = Path.GetDirectoryName(orig);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        // 回滚前备份当前状态
+        // 回滚前备份当前状态（Backup 内部自带锁，不要外层再套锁；lock 可重入，安全）
         Backup(snapshot.Session, orig, $"rollback→{snapshot.TsMs}");
 
         File.Copy(snapAbs, orig, overwrite: true);
@@ -130,9 +138,9 @@ public sealed class UndoStore
         return Rollback(snap);
     }
 
-    // ---------------- 内部 ----------------
+    // ---------------- 内部（调用方已持 ManifestLock） ----------------
 
-    private static List<Snapshot> ReadManifest()
+    private static List<Snapshot> ReadManifestLocked()
     {
         if (!File.Exists(Paths.UndoManifest)) return new List<Snapshot>();
 
@@ -150,7 +158,12 @@ public sealed class UndoStore
         return result;
     }
 
-    private static void WriteManifest(List<Snapshot> snapshots)
+    private static List<Snapshot> ReadManifest()
+    {
+        lock (ManifestLock) return ReadManifestLocked();
+    }
+
+    private static void WriteManifestLocked(List<Snapshot> snapshots)
     {
         var dir = Path.GetDirectoryName(Paths.UndoManifest);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -162,6 +175,11 @@ public sealed class UndoStore
             sb.AppendLine(JsonSerializer.Serialize(s, StorageJson.Compact));
         }
         File.WriteAllText(Paths.UndoManifest, sb.ToString());
+    }
+
+    private static void WriteManifest(List<Snapshot> snapshots)
+    {
+        lock (ManifestLock) WriteManifestLocked(snapshots);
     }
 
     private static string SanitizeSession(string id)

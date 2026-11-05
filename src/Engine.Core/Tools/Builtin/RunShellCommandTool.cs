@@ -1,10 +1,10 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
-using HaloAgent.Engine.Core.Permissions;
-using HaloAgent.Engine.Core.Util;
-
+ using System.Collections.Concurrent;
+ using System.Diagnostics;
+ using System.Globalization;
+ using System.Text;
+ using System.Text.Json;
+ using HaloAgent.Engine.Core.Permissions;
+ using HaloAgent.Engine.Core.Util;
 namespace HaloAgent.Engine.Core.Tools.Builtin;
 
 /// <summary>
@@ -40,14 +40,62 @@ public sealed class RunShellCommandTool : ITool
     private static readonly TimeSpan TickerPeriod = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan RedAlertThreshold = TimeSpan.FromSeconds(10);
 
-    private const int GracePercent = 20;
-    private static readonly TimeSpan GraceCap = TimeSpan.FromMinutes(1);
-    // 滚动缓冲由字节改为字符。256KB 字节按中英混合约 2 字节/字折算为 128K 字符。
-    private const int OutputBufferCapChars = 128_000;
-    private const int ContextMaxChars = 20_000;
-    private const int DeathTailChars = 1500;
+     private const int GracePercent = 20;
+     private static readonly TimeSpan GraceCap = TimeSpan.FromMinutes(1);
+     // 滚动缓冲由字节改为字符。256KB 字节按中英混合约 2 字节/字折算为 128K 字符。
+     private const int OutputBufferCapChars = 128_000;
+     // 上下文窗口与死前遗言长度见 ToolLimits（ShellContextMaxChars / ShellDeathTailChars）。
 
     public const long MaxBudgetMs = 30L * 60 * 1000;
+     /// <summary>
+     /// 控制台输出解码器。中文 Windows 的 cmd 内建消息按 OEM 代码页（936/GBK）输出字节，
+     /// 若强制按 UTF-8 解码会得到乱码（stderr 唯一诊断信息不可用）。
+     /// 非 Windows 保持 UTF-8。CodePages 提供方在此注册一次（WebFetch 的 GB18030 同样依赖它）。
+     /// </summary>
+     internal static readonly Encoding ConsoleEncoding = ResolveConsoleEncoding();
+
+     private static Encoding ResolveConsoleEncoding()
+     {
+         try { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); } catch { }
+         if (!OperatingSystem.IsWindows()) return Encoding.UTF8;
+         try
+         {
+             int oem = CultureInfo.CurrentCulture.TextInfo.OEMCodePage;
+             return Encoding.GetEncoding(oem);
+         }
+         catch { }
+         try { return Encoding.GetEncoding("GB18030"); }
+         catch { return Encoding.UTF8; }
+     }
+     /// <summary>
+     /// UTF-8 严格解码器：非法字节抛异常而非吐 U+FFFD，用于「先试 UTF-8」。
+     /// </summary>
+     private static readonly Encoding Utf8Strict =
+         new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+     /// <summary>
+     /// GB18030 回退解码器（GBK 超集，永不抛异常；CodePages 提供方由 ConsoleEncoding 初始化时注册）。
+     /// </summary>
+     private static readonly Encoding Gb18030Fallback = ResolveGb18030();
+
+     private static Encoding ResolveGb18030()
+     {
+         try { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); } catch { }
+         try { return Encoding.GetEncoding("GB18030"); }
+         catch { return Encoding.UTF8; }
+     }
+
+     /// <summary>
+     /// 控制台单段字节 → 字符串：先 UTF-8 严格解码，失败回退 GB18030（方案 3，与 WebFetchTool 同策略）。
+     /// 纯 ASCII 两种解码结果相同；GBK 行必然走回退分支；UTF-8 行走主分支。
+     /// 调用方按行切分后逐行调用，行是天然边界（一行基本只来自一个程序）。
+     /// </summary>
+     internal static string DecodeConsoleBytes(byte[] bytes, int offset, int count)
+     {
+         if (count <= 0) return string.Empty;
+         try { return Utf8Strict.GetString(bytes, offset, count); }
+         catch (DecoderFallbackException) { return Gb18030Fallback.GetString(bytes, offset, count); }
+     }
 
     public string Name => "run_shell_command";
 
@@ -57,9 +105,17 @@ public sealed class RunShellCommandTool : ITool
         "命中会要求用户确认,无头模式直接拒绝。判定看的是解析出的目标路径," +
         "所以请写明确路径,不要用变量或通配符(会因无法判定而要求确认)";
 
-    public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
-      ""type"": ""object"",
-      ""properties"": {
+     public string? PromptSnippet => "执行终端命令";
+
+     public IReadOnlyList<string> PromptGuidelines => new[]
+     {
+         "只有真正需要跑程序（构建、测试、git、下载）才用 run_shell_command；纯读写文件不要用它",
+         "命令可能耗时较长时传宽松的 idle_ms，宁大勿小",
+     };
+
+     public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
+       ""type"": ""object"",
+       ""properties"": {
         ""command"": {
           ""type"": ""string"",
           ""description"": ""要执行的完整命令,如 'ls -la'""
@@ -81,17 +137,17 @@ public sealed class RunShellCommandTool : ITool
     public async Task<ToolResult> ExecuteAsync(
         JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var command = args.GetStringOrNull("command");
-        if (string.IsNullOrWhiteSpace(command))
-            return ToolResult.Failure(
-                "command 不能为空:请传入要执行的完整命令字符串,如 {\"command\": \"ls -la\"}");
+         var command = ctx.TypedArgs?.StringOrNull("command") ?? args.GetStringOrNull("command");
+         if (string.IsNullOrWhiteSpace(command))
+             return ToolResult.Failure(
+                 "command 不能为空:请传入要执行的完整命令字符串,如 {\"command\": \"ls -la\"}");
 
-        var cwdRaw = args.GetStringOrNull("cwd");
-        var dir = cwdRaw is null ? ctx.Cwd : ToolPaths.Resolve(ctx.Cwd, cwdRaw);
-        if (!Directory.Exists(dir))
-            return ToolResult.Failure($"执行目录不存在: {dir}");
+         var cwdRaw = ctx.TypedArgs?.StringOrNull("cwd") ?? args.GetStringOrNull("cwd");
+         var dir = cwdRaw is null ? ctx.Cwd : ToolPaths.Resolve(ctx.Cwd, cwdRaw);
+         if (!Directory.Exists(dir))
+             return ToolResult.Failure($"执行目录不存在: {dir}");
 
-        var idleMs = args.GetLongOrNull("idle_ms");
+         var idleMs = ctx.TypedArgs?.LongOrNull("idle_ms") ?? args.GetLongOrNull("idle_ms");
         TimeSpan? budget = idleMs is null
             ? null
             : TimeSpan.FromMilliseconds(Math.Min(idleMs.Value, MaxBudgetMs));
@@ -133,17 +189,13 @@ public sealed class RunShellCommandTool : ITool
             var stdout = process.StandardOutput.BaseStream;
             var stderr = process.StandardError.BaseStream;
 
-            var outBuf = new RollingBuffer(OutputBufferCapChars);
-            var errBuf = new RollingBuffer(OutputBufferCapChars);
-            // stdout/stderr 各持独立 Decoder（非线程安全，禁止共用），跨 ReadAsync 累积未完成字节。
-            var outDec = Encoding.UTF8.GetDecoder();
-            var errDec = Encoding.UTF8.GetDecoder();
-            var outChars = new char[Encoding.UTF8.GetMaxCharCount(8192)];
-            var errChars = new char[Encoding.UTF8.GetMaxCharCount(8192)];
-            var pendingDelta = new StringBuilder();
-
-            var outChunk = new byte[8192];
-            var errChunk = new byte[8192];
+             var outBuf = new RollingBuffer(OutputBufferCapChars);
+             var errBuf = new RollingBuffer(OutputBufferCapChars);
+             // 按行缓冲 + 双编码试解（方案 3）：子进程输出可能是 GBK（cmd 内建/老程序，
+             // 中文 Windows 代码页 936）也可能是 UTF-8（git/node/python 等现代工具，无视代码页）。
+             // 单一预设编码必坏一半；整行先 UTF-8 严格解码，失败回退 GB18030（与 WebFetchTool 同策略）。
+             // 行是天然边界（一行基本只来自一个程序），行内混两种编码现实中不存在。
+             var pendingDelta = new StringBuilder();
 
             var startedAt = Stopwatch.StartNew();
             var lastOutputAt = Stopwatch.StartNew();
@@ -154,12 +206,12 @@ public sealed class RunShellCommandTool : ITool
 
             try
             {
-                // 读循环
-                var readTasks = new List<Task>
-                {
-                    ReadPipeAsync(stdout, outBuf, outChunk, outDec, outChars, token),
-                    ReadPipeAsync(stderr, errBuf, errChunk, errDec, errChars, token),
-                };
+                 // 读循环（两条管道各自攒原始字节、按行试解码，互不干扰）
+                 var readTasks = new List<Task>
+                 {
+                     ReadPipeAsync(stdout, outBuf, token),
+                     ReadPipeAsync(stderr, errBuf, token),
+                 };
 
                 // 等：命令自然结束 / 被杀 / 中断
                 var exitTask = WaitForExitWithKillAsync();
@@ -201,43 +253,69 @@ public sealed class RunShellCommandTool : ITool
 
             // ---------------- 局部函数 ----------------
 
-            async Task ReadPipeAsync(Stream stream, RollingBuffer buf, byte[] chunk,
-                Decoder dec, char[] charBuf, CancellationToken token)
-            {
-                try
-                {
-                    while (!token.IsCancellationRequested)
-                    {
-                        int n = await stream.ReadAsync(chunk.AsMemory(), token).ConfigureAwait(false);
-                        if (n == 0) break;
+             async Task ReadPipeAsync(Stream stream, RollingBuffer buf, CancellationToken token)
+             {
+                 // 行缓冲：不足一行的字节留在 pending，等凑满 '\n' 再整行试解码。
+                 // 跨 ReadAsync 被拆散的 UTF-8 多字节字符因此不会被撕裂，也就没有 U+FFFD。
+                 var pending = new List<byte>(8192);
+                 var chunk = new byte[8192];
+                 try
+                 {
+                     while (!token.IsCancellationRequested)
+                     {
+                         int n = await stream.ReadAsync(chunk.AsMemory(), token).ConfigureAwait(false);
+                         if (n == 0) break;
 
-                        // 单次解码同时喂给滚动缓冲与实时输出；碎字节由 Decoder 留存到下次，不产生 U+FFFD。
-                        int c = dec.GetChars(chunk, 0, n, charBuf, 0, flush: false);
-                        buf.AppendChars(charBuf, 0, c);
-                        lock (pendingDelta) pendingDelta.Append(charBuf, 0, c);
-                        lastOutputAt.Restart();
+                         for (int k = 0; k < n; k++) pending.Add(chunk[k]);
+                         DrainCompleteLines(pending, buf);
+                         lastOutputAt.Restart();
 
-                        if (currentAlert != 0)
-                        {
-                            currentAlert = 0;
-                            ctx.Host.PublishSilentAlert(ToolCallId(ctx), 0);
-                        }
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception) { /* 管道关闭：正常 */ }
-                // 收尾 flush 一次，把 Decoder 内残留字节解出（中途禁止 flush，避免碎字节变 U+FFFD）。
-                try
-                {
-                    int tail = dec.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
-                    if (tail > 0)
-                    {
-                        buf.AppendChars(charBuf, 0, tail);
-                        lock (pendingDelta) pendingDelta.Append(charBuf, 0, tail);
-                    }
-                }
-                catch { }
-            }
+                         if (currentAlert != 0)
+                         {
+                             currentAlert = 0;
+                             ctx.Host.PublishSilentAlert(ToolCallId(ctx), 0);
+                         }
+                     }
+                 }
+                 catch (OperationCanceledException) { }
+                 catch (Exception) { /* 管道关闭：正常 */ }
+                 // 收尾：最后一截不足一行的字节同样试解码 flush（无换行的进度式输出在这里出来）。
+                 try
+                 {
+                     if (pending.Count > 0)
+                     {
+                         var tail = DecodeConsoleBytes(pending.ToArray(), 0, pending.Count);
+                         if (tail.Length > 0)
+                         {
+                             buf.Append(tail);
+                             lock (pendingDelta) pendingDelta.Append(tail);
+                         }
+                     }
+                 }
+                 catch { }
+             }
+
+             // 把 pending 里所有"已凑满 '\n' 的行"试解码后喂给滚动缓冲与实时输出，消费掉的字节移除。
+             // 注意：单次 Read 带来的多行共用一次 ToArray，避免逐行拷贝。
+             void DrainCompleteLines(List<byte> pending, RollingBuffer buf)
+             {
+                 int start = 0;
+                 byte[]? arr = null;
+                 for (int i = 0; i < pending.Count; i++)
+                 {
+                     if (pending[i] != (byte)'\n') continue;
+                     arr ??= pending.ToArray();
+                     // 含换行符整段解码（\r\n 里的 \r 是 ASCII，两种编码解出来一样，原样保留）。
+                     var text = DecodeConsoleBytes(arr, start, i - start + 1);
+                     if (text.Length > 0)
+                     {
+                         buf.Append(text);
+                         lock (pendingDelta) pendingDelta.Append(text);
+                     }
+                     start = i + 1;
+                 }
+                 if (start > 0) pending.RemoveRange(0, start);
+             }
 
             async Task TickerLoopAsync()
             {
@@ -330,17 +408,19 @@ public sealed class RunShellCommandTool : ITool
 
     private static ProcessStartInfo BuildProcessStartInfo(string command, string workDir)
     {
-        var psi = new ProcessStartInfo
-        {
-            WorkingDirectory = workDir,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = false,   // 关键：不继承 stdin，防抢终端输入
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
+         var psi = new ProcessStartInfo
+         {
+             WorkingDirectory = workDir,
+             UseShellExecute = false,
+             CreateNoWindow = true,
+             RedirectStandardInput = false,   // 关键：不继承 stdin，防抢终端输入
+             RedirectStandardOutput = true,
+             RedirectStandardError = true,
+             // 仅影响 Process.StandardOutput（StreamReader）；实际采集走 BaseStream 原始字节，
+             // 由 DecodeConsoleBytes 按行试解码（UTF-8 严格 → GB18030 回退），此处保留无害。
+             StandardOutputEncoding = ConsoleEncoding,
+             StandardErrorEncoding = ConsoleEncoding,
+         };
 
         if (OperatingSystem.IsWindows())
         {
@@ -393,10 +473,10 @@ public sealed class RunShellCommandTool : ITool
         catch { }
     }
 
-    private static string BuildDeathTail(RollingBuffer outBuf, RollingBuffer errBuf)
-    {
-        var outTail = outBuf.TailText(DeathTailChars);
-        var errTail = errBuf.TailText(DeathTailChars);
+     private static string BuildDeathTail(RollingBuffer outBuf, RollingBuffer errBuf)
+     {
+         var outTail = outBuf.TailText(ToolLimits.ShellDeathTailChars);
+         var errTail = errBuf.TailText(ToolLimits.ShellDeathTailChars);
 
         if (string.IsNullOrWhiteSpace(outTail) && string.IsNullOrWhiteSpace(errTail))
             return "\n命令没有任何输出。";
@@ -422,8 +502,8 @@ public sealed class RunShellCommandTool : ITool
             sb.Append("[stderr] ").Append(errText.TrimEnd());
         }
 
-        // 长输出保留头尾、中间折叠（上下文窗口保护）
-        string body = sb.Length == 0 ? "" : TextUtil.TruncateMiddle(sb.ToString(), ContextMaxChars);
+         // 长输出保留头尾、中间折叠（上下文窗口保护）
+         string body = sb.Length == 0 ? "" : TextUtil.TruncateMiddle(sb.ToString(), ToolLimits.ShellContextMaxChars);
         var result = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(body)) result.Append(body).Append('\n');
 
@@ -450,12 +530,12 @@ public sealed class RunShellCommandTool : ITool
 
         public RollingBuffer(int capChars) => _capChars = capChars;
 
-        public void AppendDecoded(byte[] chunk, int count, Decoder dec)
-        {
-            char[] cs = new char[Encoding.UTF8.GetMaxCharCount(count)];
-            int c = dec.GetChars(chunk, 0, count, cs, 0, flush: false);
-            AppendChars(cs, 0, c);
-        }
+         public void AppendDecoded(byte[] chunk, int count, Decoder dec)
+         {
+             char[] cs = new char[ConsoleEncoding.GetMaxCharCount(count)];
+             int c = dec.GetChars(chunk, 0, count, cs, 0, flush: false);
+             AppendChars(cs, 0, c);
+         }
 
         public void AppendChars(char[] cs, int off, int count)
         {

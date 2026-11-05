@@ -12,18 +12,18 @@
  *  单行输出，上限 80 字符。
  * ==========================================
  */
-const PRIORITY: Record<string, string[]> = {
-  read_file: ['path', 'file_path'],
-  write_file: ['path', 'file_path'],
-  edit_file: ['path', 'file_path'],
-  delete_file: ['path', 'file_path'],
-  list_directory: ['path', 'dir'],
-  run_shell: ['command', 'cmd'],
-  grep: ['pattern', 'path'],
-  glob: ['pattern', 'path'],
-  web_fetch: ['url'],
-  web_search: ['query', 'q'],
-};
+ const PRIORITY: Record<string, string[]> = {
+   read_file: ['path'],
+   write_file: ['path'],
+   edit: ['path'],
+   list_directory: ['path'],
+   glob: ['pattern'],
+   grep_search: ['pattern', 'path'],
+   run_shell_command: ['command'],
+   memory_write: ['name'],
+   memory_read: ['name', 'query'],
+   web_fetch: ['url'],
+ };
 
 const MAX_SUMMARY = 80;
 
