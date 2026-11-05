@@ -203,8 +203,14 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
   cursor: pointer;
   min-width: 0;
   box-sizing: border-box;
+  /* P27-01：hover 浅渐变用遮罩层 ::after 的 opacity 过渡实现
+     （background-image 不可插值，直接 transition 在 Chrome 109/CefSharp 下是瞬切）。 */
+  position: relative;
+  isolation: isolate; /* 遮罩层 z-index:-1 只压在本行底上，不越界污染相邻行 */
+  transition: background-color var(--duration-session-hover, 160ms) ease-out;
 }
 .sess-item:hover {
+  /* 兜底底色：渐变不可用时（reduced-motion / 极端降级）仍有可见反馈 */
   background: hsl(var(--bg-subtle));
 }
 .sess-item.active {
@@ -213,6 +219,30 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
 }
 .sess-item:focus-visible {
   box-shadow: var(--shadow-focus);
+}
+/* 渐变遮罩：inset:0 绝对定位，不占盒尺寸，不影响虚拟滚动 56px 行高 */
+.sess-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none; /* 不挡点击 / 双击重命名 / 行内按钮 */
+  opacity: 0;
+  background: linear-gradient(
+    135deg,
+    hsl(var(--accent-subtle)),
+    hsl(var(--bg-subtle)) 65%,
+    transparent
+  );
+  transition: opacity var(--duration-session-hover, 160ms) ease-out;
+}
+.sess-item.active::after {
+  /* 选中行：在 active 底上再叠一层 accent-subtle，左竖条仍可见 */
+  background: linear-gradient(135deg, hsl(var(--accent-subtle)), hsl(var(--bg-muted)) 65%);
+}
+.sess-item:hover::after,
+.sess-item:focus-visible::after {
+  opacity: 1;
 }
 .sess-body {
   flex: 1;
@@ -254,6 +284,11 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
   cursor: pointer;
   color: hsl(var(--fg-subtle));
   border-radius: var(--radius-xs);
+  /* P27-01：按钮显现与 hover 底色一并平滑（现状无 transition） */
+  transition:
+    opacity 120ms ease-out,
+    background-color 120ms ease-out,
+    color 120ms ease-out;
 }
 .sess-item:hover .sess-more,
 .sess-item:hover .sess-del,
@@ -271,4 +306,15 @@ async function onMenuSelect(key: SessionMenuKey): Promise<void> {
    color: hsl(var(--danger));
    background: hsl(var(--bg-muted));
  }
+
+/* P27-01：减少动效 / Win7 软件光栅降级——关闭过渡并去掉渐变遮罩，
+   hover 退化为单色 bg-subtle（与改动前观感一致） */
+@media (prefers-reduced-motion: reduce) {
+  .sess-item {
+    transition: none;
+  }
+  .sess-item::after {
+    display: none;
+  }
+}
 </style>
