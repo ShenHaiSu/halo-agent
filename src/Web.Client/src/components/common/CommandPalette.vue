@@ -228,8 +228,15 @@ const result = computed<{ groups: Array<[string, Scored[]]>; total: number }>(()
       label: n,
       icon: 'user',
       run: async () => {
-        await current.setPersona(n);
-        toast.success(`已切换人格：${n}`);
+        try {
+          await current.setPersona(n);
+          toast.success(`已切换人格：${n}`);
+        } catch (e) {
+          // P23-R5：跑轮中切换人格被拒，给友好文案（setPersona 已回滚）。
+          if (String((e as Error)?.message ?? '').includes('有回合正在执行')) {
+            toast.warning('有回合正在执行，暂不能切换人格');
+          } else throw e;
+        }
         close();
       },
     })),
@@ -320,7 +327,13 @@ function run(): void {
   const e = flat.value[active.value];
   if (!e) return;
   recent.value = [e.entry.id, ...recent.value.filter((x) => x !== e.entry.id)].slice(0, 12);
-  void e.entry.run();
+  // P23：entry.run 内的 busy 拒绝已由 store/PersonaEditor toast，命令面板只负责关闭面板与兜底其他错误。
+  void Promise.resolve()
+    .then(() => e.entry.run())
+    .catch((err: unknown) => {
+      if (String((err as Error)?.message ?? '').includes('有回合正在执行')) { close(); return; }
+      toast.error(`执行失败：${(err as Error)?.message ?? err}`);
+    });
 }
 
 function onKeydown(e: KeyboardEvent): void {

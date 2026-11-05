@@ -188,3 +188,66 @@ describe('D: Mock 多会话历史', () => {
     expect(after).toBe(before + 1);
   });
 });
+describe('E: P23 流式中断修复（先问后清 + 忙回填）', () => {
+  it('busy 拒绝后 stream.busy 保持 true、currentTurn 不伪造、当前页零抖动', async () => {
+    const sessions = useSessionsStore();
+    const messages = useMessagesStore();
+    const { useStreamStore } = await import('./stream');
+    const stream = useStreamStore();
+    sessions.items = listFixture() as never;
+    sessions.currentId = 'A';
+    messages.applySnapshot({ messages: [msgView('mA', 'A 历史')] });
+    // 后端忙拒绝（首帧竞态下预检拦不住的残余窗口）：预检时 busy 为 false，请求后被拒。
+    vi.spyOn(transport, 'request').mockRejectedValue(Object.assign(new Error('有回合正在执行，暂不能切换会话'), { code: 'state.busy' }));
+    await expect(sessions.select('B')).rejects.toThrow();
+    expect(sessions.currentId).toBe('A');
+    expect(stream.busy).toBe(true);
+    expect(stream.currentTurn).toBeNull();
+    expect(messages.items.map((m) => m.content)).toEqual(['A 历史']);
+  });
+
+  it('busy 时 select 本地预检直接返回，不发 RPC', async () => {
+    const sessions = useSessionsStore();
+    const messages = useMessagesStore();
+    const { useStreamStore } = await import('./stream');
+    const stream = useStreamStore();
+    sessions.items = listFixture() as never;
+    sessions.currentId = 'A';
+    messages.applySnapshot({ messages: [msgView('mA', 'A 历史')] });
+    stream.busy = true;
+    const spy = vi.spyOn(transport, 'request');
+    await sessions.select('B');
+    expect(spy).not.toHaveBeenCalled();
+    expect(sessions.currentId).toBe('A');
+    expect(stream.busy).toBe(true);
+    expect(messages.items.map((m) => m.content)).toEqual(['A 历史']);
+  });
+
+  it('busy 新建会话被拒有提示且不抖动', async () => {
+    const sessions = useSessionsStore();
+    const messages = useMessagesStore();
+    const { useStreamStore } = await import('./stream');
+    const stream = useStreamStore();
+    sessions.items = listFixture() as never;
+    sessions.currentId = 'A';
+    messages.applySnapshot({ messages: [msgView('mA', 'A 历史')] });
+    vi.spyOn(transport, 'request').mockRejectedValue(Object.assign(new Error('有回合正在执行，暂不能新建会话'), { code: 'state.busy' }));
+    await expect(sessions.createNew()).rejects.toThrow();
+    expect(sessions.currentId).toBe('A');
+    expect(stream.busy).toBe(true);
+    expect(messages.items.map((m) => m.content)).toEqual(['A 历史']);
+  });
+
+  it('busy 时 createNew 本地预检直接返回，不发 RPC', async () => {
+    const sessions = useSessionsStore();
+    const { useStreamStore } = await import('./stream');
+    const stream = useStreamStore();
+    sessions.items = listFixture() as never;
+    sessions.currentId = 'A';
+    stream.busy = true;
+    const spy = vi.spyOn(transport, 'request');
+    await sessions.createNew();
+    expect(spy).not.toHaveBeenCalled();
+    expect(sessions.currentId).toBe('A');
+  });
+});

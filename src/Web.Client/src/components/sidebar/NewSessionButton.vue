@@ -11,6 +11,8 @@ async function create(): Promise<void> {
   try {
     await sessions.createNew();
   } catch (e) {
+    // P23：store 内已对 state.busy toast，调用方不再重复。
+    if (String((e as Error)?.message ?? '').includes('有回合正在执行')) return;
     toast.error(`新建会话失败：${(e as Error).message}`);
   }
 }

@@ -131,6 +131,8 @@ async function stepSession(delta: -1 | 1): Promise<void> {
   try {
     await sessions.select(next.id);
   } catch (e) {
+    // P23：store 内已对 state.busy toast，快捷键路径不再重复（预检 return 路径无 throw）。
+    if (String((e as Error)?.message ?? '').includes('有回合正在执行')) return;
     toast.error(`切换会话失败：${(e as Error).message}`);
   }
 }

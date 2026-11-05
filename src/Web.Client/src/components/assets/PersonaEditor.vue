@@ -4,6 +4,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
 import { useSessionStore } from '@/stores/session';
+import { useStreamStore } from '@/stores/stream';
 import { useToast } from '@/composables/useToast';
 import AssetLayout from './AssetLayout.vue';
 import AssetListItem from './AssetListItem.vue';
@@ -16,6 +17,14 @@ import HDialog from '@/components/base/HDialog.vue';
 
 const toast = useToast();
 const session = useSessionStore();
+// P23-R5：跑轮中切换人格被后端拒绝，前端提前给反馈并禁用按钮。
+const busy = computed(() => useStreamStore().busy);
+function isBusyError(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  if (code === 'state.busy') return true;
+  const msg = String((e as Error)?.message ?? '');
+  return msg.includes('state.busy') || msg.includes('有回合正在执行');
+}
 
 const names = ref<string[]>([]);
 const loading = ref(true);
@@ -126,24 +135,29 @@ async function save(): Promise<void> {
 
 /** 应用为人格（当前会话生效，经 state.setPersona）。 */
 async function apply(): Promise<void> {
+  if (busy.value) { toast.warning('回合执行中不可切换人格'); return; }
   const name = (selected.value ?? fName.value).trim();
   if (!name) return;
   try {
     await session.setPersona(name);
     toast.success(`已切换人格：${name}`);
-  } catch {
-    toast.error('切换失败');
+  } catch (e) {
+    if (isBusyError(e)) toast.warning('有回合正在执行，暂不能切换人格');
+    else toast.error('切换失败');
   }
 }
 
 async function clearPersona(): Promise<void> {
+  if (busy.value) { toast.warning('回合执行中不可切换人格'); return; }
   try {
     await session.setPersona('');
     toast.success('已清除人格');
-  } catch {
-    toast.error('清除失败');
+  } catch (e) {
+    if (isBusyError(e)) toast.warning('有回合正在执行，暂不能切换人格');
+    else toast.error('清除失败');
   }
 }
+
 
 function requestDelete(): void {
   if (!selected.value || deleting.value) return;
@@ -170,9 +184,11 @@ async function removePersona(): Promise<void> {
     if (wasInUse) {
       try {
         await session.setPersona('');
-      } catch {
-        toast.warning('无法解除当前会话的人格绑定，已取消删除');
-        return; // 解绑失败就不删，避免"人格还在跑但文件没了"
+      } catch (e) {
+        // P23-R5 §A3：跑轮中解绑会被后端 busy 守卫拦下，给专门文案而非“无法解除绑定”。
+        if (isBusyError(e)) toast.warning('回合执行中，暂不能删除使用中的人格');
+        else toast.warning('无法解除当前会话的人格绑定，已取消删除');
+        return; // 解绑失败就不删，避免“人格还在跑但文件没了”
       }
     }
 
@@ -261,10 +277,10 @@ defineExpose({ isDirty, reload: loadList, saveIfDirty, count });
     <template v-if="creating || selected">
       <div class="name-row">
         <HInput v-model="fName" placeholder="人格名称" :disabled="!creating" />
-        <HButton size="sm" variant="secondary" :disabled="!selected || creating" @click="apply">
+        <HButton size="sm" variant="secondary" :disabled="!selected || creating || busy" @click="apply">
           应用到当前会话
         </HButton>
-        <HButton v-if="session.persona" size="sm" variant="ghost" @click="clearPersona"
+        <HButton v-if="session.persona" size="sm" variant="ghost" :disabled="busy" @click="clearPersona"
           >清除人格</HButton
         >
         <HButton

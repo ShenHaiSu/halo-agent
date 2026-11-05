@@ -139,28 +139,28 @@ export const useSessionsStore = defineStore('sessions', () => {
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
+    // P23-R1/R4：本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
+    // 用 return 而非 throw：调用方 catch 里还有 error toast，throw 会导致双 toast。
+    if (stream.busy) {
+      useToast().info('有回合正在执行，稍后再切');
+      return;
+    }
     const token = ++switchToken;
     switchDepth++;
     switching.value = true;
-    messages.loading = true;
-      // 切入即重置旧会话残留（C）：流式 / 询问卡 / 排队 / 摘要卡 / 折叠记忆（P11-E 单源）。
-      stream.endTurn();
-      // P23：切会话入口先清零水位线（估算态），再由快照覆盖；catch 分支同样保持已清零态。
-      sessionInfo.resetWaterline();
-      /* P15: turns store */
-      perms.clear();
-      queue.clear();
-      clearCollapsedTools();
     try {
       let resumed: { count?: number; messages?: unknown } | null = null;
       try {
+        // P23-R1：先问引擎，成功后才清理本地（零抖动）。
         resumed = await transport.request<{ count?: number; messages?: unknown; turns?: unknown }>('session.resume', { id });
       } catch (e) {
         const code = rpcCodeOf(e);
-        // busy：直接抛 + Toast，不切 currentId、不清空当前页。
+        // busy：后端拒绝（首帧竞态下预检拦不住的残余窗口）。本地未清理过，
+        // 只需回填 busy 真值让 Stop 可见，不伪造 currentTurn（见 10-R1 §B）。
         if (code === 'state.busy') {
           useToast().info('有回合正在执行，稍后再切');
           currentId.value = prev;
+          stream.busy = true;
           throw e;
         }
         // P08-fix 03：本地乐观空会话容错，降级为空白页 + toast。
@@ -188,6 +188,14 @@ export const useSessionsStore = defineStore('sessions', () => {
         throw e;
       }
       if (token !== switchToken) return;
+      // P23-R1：成功后同步清理（与 applySnapshot 之间不插入 await，避免中间帧）。
+      messages.loading = true;
+      stream.endTurn();
+      sessionInfo.resetWaterline();
+      /* P15: turns store */
+      perms.clear();
+      queue.clear();
+      clearCollapsedTools();
       currentId.value = id;
       // 复用 resume.messages 直接绘制（无 seq 不回退游标，见 01）；缺字段才回退 loadSnapshot。
       const rawTurns = (resumed as Record<string,unknown>)?.turns as unknown;
@@ -244,26 +252,44 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   async function createNew(): Promise<void> {
-    const token = ++switchToken;
-    switchDepth++;
-    switching.value = true;
     const messages = useMessagesStore();
     const stream = useStreamStore();
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
+    // P23-R2/R4：本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
+    // 用 return 而非 throw：快捷键/侧边栏路径对 rejection 处理不一，return 保证只弹一次且不静默。
+    if (stream.busy) {
+      useToast().info('有回合正在执行，稍后再新建');
+      return;
+    }
+    const token = ++switchToken;
+    switchDepth++;
+    switching.value = true;
+    try {
+      // P23-R2：先问引擎（与 select 同语义），成功后才清理本地。
+      let res: { id?: string; sessionId?: string } | null = null;
+      try {
+        res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
+      } catch (e) {
+        const code = rpcCodeOf(e);
+        if (code === 'state.busy') {
+          useToast().info('有回合正在执行，稍后再新建');
+          stream.busy = true;
+          throw e;
+        }
+        throw e;
+      }
+      if (token !== switchToken) return;
+      // 成功后同步清理（与 clearItems/loadSnapshot 之间不插入 await）。
       messages.loading = true;
       stream.endTurn();
-      // P23：新建入口先清零水位线，再由 loadSnapshot 覆盖。
       sessionInfo.resetWaterline();
       /* P15: turns store */
       perms.clear();
       queue.clear();
       clearCollapsedTools();
       sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
-    try {
-      const res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
-      if (token !== switchToken) return;
       messages.clearItems();
       const nid = res?.id ?? res?.sessionId ?? '';
       if (nid) {

@@ -41,7 +41,7 @@ export function toMessageViews(list: unknown): Array<Record<string, unknown>> {
 // 只保留会话元信息 / 状态类帧（session.info/usage/state.*/resync 等）。
 const DROP_DURING_SWITCH = new Set([
   'turn.started',
-  'turn.finished',
+  // P23-R3：turn.finished 不再丢弃——切换窗口内到达的收口帧必须正常处理，否则旧轮永无终态。
   'text.delta',
   'reasoning.delta',
   'tool.started',
@@ -119,6 +119,28 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           const stream = useStreamStore();
           const turnId = String(p.turnId ?? stream.currentTurn?.turnId ?? '');
           if (!turnId) break;
+          // P23-R3 §B：切换中外来 turn（与当前 currentTurn 不匹配）只落盘、不抢 currentTurn、不调 endTurn。
+          // 保守判定：仅 currentTurn 存在且 turnId 不匹配时才算外来；currentTurn 为 null 时按原逻辑走。
+          const isForeign = !!stream.currentTurn && turnId !== stream.currentTurn.turnId;
+          if (switching && isForeign) {
+            if (messages.findTurn(turnId)) {
+              const byUserForeign = p.byUser === true;
+              if (byUserForeign) messages.markRunningToolsCancelled(turnId);
+              const textForeign = typeof p.text === 'string' ? (p.text as string) : '';
+              const truncatedForeign = p.truncated === true;
+              const responseIdForeign = typeof p.responseId === 'string' ? (p.responseId as string) : undefined;
+              const finalUsedForeign = Number(p.finalUsed ?? 0);
+              messages.finalizeTurn(
+                turnId,
+                finalUsedForeign >= 1 ? finalUsedForeign : 1,
+                textForeign,
+                truncatedForeign,
+                responseIdForeign,
+                byUserForeign,
+              );
+            }
+            break;
+          }
           const finalUsed = Number(p.finalUsed ?? 0);
           if (!(finalUsed >= 1)) {
             stream.mismatch++;

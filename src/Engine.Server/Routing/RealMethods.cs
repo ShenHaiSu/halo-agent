@@ -344,6 +344,9 @@ public sealed partial class RealMethods
 
     public Task<object?> StateSetPersonaAsync(JsonElement? p, CancellationToken ct)
     {
+        // P23-R5：跑轮中切换人格会就地改写本轮系统提示词，与模型/会话切换保持一致拒绝。
+        if (_session.IsBusy)
+            throw RpcException.Busy("有回合正在执行，暂不能切换人格");
         var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() ?? "" : "";
         _session.SetPersona(name);
         return Task.FromResult<object?>(new { name });

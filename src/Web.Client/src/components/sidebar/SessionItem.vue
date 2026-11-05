@@ -102,6 +102,9 @@ async function open(): Promise<void> {
   try {
     await sessions.select(props.session.id);
   } catch (e) {
+    // P23：store 内已对 state.busy toast，调用方不再重复（预检 return 路径无 throw，不会进这里）。
+    const msg = String((e as Error)?.message ?? '');
+    if (msg.includes('有回合正在执行')) return;
     toast.error(`打开会话失败：${(e as Error).message}`);
   }
 }
