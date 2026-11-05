@@ -1,4 +1,4 @@
-// P12 render-fix 结构回归：列表/表格 AST → MessageBody VNode 结构稳定。
+// render-fix 结构回归：列表/表格 AST → MessageBody VNode 结构稳定。
 // 样式层断言见 CSS 文本检查（jsdom 无完整 computed list-style/table 边框计算）。
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -12,7 +12,7 @@ function mountBody(md: string) {
   return { w: mount(MessageBody, { props: { nodes } }), nodes };
 }
 
-describe('P12 列表结构', () => {
+describe('列表结构', () => {
   it('单级 ul/ol 渲染为 ul.md-list / ol.md-list', () => {
     const u = mountBody('- a\n- b\n');
     expect(u.w.find('ul.md-list').exists()).toBe(true);
@@ -52,7 +52,7 @@ describe('P12 列表结构', () => {
   });
 });
 
-describe('P12 表格结构', () => {
+describe('表格结构', () => {
   it('表结构为 wrap > table.md-table > thead/tbody', () => {
     const w = mountBody('| a | b |\n|---|---|\n| 1 | 2 |\n');
     expect(w.w.find('.md-table-wrap > table.md-table').exists()).toBe(true);
@@ -71,14 +71,14 @@ describe('P12 表格结构', () => {
   });
 });
 
- describe('P12 CSS 文本（作用域自闭环）', () => {
+ describe('CSS 文本（作用域自闭环）', () => {
    const vue = readFileSync(resolve(__dirname, 'MessageBody.vue'), 'utf-8');
    const css = vue.slice(vue.indexOf('<style'));
    it('源码无 deep 写法', () => {
      expect(css).not.toContain(':deep(');
    });
    it('列表：disc/decimal + 1.6em 基数 + task -1.6em（裸 scoped）', () => {
-     // P13：pushScopeId 绑定后内层自带 data-v，裸写 scoped 即可。
+     // pushScopeId 绑定后内层自带 data-v，裸写 scoped 即可。
      expect(css).toContain('.md-list{margin:0 0 var(--space-3);padding-inline-start:1.6em;list-style:disc outside none;}');
      expect(css).toContain('ol.md-list{list-style-type:decimal;}');
      expect(css).toContain('margin-inline-start:-1.6em');
@@ -121,15 +121,15 @@ describe('P12 表格结构', () => {
    });
  });
 
-describe('P12 import 治理', () => {
+describe('import 治理', () => {
   const root = resolve(__dirname, '../../styles');
-  it('index.css 接回 chat.css；chat.css 基座无 .md-table-wrap 重复（P15 compact 覆盖除外）', () => {
+  it('index.css 接回 chat.css；chat.css 基座无 .md-table-wrap 重复（compact 覆盖除外）', () => {
     const index = readFileSync(resolve(root, 'index.css'), 'utf-8');
     const chat = readFileSync(resolve(root, 'chat.css'), 'utf-8');
     expect(index).toContain(`@import './chat.css';`);
-    const base = chat.split('P15 chat-compact')[0]!;
+    const base = chat.split('chat-compact')[0]!;
     expect(base).not.toContain('.md-table-wrap');
-    // P15 compact 段允许覆盖（方案 A，.density-compact 下）。
+    // compact 段允许覆盖（方案 A，.density-compact 下）。
     expect(chat).toContain('.msg-inner.density-compact .md-table-wrap');
   });
 });

@@ -1,6 +1,6 @@
 namespace HaloAgent.Desktop;
 
-/// <summary>宿主启动参数（P0 只有很少几个）。record：支持 with 表达式。</summary>
+/// <summary>宿主启动参数（只有很少几个）。record：支持 with 表达式。</summary>
 public sealed record DesktopStartup
 {
     /// <summary>开发态 URL；为空 = 走 app:// 生产加载</summary>

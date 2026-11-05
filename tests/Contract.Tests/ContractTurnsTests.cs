@@ -5,8 +5,8 @@ using Xunit;
 
 namespace HaloAgent.Contract.Tests;
 
-/// <summary>P15 契约验收 7~8：三向一致性 + 删除矩阵 + finalUsed 不变式。</summary>
-public sealed class P15ContractTests
+/// <summary>契约验收 7~8：三向一致性 + 删除矩阵 + finalUsed 不变式。</summary>
+public sealed class ContractTurnsTests
 {
     private static JsonDocument Schema
     {
@@ -71,7 +71,7 @@ public sealed class P15ContractTests
          Assert.Contains("\"finalUsed\":2", fin);
      }
      [Fact]
-     public void P18_Compacted_HasTurns_Additive()
+     public void Compacted_HasTurns_Additive()
      {
          var events = Schema.RootElement.GetProperty("events");
          var props = events.GetProperty("session.compacted").GetProperty("payload").GetProperty("properties");

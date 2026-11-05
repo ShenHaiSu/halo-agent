@@ -52,7 +52,7 @@ public sealed class EngineClient : IAsyncDisposable
     public bool IsRunning => _channel is not null && !_disposed;
 
 
-    /// <summary>P3 工厂入口：按管道名构造（供 EngineSupervisor 的 clientFactory 使用）。</summary>
+    /// <summary>工厂入口：按管道名构造（供 EngineSupervisor 的 clientFactory 使用）。</summary>
     public EngineClient(string pipeName) { PipeName = pipeName; }
 
     public EngineClient() { }
@@ -60,18 +60,18 @@ public sealed class EngineClient : IAsyncDisposable
     /// <summary>构造时绑定的管道名（可为空）。</summary>
     public string? PipeName { get; }
 
-    /// <summary>是否已连接（P3 桥接 isReady 用）。</summary>
+    /// <summary>是否已连接（桥接 isReady 用）。</summary>
     public bool IsConnected => IsRunning;
 
-    /// <summary>尝试连接（已连接返回 true；P3 Supervisor 的轮询入口）。</summary>
+    /// <summary>尝试连接（已连接返回 true；Supervisor 的轮询入口）。</summary>
     public Task<bool> TryConnectAsync(CancellationToken ct = default) =>
         Task.FromResult(IsRunning);
 
-    /// <summary>原始请求（P3 AgentBridge 用）：返回 JsonElement 结果。</summary>
+    /// <summary>原始请求（AgentBridge 用）：返回 JsonElement 结果。</summary>
     public async Task<object?> RequestRawAsync(string method, JsonElement? prms, CancellationToken ct = default)
         => await RequestAsync<JsonElement>(method, prms, ct).ConfigureAwait(false);
 
-    /// <summary>拉事件元组版（P3 AgentBridge 用）。</summary>
+    /// <summary>拉事件元组版（AgentBridge 用）。</summary>
     public (IReadOnlyList<HaloAgent.Engine.Abstractions.Frames.EventFrame> Events, long Next) DrainEvents(long sinceSeq, int max = 500)
     {
         var r = PollEvents(sinceSeq, max);
@@ -182,7 +182,7 @@ public sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// P0 兼容入口：只给数据目录，管道名自动生成。
+    /// 兼容入口：只给数据目录，管道名自动生成。
     /// Program.cs 在切到 EngineSupervisor 之前继续用它。
     /// </summary>
     public Task StartAsync(string dataDir, CancellationToken ct = default)

@@ -1,12 +1,12 @@
-# scripts/p5-verify.ps1
+# scripts/verify-frontend.ps1
 <#
 .SYNOPSIS
-  P5 一键验收。按依赖顺序执行，任何一步失败立即停止。
+  一键验收。按依赖顺序执行，任何一步失败立即停止。
 .OUTPUTS
   退出码 0 = 自动化项全过；非 0 = 第 N 步失败。
   全部输出写入 docs/evidence/P5/。
 .NOTES
-  不含"浏览器内"与"人工"项；那些见 docs/P5-前端交互/07-验收方法.md §3。
+  不含"浏览器内"与"人工"项；那些见 docs/前端交互/07-验收方法.md §3。
 #>
 param(
   [switch]$SkipCounterproof,
@@ -40,7 +40,7 @@ function Step([string]$Name, [string]$File, [scriptblock]$Cmd) {
 
 if (-not $SkipCounterproof) {
   Step '反证：5 条红线 + 3 个检查脚本' 'A-0-counterproof-run.txt' {
-    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'p5-counterproof.ps1')
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'counterproof-frontend.ps1')
   }
 }
 
@@ -236,13 +236,13 @@ Step 'A-6.2 校验测试' 'A-6-validators-test.txt' {
 
 Write-Host ''
 Write-Host '════════════════════════════════════' -ForegroundColor Green
-Write-Host '✓ P5 自动化项全部通过' -ForegroundColor Green
+Write-Host '✓ 自动化项全部通过' -ForegroundColor Green
 Write-Host "证据目录：$Evidence" -ForegroundColor Gray
 Write-Host '════════════════════════════════════' -ForegroundColor Green
 Write-Host ''
 Write-Host '下一步（必须人工执行，见 07-验收方法 §3 的浏览器内部分）：' -ForegroundColor Yellow
 Write-Host '  1) pnpm dev  → 浏览器打开 http://localhost:5173/?diag=1' -ForegroundColor Yellow
-Write-Host '  2) Console 执行 __p5diag.runAll()' -ForegroundColor Yellow
+Write-Host '  2) Console 执行 __diag.runAll()' -ForegroundColor Yellow
 Write-Host '  3) 把输出粘到 docs/evidence/P5/A-browser-diag.txt' -ForegroundColor Yellow
 Write-Host '  4) 按 §3 的 38 个人工项逐项勾选' -ForegroundColor Yellow
 exit 0

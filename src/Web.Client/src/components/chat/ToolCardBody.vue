@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/ToolCardBody.vue -->
-<!-- P15-D8 半懒加载：首屏头部 2k + 展开才按需拉尾部；running 不走懒加载；失败回落头部。 -->
+<!-- 半懒加载：首屏头部 2k + 展开才按需拉尾部；running 不走懒加载；失败回落头部。 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { ToolCallInfo } from '@/stores/messages';

@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/common/UpdateBanner.vue -->
-<!-- 更新提示（05 §9.2）：P5 只 check 不 install；有新版显示横幅，点查看走外部浏览器。 -->
+<!-- 更新提示（05 §9.2）：只 check 不 install；有新版显示横幅，点查看走外部浏览器。 -->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { transport } from '@/transport';

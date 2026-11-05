@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/MessageAvatar.vue -->
-<!-- P5 D5-3 消息头像：按角色显示图标。 -->
+<!-- D5-3 消息头像：按角色显示图标。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';

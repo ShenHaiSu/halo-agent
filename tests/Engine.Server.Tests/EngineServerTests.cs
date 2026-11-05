@@ -154,7 +154,7 @@ public class EngineServerTests
     //    EventBus（src/Engine.Core/Events/EventBus.cs）
     //    新 FrameServer 构造（channel, state, bus, logger, ct）
     //    方法 DTO（HaloAgent.Engine.Abstractions.Methods，如 SystemPingResult）
-    //  上述类型落地后：定义编译符号 P1_BACKEND_ROUTING
+    //  上述类型落地后：定义编译符号 BACKEND_ROUTING
     // （或直接删掉本文件的 #if / #endif），即可启用。
     // ============================================================
 
@@ -297,7 +297,7 @@ public class EngineServerTests
     }
 
     /// <summary>
-    /// P24-E7：agent.cancel 不被 session.compact 阻塞（D7：cancel 已移出 MutatingMethods）。
+    /// agent.cancel 不被 session.compact 阻塞（D7：cancel 已移出 MutatingMethods）。
     /// 修前：cancel 要等 5s 的 compact 释放锁 → 超时/缓慢 → 红。
     /// </summary>
     [Fact]

@@ -3,8 +3,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Storage.Tests.Config;
 
-/// <summary>P22 行为页：Resolve 缺省/越界 + ValidateBehavior 边界。</summary>
-public sealed class P22BehaviorTests
+/// <summary>行为页：Resolve 缺省/越界 + ValidateBehavior 边界。</summary>
+public sealed class BehaviorPolicyTests
 {
     private static ConfigModel NewTree() => new()
     {

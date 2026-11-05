@@ -6,7 +6,7 @@ import { ICONS, type IconName, type IconPath } from './paths';
  * 图标数据的完整性。
  *
  * ============ 这组测试守住什么 ============
- *  ① 数量不足 67 → P5 开发时"找不到图标"就开始乱用 emoji
+ *  ① 数量不足 67 → 开发时"找不到图标"就开始乱用 emoji
  *  ② 某条 path 的 d 为空 / 不合法 → 该图标不显示（且无任何报错）
  *  ③ viewBox 不是 24×24 → 图标变形或裁剪
  *  ④ d 里有 NaN / undefined（拼接错误）→ 整个 svg 渲染失败
@@ -64,7 +64,7 @@ describe('ICONS', () => {
     expect(new Set(lower).size).toBe(lower.length);
   });
 
-  it('必须有 P5 会用到的核心图标', () => {
+  it('必须有 会用到的核心图标', () => {
     const required: IconName[] = [
       'chevron-down',
       'chevron-right',

@@ -1,5 +1,5 @@
 // src/Web.Client/src/transport/legacy.ts
-// P3 的传输选择逻辑（原 transport/index.ts 的 createTransport），原样保留供兼容。
+// 的传输选择逻辑（原 transport/index.ts 的 createTransport），原样保留供兼容。
 import { MockTransport } from './MockTransport';
 import { BridgeTransport } from './BridgeTransport';
 import type { Transport } from './types';

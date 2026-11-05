@@ -455,7 +455,7 @@ export interface HaloMethods {
   migrationRequired?: boolean
   providers?: {
   id?: string
-  /** P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
+  /** 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
   displayName?: string
   baseUrl?: string
   apiKeySet?: boolean
@@ -465,7 +465,7 @@ export interface HaloMethods {
   modelCount?: number
   models?: {
   id?: string
-  /** P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
+  /** 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名 */
   displayName?: string
   protocol?: "chat" | "responses"
   contextWindow?: number | null
@@ -852,7 +852,7 @@ export interface HaloEventPayloads {
   reason?: string | null
   responseId?: string | null
   finalUsed: number
-  /** P24：本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。 */
+  /** 本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。 */
   byUser?: boolean
 }
   /** text.delta */

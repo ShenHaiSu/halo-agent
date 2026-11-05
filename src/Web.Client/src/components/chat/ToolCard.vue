@@ -1,9 +1,8 @@
 <!-- src/Web.Client/src/components/chat/ToolCard.vue -->
-<!-- P5 D5-4 工具卡片：6 状态（pending/running/awaiting-user/done/error/cancelled），
+<!-- D5-4 工具卡片：6 状态（pending/running/awaiting-user/done/error/cancelled），
      状态从 ToolCallInfo 派生（优先级 cancelled > error > awaiting-user > running >
-     pending > done）；默认展开规则 + 用户折叠记忆（P11-E 单源 ui.collapsedTools，
-     本模块 collapsedToolIds 为其薄代理）；silentAlert 黄/红预警条。
-     P11-D：头部唯一一份，kind 只切换正文区（ToolCardBody vs 未知工具正文）。 -->
+     pending > done）；默认展开规则 + 用户折叠记忆；silentAlert 黄/红预警条。
+     头部唯一一份，kind 只切换正文区（ToolCardBody vs 未知工具正文）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { ToolCallInfo } from '@/stores/messages';
@@ -27,7 +26,7 @@ const displayName = computed(() =>
 );
 const summary = computed(() => summarizeArgs(props.tool.name, props.tool.arguments, kind.value));
 
-// awaiting-user 判定：P2 单槽串行，最新 running 的卡片 + 有非 rounds 待答询问即视为等待授权
+// awaiting-user 判定：单槽串行，最新 running 的卡片 + 有非 rounds 待答询问即视为等待授权
 const isAwaiting = computed(
   () =>
     props.tool.status === 'running' &&
@@ -71,10 +70,10 @@ function onHeadKeydown(e: KeyboardEvent): void {
   }
 }
 
-// P11-D：状态文案共用 toolMeta.toolStatusText（与未知工具链同一份实现）。
+// 状态文案共用 toolMeta.toolStatusText（与未知工具链同一份实现）。
 const statusText = computed(() => toolStatusText(state.value));
 
-// P11-D：时长 Chip 上移到 ToolCard 头部（普通/未知工具一致）。
+// 时长 Chip 上移到 ToolCard 头部（普通/未知工具一致）。
 const durationText = computed(() =>
   typeof props.tool.durationMs === 'number'
     ? props.tool.durationMs >= 1000
@@ -133,7 +132,7 @@ const badgeVariant = computed(() => {
       <span>该命令已运行较久，请耐心等待。</span>
     </div>
 
-    <!-- P11-D：去嵌套。头部唯一，正文按 kind 切换（未知工具为纯正文组件，无二级折叠）。 -->
+    <!-- 去嵌套。头部唯一，正文按 kind 切换（未知工具为纯正文组件，无二级折叠）。 -->
     <ToolCardBody v-if="expanded && kind === 'function'" :tool="tool" />
     <UnknownToolCard v-if="expanded && kind === 'unknown'" :tool="tool" />
   </div>

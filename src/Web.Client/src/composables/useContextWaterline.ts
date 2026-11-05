@@ -1,5 +1,5 @@
 // src/Web.Client/src/composables/useContextWaterline.ts
-// P23：上下文水位线纯计算（无副作用，便于单测）。
+// 上下文水位线纯计算（无副作用，便于单测）。
 import { computed, type Ref } from 'vue';
 import { formatNumber } from '@/utils/format';
 

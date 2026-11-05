@@ -60,7 +60,7 @@ public sealed record McpServerStatus
     public string? Error { get; init; }
 }
 
-// ============================ tool.result (P15-D8) ============================
+// ============================ tool.result () ============================
 
 /// <summary>tool.result 参数。</summary>
 public sealed record ToolResultParams

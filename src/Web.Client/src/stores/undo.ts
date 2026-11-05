@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/undo.ts
-// P5：撤销快照（容错归一化）。
+// 撤销快照（容错归一化）。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';

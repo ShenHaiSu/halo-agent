@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/components/usage/usagePresets.test.ts
-// P16：8 预设期望值表（周日/月初一/跨月/闰日）。
+// src/Web.Client/src/components/usage/usagePresets.test.ts
+// 8 预设期望值表（周日/月初一/跨月/闰日）。
 import { describe, expect, it } from 'vitest';
 import {
   daysAgoMidnightMs,

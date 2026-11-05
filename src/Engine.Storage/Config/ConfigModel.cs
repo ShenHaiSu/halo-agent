@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace HaloAgent.Engine.Storage.Config;
 
 /// <summary>
-/// config.json 的模型（P10 新形状：Provider 1—N Model 全量树）。
-/// P18-proxy02：Provider 网络选项 network 取代 use_proxy；proxy.mode 三档 system/direct/manual。
+/// config.json 的模型（新形状：Provider 1—N Model 全量树）。
+/// Provider 网络选项 network 取代 use_proxy；proxy.mode 三档 system/direct/manual。
 ///
 /// 破坏性：不再保留顶层 model/base_url/api_key/provider/context_window，
 /// 也不再做旧文件自动迁移（见 ConfigStore嗅探/备份）。
@@ -38,9 +38,9 @@ public sealed class ProviderConfig
     [JsonPropertyName("headers_enabled")] public bool HeadersEnabled { get; set; } = true;
     [JsonPropertyName("headers")]
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    /// <summary>P18-proxy02：follow | proxy | direct（取代 use_proxy）。</summary>
+    /// <summary>follow | proxy | direct（取代 use_proxy）。</summary>
     [JsonPropertyName("network")] public string Network { get; set; } = "follow";
-    /// <summary>P18-proxy02 预留扩展位：Provider 独立代理地址（本次只留位，不实现）。</summary>
+    /// <summary>预留扩展位：Provider 独立代理地址（本次只留位，不实现）。</summary>
     [JsonPropertyName("proxy_override")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProxyOverride { get; set; }

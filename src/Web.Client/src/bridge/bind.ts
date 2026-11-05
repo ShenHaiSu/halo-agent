@@ -30,7 +30,7 @@ export async function bindBridge(): Promise<void> {
         // 绑定失败不要抛（可能是页面加载太早），标记为"无桥接"，上层走 Mock。
         console.warn('[bridge] BindObjectAsync 失败，将使用 Mock', e);
       }
-      // P0 兼容桥兜底（旧宿主）：失败静默忽略。
+      // 兼容桥兜底（旧宿主）：失败静默忽略。
       try {
         await window.CefSharp.BindObjectAsync('hostBridge');
       } catch {

@@ -1,9 +1,8 @@
-using System.Reflection;
 using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Core.Agent;
-using HaloAgent.Engine.Core.Events;
 using HaloAgent.Engine.Core.Llm;
+using HaloAgent.Engine.Core.Events;
 using HaloAgent.Engine.Core.Tools;
 using HaloAgent.Engine.Server.Routing;
 using HaloAgent.Engine.Storage.Sessions;
@@ -12,14 +11,14 @@ using Xunit;
 
 namespace HaloAgent.Engine.Server.Tests;
 
-/// <summary>P23-R5：跑轮中切换人格被拒绝（前后端 busy 守卫）。</summary>
-public sealed class P23PersonaBusyGuardTests : IDisposable
+/// <summary>SessionSetCwdAsync busy 守卫 + 异常映射 + 去引号。</summary>
+public sealed class SetCwdServerGuardTests : IDisposable
 {
     private readonly string _prevDataDir;
     private readonly string _dataDir;
     private readonly string _cwd;
 
-    public P23PersonaBusyGuardTests()
+    public SetCwdServerGuardTests()
     {
         _dataDir = Path.Combine(Path.GetTempPath(), "halo-srv-" + Guid.NewGuid().ToString("N"));
         _cwd = Path.Combine(_dataDir, "cwd");
@@ -28,12 +27,12 @@ public sealed class P23PersonaBusyGuardTests : IDisposable
         Environment.SetEnvironmentVariable("HALO_DATA_DIR", _dataDir);
     }
 
-    private (AgentSession session, RealMethods real) Create()
+    private (AgentSession session, SessionStore store, RealMethods real) Create()
     {
         var store = new SessionStore();
         store.StartNew();
         var tools = ToolRegistry.CreateBuiltin();
-        var llm = new FakeLlm();
+        var llm = new FakeLlmForServer();
         var ch = new NullChannel();
         var bus = new EventBus(ch, NullLogger.Instance);
         bus.Start();
@@ -41,34 +40,57 @@ public sealed class P23PersonaBusyGuardTests : IDisposable
             HaloAgent.Engine.Abstractions.Types.PermissionMode.BypassPermissions,
             string.Empty, 0, 3, true);
         var real = new RealMethods(session, store, tools, _dataDir, NullLogger.Instance, CancellationToken.None);
-        return (session, real);
+        return (session, store, real);
     }
 
     private static JsonElement? P(string json) =>
         JsonSerializer.Deserialize<JsonElement>(json);
 
-    private static void SetBusy(AgentSession session, bool busy)
-    {
-        var f = typeof(AgentSession).GetField("_busy", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        f.SetValue(session, busy);
-    }
-
     [Fact]
-    public async Task SetPersona_Busy_Throws_StateBusy()
+    public async Task SetCwd_MissingDir_Maps_FsNotFound()
     {
-        var (session, real) = Create();
-        SetBusy(session, true);
+        var (_, _, real) = Create();
         var ex = await Assert.ThrowsAsync<RpcException>(() =>
-            real.StateSetPersonaAsync(P(@"{""name"":""tester""}"), CancellationToken.None));
-        Assert.Equal(RpcError.StateBusy, ex.Code);
+            real.SessionSetCwdAsync(P(@"{""path"":""C:\\no-such-dir-xyz-12345""}"), CancellationToken.None));
+        Assert.Equal(RpcError.FsNotFound, ex.Code);
     }
 
     [Fact]
-    public async Task SetPersona_Idle_Succeeds()
+    public async Task SetCwd_Empty_Maps_ParamsInvalid()
     {
-        var (_, real) = Create();
-        var r = await real.StateSetPersonaAsync(P(@"{""name"":""tester""}"), CancellationToken.None);
+        var (_, _, real) = Create();
+        var ex = await Assert.ThrowsAsync<RpcException>(() =>
+            real.SessionSetCwdAsync(P(@"{""path"":""""}"), CancellationToken.None));
+        Assert.Equal(RpcError.ParamsInvalid, ex.Code);
+    }
+
+    [Fact]
+    public async Task SetCwd_Root_Maps_ParamsInvalid()
+    {
+        var (_, _, real) = Create();
+        var root = Path.GetPathRoot(_cwd)!;
+        var ex = await Assert.ThrowsAsync<RpcException>(() =>
+            real.SessionSetCwdAsync(P(JsonSerializer.Serialize(new { path = root })), CancellationToken.None));
+        Assert.Equal(RpcError.ParamsInvalid, ex.Code);
+    }
+
+    [Fact]
+    public async Task SetCwd_Quoted_Succeeds()
+    {
+        var (session, _, real) = Create();
+        var target = Path.Combine(_dataDir, "quoted");
+        Directory.CreateDirectory(target);
+        var r = await real.SessionSetCwdAsync(P(JsonSerializer.Serialize(new { path = "\"" + target + "\"" })), CancellationToken.None);
         Assert.NotNull(r);
+        Assert.Equal(Path.GetFullPath(target), session.Cwd);
+    }
+
+    [Fact]
+    public void UnquoteCwd_Strips_Paired_Quotes()
+    {
+        Assert.Equal(@"C:\a", RealMethods.UnquoteCwd(@"""C:\a"""));
+        Assert.Equal(@"C:\a", RealMethods.UnquoteCwd(@"'C:\a'"));
+        Assert.Equal(@"C:\a", RealMethods.UnquoteCwd(@"  C:\a  "));
     }
 
     public void Dispose()
@@ -77,7 +99,7 @@ public sealed class P23PersonaBusyGuardTests : IDisposable
         try { Directory.Delete(_dataDir, recursive: true); } catch { }
     }
 
-    private sealed class FakeLlm : ILlmClient
+    private sealed class FakeLlmForServer : ILlmClient
     {
         public string Model => "fake";
         public string? ProxyUrl => null;

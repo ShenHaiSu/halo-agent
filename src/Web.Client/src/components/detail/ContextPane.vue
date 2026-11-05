@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/detail/ContextPane.vue -->
-<!-- 上下文分页：最大轮数 / 工作目录 / 会话 ID / 人格（P23：删除“已用 Tokens”行，避免与水位线百分比取整差 ±1% 投诉）。 -->
+<!-- 上下文分页：最大轮数 / 工作目录 / 会话 ID / 人格（删除“已用 Tokens”行，避免与水位线百分比取整差 ±1% 投诉）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useSessionStore } from '@/stores/session';

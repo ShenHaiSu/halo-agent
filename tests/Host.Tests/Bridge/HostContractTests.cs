@@ -6,7 +6,7 @@ using Xunit;
 
 namespace HaloAgent.Host.Tests.Bridge;
 
-/// <summary>P3 桥接与资源契约：MIME 表 / Router-schema 一致 / PE 校验。</summary>
+/// <summary>桥接与资源契约：MIME 表 / Router-schema 一致 / PE 校验。</summary>
 public sealed class HostContractTests
 {
     [Fact]
@@ -177,7 +177,7 @@ public sealed class HostContractTests
      [Fact]
      public void HaloHost_exposes_exactly_thirteen_bridge_methods()
      {
-         // 与 scripts/p3-diag.html 的 HOST_METHODS / 前端 HaloHost 接口保持一致。
+         // 与 scripts/diag-host.html 的 HOST_METHODS / 前端 HaloHost 接口保持一致。
          // windowDragStart / windowResizeStart 是自绘标题栏 B 方案的显式拖拽/缩放入口（CEF 铺满客户区后
          // WM_NCHITTEST 到不了窗体，前端 mousedown 直调，宿主做 ReleaseCapture+SendMessage）。
          var expected = new[]

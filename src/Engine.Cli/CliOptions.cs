@@ -34,14 +34,14 @@ public sealed record CliOptions
                 case "--diagnostics": o = o with { Diagnostics = true }; break;
                 case "--pipe-name": o = o with { PipeName = Next(args, ref i) }; break;
                 case "--log": o = o with { LogLevel = Next(args, ref i) ?? "info" }; break;
-                // P10：--provider/--model/--base-url/--api-key/--proxy/--no-proxy 已删除（仅保留 --data-dir）
+                // --provider/--model/--base-url/--api-key/--proxy/--no-proxy 已删除（仅保留 --data-dir）
                 case "--provider":
                 case "--model":
                 case "--base-url":
                 case "--api-key":
                 case "--proxy":
                 case "--no-proxy":
-                    throw new ArgumentException("该参数已删除（P10 破坏性）：请改用 config.json 的 providers/active 配置（仅保留 --data-dir）: " + args[i]);
+                    throw new ArgumentException("该参数已删除（破坏性）：请改用 config.json 的 providers/active 配置（仅保留 --data-dir）: " + args[i]);
                 case "-h":
                 case "--help": o = o with { ShowHelp = true }; break;
                 default:

@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/layout/engineStatusMeta.test.ts
-// P07-Enhance 01：状态→颜色映射 + hover 文案含 pid/reason。
+// 状态→颜色映射 + hover 文案含 pid/reason。
 import { describe, expect, it } from 'vitest';
 import { describeEngineStatus, mapEngineState } from './engineStatusMeta';
 

@@ -12,7 +12,7 @@ let registered = false;
  * 注册宿主事件入口 `window.__haloHostEvent`。
  *
  * ============ 这是宿主"前端就绪"的信号 ============
- *  宿主侧（P3）在页面加载前就开始产生事件，此时 __haloHostEvent 还不存在。
+ *  宿主侧在页面加载前就开始产生事件，此时 __haloHostEvent 还不存在。
  *  宿主把这些事件缓存起来（最多 20 条），
  *  等前端第一次调用 haloHost.systemInfo() 时补推。
  *

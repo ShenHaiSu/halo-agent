@@ -59,7 +59,7 @@ export class MockTransport implements Transport {
 
       case 'agent.cancel': {
         this.stopReplay();
-        // ★ P24：补偿真实引擎的收尾帧，否则前端只能靠静默期兜底
+        // ★ 补偿真实引擎的收尾帧，否则前端只能靠静默期兜底
         this.pushEvent('turn.finished', {
           turnId: 'mock-turn-1',
           text: '⏹ 生成已中断',
@@ -215,7 +215,7 @@ export class MockTransport implements Transport {
           this.snapshot.usage.outputTotal =
             (this.snapshot.usage.outputTotal ?? 0) + Number(p.completion ?? 0);
           this.snapshot.usage.lastPromptTokens = Number(p.prompt ?? 0);
-          // P23：Mock 真相源与真实引擎同增（cached/llmCalls 递增，模拟多轮放大）。
+          // Mock 真相源与真实引擎同增（cached/llmCalls 递增，模拟多轮放大）。
           this.snapshot.usage.lastCachedTokens = Number(p.cached ?? 0);
           this.snapshot.usage.sessionLlmCalls = (this.snapshot.usage.sessionLlmCalls ?? 0) + 1;
         }

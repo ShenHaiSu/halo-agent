@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/App.vue -->
-<!-- P5 应用根：AppShell 两栏 + 右抽屉 + 设置页 + 命令面板 + 快捷键帮助 + Toast + 错误边界 + 全局快捷键。 -->
+<!-- 应用根：AppShell 两栏 + 右抽屉 + 设置页 + 命令面板 + 快捷键帮助 + Toast + 错误边界 + 全局快捷键。 -->
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue';
 import AppShell from './components/layout/AppShell.vue';
@@ -97,7 +97,7 @@ onMounted(() => {
   // （或超时降级）后再发初始请求，绕开发布初期的竞态报错。
   void boot.waitForEngine().then(() => {
     void host.load();
-    // P09-fix2 C：启动串行化。先加载会话列表并切首个会话（select 内含快照绘制），
+    // 启动串行化。先加载会话列表并切首个会话（select 内含快照绘制），
     // 删除裸 messages.loadSnapshot()，避免与 select 竞态互相覆盖。
     void sessions
       .load()

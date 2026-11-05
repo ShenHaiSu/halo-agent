@@ -1,11 +1,11 @@
-﻿using HaloAgent.Engine.Storage.Sessions;
+using HaloAgent.Engine.Storage.Sessions;
 
 namespace HaloAgent.Engine.Core.Llm;
 
 /// <summary>
 /// Storage.StoredMessage ↔ Core.ChatMessage 互转适配器（Core 侧）。
 /// Storage 不引用 Core（分层铁律），所以适配器只能放在 Core 侧。
-/// P10：双向映射 content parts；读旧文件 parts 为空即回落纯文本。
+/// 双向映射 content parts；读旧文件 parts 为空即回落纯文本。
 /// </summary>
 public static class MessageAdapters
 {

@@ -1,4 +1,4 @@
-﻿<!-- src/Web.Client/src/components/settings/SettingsApp.vue -->
+<!-- src/Web.Client/src/components/settings/SettingsApp.vue -->
  <!-- 设置页容器：8 分页 + 窄窗全屏 + DirtyGuard 拦截切页/关页。 -->
 <script lang="ts">
 import { ref as sharedRef } from 'vue';
@@ -241,7 +241,7 @@ function requestClose(): void {
    font-size: var(--text-sm);
    line-height: 1.6;
  }
- @media (max-width: 900px) { /* P14：与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
+ @media (max-width: 900px) { /* 与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
   .settings-overlay {
     justify-content: stretch;
   }

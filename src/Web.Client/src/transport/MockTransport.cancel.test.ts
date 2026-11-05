@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MockTransport } from './MockTransport';
 
-describe('P24 MockTransport.cancel 收尾帧', () => {
+describe('MockTransport.cancel 收尾帧', () => {
   it('R4: agent.cancel 必须发 turn.finished{byUser:true}', async () => {
     const t = new MockTransport();
     await t.invoke('agent.prompt', { text: '你好' });

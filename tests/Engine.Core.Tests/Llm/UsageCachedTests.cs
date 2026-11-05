@@ -5,7 +5,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Llm;
 
-/// <summary>P16 用量采集：CachedTokens 5 例（含流式 responses）。</summary>
+/// <summary>用量采集：CachedTokens 5 例（含流式 responses）。</summary>
 public class UsageCachedTests
 {
     private sealed class FakeHttpHandler : HttpMessageHandler

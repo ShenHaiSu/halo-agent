@@ -10,7 +10,7 @@ namespace HaloAgent.Desktop.Shell;
 /// </summary>
  public class ChromeForm : Form
  {
-     // P07-Enhance 04：固定 8px 缩放边（高 DPI 下仍易命中；CreateGraphics 在构造期不可用，故不用动态 DPI 计算）。
+     // 固定 8px 缩放边（高 DPI 下仍易命中；CreateGraphics 在构造期不可用，故不用动态 DPI 计算）。
      private const int ResizeBorder = 8;
      private const int TitleBarButtonZoneWidth = 200;
      private const int WS_THICKFRAME = 0x00040000;
@@ -50,7 +50,7 @@ namespace HaloAgent.Desktop.Shell;
          Padding = Padding.Empty;
          MinimumSize = new Size(900, 560);
      }
-     /// <summary>P07-Enhance 04：补 WS_THICKFRAME 让 DWM 保留隐形缩放边（无边框下仍可缩放）。Win7 下若出现黑边/闪烁可回退删此重写。</summary>
+     /// <summary>补 WS_THICKFRAME 让 DWM 保留隐形缩放边（无边框下仍可缩放）。Win7 下若出现黑边/闪烁可回退删此重写。</summary>
      protected override CreateParams CreateParams
      {
          get

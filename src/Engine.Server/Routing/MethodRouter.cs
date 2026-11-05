@@ -15,7 +15,7 @@ public delegate Task<object?> MethodHandler(JsonElement? parameters, Cancellatio
 /// 设计要点：
 ///   1. **严格**：未知方法返回 method.notFound（不静默失败）
 ///   2. **可枚举**：所有已注册方法可通过 Methods 列出（system.protocol 用）
-///   3. **可替换**：P2 阶段用真实实现替换 stub，路由表结构不变
+///   3. **可替换**：阶段用真实实现替换 stub，路由表结构不变
 /// </summary>
 public sealed class MethodRouter
 {

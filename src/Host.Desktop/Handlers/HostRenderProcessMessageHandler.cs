@@ -5,7 +5,7 @@ namespace HaloAgent.Desktop.Handlers;
 /// <summary>
 /// 渲染进程崩溃/无响应处理。
 /// Win7 上，显卡驱动问题常表现为渲染进程直接退出——界面变成灰块。
-/// 这里只记录 OnUncaughtException；崩溃自愈在 P3 完善。
+/// 这里只记录 OnUncaughtException；崩溃自愈在 完善。
 /// </summary>
 public sealed class HostRenderProcessMessageHandler : IRenderProcessMessageHandler
 {

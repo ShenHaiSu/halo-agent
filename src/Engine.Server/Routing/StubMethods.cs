@@ -6,19 +6,19 @@ using HaloAgent.Engine.Storage;
 namespace HaloAgent.Engine.Server.Routing;
 
 /// <summary>
-/// P1 阶段的 stub 实现。
+/// 阶段的 stub 实现。
 ///
 /// 为什么要有 stub：
-///   - P1 的目标是"打通传输"，不是"实现功能"。
+///   - 的目标是"打通传输"，不是"实现功能"。
 ///   - 前端需要一套能跑通所有交互的"假引擎"来做 UI 开发。
-///   - P2 逐个把这些 stub 替换为真实实现时，前端完全不用改——
+///   - 逐个把这些 stub 替换为真实实现时，前端完全不用改——
 ///     因为契约（schema）没有变。
 ///
 /// 注意：
 ///   1. stub 必须返回**结构正确**的数据（类型、字段名都符合 schema）。
 ///   2. ★ 架构红线 R-1：stub 不得用于生产路由表。EngineAssembly 只能挂 real.*，
 ///      无法实现时用 NotConfigured 明确报错，绝不用 EmptyOk 假装成功。
-///   3. 本类只服务于 P2 装配失败时的回落路径（Program.cs）。
+///   3. 本类只服务于 装配失败时的回落路径（Program.cs）。
 public sealed class StubMethods
 {
     private readonly EngineState _state;
@@ -107,7 +107,7 @@ public sealed class StubMethods
              // ---- update 2 ----
              ("update.check", stub.NotImplemented),
              ("update.install", stub.NotImplemented),
-             // ---- usage 6 (P16 5 + P17 exportFile) ----
+             // ---- usage 6  ----
              ("usage.query", stub.UsageQuery),
              ("usage.summary", stub.UsageSummary),
              ("usage.stats", stub.UsageStats),
@@ -163,7 +163,7 @@ public sealed class StubMethods
     }
 
     // ============================================================
-    //  agent.*（P1 只返回 accepted，P2 真正跑回合）
+    //  agent.*（只返回 accepted，真正跑回合）
     // ============================================================
 
     public Task<object?> AgentPrompt(JsonElement? p, CancellationToken ct)
@@ -228,7 +228,7 @@ public sealed class StubMethods
         Task.FromResult<object?>(_state.BuildSnapshot());
 
     // ============================================================
-    //  session.*（P1 最小 stub：仅 new 返回可用形状）
+    //  session.*（最小 stub：仅 new 返回可用形状）
     // ============================================================
 
     public Task<object?> SessionNew(JsonElement? _, CancellationToken ct) =>
@@ -257,7 +257,7 @@ public sealed class StubMethods
     }
 
     // ============================================================
-    //  其余方法（P1 返回最小可用 stub）
+    //  其余方法（返回最小可用 stub）
     // ============================================================
 
     public Task<object?> EmptyOk(JsonElement? _, CancellationToken ct) =>
@@ -279,9 +279,9 @@ public sealed class StubMethods
 
     public Task<object?> NotImplemented(JsonElement? _, CancellationToken ct) =>
         throw new RpcException(RpcError.NotSupported,
-            "该功能在 P1 阶段未实现（stub）", "P2 阶段会实现");
+            "该功能在 阶段未实现（stub）", "阶段会实现");
 
-    /// <summary>P10：state.setProvider 已删除。</summary>
+    /// <summary>state.setProvider 已删除。</summary>
 
 
     /// <summary>state.setPersona 回落形状（与契约一致）。</summary>
@@ -307,7 +307,7 @@ public sealed class StubMethods
         return Task.FromResult<object?>(new { retry = v });
     }
 
-     /// <summary>P22 settings.saveBehavior 空实现（未配置态也能调通契约，结果体只有 ok/warnings）。</summary>
+     /// <summary>settings.saveBehavior 空实现（未配置态也能调通契约，结果体只有 ok/warnings）。</summary>
      public Task<object?> SettingsSaveBehavior(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { ok = true, warnings = Array.Empty<string>() });
  
@@ -319,7 +319,7 @@ public sealed class StubMethods
      public Task<object?> AssetSkillsList(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { items = Array.Empty<object>(), warnings = Array.Empty<string>() });
  
-     /// <summary>P16 用量桩：summary 全 0 + 空数组；query 空页；export 空串；clear 0；stats 0。</summary>
+     /// <summary>用量桩：summary 全 0 + 空数组；query 空页；export 空串；clear 0；stats 0。</summary>
      public Task<object?> UsageQuery(JsonElement? _, CancellationToken ct) =>
          Task.FromResult<object?>(new { items = Array.Empty<object>(), total = 0 });
      public Task<object?> UsageSummary(JsonElement? _, CancellationToken ct) =>
@@ -328,7 +328,7 @@ public sealed class StubMethods
          Task.FromResult<object?>(new { sizeBytes = 0, rowCount = 0 });
       public Task<object?> UsageExport(JsonElement? _, CancellationToken ct) =>
           Task.FromResult<object?>(new { csv = "", truncated = false });
-      /// <summary>P17 导出落盘桩：无真实落盘，返回 mock 路径。</summary>
+      /// <summary>导出落盘桩：无真实落盘，返回 mock 路径。</summary>
       public Task<object?> UsageExportFile(JsonElement? _, CancellationToken ct) =>
           Task.FromResult<object?>(new { path = "(stub)/usage.csv", wrote = 0, truncated = false });
      public Task<object?> UsageClear(JsonElement? _, CancellationToken ct) =>

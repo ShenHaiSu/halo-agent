@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/layout/EngineStatusDot.vue -->
-<!-- P07-Enhance 01：TitleBar 引擎状态指示灯（hover 显示 pid/reason/Mock/版本，失败时可重启）。 -->
+<!-- TitleBar 引擎状态指示灯（hover 显示 pid/reason/Mock/版本，失败时可重启）。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useHostStore } from '@/stores/host';

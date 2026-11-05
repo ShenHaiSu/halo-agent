@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  P2 引擎内核验收总入口（fail fast），证据落到 docs/evidence/P2/。
+  引擎内核验收总入口（fail fast），证据落到 docs/evidence/P2/。
 #>
 [CmdletBinding()] param([switch]$SkipBuild, [string]$Only = '')
 $ErrorActionPreference = 'Stop'

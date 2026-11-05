@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/layout/engineStatusMeta.ts
-// P07-Enhance 01：引擎状态 → 颜色/文案映射（纯函数，可单测）。
+// 引擎状态 → 颜色/文案映射（纯函数，可单测）。
 
 import type { EngineStatusPayload } from '@/bridge/types';
 

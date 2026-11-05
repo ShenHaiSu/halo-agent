@@ -1,4 +1,4 @@
-// P12-02 回归：state.snapshot 全量同步 session.agent（模型切换器 unconfigured 恒 true）。
+// 回归：state.snapshot 全量同步 session.agent（模型切换器 unconfigured 恒 true）。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useMessagesStore } from './messages';
@@ -22,7 +22,7 @@ beforeEach(() => {
   setMockAgentConfigured(true);
 });
 
-describe('P12-02: 快照同步模型状态', () => {
+describe('快照同步模型状态', () => {
   it('loadSnapshot 含 agent 时 session 被置位（含 usage 映射）', async () => {
     const messages = useMessagesStore();
     const session = useSessionStore();

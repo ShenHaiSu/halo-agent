@@ -1,6 +1,6 @@
 namespace HaloAgent.Engine.Storage.Config;
 
-/// <summary>P10 种子：新文件首次创建时写入，不再与用户层做字段合并。</summary>
+/// <summary>种子：新文件首次创建时写入，不再与用户层做字段合并。</summary>
 public static class BuiltinProviders
 {
     public static Dictionary<string, ProviderConfig> Seeds() => new(StringComparer.Ordinal)

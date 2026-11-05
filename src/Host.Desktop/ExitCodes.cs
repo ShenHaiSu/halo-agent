@@ -1,6 +1,6 @@
 namespace HaloAgent.Desktop;
 
-/// <summary>宿主退出码。P6 安装器与自动化测试据此区分失败原因。</summary>
+/// <summary>宿主退出码。安装器与自动化测试据此区分失败原因。</summary>
 public static class ExitCodes
 {
     public const int Success = 0;

@@ -3,8 +3,8 @@ using CefSharp;
 namespace HaloAgent.Desktop.Handlers;
 
 /// <summary>
-/// 下载处理。P0 阶段：把所有下载取消并交给系统浏览器。
-/// 理由：应用内的下载需要一整套 UI（进度、路径选择、冲突处理），P0 不做。
+/// 下载处理。阶段：把所有下载取消并交给系统浏览器。
+/// 理由：应用内的下载需要一整套 UI（进度、路径选择、冲突处理），不做。
 /// </summary>
 public sealed class HostDownloadHandler : IDownloadHandler
 {

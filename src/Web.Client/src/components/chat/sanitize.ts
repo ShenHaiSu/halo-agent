@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/chat/sanitize.ts
-// P5 D5-1 链接/图片 URL 安全白名单（XSS 防线 L2/L3）。
+// D5-1 链接/图片 URL 安全白名单（XSS 防线 L2/L3）。
 
 const SAFE_PROTOCOLS_LINK = ['http:', 'https:', 'mailto:'];
 const SAFE_PROTOCOLS_IMG = ['http:', 'https:', 'data:'];

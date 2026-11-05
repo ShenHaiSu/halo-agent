@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import StopButton from './StopButton.vue';
 
-describe('P24 StopButton 取消中态', () => {
+describe('StopButton 取消中态', () => {
   it('F7: 默认显示「停止」', () => {
     const w = mount(StopButton);
     expect(w.text()).toContain('停止');

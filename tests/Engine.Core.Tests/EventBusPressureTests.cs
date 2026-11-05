@@ -5,7 +5,7 @@ using HaloAgent.Engine.Core.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-#if P1_BACKEND_EVENTBUS
+#if BACKEND_EVENTBUS
 using HaloAgent.Engine.Core.Events;
 #endif
 
@@ -50,11 +50,11 @@ public class EventBusPressureTests
     //  以下 3 个用例需要后端 D1-3 的 EventBus
     //  （src/Engine.Core/Events/EventBus.cs，含 PublishDelta /
     //  PublishStateAsync / FlushNow / ConsumeDroppedCount / Start）。
-    //  EventBus 落地后：定义编译符号 P1_BACKEND_EVENTBUS
+    //  EventBus 落地后：定义编译符号 BACKEND_EVENTBUS
     // （或直接删掉本文件的 #if / #endif），即可启用。
     // ============================================================
 
-#if P1_BACKEND_EVENTBUS
+#if BACKEND_EVENTBUS
     [Fact]
     public async Task HighFrequencyDeltas_do_not_grow_unbounded()
     {

@@ -1,4 +1,4 @@
-// P09-fix2 回归：lastSeq 只增不减 / select 切换令牌 / 切换中过期帧丢弃 / Mock 多会话。
+// 会话切换回归：lastSeq 只增不减 / select 切换令牌 / 切换中过期帧丢弃 / Mock 多会话。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useMessagesStore } from './messages';
@@ -188,7 +188,7 @@ describe('D: Mock 多会话历史', () => {
     expect(after).toBe(before + 1);
   });
 });
-describe('E: P23 流式中断修复（先问后清 + 忙回填）', () => {
+describe('E: 流式中断修复（先问后清 + 忙回填）', () => {
   it('busy 拒绝后 stream.busy 保持 true、currentTurn 不伪造、当前页零抖动', async () => {
     const sessions = useSessionsStore();
     const messages = useMessagesStore();

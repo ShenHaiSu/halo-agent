@@ -4,7 +4,7 @@ using HaloAgent.Engine.Storage.Usage;
 
 namespace HaloAgent.Engine.Server.Routing;
 
-/// <summary>P16 用量 RPC：usage.query / summary / stats / export / clear。</summary>
+/// <summary>用量 RPC：usage.query / summary / stats / export / clear。</summary>
 public sealed partial class RealMethods
 {
     private UsageQuery ParseUsageQuery(JsonElement? p, bool paged)
@@ -125,7 +125,7 @@ public sealed partial class RealMethods
          return Task.FromResult<object?>(new { csv, truncated, degraded = _usageStore.Degraded });
      }
  
-     /// <summary>P17 导出落盘：选路→引擎写盘（.tmp→rename）→reveal。旧 usage.export 保留给浏览器/Mock，桌面禁用 Blob 分支。</summary>
+     /// <summary>导出落盘：选路→引擎写盘（.tmp→rename）→reveal。旧 usage.export 保留给浏览器/Mock，桌面禁用 Blob 分支。</summary>
      public Task<object?> UsageExportFileAsync(JsonElement? p, CancellationToken ct)
      {
          if (p is null || p.Value.ValueKind != JsonValueKind.Object)

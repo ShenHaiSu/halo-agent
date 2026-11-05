@@ -10,7 +10,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>fix-model-switch 回归：ReconfigureActive 必须置位 Configured/ApiKeySet（P18/P22 重写时丢失两行）。</summary>
+/// <summary>fix-model-switch 回归：ReconfigureActive 必须置位 Configured/ApiKeySet。</summary>
 public sealed class ReconfigureActiveConfiguredTests : IDisposable
 {
     private readonly string? _prevDataDir;

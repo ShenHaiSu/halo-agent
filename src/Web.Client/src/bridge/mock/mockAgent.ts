@@ -1,5 +1,5 @@
 // src/Web.Client/src/bridge/mock/mockAgent.ts
-// D4-7 无宿主时的假引擎（P07 已改为行为表驱动，见 behaviors.ts）。
+// D4-7 无宿主时的假引擎（已改为行为表驱动，见 behaviors.ts）。
 import type { HaloFrame, PollResult } from '../types';
 import { BEHAVIORS, mockAppendMessage } from './behaviors';
 
@@ -9,12 +9,12 @@ import { BEHAVIORS, mockAppendMessage } from './behaviors';
  * ============ 设计要点 ============
  *  ① agent.prompt → turn.started → text.delta × N → turn.finished 流式
  *  ② 事件按 seq 递增，前端可以用 pollEvents 拉到“看起来真实”的流
- *  ③ P1 契约里的方法都有返回值（不返回 NotImplemented）
+ *  ③ 契约里的方法都有返回值（不返回 NotImplemented）
  *  ④ 参数校验宽松（前端传什么都能“成功”）
  * ============ 为什么事件要延迟产生 ============
  *  如果一次性产生所有事件，前端的流式渲染就测不出来。
  *  所以每条事件按 40–80ms 的间隔产生，模拟真实模型。
- * ============ P09-fix2 D ============
+ * ============ ============
  *  会话历史由 behaviors.ts 的 Mock 会话存储持有（多会话、切走切回仍在）；
  *  这里只负责事件 seq 与流式回放，回放结束把助理回复落盘进当前 Mock 会话。
  * ============ ============
@@ -23,8 +23,8 @@ import { BEHAVIORS, mockAppendMessage } from './behaviors';
 let seqCounter = 0;
 const events: HaloFrame[] = [];
 let busy = false;
-let currentTurnId = '';                    // ★ P24：当前 mock 回合 id（cancel 时用真实 id，不能硬编码 'mock'）
-const timers = new Set<number>();          // ★ P24：回放定时器句柄，cancel 时统一清理
+let currentTurnId = '';                    // ★ 当前 mock 回合 id（cancel 时用真实 id，不能硬编码 'mock'）
+const timers = new Set<number>();          // ★ 回放定时器句柄，cancel 时统一清理
 function emit(kind: string, payload: unknown): void {
   events.push({ t: 'evt', seq: ++seqCounter, k: kind, p: payload });
   // 限制内存
@@ -73,10 +73,10 @@ const SAMPLE_REPLY = [
    busy = true;
 
    const turnId = `mock-turn-${Date.now()}`;
-   currentTurnId = turnId;                    // ★ P24：记录真实 turnId
+   currentTurnId = turnId;                    // ★ 记录真实 turnId
    emit('turn.started', { turnId });
 
-   // P13 responses 示例序列：summary 推理 → unknown 原生工具 → 带 responseId 收尾。
+   // responses 示例序列：summary 推理 → unknown 原生工具 → 带 responseId 收尾。
    later(40, () => emit('reasoning.delta', { text: '先整理思路，再动手。', kind: 'summary' }));
    later(80, () =>
      emit('tool.started', {
@@ -97,7 +97,7 @@ const SAMPLE_REPLY = [
    const tick = () => {
      if (i >= chunks.length) {
        emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false, responseId: 'resp-mock-1' });
-       // P09-fix2 D：用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
+       // 用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
        mockAppendMessage('assistant', SAMPLE_REPLY);
        busy = false;
        return;
@@ -124,7 +124,7 @@ export function createMockAgent() {
         runMockTurn();
       }
       if (method === 'agent.cancel') {
-        // ★ P24：模拟真实引擎的取消时序（与 02/03 的引擎改动对齐）
+        // ★ 模拟真实引擎的取消时序（与 02/03 的引擎改动对齐）
         //   1) 停掉后续 delta 定时器（否则取消后还在吐字）
         //   2) 发 turn.finished{truncated:true, byUser:true, text:'⏹ 生成已中断', finalUsed:1}
         //   3) 发 state.busyChanged{busy:false}

@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/input/ContextWaterline.vue -->
-<!-- P23：上下文水位线（输入框右上角）。横条 0–100%，默认只展示百分比，hover/focus 切 used/total。 -->
+<!-- 上下文水位线（输入框右上角）。横条 0–100%，默认只展示百分比，hover/focus 切 used/total。 -->
 <script setup lang="ts">
 import { computed, ref, toRef } from 'vue';
 import { useSessionStore } from '@/stores/session';

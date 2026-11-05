@@ -1,4 +1,4 @@
-﻿using HaloAgent.Engine.Abstractions.Types;
+using HaloAgent.Engine.Abstractions.Types;
 
 namespace HaloAgent.Engine.Abstractions.Events;
 
@@ -22,11 +22,11 @@ public sealed record TurnFinishedPayload
     public string? Reason { get; init; }
     /// <summary>诊断用 response.id，不做链逻辑依赖。</summary>
     public string? ResponseId { get; init; }
-    /// <summary>P15：末轮序号（>=1 必需）。</summary>
+    /// <summary>末轮序号（>=1 必需）。</summary>
     public int FinalUsed { get; init; }
 
     /// <summary>
-    /// P24：本次截断是否由用户主动中断（点“停止”/Esc）造成。
+    /// 本次截断是否由用户主动中断（点“停止”/Esc）造成。
     /// 与 Truncated 的关系：
     ///   - ByUser=true  ⇒ Truncated 必为 true（用户中断一定截断）
     ///   - Truncated=true ⇏ ByUser=true（可能是超长截断 / 轮次超限 / 异常）
@@ -40,7 +40,7 @@ public sealed record TextDeltaPayload
 {
     /// <summary>增量文本。</summary>
     public string Text { get; init; } = "";
-    /// <summary>P15：归属轮序号（>=1）。</summary>
+    /// <summary>归属轮序号（>=1）。</summary>
     public int Used { get; init; } = 1;
 }
 
@@ -51,7 +51,7 @@ public sealed record ReasoningDeltaPayload
     public string Text { get; init; } = "";
     /// <summary>推理种类：full | summary。缺省 full。</summary>
     public string? Kind { get; init; }
-    /// <summary>P15：归属轮序号（>=1）。</summary>
+    /// <summary>归属轮序号（>=1）。</summary>
     public int Used { get; init; } = 1;
 }
 
@@ -70,11 +70,11 @@ public sealed record ToolStartedPayload
     public string? Kind { get; init; }
     /// <summary>原生输出类型。</summary>
     public string? RawType { get; init; }
-    /// <summary>P15：归属轮序号。</summary>
+    /// <summary>归属轮序号。</summary>
     public int Used { get; init; } = 1;
-    /// <summary>P15-D8：截断前参数总长。</summary>
+    /// <summary>截断前参数总长。</summary>
     public int ArgsTotal { get; init; }
-    /// <summary>P15-D8：是否截断。</summary>
+    /// <summary>是否截断。</summary>
     public bool Truncated { get; init; }
 }
 
@@ -89,11 +89,11 @@ public sealed record ToolFinishedPayload
     public bool Ok { get; init; }
     /// <summary>输出。</summary>
     public string Output { get; init; } = "";
-    /// <summary>P15：归属轮序号。</summary>
+    /// <summary>归属轮序号。</summary>
     public int Used { get; init; } = 1;
-    /// <summary>P15-D8：截断前输出总长。</summary>
+    /// <summary>截断前输出总长。</summary>
     public int OutputTotal { get; init; }
-    /// <summary>P15-D8：是否截断。</summary>
+    /// <summary>是否截断。</summary>
     public bool Truncated { get; init; }
 }
 
@@ -115,7 +115,7 @@ public sealed record ToolSilentAlertPayload
     public int Level { get; init; }
 }
 
-/// <summary>round.ended 载荷（P15）。</summary>
+/// <summary>round.ended 载荷。</summary>
 public sealed record RoundEndedPayload
 {
     /// <summary>轮序号。</summary>
@@ -153,9 +153,9 @@ public sealed record LlmRetryingPayload
      public long Completion { get; init; }
      /// <summary>本批是否因背压丢弃过 delta。</summary>
      public bool? Dropped { get; init; }
-     /// <summary>P23：本轮 cached token 数（默认 0，老前端忽略）。</summary>
+     /// <summary>本轮 cached token 数（默认 0，老前端忽略）。</summary>
      public long Cached { get; init; }
-     /// <summary>P23：递增后的本会话 LLM 调用总值（默认 0，老前端忽略）。</summary>
+     /// <summary>递增后的本会话 LLM 调用总值（默认 0，老前端忽略）。</summary>
      public long LlmCalls { get; init; }
  }
 
@@ -184,7 +184,7 @@ public sealed record SessionHistoryLoadedPayload
 {
     /// <summary>消息条数。</summary>
     public int Count { get; init; }
-    /// <summary>P15：回合视图。</summary>
+    /// <summary>回合视图。</summary>
     public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
 }
 
@@ -195,13 +195,13 @@ public sealed record SessionHistoryLoadedPayload
      public int Removed { get; init; }
      /// <summary>摘要。</summary>
      public string Summary { get; init; } = "";
-     /// <summary>P15：保留的回合视图（deprecated，保留兼容；新端优先用 Turns）。</summary>
+     /// <summary>保留的回合视图（deprecated，保留兼容；新端优先用 Turns）。</summary>
      public IReadOnlyList<TurnView> Kept { get; init; } = Array.Empty<TurnView>();
-     /// <summary>P18：压缩后全量回合视图（含摘要轮），前端以此替换 turns。</summary>
+     /// <summary>压缩后全量回合视图（含摘要轮），前端以此替换 turns。</summary>
      public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
-     /// <summary>P18：压缩前消息数（含 system）。</summary>
+     /// <summary>压缩前消息数（含 system）。</summary>
      public int TotalBefore { get; init; }
-     /// <summary>P18：压缩后消息数（含 system）。</summary>
+     /// <summary>压缩后消息数（含 system）。</summary>
      public int TotalAfter { get; init; }
      /// <summary>本会话内压缩序号。</summary>
      public int Seq { get; init; }
@@ -250,7 +250,7 @@ public sealed record ResyncRequiredPayload
     public string Reason { get; init; } = "";
 }
 
-/// <summary>tool.result 参数（P15-D8）。</summary>
+/// <summary>tool.result 参数（）。</summary>
 public sealed record ToolResultParams
 {
     public string ToolCallId { get; init; } = "";

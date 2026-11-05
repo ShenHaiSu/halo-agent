@@ -1,4 +1,4 @@
-// P23-R3 回归：切换窗口内 turn.finished 不再被丢弃；外来 turn 不抢 currentTurn。
+// 回归：切换窗口内 turn.finished 不再被丢弃；外来 turn 不抢 currentTurn。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useMessagesStore } from './messages';
@@ -25,7 +25,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('P23-R3: switching 中 turn.finished 正常收口', () => {
+describe('switching 中 turn.finished 正常收口', () => {
   it('切换中本轮 turn.finished 到达 → busy=false、currentTurn=null、turn 已 finalize', async () => {
     const sessions = useSessionsStore();
     const messages = useMessagesStore();

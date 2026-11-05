@@ -1,4 +1,4 @@
-﻿<!-- src/Web.Client/src/components/common/CommandPalette.vue -->
+<!-- src/Web.Client/src/components/common/CommandPalette.vue -->
 <!-- Ctrl+K 命令面板（01 §11.4 + 05 §6）：会话 + 命令 + 技能 + 人格 + 设置项，本地过滤上限 40。 -->
 <script lang="ts">
 import { ref as sharedRef } from 'vue';
@@ -232,7 +232,7 @@ const result = computed<{ groups: Array<[string, Scored[]]>; total: number }>(()
           await current.setPersona(n);
           toast.success(`已切换人格：${n}`);
         } catch (e) {
-          // P23-R5：跑轮中切换人格被拒，给友好文案（setPersona 已回滚）。
+          // 跑轮中切换人格被拒，给友好文案（setPersona 已回滚）。
           if (String((e as Error)?.message ?? '').includes('有回合正在执行')) {
             toast.warning('有回合正在执行，暂不能切换人格');
           } else throw e;
@@ -327,7 +327,7 @@ function run(): void {
   const e = flat.value[active.value];
   if (!e) return;
   recent.value = [e.entry.id, ...recent.value.filter((x) => x !== e.entry.id)].slice(0, 12);
-  // P23：entry.run 内的 busy 拒绝已由 store/PersonaEditor toast，命令面板只负责关闭面板与兜底其他错误。
+  // entry.run 内的 busy 拒绝已由 store/PersonaEditor toast，命令面板只负责关闭面板与兜底其他错误。
   void Promise.resolve()
     .then(() => e.entry.run())
     .catch((err: unknown) => {

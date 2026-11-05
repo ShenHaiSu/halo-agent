@@ -13,7 +13,7 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-    // P10：state.setProvider 已删除，改调 settings.setActive（持久化+热切）。
+    // state.setProvider 已删除，改调 settings.setActive（持久化+热切）。
 
 
     // ---------- asset.skills.list ----------
@@ -126,7 +126,7 @@ public sealed partial class RealMethods
     public Task<object?> AssetSkillsRunAsync(JsonElement? p, CancellationToken ct)
     {
         throw new RpcException(RpcError.NotSupported,
-            "技能执行尚未接通（P07 未纳入范围）",
+            "技能执行尚未接通（未纳入范围）",
             "请改用 /命令 方式或等待后续版本");
     }
 

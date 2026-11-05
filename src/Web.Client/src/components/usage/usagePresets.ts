@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/components/usage/usagePresets.ts
-// P16 用量筛选：8 预设精确语义（本地日历 → UTC ms，前端换算）。
+// src/Web.Client/src/components/usage/usagePresets.ts
+// 用量筛选：8 预设精确语义（本地日历 → UTC ms，前端换算）。
 
 export type UsagePresetKey =
   | 'today'

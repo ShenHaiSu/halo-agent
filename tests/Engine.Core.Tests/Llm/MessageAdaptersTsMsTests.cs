@@ -5,7 +5,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Llm;
 
-/// <summary>P14-1 Adapters_TsMs_RoundTrip：Stored→Chat→Stored 不丢；LLM 序列化体无 ts 字段。</summary>
+/// <summary>Adapters_TsMs_RoundTrip：Stored→Chat→Stored 不丢；LLM 序列化体无 ts 字段。</summary>
 public sealed class MessageAdaptersTsMsTests
 {
     [Fact]

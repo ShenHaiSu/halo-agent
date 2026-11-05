@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/fields/SettingRow.vue -->
-<!-- 设置行：标签 + 说明 + 控件三栏，字段错误红字（04 §6.3 §6.4）。compact 模式见 P11-02。 -->
+<!-- 设置行：标签 + 说明 + 控件三栏，字段错误红字（04 §6.3 §6.4）。compact 模式见 。 -->
 <script setup lang="ts">
 import HTooltip from '@/components/base/HTooltip.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
@@ -133,7 +133,7 @@ withDefaults(
   visibility: hidden;
   width: 13px;
 }
- @media (max-width: 700px) { /* P14：与 var(--bp-narrow) 同值；var() 不可用于 @media 条件 */
+ @media (max-width: 700px) { /* 与 var(--bp-narrow) 同值；var() 不可用于 @media 条件 */
   .srow {
     grid-template-columns: 1fr;
     gap: var(--space-1);

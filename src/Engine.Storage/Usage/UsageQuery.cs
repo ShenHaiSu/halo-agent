@@ -1,6 +1,6 @@
 namespace HaloAgent.Engine.Storage.Usage;
 
-/// <summary>P16 用量查询参数（query/summary/export 共用，无分页除外）。</summary>
+/// <summary>用量查询参数（query/summary/export 共用，无分页除外）。</summary>
 public sealed class UsageQuery
 {
     public long? FromMs { get; set; }
@@ -35,7 +35,7 @@ public sealed class UsageByModel
     public long Output { get; set; }
     public long Requests { get; set; }
     public double HitRate { get; set; }
-    /// <summary>P24：按 (provider,model) 双键聚合的 LLM 调用次数。</summary>
+    /// <summary>按 (provider,model) 双键聚合的 LLM 调用次数。</summary>
     public long LlmCalls { get; set; }
 }
 
@@ -48,7 +48,7 @@ public sealed class UsageByModel
      public long Total { get; set; }
      public long Requests { get; set; }
      public double HitRate { get; set; }
-     /// <summary>P24：本筛选范围内落盘 turn 的 LLM 调用次数总和（零用量/中断 turn 不计入）。</summary>
+     /// <summary>本筛选范围内落盘 turn 的 LLM 调用次数总和（零用量/中断 turn 不计入）。</summary>
      public long LlmCalls { get; set; }
      public List<UsageByDay> ByDay { get; set; } = new();
      public List<UsageByModel> ByModel { get; set; } = new();

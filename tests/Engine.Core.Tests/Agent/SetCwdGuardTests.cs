@@ -3,8 +3,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P10-fix3 C/D/E：SetCwd 加固 + LoadHistory 回填 + UpdateCwdAtomic。</summary>
-public sealed class P10Fix3SetCwdTests
+/// <summary>SetCwd 加固 + LoadHistory 回填 + UpdateCwdAtomic。</summary>
+public sealed class SetCwdGuardTests
 {
     [Fact]
     public void SetCwd_Normalizes_Relative_And_TildePaths()

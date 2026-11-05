@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   打包前置体检：检查 dist 完整性 + build/ 资源缺口 + 环境。只读，不改任何文件。
 
@@ -136,11 +136,11 @@ try {
         if ($m -eq 0x8664) { Ok 'dist\win-x64 存在，libcef.dll PE=0x8664（x64）' }
         else { Miss ("dist\win-x64 的 libcef.dll PE=0x{0:X4}，期望 0x8664" -f $m) }
     } else {
-        Miss 'dist\win-x64 不存在 —— P0 阻塞：跑 build-dist.ps1 -Platform x64（见 §7.1）'
+        Miss 'dist\win-x64 不存在 —— 阻塞：跑 build-dist.ps1 -Platform x64（见 §7.1）'
     }
 
     # ============================================================
-    Head '4. build\ 资源（P0 阻塞项）'
+    Head '4. build\ 资源（阻塞项）'
     # ============================================================
     $need = [ordered]@{
         'installer.iss'                    = '安装器主脚本'

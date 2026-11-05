@@ -1,5 +1,5 @@
-// src/Web.Client/src/devtools/p5diag.ts
-// P5 验收诊断工具（见 07-验收方法.md §7）。
+// src/Web.Client/src/devtools/diag.ts
+// 验收诊断工具（见 07-验收方法.md §7）。
 //
 // 挂载条件（main.ts）：import.meta.env.DEV || location.search 含 diag=1。
 // 只读原则：所有命令只注入 + 观察 + 打印，不写盘；每轮结束恢复 store 快照。
@@ -19,15 +19,15 @@ class Asserts {
   }
   dump(title: string): boolean {
     // eslint-disable-next-line no-console
-    console.log(`[p5diag] ==== ${title} ====`);
+    console.log(`[diag] ==== ${title} ====`);
     for (const r of this.results) {
       // eslint-disable-next-line no-console
-      console.log('[p5diag]', r);
+      console.log('[diag]', r);
     }
     const total = this.results.length;
     const pass = this.results.filter((r) => r.startsWith('[OK]')).length;
     // eslint-disable-next-line no-console
-    console.log('[p5diag] ' + pass + '/' + total + (pass === total ? ' [OK]' : ' [NG]'));
+    console.log('[diag] ' + pass + '/' + total + (pass === total ? ' [OK]' : ' [NG]'));
     return pass === total;
   }
 }
@@ -255,7 +255,7 @@ async function events(): Promise<void> {
     await emit('state.busyChanged', { busy: false, queueLength: 0 });
     a.ok('23 busyChanged → busy=false', s.busy === false);
 
-    a.ok('24 resync.required → 见 __p5diag.resync()', true);
+    a.ok('24 resync.required → 见 __diag.resync()', true);
 
     a.dump('24 事件 → UI 变化');
   });
@@ -296,7 +296,7 @@ async function ime(): Promise<void> {
   const ta = document.querySelector<HTMLTextAreaElement>('.composer-input textarea');
   if (!ta) {
     // eslint-disable-next-line no-console
-    console.log('[p5diag] [NG] 找不到输入框');
+    console.log('[diag] [NG] 找不到输入框');
     return;
   }
   ta.focus();
@@ -366,7 +366,7 @@ async function mentionSlash(): Promise<void> {
   const ta = document.querySelector<HTMLTextAreaElement>('.composer-input textarea');
   if (!ta) {
     // eslint-disable-next-line no-console
-    console.log('[p5diag] [NG] 找不到输入框');
+    console.log('[diag] [NG] 找不到输入框');
     return;
   }
   ta.focus();
@@ -483,7 +483,7 @@ async function draftRestore(): Promise<void> {
   const ta = document.querySelector<HTMLTextAreaElement>('.composer-input textarea');
   if (!ta) {
     // eslint-disable-next-line no-console
-    console.log('[p5diag] [NG] 找不到输入框');
+    console.log('[diag] [NG] 找不到输入框');
     return;
   }
   failNext('agent.prompt');
@@ -567,7 +567,7 @@ async function askA11y(): Promise<void> {
   const card = document.querySelector('[data-ask-card]');
   if (!card) {
     // eslint-disable-next-line no-console
-    console.log('[p5diag] [NG] 没有待答询问，先执行 __p5diag.askWarning() 或手动触发');
+    console.log('[diag] [NG] 没有待答询问，先执行 __diag.askWarning() 或手动触发');
     return;
   }
   a.ok('role=alertdialog', card.getAttribute('role') === 'alertdialog');
@@ -974,9 +974,9 @@ async function baseline(): Promise<void> {
   parseMarkdown(big.slice(0, 50000));
   const dt = performance.now() - t0;
   // eslint-disable-next-line no-console
-  console.log(`[p5diag] C-04 50KB Markdown 解析: ${dt.toFixed(1)} ms`);
+  console.log(`[diag] C-04 50KB Markdown 解析: ${dt.toFixed(1)} ms`);
   // eslint-disable-next-line no-console
-  console.log('[p5diag] 其余 C 项见 C-baseline.md（浏览器实测以 P6 真机为准）');
+  console.log('[diag] 其余 C 项见 C-baseline.md（浏览器实测以 真机为准）');
 }
 
 // ---- 工具状态一览 ----
@@ -1004,7 +1004,7 @@ async function toolStates(): Promise<void> {
 // ---- runAll ----
 export async function runAll(): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[p5diag] 开始 P5 一键验收…');
+  console.log('[diag] 开始 一键验收…');
   await events();
   await resync();
   await ime();
@@ -1030,10 +1030,10 @@ export async function runAll(): Promise<void> {
   await e2e();
   await baseline();
   // eslint-disable-next-line no-console
-  console.log('[p5diag] 完成。把本页输出粘到 docs/evidence/P5/A-browser-diag.txt');
+  console.log('[diag] 完成。把本页输出粘到 docs/evidence/P5/A-browser-diag.txt');
 }
 
-export const __p5diag = {
+export const __diag = {
   runAll,
   events,
   resync,
@@ -1062,8 +1062,8 @@ export const __p5diag = {
   failNext,
 };
 
-export function mountP5Diag(): void {
-  (window as unknown as { __p5diag?: unknown }).__p5diag = __p5diag;
+export function mountDiag(): void {
+  (window as unknown as { __diag?: unknown }).__diag = __diag;
   // eslint-disable-next-line no-console
-  console.log('[p5diag] 已挂载：执行 __p5diag.runAll() 开始验收');
+  console.log('[diag] 已挂载：执行 __diag.runAll() 开始验收');
 }

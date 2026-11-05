@@ -127,7 +127,7 @@ async function loadTheme(id: string): Promise<ThemeFile> {
   const local = (builtinThemes as Record<string, ThemeFile | undefined>)[id];
   if (local) return { ...local, tokens: { ...(local.tokens as Record<string, string>) } };
 
-  // 用户主题：经 transport 走引擎（P07：契约 asset.themes.get）
+  // 用户主题：经 transport 走引擎（契约 asset.themes.get）
   const file = await transport.request<ThemeFile>('asset.themes.get', { id });
   const tokens = (file.tokens ?? {}) as Record<string, string>;
   const check = validateThemeTokens(tokens);

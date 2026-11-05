@@ -34,7 +34,7 @@ export function createMockHost() {
       console.debug('[mock] windowDragStart（浏览器里无效果）');
     },
     async windowResizeStart(hitTest: number): Promise<void> {
-      // 浏览器 Mock 下无效果（P07-Enhance 04 真机验收项）。
+      // 浏览器 Mock 下无效果（真机验收项）。
       console.debug('[mock] windowResizeStart（浏览器里无效果）', hitTest);
     },
 

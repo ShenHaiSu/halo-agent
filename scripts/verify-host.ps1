@@ -1,6 +1,6 @@
-﻿<#
+<#
 .SYNOPSIS
-  P3 宿主与 CefSharp 验收总入口（fail fast），证据落到 docs/evidence/P3/。
+  宿主与 CefSharp 验收总入口（fail fast），证据落到 docs/evidence/P3/。
   覆盖全部可自动化项；人工项（窗口/托盘/真机）按 06-验收方法.md 逐条执行。
 #>
 [CmdletBinding()] param([switch]$SkipBuild, [string]$Only = '')

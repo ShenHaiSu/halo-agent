@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/detail/UsagePane.vue -->
-<!-- P24：右抽屉本会话用量（usage.summary({sessionId}) 本会话合计；llmCalls 读 DB 落盘值，与内存事件值取 max）。 -->
+<!-- 右抽屉本会话用量（usage.summary({sessionId}) 本会话合计；llmCalls 读 DB 落盘值，与内存事件值取 max）。 -->
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useMessagesStore } from '@/stores/messages';
@@ -20,7 +20,7 @@ const total = computed(() => summary.value?.total ?? input.value + output.value)
 const hitRateText = computed(() => formatHitRate(input.value, summary.value?.hitRate ?? 0));
 const turns = computed(() => messages.turns.length);
 const requests = computed(() => summary.value?.requests ?? 0);
-// P24：DB 落盘滞后 turn 一拍（ordering），同进程内内存事件值更新；取 max 避免回退跳变；老引擎缺字段按 0。
+// DB 落盘滞后 turn 一拍（ordering），同进程内内存事件值更新；取 max 避免回退跳变；老引擎缺字段按 0。
 const llmCalls = computed(() => Math.max(summary.value?.llmCalls ?? 0, session.llmCalls));
 
 const isEmpty = computed(

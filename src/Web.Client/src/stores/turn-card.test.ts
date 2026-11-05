@@ -1,4 +1,4 @@
-// P15 前端验收 9~15：turncard-routing / round-move / stream-stable-parity / dropped-fallback / process-autofold / tool-lazy / 反例
+// 前端验收 9~15：turncard-routing / round-move / stream-stable-parity / dropped-fallback / process-autofold / tool-lazy / 反例
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';

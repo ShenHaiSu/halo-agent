@@ -1,7 +1,7 @@
 // src/Web.Client/src/components/settings/validators.ts
 
 /**
- * P10 设置页字段级校验器。全部纯函数，无依赖，可单测。
+ * 设置页字段级校验器。全部纯函数，无依赖，可单测。
  */
 
 export interface FieldError {
@@ -59,7 +59,7 @@ export function validateJson(text: string): JsonValidation {
 
 export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 
- /** 网络分页校验（P22 瘦身：代理模式 + 地址；retry 已搬家至行为页） */
+ /** 网络分页校验（瘦身：代理模式 + 地址；retry 已搬家至行为页） */
  export function validateNetworkForm(f: { mode: string; url: string }): FieldError[] {
    const errs: FieldError[] = [];
    if (!['direct', 'system', 'manual'].includes(f.mode))
@@ -72,7 +72,7 @@ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
    return errs;
  }
  
- /** P22：人格名格式（前端只做格式拦，存在性以后端拒存为准） */
+ /** 人格名格式（前端只做格式拦，存在性以后端拒存为准） */
  export function isValidPersonaName(name: string): boolean {
    const t = (name ?? '').trim();
    if (!t) return true;
@@ -83,7 +83,7 @@ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
    return true;
  }
  
- /** P22 行为页校验：maxTurns（整数且 0 或 1~500）、retry（0~8）、compact（1~10）、persona（空或 ≤64 且无非法文件名字符） */
+ /** 行为页校验：maxTurns（整数且 0 或 1~500）、retry（0~8）、compact（1~10）、persona（空或 ≤64 且无非法文件名字符） */
  export function validateBehaviorForm(f: {
    maxTurns: unknown;
    retry: unknown;
@@ -104,7 +104,7 @@ export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
    return errs;
  }
 
-/** P18：provider network 三选项。 */
+/** provider network 三选项。 */
 export const PROVIDER_NETWORKS = ['follow', 'proxy', 'direct'] as const;
 export type ProviderNetwork = (typeof PROVIDER_NETWORKS)[number];
 
@@ -113,7 +113,7 @@ export function isValidProviderNetwork(n: string): boolean {
   return (PROVIDER_NETWORKS as readonly string[]).includes(n);
 }
 
- /** P13 responses：模型协议白名单（chat/responses 放行，其余禁用）。 */
+ /** responses：模型协议白名单（chat/responses 放行，其余禁用）。 */
  export const SUPPORTED_MODEL_PROTOCOLS = ['chat', 'responses'] as const;
  export type SupportedModelProtocol = (typeof SUPPORTED_MODEL_PROTOCOLS)[number];
 

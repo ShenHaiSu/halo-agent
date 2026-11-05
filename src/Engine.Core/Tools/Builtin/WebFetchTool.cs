@@ -51,7 +51,7 @@ public sealed class WebFetchTool : ITool
          HttpClient client;
          try
          {
-             // P18：逐 URL 旁路预检（本地/内网永远直连，不走 system 通道）
+             // 逐 URL 旁路预检（本地/内网永远直连，不走 system 通道）
              var eff = HaloAgent.Engine.Storage.Config.ConfigStore.IsBypassedUrl(url)
                  ? HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None
                  : ctx.Host.EffectiveProxy;

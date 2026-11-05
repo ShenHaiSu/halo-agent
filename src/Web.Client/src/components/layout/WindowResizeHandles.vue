@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/layout/WindowResizeHandles.vue -->
-<!-- P07-Enhance 04：窗体 8 方位缩放热区（B 方案思想：前端 mousedown 同步直调宿主 windowResizeStart）。 -->
+<!-- 窗体 8 方位缩放热区（B 方案思想：前端 mousedown 同步直调宿主 windowResizeStart）。 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { hostBridge } from '@/bridge/host';

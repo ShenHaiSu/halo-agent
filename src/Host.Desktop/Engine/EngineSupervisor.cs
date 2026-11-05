@@ -1,6 +1,6 @@
 namespace HaloAgent.Desktop.Engine;
 
-/// <summary>P3 引擎状态机：Starting → Ready ⇄ Restarting → Failed / Stopped。</summary>
+/// <summary>引擎状态机：Starting → Ready ⇄ Restarting → Failed / Stopped。</summary>
 public enum EngineState { Starting, Ready, Restarting, Failed, Stopped }
 
 public sealed record EngineStatus(EngineState State, int? Pid = null, string? Reason = null);
@@ -9,7 +9,7 @@ public sealed record EngineStatus(EngineState State, int? Pid = null, string? Re
 /// 引擎监督者：启动、健康监控、崩溃重启、受控关闭。
 /// 自动重启上限 3 次、间隔 1s/2s/4s（确定性崩溃无限重启只会打满 CPU）。
 /// 管道就绪等待 30s 超时。关闭时先停心跳再停进程。
-/// 另保留 P1 兼容面（State/TryGetClient/RetryInBackground/排队重放/BuildPipeName）。
+/// 另保留 兼容面（State/TryGetClient/RetryInBackground/排队重放/BuildPipeName）。
 /// </summary>
 public sealed class EngineSupervisor : IAsyncDisposable
 {
@@ -39,12 +39,12 @@ public sealed class EngineSupervisor : IAsyncDisposable
         State = new SupervisedState(SupervisorPhase.Idle, null, null);
     }
 
-    // ---- P3 新面 ----
+    // ---- 新面 ----
     public EngineStatus Status { get; private set; }
     public EngineClient? Client => _client;
     public event EventHandler<EngineStatus>? StatusChanged;
 
-    // ---- P1 兼容面 ----
+    // ---- 兼容面 ----
     public SupervisedState State { get; private set; }
     public event Action<SupervisedState>? LegacyStateChanged;
     public EngineClient? TryGetClient() => _client;
@@ -63,7 +63,7 @@ public sealed class EngineSupervisor : IAsyncDisposable
 
     public async Task StartAsync() => await StartInternalAsync().ConfigureAwait(false);
 
-    /// <summary>P1 兼容：长驻守护（退避 200→5000ms / 10 次）。保留给旧调用方；新代码用 StartAsync().</summary>
+    /// <summary>兼容：长驻守护（退避 200→5000ms / 10 次）。保留给旧调用方；新代码用 StartAsync().</summary>
     public async Task StartAsync(CancellationToken ct)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
@@ -201,7 +201,7 @@ public sealed class EngineSupervisor : IAsyncDisposable
     }
 
     // ============================================================
-    //  崩溃与重启（P3：心跳失败与 Exited 双重保护 + 3 次上限）
+    //  崩溃与重启（心跳失败与 Exited 双重保护 + 3 次上限）
     // ============================================================
 
     private void OnProcessExited(int exitCode)
@@ -255,7 +255,7 @@ public sealed class EngineSupervisor : IAsyncDisposable
         await StartInternalAsync().ConfigureAwait(false);
     }
 
-    /// <summary>P1 兼容：后台重试。</summary>
+    /// <summary>兼容：后台重试。</summary>
     public void RetryInBackground()
     {
         lock (_lock)

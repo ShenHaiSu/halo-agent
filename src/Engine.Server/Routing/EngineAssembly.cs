@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace HaloAgent.Engine.Server.Routing;
 
 /// <summary>
-/// P2 装配产物：一组互相连好的对象（路由 / 状态 / 总线 / 会话 / 存储 / 工具）。
+/// 装配产物：一组互相连好的对象（路由 / 状态 / 总线 / 会话 / 存储 / 工具）。
 /// 由 FrameServer 驱动；释放时关会话与存储（总线由 FrameServer 收尾）。
 /// </summary>
 public sealed class AssembledEngine : IAsyncDisposable
@@ -50,7 +50,7 @@ public sealed class AssembledEngine : IAsyncDisposable
 }
 
 /// <summary>
-/// P10 装配：按 active 装配；失败（无 active / provider 空 / model 缺）则引擎仍启动但 Configured=false。
+/// 装配：按 active 装配；失败（无 active / provider 空 / model 缺）则引擎仍启动但 Configured=false。
 /// </summary>
 public static class EngineAssembly
 {
@@ -104,7 +104,7 @@ public static class EngineAssembly
          // 4) 建通道总线 + 会话（有管道 = 有 UI，可交互确认）
          var bus = new EventBus(channel, busLogger);
          var initialMode = PrefsStore.LoadPermissionMode() ?? PermissionMode.Ask;
-         // P16：用量库单例（与 SessionStore 同级，AgentSession 落盘与 RPC 查询共用同一实例）
+         // 用量库单例（与 SessionStore 同级，AgentSession 落盘与 RPC 查询共用同一实例）
          var usageStore = new HaloAgent.Engine.Storage.Usage.UsageStore(Paths.UsageDbFile);
          var session = new AgentSession(
              llm, tools, store, bus,
@@ -147,7 +147,7 @@ public static class EngineAssembly
              Retry = resolved?.Retry ?? 0,
              Persona = resolved?.Persona ?? "",
          };
-         // 6) 注册路由（P10 新契约；旧方法删除）
+         // 6) 注册路由（新契约；旧方法删除）
          var real = new RealMethods(session, store, tools, Paths.DataDir, methodsLogger, shutdownCt, usageStore);
           var stub = new StubMethods(state);
            router.RegisterAll(

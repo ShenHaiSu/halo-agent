@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Storage.Tests.Sessions;
 
-/// <summary>P18：RewriteAfterCompact 原子重写（meta 保留、system 不落盘、行数正确）。</summary>
+/// <summary>RewriteAfterCompact 原子重写（meta 保留、system 不落盘、行数正确）。</summary>
 public sealed class RewriteAfterCompactTests : IDisposable
 {
     private readonly string _dir;

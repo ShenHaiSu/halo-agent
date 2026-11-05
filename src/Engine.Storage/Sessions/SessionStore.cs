@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HaloAgent.Engine.Storage;
@@ -157,7 +157,7 @@ public sealed class SessionStore : IDisposable
          }
      }
 
-     /// <summary>P10-fix3 D2：只换首行 meta.cwd（原子替换）。无文件/0字节则跳过，下次 Record 自然带新 cwd。</summary>
+     /// <summary>只换首行 meta.cwd（原子替换）。无文件/0字节则跳过，下次 Record 自然带新 cwd。</summary>
      public void UpdateCwdAtomic(string newCwd)
      {
          string? path;
@@ -207,7 +207,7 @@ public sealed class SessionStore : IDisposable
          catch { }
      }
  
-     /// <summary>P18：压缩后原子重写历史文件（tmp+rename，与 UpdateCwdAtomic 同口径）。
+     /// <summary>压缩后原子重写历史文件（tmp+rename，与 UpdateCwdAtomic 同口径）。
      /// 入参为压缩后应落盘的全部消息（不含 system，与 ReadHistory 对称：文件从不存 system）。
      /// 成功则文件变小，失败抛异常（调用方判为压缩失败，内存不换、不断链、不发 compacted）。</summary>
      public void RewriteAfterCompact(IReadOnlyList<StoredMessage> keepPlusSummary)
@@ -297,7 +297,7 @@ public sealed class SessionStore : IDisposable
 
          if (!File.Exists(path)) return (null, messages, 0);
 
-         // P10-fix3：允许与追加写句柄并发读（writer 以 FileShare.Read 打开，读端需 ReadWrite 共享）。
+         // 允许与追加写句柄并发读（writer 以 FileShare.Read 打开，读端需 ReadWrite 共享）。
          IEnumerable<string> ReadAllLinesShared(string p)
          {
              using var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

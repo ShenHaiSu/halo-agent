@@ -1,4 +1,4 @@
-﻿ using HaloAgent.Engine.Abstractions.Types;
+ using HaloAgent.Engine.Abstractions.Types;
  using System.Text.Json;
  using System.Text.Json.Serialization;
  
@@ -7,7 +7,7 @@ public enum Role { System, User, Assistant, Tool }
 
 public enum LlmProtocol { Chat, Responses }
 
-/// <summary>图片/文本内容块（P10：ChatMessage 发送格式升级）。</summary>
+/// <summary>图片/文本内容块（ChatMessage 发送格式升级）。</summary>
 public sealed record ChatContentPart
 {
     [JsonPropertyName("type")] public string Type { get; init; } = "text"; // text | image_url
@@ -38,11 +38,11 @@ public record ChatMessage
     public List<ToolCall>? ToolCalls { get; init; }
     public string? ToolCallId { get; init; }
     public string? ReasoningContent { get; init; }
-    /// <summary>P14-D2：内存透传 UTC ms，永不进 LLM 请求体（JsonIgnore + Converter 不读写）。0=未知。</summary>
+    /// <summary>内存透传 UTC ms，永不进 LLM 请求体（JsonIgnore + Converter 不读写）。0=未知。</summary>
     [JsonIgnore] public long TsMs { get; init; }
-    /// <summary>P15：轮序号，0=非回合，>=1 轮内序号。内存透传，不进请求体。</summary>
+    /// <summary>轮序号，0=非回合，>=1 轮内序号。内存透传，不进请求体。</summary>
     [JsonIgnore] public int Ord { get; init; }
-    /// <summary>P15 TurnId</summary>
+    /// <summary>TurnId</summary>
     [JsonIgnore] public string? TurnId { get; init; }
 
     /// <summary>是否为上下文压缩标记消息。</summary>
@@ -236,7 +236,7 @@ public interface ILlmClient
      public string BaseUrl { get; init; } = "";
      public string Model { get; init; } = "";
      public string? ApiKey { get; init; }
-     /// <summary>P18：单个 EffectiveProxy 值对象（旧 ProxyUrl 已删除，避免双源）。</summary>
+     /// <summary>单个 EffectiveProxy 值对象（旧 ProxyUrl 已删除，避免双源）。</summary>
      public EffectiveProxy Proxy { get; init; } = EffectiveProxy.None;
      /// <summary>请求头模板原文（含 `{{session_id}}` / `{{session_hash}}`）；请求时由 HeaderTemplate 展开。</summary>
      public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; }
@@ -245,7 +245,7 @@ public interface ILlmClient
      public int? MaxTokens { get; init; }
      public bool AcceptsImages { get; init; }
       public bool IncludeReasoningHistory { get; init; } = true;
-      /// <summary>P16-F2：responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
+      /// <summary>responses 是否要求服务端持久化（store=true 才能多轮 previous_response_id 链）。</summary>
       public bool StoreResponses { get; init; } = true;
   }
 /// <summary>发给模型的工具定义（OpenAI tools 格式）。</summary>

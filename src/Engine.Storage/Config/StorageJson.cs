@@ -4,7 +4,7 @@ namespace HaloAgent.Engine.Storage.Config;
 
 /// <summary>
 /// 存储层统一 JSON 配置：snake_case。
-/// 与通信用的 camelCase（P1 HaloJson.Options）分开，两套必须区分。
+/// 与通信用的 camelCase（HaloJson.Options）分开，两套必须区分。
 /// </summary>
 public static class StorageJson
 {

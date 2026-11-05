@@ -1,9 +1,9 @@
 // src/Web.Client/src/utils/formatZhCount.test.ts
-// P21 用量单位口径单测：<1万原始值 / 万档两位 / 舍入溢出进位 / 亿兆档 / 负数非有限。
+// 用量单位口径单测：<1万原始值 / 万档两位 / 舍入溢出进位 / 亿兆档 / 负数非有限。
 import { describe, expect, it } from 'vitest';
 import { formatZhCount } from './format';
 
-describe('formatZhCount (P21)', () => {
+describe('formatZhCount ', () => {
   it('<1万原始值（含千分位）', () => {
     expect(formatZhCount(0)).toBe('0');
     expect(formatZhCount(999)).toBe('999');

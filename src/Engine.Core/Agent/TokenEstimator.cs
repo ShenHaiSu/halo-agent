@@ -1,7 +1,7 @@
 namespace HaloAgent.Engine.Core.Agent;
 
 /// <summary>
-/// P23：确定性字符估算（非分词器）。
+/// 确定性字符估算（非分词器）。
 /// 公式冻结：EstimateTokens(text) = max(1, ceil(utf16Length / 4))，无超长钳制。
 /// 误差由前端“预估”角标覆盖，禁止为此引入分词器。
 /// </summary>

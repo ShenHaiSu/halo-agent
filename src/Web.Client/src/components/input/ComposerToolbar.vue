@@ -9,7 +9,7 @@ defineProps<{
   canSend: boolean;
   askPending: boolean;
   cwd: string;
-  cancelling?: boolean;        // ★ P24-D3
+  cancelling?: boolean;        // ★ 取消中态。
 }>();
 
  defineEmits<{

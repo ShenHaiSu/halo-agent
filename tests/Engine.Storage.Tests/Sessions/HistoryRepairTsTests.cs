@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Storage.Tests.Sessions;
 
-/// <summary>P14-4 Repair_Preserves_Ts：占位 ts = parent+1，孤儿丢弃不留洞。</summary>
+/// <summary>Repair_Preserves_Ts：占位 ts = parent+1，孤儿丢弃不留洞。</summary>
 public sealed class HistoryRepairTsTests
 {
     private static StoredMessage AssistantWithCalls(long tsMs, params string[] ids) =>

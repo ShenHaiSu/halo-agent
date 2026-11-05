@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/CompactionCard.vue -->
-<!-- P18 上下文压缩分隔栏：标题行追加 移除 N 条·保留 M 轮；summary 为空不挂载（由 MessageList v-if 控制）。 -->
+<!-- 上下文压缩分隔栏：标题行追加 移除 N 条·保留 M 轮；summary 为空不挂载（由 MessageList v-if 控制）。 -->
 <script setup lang="ts">
 import { ref } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
@@ -9,9 +9,9 @@ withDefaults(
     summary: string;
     /** 保留的消息（可选，显示前 KEEP_PREVIEW 条） */
     kept?: string[];
-    /** P18：移除条数（可选） */
+    /** 移除条数（可选） */
     removed?: number | null;
-    /** P18：保留轮数（可选） */
+    /** 保留轮数（可选） */
     keptCount?: number | null;
   }>(),
   { kept: () => [], removed: null, keptCount: null }

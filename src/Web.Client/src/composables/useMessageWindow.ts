@@ -1,5 +1,5 @@
 // src/Web.Client/src/composables/useMessageWindow.ts
-// P5 D5-3 消息列表窗口化（见 03 §5.2）：不做完整虚拟滚动（消息高度不定，
+// D5-3 消息列表窗口化（见 03 §5.2）：不做完整虚拟滚动（消息高度不定，
 // 测量会强制同步布局导致滚动掉帧），只渲染"关注点"附近 31 条，其余折叠为占位。
 //
 // 分层注意：composables 禁止 import stores（check-layering），所以这里用泛型，

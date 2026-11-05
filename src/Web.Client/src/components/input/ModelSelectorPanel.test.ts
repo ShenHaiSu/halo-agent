@@ -86,7 +86,7 @@ describe('ModelSelectorPanel', () => {
     });
     const options = w.findAll('[role="option"]');
     expect(options[0]!.classes()).toContain('current');
-    // P13：chat/responses 均放行，只有未知协议才 disabled。
+    // chat/responses 均放行，只有未知协议才 disabled。
     expect(options[1]!.classes()).not.toContain('disabled');
     expect(options[1]!.attributes('aria-disabled')).toBeUndefined();
     expect(options[1]!.text()).toContain('resp');

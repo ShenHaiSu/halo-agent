@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/fields/ModelProbe.vue -->
-<!-- 模型探测：loading + 计时 + 超时 10s + 成功弹名单 dialog + 失败保留手填。P10：带头、走对代理；含会话模板的头跳过。P12：名单闭环 + 空 headers 省传。 -->
+<!-- 模型探测：loading + 计时 + 超时 10s + 成功弹名单 dialog + 失败保留手填。带头、走对代理；含会话模板的头跳过。名单闭环 + 空 headers 省传。 -->
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import { transport } from '@/transport';

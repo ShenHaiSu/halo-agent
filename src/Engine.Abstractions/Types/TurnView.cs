@@ -1,6 +1,6 @@
-﻿namespace HaloAgent.Engine.Abstractions.Types;
+namespace HaloAgent.Engine.Abstractions.Types;
 
-/// <summary>P15：回合视图。用户消息 + 同回合排队插入 + 中途产出 + 末轮正文。</summary>
+/// <summary>回合视图。用户消息 + 同回合排队插入 + 中途产出 + 末轮正文。</summary>
 public sealed record TurnView
 {
     /// <summary>回合 id。</summary>

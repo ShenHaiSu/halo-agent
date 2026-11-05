@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/index.ts
-// P5 store 注册入口。
+// store 注册入口。
 import { createPinia, type Pinia } from 'pinia';
 
 let pinia: Pinia | null = null;

@@ -1,5 +1,5 @@
-﻿<!-- src/Web.Client/src/components/settings/pages/UsageAnalyticsPage.vue -->
-<!-- P17 用量页：筛选表单 + 预设 + 汇总卡 + 主图（双轴） + 饼图 + 明细表 + 治理区（三子卡 + 危险区）。查询态，isDirty 恒 false。 -->
+<!-- src/Web.Client/src/components/settings/pages/UsageAnalyticsPage.vue -->
+<!-- 用量页：筛选表单 + 预设 + 汇总卡 + 主图（双轴） + 饼图 + 明细表 + 治理区（三子卡 + 危险区）。查询态，isDirty 恒 false。 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { transport } from '@/transport';
@@ -62,7 +62,7 @@ const page = ref(1);
 const pageSize = ref(20);
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 const providerDict = ref<ProviderDict>({});
-// P17-04 隐私遮蔽：默认开，切换只重绘 + 重渲染（不重查）。
+// 隐私遮蔽：默认开，切换只重绘 + 重渲染（不重查）。
 const maskOn = ref(isMaskEnabled());
 
 // ---------- 数据 ----------
@@ -317,7 +317,7 @@ function saveMonthlyLimit(): void {
   toast.success('配额阈值已保存');
 }
 
-// ---------- 导出 CSV（P17-06：桌面选路→引擎落盘→reveal；浏览器走 Blob 老路） ----------
+// ---------- 导出 CSV（桌面选路→引擎落盘→reveal；浏览器走 Blob 老路） ----------
 function suggestedName(): string {
   const d = new Date();
   const pad = (n: number): string => String(n).padStart(2, '0');
@@ -386,7 +386,7 @@ async function onExport(): Promise<void> {
   }
 }
 
-// ---------- 数据治理（P17-05：三子卡 + 危险区；两条清理路径共用一 HDialog） ----------
+// ---------- 数据治理（三子卡 + 危险区；两条清理路径共用一 HDialog） ----------
 async function onClear90(): Promise<void> {
   showClearDialog.value = true;
   showFullClear.value = false;
@@ -430,7 +430,7 @@ async function confirmFullClear(): Promise<void> {
   }
 }
 
-// ---------- 图表（P17-02：主图双轴 + 模型饼图；命中率小图已下线） ----------
+// ---------- 图表（主图双轴 + 模型饼图；命中率小图已下线） ----------
 let trendCtl: { chart: EChartsInstance; dispose: () => void } | null = null;
 let pieCtl: { chart: EChartsInstance; dispose: () => void } | null = null;
 const trendEl = ref<HTMLElement | null>(null);

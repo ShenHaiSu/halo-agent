@@ -1,4 +1,4 @@
-﻿using HaloAgent.Engine.Abstractions.Types;
+using HaloAgent.Engine.Abstractions.Types;
 
 namespace HaloAgent.Engine.Abstractions.Methods;
 
@@ -25,7 +25,7 @@ public sealed record SessionResumeResult
 {
     /// <summary>消息条数。</summary>
     public int Count { get; init; }
-    /// <summary>P15：回合视图。</summary>
+    /// <summary>回合视图。</summary>
     public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
 }
 
@@ -97,7 +97,7 @@ public sealed record SessionClearResult
      public int Removed { get; init; }
      /// <summary>摘要。</summary>
      public string Summary { get; init; } = "";
-     /// <summary>P18：压缩前消息数（含 system）。</summary>
+     /// <summary>压缩前消息数（含 system）。</summary>
      public int TotalBefore { get; init; }
      /// <summary>压缩后消息数（含 system）。</summary>
      public int TotalAfter { get; init; }

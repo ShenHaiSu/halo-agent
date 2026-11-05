@@ -1,4 +1,4 @@
-// P13 responses 契约字段回归：kind/rawType/payload/reasoningKind/responseId 透传 + 缺省回落 + dropped:boolean。
+// responses 契约字段回归：kind/rawType/payload/reasoningKind/responseId 透传 + 缺省回落 + dropped:boolean。
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { normalizeToolCalls, useMessagesStore } from './messages';
@@ -10,7 +10,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
-describe('normalizeToolCalls P13 字段', () => {
+describe('normalizeToolCalls 字段', () => {
   it('显式读 kind/rawType/payload', () => {
     const out = normalizeToolCalls([
       { id: 't1', name: 'web_search', args: '{}', kind: 'unknown', rawType: 'web_search', payload: { a: 1 } },
@@ -29,7 +29,7 @@ describe('normalizeToolCalls P13 字段', () => {
   });
 });
 
-describe('applySnapshot P13 字段', () => {
+describe('applySnapshot 字段', () => {
   it('reasoningKind 缺省 full，responseId 透传', () => {
     const messages = useMessagesStore();
     messages.applySnapshot({
@@ -45,7 +45,7 @@ describe('applySnapshot P13 字段', () => {
   });
 });
 
-describe('dispatchFrames P13 字段', () => {
+describe('dispatchFrames 字段', () => {
   it('reasoning.delta kind / tool.started kind+rawType / turn.finished responseId / usage dropped:boolean', () => {
     const messages = useMessagesStore();
     const stream = useStreamStore();

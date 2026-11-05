@@ -1,5 +1,5 @@
 /* src/Web.Client/src/styles/chat.css
- * P5 D5-3/D5-4 聊天区样式基座：放在 @tailwind utilities 之后引入（@import './chat.css'）。
+ * D5-3/D5-4 聊天区样式基座：放在 @tailwind utilities 之后引入（@import './chat.css'）。
  * 各组件已有 scoped 样式，这里只补全局滚动条行为、表格横滚与长内容断行基线。
  * 全部用 hsl(var(--...)) tokens，无硬编码颜色。
  */
@@ -91,7 +91,7 @@ html[data-no-blur='true'] .msg-inner * {
   white-space: nowrap;
 }
 
-/* ============ P15 chat-compact（方案 A：默认态零改动，去类即回滚） ============
+/* ============ chat-compact（方案 A：默认态零改动，去类即回滚） ============
  * 挂载点：MessageList.vue .msg-inner.density-compact（默认挂载）。
  * 选择器一律 .msg-inner.density-compact 后代三段式（0,3,0），压过 scoped .x[data-v]（0,2,0）。
  * 自身容器用 .msg-scroll .msg-inner.density-compact（0,3,0）提权；滚动余量用 :has 向上覆盖。

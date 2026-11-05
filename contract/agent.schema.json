@@ -1589,7 +1589,7 @@
                 },
                 "displayName": {
                   "type": "string",
-                  "description": "P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
+                  "description": "别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
                 },
                 "baseUrl": {
                   "type": "string"
@@ -1622,7 +1622,7 @@
                       },
                       "displayName": {
                         "type": "string",
-                        "description": "P14 别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
+                        "description": "别名：null/空/==id(Ordinal)均视为无别名；有别名时为trim后别名"
                       },
                       "protocol": {
                         "type": "string",
@@ -3152,7 +3152,7 @@
           },
           "byUser": {
             "type": "boolean",
-            "description": "P24：本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。"
+            "description": "本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。"
           }
         },
         "required": [

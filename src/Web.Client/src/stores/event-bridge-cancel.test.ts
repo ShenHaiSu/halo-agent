@@ -22,7 +22,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
-describe('P24 eventBridge byUser/cancelled', () => {
+describe('eventBridge byUser/cancelled', () => {
   it('F3: turn.finished{byUser:true} → truncatedByUser 且互斥', () => {
     const messages = useMessagesStore();
     const stream = useStreamStore();

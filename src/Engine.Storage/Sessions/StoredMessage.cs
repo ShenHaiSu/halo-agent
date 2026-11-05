@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HaloAgent.Engine.Storage.Sessions;
@@ -8,7 +8,7 @@ namespace HaloAgent.Engine.Storage.Sessions;
 ///
 /// Storage 不引用 Engine.Core（铁律：Storage 不认识 agent），所以这里自带消息类型；
 /// 与 Core 的 <c>ChatMessage</c> 互转由 Core 侧的 MessageAdapters 做。
-/// P10：同步加 content_parts（读旧文件 parts 为空即回落纯文本）。
+/// 同步加 content_parts（读旧文件 parts 为空即回落纯文本）。
 /// </summary>
 public enum StoredRole { System, User, Assistant, Tool }
 
@@ -87,7 +87,7 @@ public sealed record StoredMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ReasoningContent { get; init; }
 
-    /// <summary>P14-D1：UTC ms 时间戳，SSOT。0 = 未知（旧数据）。加性可选字段，不升 HistorySchema。</summary>
+    /// <summary>UTC ms 时间戳，SSOT。0 = 未知（旧数据）。加性可选字段，不升 HistorySchema。</summary>
     [JsonPropertyName("ts_ms")] public long TsMs { get; init; }
 
     [JsonPropertyName("marker")]

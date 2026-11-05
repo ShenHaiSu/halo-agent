@@ -1,13 +1,13 @@
-﻿namespace HaloAgent.Engine.Core.Agent;
+namespace HaloAgent.Engine.Core.Agent;
 
 /// <summary>
 /// 把 OpenAI 格式的 ChatMessage 投影成渲染友好的 MessageView。
 /// 核心工作：工具调用与结果合并（assistant + tool → 一张工具卡片）。
-/// P15：新增 ProjectTurns（turnId + ord 分组 → TurnView）。
+/// 新增 ProjectTurns（turnId + ord 分组 → TurnView）。
 /// </summary>
 public static class MessageProjector
 {
-    /// <summary>P15-D8 首屏头部长度。</summary>
+    /// <summary>首屏头部长度。</summary>
     public const int ParamHead = 2000;
 
     /// <summary>把完整消息列表投影成渲染列表（合并工具调用与结果）。</summary>
@@ -88,7 +88,7 @@ public static class MessageProjector
 
     /// <summary>快照投影：语义同 Project（合并 + 跳过 system/tool 独立消息 + ok 判定复用），另加稳定 Id/TsMs。</summary>
     /// <remarks>
-    /// P08-fix 01：快照类输出（snapshot/resume/resync/compact.kept）统一走这里；
+    /// 快照类输出（snapshot/resume/resync/compact.kept）统一走这里；
     /// ToView 降级为增量场景专用，不再用于快照。
     /// - 稳定 Id：m-&lt;序号&gt;（1 起，替代随机，保证折叠/锚点/重试查找稳定；toolCallId 本就不动）。
     /// - TsMs：按序号递增（存储无 ts 时的最小方案，以当前时间倒推，步长 1s，保证有序且非 0）。
@@ -98,7 +98,7 @@ public static class MessageProjector
     {
         var merged = Project(messages);
         if (merged.Count == 0) return merged;
-        // P14-D5：全真且单调 → 直接透传真值，只稳定 Id；否则降级走现存 UtcNow 倒推（纯旧文件兼容）。
+        // 全真且单调 → 直接透传真值，只稳定 Id；否则降级走现存 UtcNow 倒推（纯旧文件兼容）。
         if (merged.All(v => v.TsMs > 0) && IsMonotonic(merged))
         {
             for (var i = 0; i < merged.Count; i++)
@@ -126,7 +126,7 @@ public static class MessageProjector
         return true;
     }
 
-    /// <summary>单条投影（不含工具合并，用于增量场景）。P14：透传真值。</summary>
+    /// <summary>单条投影（不含工具合并，用于增量场景）。透传真值。</summary>
     public static HaloAgent.Engine.Abstractions.Types.MessageView ToView(
         HaloAgent.Engine.Core.Llm.ChatMessage m) => new()
     {
@@ -144,7 +144,7 @@ public static class MessageProjector
         s.Length <= max ? s : s[..max];
 
     /// <summary>
-    /// P15：按 (turnId, ord) 分组投影为 TurnView 列表。
+    /// 按 (turnId, ord) 分组投影为 TurnView 列表。
     /// - 有 TurnId：同 TurnId 聚合；无 TurnId（旧数据）：按 user 切回合。
     /// - 组内：首条 user → User；后续 user → Injected；assistant 按 ord 排序，
     ///   末条进 Final，其余进 Process；system/tool 孤儿丢弃。
@@ -304,7 +304,7 @@ public static class MessageProjector
         return turns;
     }
 
-    /// <summary>P15：快照用 ProjectTurns（与 ProjectSnapshot 同源，稳定 Id）。</summary>
+    /// <summary>快照用 ProjectTurns（与 ProjectSnapshot 同源，稳定 Id）。</summary>
     public static List<HaloAgent.Engine.Abstractions.Types.TurnView> ProjectSnapshotTurns(
         IReadOnlyList<HaloAgent.Engine.Core.Llm.ChatMessage> messages)
         => ProjectTurns(messages);

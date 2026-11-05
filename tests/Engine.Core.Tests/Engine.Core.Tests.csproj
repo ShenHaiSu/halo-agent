@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>HaloAgent.Engine.Core.Tests</RootNamespace>
-    <DefineConstants>$(DefineConstants);P1_BACKEND_EVENTBUS</DefineConstants>
+    <DefineConstants>$(DefineConstants);BACKEND_EVENTBUS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

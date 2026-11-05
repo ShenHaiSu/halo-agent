@@ -17,7 +17,7 @@ import HDialog from '@/components/base/HDialog.vue';
 
 const toast = useToast();
 const session = useSessionStore();
-// P23-R5：跑轮中切换人格被后端拒绝，前端提前给反馈并禁用按钮。
+// 跑轮中切换人格被后端拒绝，前端提前给反馈并禁用按钮。
 const busy = computed(() => useStreamStore().busy);
 function isBusyError(e: unknown): boolean {
   const code = (e as { code?: unknown })?.code;
@@ -185,7 +185,7 @@ async function removePersona(): Promise<void> {
       try {
         await session.setPersona('');
       } catch (e) {
-        // P23-R5 §A3：跑轮中解绑会被后端 busy 守卫拦下，给专门文案而非“无法解除绑定”。
+        // §A3：跑轮中解绑会被后端 busy 守卫拦下，给专门文案而非“无法解除绑定”。
         if (isBusyError(e)) toast.warning('回合执行中，暂不能删除使用中的人格');
         else toast.warning('无法解除当前会话的人格绑定，已取消删除');
         return; // 解绑失败就不删，避免“人格还在跑但文件没了”

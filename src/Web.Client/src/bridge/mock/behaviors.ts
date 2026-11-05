@@ -1,11 +1,11 @@
 // src/Web.Client/src/bridge/mock/behaviors.ts
-// P10 Mock 行为表：必须与 EngineAssembly 注册表保持方法名集合与成功/失败语义一致。
+// Mock 行为表：必须与 EngineAssembly 注册表保持方法名集合与成功/失败语义一致。
 
 export type MockBehavior =
   | { kind: 'ok'; run: (params: unknown) => unknown }
   | { kind: 'throws'; code: string; message: string };
 
-// P09-fix2 D：Mock 多会话历史（?mock=1 下可复现切换，不再恒返空历史）。
+// Mock 多会话历史（?mock=1 下可复现切换，不再恒返空历史）。
 export interface MockChatMessage {
   id: string;
   role: string;
@@ -193,7 +193,7 @@ export function getCurrentMockSessionId(): string {
   return currentMockSessionId;
 }
 
-// P12-02：未配置态回归分支。默认保持 configured:true（历史行为），测试可经
+// 未配置态回归分支。默认保持 configured:true（历史行为），测试可经
 // setMockAgentConfigured(false) 切到 configured:false/provider='',model=''，复现切换器直开设置。
 let mockAgentConfigured = true;
 export function setMockAgentConfigured(v: boolean): void {
@@ -339,7 +339,7 @@ function mockSettings(): unknown {
     configPath: '(mock)/config.json',
   };
 }
-// P16 mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
+// mock 用量数据：3 天 + 两个 provider 同名模型各一行（验证双键拆分）。
 function mockUsageRows(): unknown[] {
   const day = 86400000;
   const now = Date.now();
@@ -430,7 +430,7 @@ function mockUsageSummary(): unknown {
     e.cached += r.cached;
     e.output += r.output;
     e.requests += 1;
-    e.llmCalls += r.llmCalls; // P21-F3：requests 按行累加，一行=一回合，非网络请求次数
+    e.llmCalls += r.llmCalls; // requests 按行累加，一行=一回合，非网络请求次数
     byModelMap.set(k, e);
   }
   const byModel = [...byModelMap.values()].map((m) => ({
@@ -451,7 +451,7 @@ function mockUsageSummary(): unknown {
     output,
     total: input + output,
     requests: rows.length,
-    llmCalls, // P21-F3：一行=一回合，非网络请求次数；P24：llmCalls 为落盘 turn 的调用次数总和
+    llmCalls, // 一行=一回合，非网络请求次数；llmCalls 为落盘 turn 的调用次数总和
     hitRate: input > 0 ? cached / input : 0,
     byDay,
     byModel,
@@ -683,7 +683,7 @@ export const BEHAVIORS: Record<string, MockBehavior> = {
   },
   'update.install': { kind: 'ok', run: () => ({ started: false }) },
 
-  // usage 5 (P16 mock：3 天数据，两个 provider 同名模型各一行，验证双键拆分)
+  // usage 5 (mock：3 天数据，两个 provider 同名模型各一行，验证双键拆分)
   'usage.summary': { kind: 'ok', run: () => mockUsageSummary() },
   'usage.query': {
     kind: 'ok',

@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/usage/providerMask.test.ts
-// P17-04 模糊化单测：恒 5 位 / 确定性 / 默认开 / utf8 不抛 / 不污染过滤。
+// 模糊化单测：恒 5 位 / 确定性 / 默认开 / utf8 不抛 / 不污染过滤。
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   MASK_KEY,

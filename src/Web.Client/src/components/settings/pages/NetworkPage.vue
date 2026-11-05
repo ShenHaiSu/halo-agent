@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/pages/NetworkPage.vue -->
-<!-- P22：全局三档 system/direct/manual + 各 Provider effective 一览 + 当前生效 + 一键探测（retry 已搬家至行为页）。 -->
+<!-- 全局三档 system/direct/manual + 各 Provider effective 一览 + 当前生效 + 一键探测（retry 已搬家至行为页）。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';

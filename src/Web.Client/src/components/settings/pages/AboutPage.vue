@@ -88,7 +88,7 @@ async function checkUpdate(): Promise<void> {
  
  const verifying = ref(false);
  const verifyInfo = ref<string | null>(null);
- /** P18：验证代理连通性（复用 probe + 脱敏回显）。 */
+ /** 验证代理连通性（复用 probe + 脱敏回显）。 */
  async function verifyProxy(): Promise<void> {
    if (verifying.value) return;
    verifying.value = true;

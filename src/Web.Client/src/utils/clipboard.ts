@@ -3,7 +3,7 @@
  * ============ 三级降级 ============
  *  ① navigator.clipboard.writeText（需要安全上下文；app:// 算安全上下文吗？
  *     CefSharp 的 app:// 是自定义 scheme，Chrome 视为“secure context”
- *     （因为注册了 standard + secure 标志）—— P3 已配置）
+ *     （因为注册了 standard + secure 标志）—— 已配置）
  *  ② document.execCommand('copy')（已废弃但 Win7 上最可靠）
  *  ③ 让用户手动选择（返回 false，调用方提示“请按 Ctrl+C”）
  * ===================================

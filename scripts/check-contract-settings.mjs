@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // scripts/check-contract-settings.mjs
-// P10 三方一致性：agent.schema.json 与 SettingsContracts.cs 与 agent.d.ts（settings.* 新契约）。
+// 三方一致性：agent.schema.json 与 SettingsContracts.cs 与 agent.d.ts（settings.* 新契约）。
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

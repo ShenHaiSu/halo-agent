@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/stores/eventBridge.ts
-// P15：按 (used,kind) 路由 + 轮级搬运 + 双草稿 + 三态折叠。
+// src/Web.Client/src/stores/eventBridge.ts
+// 按 (used,kind) 路由 + 轮级搬运 + 双草稿 + 三态折叠。
 import { normalizeToolCalls, useMessagesStore } from './messages';
 import { clearCollapsedTools } from '@/components/chat/toolMeta';
 import { useStreamStore } from './stream';
@@ -37,11 +37,11 @@ export function toMessageViews(list: unknown): Array<Record<string, unknown>> {
   }
   return out;
 }
-// P09-fix2 B/C：切换中到达的历史变更帧一律丢弃（仍推进游标，避免 pump 反复拉取）。
+// 切换中到达的历史变更帧一律丢弃（仍推进游标，避免 pump 反复拉取）。
 // 只保留会话元信息 / 状态类帧（session.info/usage/state.*/resync 等）。
 const DROP_DURING_SWITCH = new Set([
   'turn.started',
-  // P23-R3：turn.finished 不再丢弃——切换窗口内到达的收口帧必须正常处理，否则旧轮永无终态。
+  // turn.finished 不再丢弃——切换窗口内到达的收口帧必须正常处理，否则旧轮永无终态。
   'text.delta',
   'reasoning.delta',
   'tool.started',
@@ -119,7 +119,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           const stream = useStreamStore();
           const turnId = String(p.turnId ?? stream.currentTurn?.turnId ?? '');
           if (!turnId) break;
-          // P23-R3 §B：切换中外来 turn（与当前 currentTurn 不匹配）只落盘、不抢 currentTurn、不调 endTurn。
+          // §B：切换中外来 turn（与当前 currentTurn 不匹配）只落盘、不抢 currentTurn、不调 endTurn。
           // 保守判定：仅 currentTurn 存在且 turnId 不匹配时才算外来；currentTurn 为 null 时按原逻辑走。
           const isForeign = !!stream.currentTurn && turnId !== stream.currentTurn.turnId;
           if (switching && isForeign) {
@@ -149,17 +149,17 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           }
           const text = typeof p.text === 'string' ? (p.text as string) : '';
           const truncated = p.truncated === true;
-          const byUser = p.byUser === true;                                  // ★ P24-D4
+          const byUser = p.byUser === true;                                  // ★ 用户中断标志。
           const responseId = typeof p.responseId === 'string' ? (p.responseId as string) : undefined;
-          // ★ P24-D5：中断兜底——把还没结束的工具卡改成 cancelled
-          if (byUser) messages.markRunningToolsCancelled(turnId);            // ★ P24-D5
+          // ★ 中断兜底——把还没结束的工具卡改成 cancelled
+          if (byUser) messages.markRunningToolsCancelled(turnId);
           messages.finalizeTurn(
             turnId,
             finalUsed >= 1 ? finalUsed : 1,
             text,
             truncated,
             responseId,
-            byUser,                                                          // ★ P24-D4
+            byUser,
           );
           // truncated 回合 auto 保持展开直到手动收：不写 userClosed，TurnCard computed 处理
           stream.endTurn();            // 内部会 endCancel()（见 4.2）
@@ -242,7 +242,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
             const tid = t?.messageId ?? stream.currentTurn?.turnId;
             const used = Number(p.used ?? stream.currentTurn?.activeOrd ?? 1);
             if (tid) {
-              // ★ P24-D5：用户中断导致的工具未完成，不能显示成「失败」（红色 error）。
+              // ★ 用户中断导致的工具未完成，不能显示成「失败」（红色 error）。
               //   判定依据：ok=false 且该帧到达时刻晚于取消请求时刻（见上「判定依据」一节）。
               //   不能用 p.output 文案判定（违反“判定结构化”铁律）。
               const cancelled =
@@ -290,7 +290,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
             max: Number(p.max ?? 0),
             reason: String(p.reason ?? ''),
           };
-          // G2：清空本 used 双草稿（防“半截+完整”双拼）
+          // 清空本 used 双草稿（防“半截+完整”双拼）
           const tid = stream.currentTurn?.turnId;
           const used = stream.currentTurn?.activeOrd ?? 0;
           if (tid && used >= 1) messages.clearDraft(tid, used);
@@ -304,7 +304,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           stream.usage.lastCompletionTokens = Number(p.completion ?? 0);
           stream.usage.dropped = p.dropped === true;
           session.addUsage(Number(p.prompt ?? 0), Number(p.completion ?? 0));
-          // P23：事件总值覆盖优先（lastPrompt/cached/llmCalls 总值覆盖）。
+          // 事件总值覆盖优先（lastPrompt/cached/llmCalls 总值覆盖）。
           session.applyUsageEvent(p);
           break;
         }
@@ -416,7 +416,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           const stream = useStreamStore();
           stream.busy = p.busy === true;
           stream.queueLength = Number(p.queueLength ?? 0);
-          if (p.busy !== true) stream.endCancel();     // ★ P24-D3 兜底
+          if (p.busy !== true) stream.endCancel();     // ★ 兜底
           try {
             useQueueStore().syncFromEngine(Number(p.queueLength ?? 0));
           } catch {
@@ -456,7 +456,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
                     historyPath: (ss.historyPath ?? null) as string | null,
                   });
                 }
-                // P23：resync 全量快照同样补水位线（同会话只填空，不回退事件值）。
+                // resync 全量快照同样补水位线（同会话只填空，不回退事件值）。
                 const uu = (snap as { usage?: Record<string, unknown> } | null)?.usage;
                 if (uu && typeof uu === 'object') {
                   const st = useSessionStore();

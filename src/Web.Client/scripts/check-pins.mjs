@@ -5,7 +5,7 @@
  * ============ 为什么必须锁 ============
  *  ① tailwindcss：v4 产出 oklch()/color-mix() → Chrome 109 白屏（R-3）
  *  ② vue / vite 等：大版本跳跃会改编译产物（如 vue 3.6 的 vapor 模式）
- *  ③ .NET 侧的 CefSharp 109.1.110 已在 P0/P3 锁定，这里只管前端
+ *  ③ .NET 侧的 CefSharp 109.1.110 已在 P0/锁定，这里只管前端
  * ============ 规则 ============
  *  EXACT：值必须完全等于指定版本（不许 ^ ~ >=）
  *  TILDE：值必须是 ~x.y.z（锁 minor）

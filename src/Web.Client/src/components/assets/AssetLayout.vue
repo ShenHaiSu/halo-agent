@@ -164,7 +164,7 @@ defineEmits<{
   color: hsl(var(--fg-subtle));
   font-family: var(--font-mono);
 }
-@media (max-width: 900px) { /* P14：与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
+@media (max-width: 900px) { /* 与 var(--bp-compact) 同值；var() 不可用于 @media 条件，保持字面量 */
   .asset {
     flex-direction: column;
   }

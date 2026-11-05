@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace HaloAgent.Engine.Storage.Config;
 
-/// <summary>P10 整树校验（06 校验矩阵）。失败返回 errors(provider,model,field,message)。</summary>
+/// <summary>整树校验（06 校验矩阵）。失败返回 errors(provider,model,field,message)。</summary>
 public sealed record ConfigValidationError(string Provider, string? Model, string Field, string Message);
 
 public static class ConfigValidation
@@ -20,7 +20,7 @@ public static class ConfigValidation
         {
             if (string.IsNullOrWhiteSpace(pid) || !ProviderIdRe.IsMatch(pid))
                 errs.Add(new(pid, null, "id", "provider.id 非法：^[a-z0-9][a-z0-9-_]{0,63}$"));
-             // P14 别名原则：null/空/与 id 精确相等(Ordinal)均视为无别名，不报错；长度仍 ≤64。
+             // 别名原则：null/空/与 id 精确相等(Ordinal)均视为无别名，不报错；长度仍 ≤64。
              if (p.DisplayName is not null && p.DisplayName.Length > 64)
                  errs.Add(new(pid, null, "displayName", "别称不超过 64 字"));
             if (string.IsNullOrWhiteSpace(p.BaseUrl))
@@ -31,7 +31,7 @@ public static class ConfigValidation
                 if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                     errs.Add(new(pid, null, "baseUrl", "baseUrl 必须是绝对 http(s) 地址"));
-             // P18：network 枚举校验（非法直接拦；未知回落只发生在读归一，写前此处已拦）
+             // network 枚举校验（非法直接拦；未知回落只发生在读归一，写前此处已拦）
              var _net = (p.Network ?? "").Trim().ToLowerInvariant();
              if (_net is not ("follow" or "proxy" or "direct"))
                  errs.Add(new(pid, null, "network", "network 须为 follow/proxy/direct"));
@@ -112,7 +112,7 @@ public static class ConfigValidation
                  errs.Add(new(ap, am, "active", $"active model 不存在：{ap}/{am}"));
          }
  
-         // P22：行为 5 项同样纳入整树校验（两套范围不漂移）
+         // 行为 5 项同样纳入整树校验（两套范围不漂移）
          errs.AddRange(ValidateBehavior(cfg));
  
          return errs;
@@ -125,7 +125,7 @@ public static class ConfigValidation
          return ValidateBehaviorValues(cfg.MaxTurns, cfg.Retry, cfg.Persona, cfg.CompactKeepTail, cfg.AutoCompactOnLimit, personaExists);
      }
  
-     /// <summary>P22 行为 5 字段值校验（供 saveBehavior 直接用原始值，避免 ConfigModel 装箱）。</summary>
+     /// <summary>行为 5 字段值校验（供 saveBehavior 直接用原始值，避免 ConfigModel 装箱）。</summary>
      public static IReadOnlyList<ConfigValidationError> ValidateBehaviorValues(int? maxTurns, int? retry, string? persona, int? compactKeepTail, bool? autoCompact, Func<string, bool>? personaExists = null)
      {
          var errs = new List<ConfigValidationError>();
@@ -169,7 +169,7 @@ public static class ConfigValidation
  
  
 
-      /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。P14：alias==id 聚合为单条提示。P18：代理 warning 与 TryResolve 同源。</summary>
+      /// <summary>maxTokens &gt; contextWindow 时 warning（不拦）。alias==id 聚合为单条提示。代理 warning 与 TryResolve 同源。</summary>
       public static List<string> Warnings(ConfigModel cfg)
       {
           var w = new List<string>();

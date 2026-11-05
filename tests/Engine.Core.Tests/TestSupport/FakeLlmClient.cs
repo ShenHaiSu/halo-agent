@@ -9,7 +9,7 @@ public sealed class ScriptedReply
     public string? Reasoning { get; set; }
     public List<ToolCall> ToolCalls { get; } = new();
     public Usage Usage { get; set; } = new(0, 0);
-    /// <summary>P24-E5b：模拟超长截断（finish_reason=length）。</summary>
+    /// <summary>模拟超长截断（finish_reason=length）。</summary>
     public bool TruncatedByLength { get; set; }
 
     /// <summary>流式分片粒度：每 N 个字符一块。设为 0 表示一次性给完。</summary>
@@ -21,7 +21,7 @@ public sealed class ScriptedReply
     public TimeSpan Delay { get; set; } = TimeSpan.Zero;
 
     /// <summary>
-    /// P24：P0-1。为 true 时，Delay 用不可取消的等待（Task.Delay(x) 不传 ct），
+    /// 。为 true 时，Delay 用不可取消的等待（Task.Delay(x) 不传 ct），
     /// 睡满后无条件抛 Throw（无视取消状态）。
     /// 用途：构造「取消与 IOException 同现」的真实形态——流读取被取消时抛的正是 IOException。
     /// </summary>
@@ -111,7 +111,7 @@ public sealed class FakeLlmClient : ILlmClient
 
         if (reply.UncancelableDelay)
         {
-            // ★ P24-P0-1：不可取消延迟 + 睡满后无条件抛。模拟「底层读取被取消、
+            // ★ 不可取消延迟 + 睡满后无条件抛。模拟「底层读取被取消、
             //   抛出的却不是 OCE」的竞态窗口。注意此处不检查 ct。
             if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
             if (reply.Throw is not null) throw reply.Throw;
@@ -175,7 +175,7 @@ public sealed class FakeLlmClient : ILlmClient
         var reply = Next(Array.Empty<ChatMessage>(), null, sessionId);
         if (reply.UncancelableDelay)
         {
-            // ★ P24-P0-1（responses 对称）：不可取消延迟 + 睡满后无条件抛。
+            // ★ （responses 对称）：不可取消延迟 + 睡满后无条件抛。
             if (reply.Delay > TimeSpan.Zero) await Task.Delay(reply.Delay).ConfigureAwait(false);
             if (reply.Throw is not null) throw reply.Throw;
         }

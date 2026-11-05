@@ -129,7 +129,7 @@ public sealed class HaloHostBridge
          return Task.CompletedTask;
      }
      /// <summary>
-     /// 显式启动窗口缩放（P07-Enhance 04，主路径）。
+     /// 显式启动窗口缩放（主路径）。
      /// 前端 8 方位热区 mousedown（左键、非最大化/最小化）时同步直调本方法；
      /// 宿主用 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/hitTest) 把缩放交给系统（与 WindowDragStart 同一机制）。
      /// hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT），非法值抛 ArgumentOutOfRangeException。

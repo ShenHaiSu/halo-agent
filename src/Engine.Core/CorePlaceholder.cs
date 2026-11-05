@@ -3,8 +3,8 @@ using Microsoft.Extensions.Logging;
 namespace HaloAgent.Engine.Core;
 
 /// <summary>
-/// 引擎内核占位。P2 才实现 agent 循环 / 工具 / 权限。
-/// P0 只需要它能编译、能被 Engine.Server 引用。
+/// 引擎内核占位。后续再实现 agent 循环 / 工具 / 权限。
+/// 早期只需要它能编译、能被 Engine.Server 引用。
 /// </summary>
 public sealed class CorePlaceholder
 {

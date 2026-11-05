@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/chat/useStreamingMarkdown.ts
-// P15：统一稳态渲染。唯一真相为全量 parseMarkdown；流式只做节流渐进 + 块级 holdback。
+// 统一稳态渲染。唯一真相为全量 parseMarkdown；流式只做节流渐进 + 块级 holdback。
 // 移除旧增量分支（流稳不一致根因）。
 import { computed, ref, watch } from 'vue';
 import {
@@ -23,7 +23,7 @@ export function useStreamingMarkdown(getText: () => string, throttleMs = 200) {
   }
 
   function schedule(text: string): void {
-    // P15：EventBus 已按 80ms 合并，前端同帧直接重算（单次全量<=16ms，见性能预算）；
+    // EventBus 已按 80ms 合并，前端同帧直接重算（单次全量<=16ms，见性能预算）；
     // 节流由上游保证，此处保持同步以满足流稳一致。
     void timer; void throttleMs;
     recompute(text);
@@ -56,7 +56,7 @@ export function useStreamingMarkdown(getText: () => string, throttleMs = 200) {
 }
 
 /**
- * P11-G1 提交边界：末尾未完块暂不提交，返回可提交的字符数。
+ * 提交边界：末尾未完块暂不提交，返回可提交的字符数。
  */
 export function holdbackCut(head: string): number {
   const lines = head.split('\n');

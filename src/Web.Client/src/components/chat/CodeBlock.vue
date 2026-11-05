@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/CodeBlock.vue -->
-<!-- P5 D5-2 代码块：12 语言三色高亮 + 复制 + 30 行折叠，未闭合围栏显示"生成中"。 -->
+<!-- D5-2 代码块：12 语言三色高亮 + 复制 + 30 行折叠，未闭合围栏显示"生成中"。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { displayLang, resolveLang } from './highlight';

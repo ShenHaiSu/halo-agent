@@ -1,4 +1,4 @@
-// P24：右抽屉网络请求行取 max(DB 落盘, 内存事件) + 三条 hint 文案断言。
+// 右抽屉网络请求行取 max(DB 落盘, 内存事件) + 三条 hint 文案断言。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';

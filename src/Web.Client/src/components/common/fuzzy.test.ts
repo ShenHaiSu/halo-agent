@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/common/fuzzy.test.ts
-// 命令面板检索算法测试（P5 A-8.1：12 + 5 用例）。
+// 命令面板检索算法测试（A-8.1：12 + 5 用例）。
 import { describe, expect, it } from 'vitest';
 import { fuzzyScore, highlight } from './fuzzy';
 

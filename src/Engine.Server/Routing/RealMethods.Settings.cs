@@ -22,7 +22,7 @@ public sealed partial class RealMethods
               .Select(kv =>
               {
                   var network = ConfigStore.NormalizeProviderNetwork(kv.Value.Network, kv.Value.UseProxyLegacy);
-                  // P18：每个 Provider 下发 effective（inUse/source/maskedUrl + warning）
+                  // 每个 Provider 下发 effective（inUse/source/maskedUrl + warning）
                   var (eff, warn) = ConfigStore.TryResolveEffectiveProxy(cfg.Proxy ?? new ProxyConfig(), network);
                   string source;
                   if (!string.IsNullOrWhiteSpace(kv.Value.BaseUrl) && ConfigStore.IsBypassedUrl(kv.Value.BaseUrl))
@@ -191,7 +191,7 @@ public sealed partial class RealMethods
         }
          warnings.AddRange(ConfigValidation.Warnings(next));
          ConfigStore.Save(next);
-         // P12-02：保存即生效（此前只落盘不进内存，改 key/baseUrl 后需重启才生效）。
+         // 保存即生效（此前只落盘不进内存，改 key/baseUrl 后需重启才生效）。
          // active 指针沿用旧值；Resolve 失败（删了 active 目标/旧形状）则显式置未配置并 warning。
          try
          {
@@ -246,7 +246,7 @@ public sealed partial class RealMethods
                  headers[key!] = val;
              }
          }
-         // P18：network 三选项（读时兼容旧 useProxy）
+         // network 三选项（读时兼容旧 useProxy）
          string? networkRaw = el.TryGetProperty("network", out var nw) ? nw.GetString() : null;
          string? network = null;
          if (networkRaw is not null)
@@ -280,7 +280,7 @@ public sealed partial class RealMethods
           return new ParsedProvider(displayName, hasDisplayName, baseUrl, apiKey, clearKey, headersEnabled, headers, network, networkRaw, useProxy, models);
       }
 
-     /// <summary>P14 别名原则：无别名一律存 null。空白/与 id 精确相等(Ordinal)均视为无别名。</summary>
+     /// <summary>别名原则：无别名一律存 null。空白/与 id 精确相等(Ordinal)均视为无别名。</summary>
      private static string? NormalizeAlias(string id, string? displayName)
      {
          if (string.IsNullOrWhiteSpace(displayName)) return null;
@@ -343,7 +343,7 @@ public sealed partial class RealMethods
          try { var _snap = _session.BuildSnapshot().Agent; if (_snap.Configured && string.Equals(_snap.Provider, providerId, StringComparison.Ordinal) && string.Equals(_snap.Model, modelId, StringComparison.Ordinal)) _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}"); } catch { _ = PublishAgentChangedAsync($"已切换模型：{providerId}/{modelId}"); }
          return Task.FromResult<object?>(new SettingsSetActiveResult { Ok = true });
      }
-     // P12-02：此前为空实现（BuildSnapshot 后直接丢弃）。RealMethods 无 EventBus 成员，
+     // 此前为空实现（BuildSnapshot 后直接丢弃）。RealMethods 无 EventBus 成员，
      // 经 _session 复用存量 notice 事件提示，不新增事件 kind、不改契约。
      private Task PublishAgentChangedAsync(string text)
      {
@@ -358,7 +358,7 @@ public sealed partial class RealMethods
          }
      }
 
-     /// <summary>P22 行为页保存：5 项全局行为（LoadForWrite → Validate → Save → 活应用）。</summary>
+     /// <summary>行为页保存：5 项全局行为（LoadForWrite → Validate → Save → 活应用）。</summary>
      public Task<object?> SettingsSaveBehaviorAsync(JsonElement? p, CancellationToken ct)
      {
          ConfigModel cfg;
@@ -472,7 +472,7 @@ public sealed partial class RealMethods
          var proxyCfg = cfg.Proxy ??= new ProxyConfig();
          var notes = new List<string>();
          var warnings = new List<string>();
-         // P18：热切只看 mode/url（retry 不触发）
+         // 热切只看 mode/url（retry 不触发）
          var oldMode = ConfigStore.NormalizeGlobalMode(cfg.Proxy?.Mode);
          var oldUrl = (cfg.Proxy?.Url ?? "").Trim();
          var mode = p?.TryGetProperty("mode", out var mv) == true ? mv.GetString() : null;
@@ -481,7 +481,7 @@ public sealed partial class RealMethods
              var m = mode.Trim().ToLowerInvariant();
              string normalized = m switch
              {
-                 // P18 新三档
+                 // 新三档
                  "system" => "system",
                  "direct" => "direct",
                  "manual" => "manual",
@@ -510,16 +510,16 @@ public sealed partial class RealMethods
              p?.TryGetProperty("headersEnabled", out _) == true ||
              p?.TryGetProperty("providerHeaders", out _) == true)
              throw RpcException.ParamsInvalid("saveNetwork 已瘦身：仅支持 mode/url/retry，请求头请走 saveProviders");
-         // P18：manual 下 url 必填 + http(s) 校验，失败即拒存
+         // manual 下 url 必填 + http(s) 校验，失败即拒存
          if (ConfigStore.NormalizeGlobalMode(proxyCfg.Mode) == "manual")
          {
              if (string.IsNullOrWhiteSpace(proxyCfg.Url) || !ConfigStore.IsValidProxyUrl(proxyCfg.Url!))
                  throw RpcException.ParamsInvalid("manual 模式下 url 必填且须为 http(s):// 开头");
          }
          ConfigStore.Save(cfg);
-         // P18：代理组合 warning（与 TryResolve 同源）进 Warnings
+         // 代理组合 warning（与 TryResolve 同源）进 Warnings
          warnings.AddRange(ConfigValidation.Warnings(cfg));
-         // P18 热切：仅 mode/url 变化触发 Resolve→Reconfigure（retry 不触发）；失败回 warning 不回滚保存
+         // 热切：仅 mode/url 变化触发 Resolve→Reconfigure（retry 不触发）；失败回 warning 不回滚保存
          var newMode = ConfigStore.NormalizeGlobalMode(proxyCfg.Mode);
          var newUrl = (proxyCfg.Url ?? "").Trim();
          if (!string.Equals(oldMode, newMode, StringComparison.Ordinal) || !string.Equals(oldUrl, newUrl, StringComparison.Ordinal))
@@ -608,7 +608,7 @@ public sealed partial class RealMethods
             catch { }
         }
 
-         // P18 代理：表单 network 试算值优先（读时兼容旧 useProxy），否则读库折叠；回包带 via + latencyMs
+         // 代理：表单 network 试算值优先（读时兼容旧 useProxy），否则读库折叠；回包带 via + latencyMs
          HaloAgent.Engine.Abstractions.Types.EffectiveProxy effProxy = HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None;
          string effSource = HaloAgent.Engine.Abstractions.Types.ProxySources.GlobalDirect;
          string effWarn = "";
@@ -660,7 +660,7 @@ public sealed partial class RealMethods
          try
          {
              var models = await client.ListModelsAsync(cts.Token).ConfigureAwait(false);
-             // P16-F3：responses 协议加带会话实调 ping（GET /models 不需要 session 头，绿了也可能是假绿）。
+             // responses 协议加带会话实调 ping（GET /models 不需要 session 头，绿了也可能是假绿）。
              // 只在库中该 provider 已配 responses 模型时才 ping（新 provider 无模型可参照时沿用旧行为，不改契约）。
              string? responsesModel = null;
              try

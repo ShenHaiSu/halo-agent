@@ -13,7 +13,7 @@
   windowMinimize(): Promise<void>;
   /** 显式启动窗口拖拽（B 方案）：前端标题栏 mousedown 时调用，最大化/最小化下宿主侧直接返回。 */
   windowDragStart(): Promise<void>;
-  /** 显式启动窗口缩放（P07-Enhance 04）：前端 8 方位热区 mousedown 时同步直调，hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT）。最大化/最小化下宿主侧直接返回。 */
+  /** 显式启动窗口缩放（）：前端 8 方位热区 mousedown 时同步直调，hitTest 取值 10..17（HTLEFT..HTBOTTOMRIGHT）。最大化/最小化下宿主侧直接返回。 */
   windowResizeStart(hitTest: number): Promise<void>;
    /** 返回 WindowState 的 JSON 字符串。 */
    windowMaximizeOrRestore(): Promise<string>;
@@ -78,7 +78,7 @@ export interface PollResult {
   nextSeq: number;
 }
 
-/** 一帧（事件，由 P1 契约定义） */
+/** 一帧（事件，由 契约定义） */
 export interface HaloFrame {
   t: 'evt';
   seq: number;
@@ -112,7 +112,7 @@ declare global {
     CefSharp?: {
       BindObjectAsync(...names: string[]): Promise<boolean | void>;
     };
-    // P0 兼容桥（保留，P5 清理前不动）。
+    // 兼容桥（保留，清理前不动）。
     hostBridge?: {
       getSystemInfoAsync: () => Promise<Record<string, unknown>>;
       enginePingAsync: () => Promise<{

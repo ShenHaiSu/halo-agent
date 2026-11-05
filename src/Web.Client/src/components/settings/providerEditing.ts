@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/settings/providerEditing.ts
-// P10 Provider 1—N Model 全量树纯函数（归一化/校验/dirty），可单测。
+// Provider 1—N Model 全量树纯函数（归一化/校验/dirty），可单测。
 import { isSupportedModelProtocol } from './validators';
 
 export interface ModelEdit {
@@ -45,7 +45,7 @@ export interface ProvidersTree {
 }
 
  export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
- /** P14 别名原则：前后端统一用区分大小写精确相等(Ordinal)判定 alias==id，大小写变体视为有效别名。 */
+ /** 别名原则：前后端统一用区分大小写精确相等(Ordinal)判定 alias==id，大小写变体视为有效别名。 */
  export const hasAlias = (id: string, dn: string | null | undefined): boolean =>
    dn != null && dn.trim() !== '' && dn.trim() !== id;
  export const mainName = (id: string, dn: string | null | undefined): string =>
@@ -139,7 +139,7 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
     }
     const seenM = new Set<string>();
      for (const m of p.models) {
-       // P14：model.id 首尾空格仍先报错（与后端 ValidateTree 同口径，不静默 trim）。
+       // model.id 首尾空格仍先报错（与后端 ValidateTree 同口径，不静默 trim）。
        if (!m.id || m.id.trim() !== m.id) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 非空且首尾非空白' });
        if (seenM.has(m.id)) errs.push({ provider: p.id, model: m.id, field: 'id', message: 'model.id 重复' });
        seenM.add(m.id);
@@ -164,14 +164,14 @@ export function validateProvidersTree(t: ProvidersTree): TreeError[] {
   return errs;
 }
 
-/** P18：network 归一化（兼容旧 useProxy 读入：false→direct，否则 follow）。 */
+/** network 归一化（兼容旧 useProxy 读入：false→direct，否则 follow）。 */
 export function normalizeNetwork(v: unknown, legacyUseProxy?: unknown): ProviderNetwork {
   if (v === 'proxy' || v === 'direct' || v === 'follow') return v;
   if (legacyUseProxy === false) return 'direct';
   return 'follow';
 }
 
-/** P18：effective 只读透传（形状不对则丢弃）。 */
+/** effective 只读透传（形状不对则丢弃）。 */
 export function normalizeEffective(v: unknown): ProviderEffective | null {
   const o = (v ?? {}) as Record<string, unknown>;
   if (typeof o['inUse'] !== 'boolean' || typeof o['source'] !== 'string') return null;
@@ -183,7 +183,7 @@ export function normalizeEffective(v: unknown): ProviderEffective | null {
   };
 }
 
-/** P18：network 枚举校验。 */
+/** network 枚举校验。 */
 export function isValidProviderNetwork(n: string): boolean {
   return n === 'follow' || n === 'proxy' || n === 'direct';
 }

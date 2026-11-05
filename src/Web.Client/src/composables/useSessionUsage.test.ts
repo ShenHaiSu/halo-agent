@@ -1,4 +1,4 @@
-// P23：useSessionUsage（本会话合计拉取语义）。
+// useSessionUsage（本会话合计拉取语义）。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { nextTick } from 'vue';
@@ -49,7 +49,7 @@ describe('useSessionUsage', () => {
     await u.refresh();
     expect(spy).toHaveBeenCalledWith('usage.summary', { sessionId: 's-9' });
     expect(u.summary.value?.input).toBe(10);
-    expect(u.summary.value?.llmCalls).toBe(5); // P24：llmCalls 透传
+    expect(u.summary.value?.llmCalls).toBe(5); // llmCalls 透传
   });
 
   it('切会话重查并丢弃旧响应（queryId）', async () => {

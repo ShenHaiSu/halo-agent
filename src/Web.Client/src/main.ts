@@ -73,10 +73,10 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  // P5 验收工具：DEV 或 ?diag=1 时挂载 __p5diag。
+  // 验收工具：DEV 或 ?diag=1 时挂载 __diag。
   // 生产包无 diag 参数时不加载（动态 import，不进首屏产物）。
   if (import.meta.env.DEV || window.location.search.includes('diag=1')) {
-    void import('./devtools/p5diag').then((m) => m.mountP5Diag());
+    void import('./devtools/diag').then((m) => m.mountDiag());
   }
 }
 

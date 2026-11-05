@@ -1,5 +1,5 @@
 // src/Web.Client/src/composables/useSessionUsage.ts
-// P23：右抽屉本会话用量（复用 usage.summary({sessionId})，不新增 RPC）。
+// 右抽屉本会话用量（复用 usage.summary({sessionId})，不新增 RPC）。
 // llmCalls/turns 另从 session/messages store 直接读，不进本 composable 的 loading 态。
 import { getCurrentInstance, onBeforeUnmount, ref, watch } from 'vue';
 import { transport } from '@/transport';

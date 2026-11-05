@@ -1,6 +1,6 @@
 <!-- src/Web.Client/src/components/chat/ToolDiff.vue -->
-<!-- P5 D5-4 文件改动的 diff 预览：从 output 提取 diff 块，按行级渲染；
-     无 diff 块时不渲染。P11-F：提取放宽（围栏优先，其次裸 unified diff，
+<!-- D5-4 文件改动的 diff 预览：从 output 提取 diff 块，按行级渲染；
+     无 diff 块时不渲染。提取放宽（围栏优先，其次裸 unified diff，
      见 ./toolDiff），合并后超 400 行截断 + “展开全部”按钮。
      加/删行分别用 success/danger-subtle 着色。 -->
 <script setup lang="ts">

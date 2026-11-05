@@ -10,7 +10,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('P24 stream.cancel 取消态', () => {
+describe('stream.cancel 取消态', () => {
   it('F2: beginCancel 置 cancelling，endTurn/endCancel 复位', () => {
     const s = useStreamStore();
     s.beginTurn('t1');

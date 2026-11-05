@@ -1,8 +1,8 @@
 // src/Web.Client/src/components/chat/toolDiff.ts
-// P11-F diff 块提取（ToolDiff.vue 的纯函数部分，可单测）。
+// diff 块提取（ToolDiff.vue 的纯函数部分，可单测）。
 import { diffLines, type DiffLine } from '@/utils/diff';
 
-/** P11-F 上限：合并行数超 400 行截断（对齐 ToolOutput 4000字 / CodeBlock 30行 的折叠语言）。 */
+/** 上限：合并行数超 400 行截断（对齐 ToolOutput 4000字 / CodeBlock 30行 的折叠语言）。 */
 export const DIFF_MAX_LINES = 400;
 
 /**
@@ -57,7 +57,7 @@ const BARE_CONT_RE =
   /^(diff --git |index |--- |\+\+\+ |@@ |[+-] |[+-][^ +-]|\\ No newline)/;
 
 /**
- * P11-F 裸 unified diff 块扫描（无围栏时）。
+ * 裸 unified diff 块扫描（无围栏时）。
  * 起始：`diff --git ` / `@@ ` / `--- `；续行：diff 头行与 +/- 内容行；
  * 空行视为块内上下文保留（尾部空行裁掉）。成块条件：含至少一个 @@ 或
  * (--- + +++) 或 diff --git，且至少一行 +/- 改动行。

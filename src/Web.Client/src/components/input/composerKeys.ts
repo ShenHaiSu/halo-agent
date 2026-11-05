@@ -101,7 +101,7 @@ export function handleComposerKeydown(e: KeyboardEvent, d: ComposerKeyContext): 
     return;
   }
 
-  // 2. Esc（P24：浮层打开时 Esc 只关浮层——这是正确的交互，用户意图是关下拉不是中断；
+  // 2. Esc（浮层打开时 Esc 只关浮层——这是正确的交互，用户意图是关下拉不是中断；
   //    浮层已关时第二次 Esc 才会落到这里触发中断。不要在这里加浮层外的 isBusy 豁免。）
   if (e.key === 'Escape') {
     e.preventDefault();

@@ -123,7 +123,7 @@ public static class GpuPolicy
             if (!settings.CefCommandLineArgs.ContainsKey(key))
                 settings.CefCommandLineArgs.Add(key, null);
         // ★ disable-software-rasterizer 会让页面完全不绘制（全白），默认不加。
-        // 实测表见 docs/P3-宿主与CefSharp/05-验收目标.md §5.3。
+        // 实测表见 docs/宿主与CefSharp/05-验收目标.md §5.3。
         // AddIfAbsent(settings, "disable-software-rasterizer"); // ← 默认注释掉
     }
 }

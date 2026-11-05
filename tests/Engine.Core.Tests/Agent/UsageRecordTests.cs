@@ -13,7 +13,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P16 落盘：每非空 turn exactly-once；异常不中断；无 Usage 不记。
+/// <summary>落盘：每非空 turn exactly-once；异常不中断；无 Usage 不记。
 /// 读写共用同一 UsageStore 实例，不依赖 HALO_DATA_DIR 二次求值（防并行竞态）。</summary>
 public sealed class UsageRecordTests
 {

@@ -1,6 +1,6 @@
 /* src/Web.Client/src/styles/tokens/layout.css */
 :root {
-  /* ---- 标题栏（必须与 P3 的 ChromeForm.TitleBarHeight 一致） ---- */
+  /* ---- 标题栏（必须与 的 ChromeForm.TitleBarHeight 一致） ---- */
   --layout-titlebar-height: 40px;
 
   /* ---- 三栏宽度 ---- */
@@ -14,7 +14,7 @@
   /* ---- 内容区 ---- */
   --layout-composer-min-height: 88px;
   --layout-composer-max-height: 320px;
-  /* P07-Enhance 03：消息区默认占满模式，--layout-message-max-width 当前未被消息区使用（保留供将来“阅读宽度”开关）；误引用会导致 820px 居中回退。 */
+  /* 消息区默认占满模式，--layout-message-max-width 当前未被消息区使用（保留供将来“阅读宽度”开关）；误引用会导致 820px 居中回退。 */
   --layout-message-max-width: 820px;
   --layout-content-max-width: 1200px;
 

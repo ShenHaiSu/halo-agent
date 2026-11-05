@@ -1,8 +1,8 @@
 // src/Web.Client/src/transport/index.ts
 // D4-7 业务层唯一的传输入口。
 //
-// ============ P3 兼容说明 ============
-//  本文件保留 P3 的 `createTransport()` / `Transport` / `TransportError` 导出
+// ============ 兼容说明 ============
+//  本文件保留 的 `createTransport()` / `Transport` / `TransportError` 导出
 //  （BridgeTransport / MockTransport 类实现原文件不动）。
 //  D4-8 起 store 只用下面的 `transport` 单例：
 //    transport.isMock / .request / .pollEvents / .isReady / .host
@@ -17,7 +17,7 @@ import { agentBridge } from '@/bridge/agent';
 import { createMockAgent } from '@/bridge/mock/mockAgent';
 import type { PollResult } from '@/bridge/types';
 
-// ---- P3 兼容导出（实现文件原样保留） ----
+// ---- 兼容导出（实现文件原样保留） ----
 import { MockTransport } from './MockTransport';
 import { BridgeTransport } from './BridgeTransport';
 export { MockTransport, BridgeTransport };

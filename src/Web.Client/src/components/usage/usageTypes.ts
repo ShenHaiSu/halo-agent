@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/usage/usageTypes.ts
-// P16 用量前端类型（与 contract/agent.schema.json 的 usage.* 对齐）。
+// 用量前端类型（与 contract/agent.schema.json 的 usage.* 对齐）。
 
 export interface UsageRow {
   tsMs: number;
@@ -15,7 +15,7 @@ export interface UsageRow {
   output: number;
   total: number;
   hitRate: number;
-  /** P24：本 turn 内 LLM 成功调用次数（缺字段按 0）。 */
+  /** 本 turn 内 LLM 成功调用次数（缺字段按 0）。 */
   llmCalls?: number;
   truncated?: number;
 }
@@ -37,7 +37,7 @@ export interface UsageByModel {
   output: number;
   /** 一行=一回合，非网络请求次数 */
   requests: number;
-  /** P24：本双键下落盘 turn 的 LLM 调用次数总和（缺字段按 0）。 */
+  /** 本双键下落盘 turn 的 LLM 调用次数总和（缺字段按 0）。 */
   llmCalls?: number;
   hitRate: number;
 }
@@ -49,7 +49,7 @@ export interface UsageSummary {
   total: number;
   /** 一行=一回合，非网络请求次数 */
   requests: number;
-  /** P24：本筛选范围落盘 turn 的 LLM 调用次数总和（缺字段按 0；零用量/中断 turn 不计入）。 */
+  /** 本筛选范围落盘 turn 的 LLM 调用次数总和（缺字段按 0；零用量/中断 turn 不计入）。 */
   llmCalls?: number;
   hitRate: number;
   byDay: UsageByDay[];

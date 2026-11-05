@@ -6,7 +6,7 @@ namespace HaloAgent.Engine.Server.Routing;
 
 public sealed partial class RealMethods
 {
-      // ---------- system.diagnostics（P18：compact + proxy 口径与 About 页复制诊断对齐） ----------
+      // ---------- system.diagnostics（compact + proxy 口径与 About 页复制诊断对齐） ----------
       public Task<object?> SystemDiagnosticsAsync(JsonElement? p, CancellationToken ct) =>
           Task.FromResult<object?>(new
           {

@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/input/ModelSelector.vue -->
-<!-- 主界面模型选择器触发器 + 拉数 + setActive（P12-01）。挂在 Composer composer-box 之后独立一行。 -->
+<!-- 主界面模型选择器触发器 + 拉数 + setActive（）。挂在 Composer composer-box 之后独立一行。 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
@@ -118,7 +118,7 @@ function focusTrigger(): void {
    switching.value = true;
    try {
      await transport.request('settings.setActive', { providerId, modelId });
-     // P12-02：setActive 无事件推送（后端 PublishSnapshotAsync 为空实现），成功后主动拉快照补 session，
+     // setActive 无事件推送（后端 PublishSnapshotAsync 为空实现），成功后主动拉快照补 session，
      // 再刷新全树以同步 tree.active 高亮（双数据源：tree 来自 settings.get，高亮用 session）。快照拉取不再吞错。
      const snap = await transport.request<{ agent?: Record<string, unknown>; session?: Record<string, unknown> }>('state.snapshot', null);
      if (snap?.agent && typeof snap.agent === 'object') session.applySnapshotAgent(snap.agent);

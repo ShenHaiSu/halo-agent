@@ -13,12 +13,12 @@ using Xunit;
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
 /// <summary>
-/// P24 中止生成：取消权威化 / 收尾 / 契约贯通的红灯与回归测试。
+/// 中止生成：取消权威化 / 收尾 / 契约贯通的红灯与回归测试。
 /// T0 要求：先写，必须确认红（红灯原因必须是预期的断言，不是超时/编译错误）。
 /// </summary>
-public sealed class P24CancelTests
+public sealed class CancelSemanticsTests
 {
-    // ---------- P24-R1：取消与 IOException 同现，不得进入重试 ----------
+    // ---------- 取消与 IOException 同现，不得进入重试 ----------
 
     [Fact]
     public async Task R1_cancel_with_io_exception_does_not_retry()
@@ -29,7 +29,7 @@ public sealed class P24CancelTests
         // —— 模拟真实流读取被取消时的异常形态。
         f.Llm.Enqueue(r =>
         {
-            r.UncancelableDelay = true;                   // ★ P0-1
+            r.UncancelableDelay = true;                   // ★ 不可取消延迟。
             r.Delay = TimeSpan.FromMilliseconds(200);
             r.Throw = new IOException("The read operation failed", new OperationCanceledException());
         });
@@ -101,7 +101,7 @@ public sealed class P24CancelTests
     }
 
     /// <summary>
-    /// P24-R1c：取消与 IO 异常同现且重试已耗尽时，必须归一化为 OCE（而不是把 IOException 抛给上层）。
+    /// 取消与 IO 异常同现且重试已耗尽时，必须归一化为 OCE（而不是把 IOException 抛给上层）。
     /// 这是 D1 改动 A 的直接判据：上层 RunTurnAsync:541 的 catch(OCE) 必须能稳定命中。
     /// </summary>
     [Fact]
@@ -126,7 +126,7 @@ public sealed class P24CancelTests
         Assert.IsType<OperationCanceledException>(ex);
     }
 
-    // ---------- P24-R2：流式中取消必须发 turn.finished ----------
+    // ---------- 流式中取消必须发 turn.finished ----------
 
     [Fact]
     public async Task R2_cancel_mid_stream_emits_turn_finished()
@@ -281,7 +281,7 @@ public sealed class P24CancelTests
     }
 
     /// <summary>
-    /// P24-E2b：取消收尾只记一行 usage（OCE 分支已 RecordTurnUsage，FinishAsync 内必须幂等 no-op）。
+    /// 取消收尾只记一行 usage（OCE 分支已 RecordTurnUsage，FinishAsync 内必须幂等 no-op）。
     /// 第一轮工具调用带用量（把 _turnHasUsage 置位），第二轮流式中取消。
     /// </summary>
     [Fact]
@@ -327,7 +327,7 @@ public sealed class P24CancelTests
     }
 
     /// <summary>
-    /// P24-E6：取消落在权限等待中 → 询问立即返回拒绝，不 hang。
+    /// 取消落在权限等待中 → 询问立即返回拒绝，不 hang。
     /// 钉死 .NET CancellationToken.Register 在已取消 token 上同步回调的语义
     ///（CancelTurn 在 slot 建立后到达，走 _pendingAsk?.Cancel()；建立前到达则靠 Register 兜住）。
     /// </summary>
@@ -357,7 +357,7 @@ public sealed class P24CancelTests
     }
 
     /// <summary>
-    /// P24-E10：取消后 _pendingAsk 不残留；下一回合的新询问能正常回答（不 stale）。
+    /// 取消后 _pendingAsk 不残留；下一回合的新询问能正常回答（不 stale）。
     /// 修前 CancelTurn 只 _pendingAsk?.Cancel() 不清槽：若 waiter 因 PublishStateAsync 在 try 外
     /// 抛出而跳过 finally，槽残留到下一 turn（确认卡点了没反应 / answer 误报 stale）。
     /// </summary>

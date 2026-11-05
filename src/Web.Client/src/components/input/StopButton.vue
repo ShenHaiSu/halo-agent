@@ -3,7 +3,7 @@
 import HButton from '@/components/base/HButton.vue';
 
 defineProps<{
-  /** P24-D3：已发出取消请求，正在等引擎收尾。 */
+  /** 已发出取消请求，正在等引擎收尾。 */
   cancelling?: boolean;
 }>();
 defineEmits<{ click: [] }>();
@@ -11,7 +11,7 @@ defineEmits<{ click: [] }>();
 
 <template>
   <!--
-    P24-D3：取消中态。
+    取消中态。
     - loading：HButton 自带的 spinner，且会自动 disabled（HButton.vue:50 isDisabled = disabled || loading）
       → 天然防连点，无需额外 disabled 逻辑。
     - 文案「中断中…」：让用户明确知道请求已发出，而不是没响应。

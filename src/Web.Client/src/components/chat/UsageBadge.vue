@@ -1,6 +1,6 @@
 <!-- src/Web.Client/src/components/chat/UsageBadge.vue -->
-<!-- P5 用量徽标：显示 lastPromptTokens / contextWindow，dropped=true 时提示
-     “因超出上下文有丢弃”。契约 usage.dropped 为 boolean（P13 清理 Number 混用）。 -->
+<!-- 用量徽标：显示 lastPromptTokens / contextWindow，dropped=true 时提示
+     “因超出上下文有丢弃”。契约 usage.dropped 为 boolean（清理 Number 混用）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { formatNumber } from '@/utils/format';

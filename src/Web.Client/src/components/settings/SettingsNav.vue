@@ -66,7 +66,7 @@ defineEmits<{ select: [tab: SettingsTab] }>();
   color: hsl(var(--fg));
   font-weight: 500;
 }
- @media (max-width: 900px) { /* P14：与 var(--bp-compact) 同值；var() 不可用于 @media 条件 */
+ @media (max-width: 900px) { /* 与 var(--bp-compact) 同值；var() 不可用于 @media 条件 */
   .snav {
     flex-direction: row;
     overflow-x: auto;

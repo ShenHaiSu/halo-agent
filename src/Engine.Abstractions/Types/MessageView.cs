@@ -30,7 +30,7 @@ public sealed record MessageView
     public int AttachmentCount { get; init; }
     /// <summary>毫秒时间戳。</summary>
     public long TsMs { get; init; }
-    /// <summary>P15：轮序号，0=非回合（system/旧数据/user首条），>=1 轮内序号。</summary>
+    /// <summary>轮序号，0=非回合（system/旧数据/user首条），>=1 轮内序号。</summary>
     public int Ord { get; init; }
 }
 
@@ -53,10 +53,10 @@ public sealed record ToolCallView
     public string? RawType { get; init; }
     /// <summary>结构载荷（C 预留，本次置 null，原样透传）。</summary>
     public object? Payload { get; init; }
-    /// <summary>P15-D8：截断前参数总长。</summary>
+    /// <summary>截断前参数总长。</summary>
     public int ArgsTotal { get; init; }
-    /// <summary>P15-D8：截断前输出总长。</summary>
+    /// <summary>截断前输出总长。</summary>
     public int OutputTotal { get; init; }
-    /// <summary>P15-D8：是否被截断（头部推送）。</summary>
+    /// <summary>是否被截断（头部推送）。</summary>
     public bool Truncated { get; init; }
 }

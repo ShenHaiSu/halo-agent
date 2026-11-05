@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/host.ts
-// P5 扩展：isWin7 / dpiScale。
+// 扩展：isWin7 / dpiScale。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -41,7 +41,7 @@ export const useHostStore = defineStore('host', () => {
     onHostEvent('host.engineStatus', (p) => {
       const s = p as EngineStatusPayload;
       engineStatus.value = s;
-      // P09-fix2 C：已有会话亲和则跳过，避免与 select 切换链打架。
+      // 已有会话亲和则跳过，避免与 select 切换链打架。
       if (s.state === 'ready') {
         try {
           if (useSessionsStore().currentId) return;

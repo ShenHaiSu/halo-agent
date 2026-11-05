@@ -21,7 +21,7 @@ public static class EventKinds
     public const string ToolSilentAlert = "tool.silentAlert";
     /// <summary>round.started。</summary>
     public const string RoundStarted = "round.started";
-    /// <summary>P15：round.ended。</summary>
+    /// <summary>round.ended。</summary>
     public const string RoundEnded = "round.ended";
     /// <summary>llm.retrying。</summary>
     public const string LlmRetrying = "llm.retrying";

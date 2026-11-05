@@ -15,7 +15,7 @@ namespace HaloAgent.Engine.Core.Net;
 ///   更新下载：连接 10s / 总 240s
 /// 由调用方传 timeoutSeconds 覆盖。
 ///
-/// P18-proxy02：单重载 Create(EffectiveProxy, …)。
+/// 单重载 Create(EffectiveProxy, …)。
 ///   None→UseProxy=false；Manual→WebProxy(url)+BypassList（含本地表 + NO_PROXY 复用）；
 ///   System→UseProxy=true, Proxy=null（由 OS 含 PAC 动态解析；无系统代理自然直连）。
 /// System 旁路不靠工厂层（靠 Resolve 期预检 + WebFetch 逐 URL 预检）。

@@ -1,7 +1,7 @@
 namespace HaloAgent.Desktop.Shell;
 
 /// <summary>
-/// 宿主命令行选项（P3 冻结 12 参数 + 位置参数）。
+/// 宿主命令行选项（冻结 12 参数 + 位置参数）。
 /// --dev/--dev-url/--diagnostics/--data-dir/--log-dir/--cwd/--disable-gpu/
 /// --force-software/--engine-args/--no-engine/--reset-window + 位置路径。
 /// </summary>

@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/sessions.ts
-// P5：分组/搜索/重命名(note)/删除二次确认在组件层；store 只做数据。
+// 分组/搜索/重命名(note)/删除二次确认在组件层；store 只做数据。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -12,7 +12,7 @@ import { useQueueStore } from './queue';
 import { useToast } from '@/composables/useToast';
 import { formatRelativeTime } from '@/utils/format';
 import type { SessionSummary } from '@/contract/agent';
-// P09-fix2 B：切换令牌。select 进入即 +1 并快照；任何异步返回后若令牌已变则直接丢弃，
+// 切换令牌。select 进入即 +1 并快照；任何异步返回后若令牌已变则直接丢弃，
 // 保证快速连点 A→B→A 只保留最后一次，无旧快照覆盖新会话。
 let switchToken = 0;
 let switchDepth = 0;
@@ -60,7 +60,7 @@ function toSummary(raw: unknown): SessionSummary {
 
 export const useSessionsStore = defineStore('sessions', () => {
   const items = ref<SessionSummary[]>([]);
-  // 兼容 P4 旧字段
+  // 兼容 旧字段
   const list = computed(() =>
     items.value.map((s) => ({
       id: s.id,
@@ -129,7 +129,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     return '';
   }
 
-  // P09-fix2 B：复用 resume.messages 直接绘制 + 切换令牌 + 全程 loading。
+  // 复用 resume.messages 直接绘制 + 切换令牌 + 全程 loading。
   // 失败语义保持：busy 直接抛 + Toast，不切 currentId、不清空。
   async function select(id: string): Promise<void> {
     if (id === currentId.value) return;
@@ -139,7 +139,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
-    // P23-R1/R4：本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
+    // 本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
     // 用 return 而非 throw：调用方 catch 里还有 error toast，throw 会导致双 toast。
     if (stream.busy) {
       useToast().info('有回合正在执行，稍后再切');
@@ -151,7 +151,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     try {
       let resumed: { count?: number; messages?: unknown } | null = null;
       try {
-        // P23-R1：先问引擎，成功后才清理本地（零抖动）。
+        // 先问引擎，成功后才清理本地（零抖动）。
         resumed = await transport.request<{ count?: number; messages?: unknown; turns?: unknown }>('session.resume', { id });
       } catch (e) {
         const code = rpcCodeOf(e);
@@ -163,7 +163,7 @@ export const useSessionsStore = defineStore('sessions', () => {
           stream.busy = true;
           throw e;
         }
-        // P08-fix 03：本地乐观空会话容错，降级为空白页 + toast。
+        // 本地乐观空会话容错，降级为空白页 + toast。
         if (code === 'session.notFound') {
           const target = items.value.find((s) => s.id === id);
           const looksEmpty =
@@ -188,11 +188,11 @@ export const useSessionsStore = defineStore('sessions', () => {
         throw e;
       }
       if (token !== switchToken) return;
-      // P23-R1：成功后同步清理（与 applySnapshot 之间不插入 await，避免中间帧）。
+      // 成功后同步清理（与 applySnapshot 之间不插入 await，避免中间帧）。
       messages.loading = true;
       stream.endTurn();
       sessionInfo.resetWaterline();
-      /* P15: turns store */
+      /* turns store */
       perms.clear();
       queue.clear();
       clearCollapsedTools();
@@ -212,7 +212,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (token !== switchToken) return;
       }
        // 成功后补齐：resume 不带 session/agent 元信息；以 state.snapshot 全量补齐（含 agent.configured）。
-       // P12-02：此前只补 session.id/cwd/historyPath，agent 恒为初始值导致切换器恒未配置。
+       // 此前只补 session.id/cwd/historyPath，agent 恒为初始值导致切换器恒未配置。
        sessionInfo.compactionSummary = null; sessionInfo.compactionRemoved = null; sessionInfo.compactionKept = null;
        try {
          const snap = await transport.request<{ session?: Record<string, unknown>; agent?: Record<string, unknown>; usage?: Record<string, unknown> }>('state.snapshot', null);
@@ -230,7 +230,7 @@ export const useSessionsStore = defineStore('sessions', () => {
                 output: typeof us.outputTotal === 'number' ? us.outputTotal : 0,
               },
             });
-            // P23：快照仅 session.id 切换采纳（此处 id 即新会话，全量覆盖；老引擎缺字段按 null/0）。
+            // 快照仅 session.id 切换采纳（此处 id 即新会话，全量覆盖；老引擎缺字段按 null/0）。
             sessionInfo.applySnapshotWaterline(
               {
                 lastPromptTokens: typeof us.lastPromptTokens === 'number' ? us.lastPromptTokens : null,
@@ -257,7 +257,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const perms = usePermissionsStore();
     const queue = useQueueStore();
     const sessionInfo = useSessionStore();
-    // P23-R2/R4：本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
+    // 本地忙预检（点击当下反馈，不发 RPC、不碰本地状态、不占 switchToken）。
     // 用 return 而非 throw：快捷键/侧边栏路径对 rejection 处理不一，return 保证只弹一次且不静默。
     if (stream.busy) {
       useToast().info('有回合正在执行，稍后再新建');
@@ -267,7 +267,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     switchDepth++;
     switching.value = true;
     try {
-      // P23-R2：先问引擎（与 select 同语义），成功后才清理本地。
+      // 先问引擎（与 select 同语义），成功后才清理本地。
       let res: { id?: string; sessionId?: string } | null = null;
       try {
         res = await transport.request<{ id?: string; sessionId?: string }>('session.new', null);
@@ -285,7 +285,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       messages.loading = true;
       stream.endTurn();
       sessionInfo.resetWaterline();
-      /* P15: turns store */
+      /* turns store */
       perms.clear();
       queue.clear();
       clearCollapsedTools();
@@ -344,7 +344,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  /** 复制会话：契约无 session.duplicate，用“新建空会话”语义兜底（P5 不新增方法）。 */
+  /** 复制会话：契约无 session.duplicate，用“新建空会话”语义兜底（不新增方法）。 */
   async function duplicate(_id: string): Promise<void> {
     await createNew();
   }

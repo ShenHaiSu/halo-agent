@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/pages/BehaviorPage.vue -->
-<!-- P22 行为页：5 项全局行为（maxTurns/retry/persona/compactKeepTail/autoCompactOnLimit），一处可配持久生效。 -->
+<!-- 行为页：5 项全局行为（maxTurns/retry/persona/compactKeepTail/autoCompactOnLimit），一处可配持久生效。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';

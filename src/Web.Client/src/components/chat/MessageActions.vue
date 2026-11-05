@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/MessageActions.vue -->
-<!-- P5 D5-3 消息操作栏：复制 / 重新生成（仅 assistant）。悬停可见，icon-only 按钮带 label。 -->
+<!-- D5-3 消息操作栏：复制 / 重新生成（仅 assistant）。悬停可见，icon-only 按钮带 label。 -->
 <script setup lang="ts">
 import HIconButton from '@/components/base/HIconButton.vue';
 import { useToast } from '@/composables/useToast';

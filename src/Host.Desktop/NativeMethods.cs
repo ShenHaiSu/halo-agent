@@ -8,7 +8,7 @@ internal static class NativeMethods
    // ---------- 窗口拖拽（自绘标题栏 B 方案：前端 mousedown → haloHost.windowDragStart） ----------
    internal const int WM_NCLBUTTONDOWN = 0x00A1;
    internal const int HTCAPTION = 2;
-   // ---------- 窗体边缘缩放（P07-Enhance 04：前端热区 mousedown → haloHost.windowResizeStart(hitTest)） ----------
+   // ---------- 窗体边缘缩放（前端热区 mousedown → haloHost.windowResizeStart(hitTest)） ----------
    internal const int HTLEFT = 10;
    internal const int HTRIGHT = 11;
    internal const int HTTOP = 12;

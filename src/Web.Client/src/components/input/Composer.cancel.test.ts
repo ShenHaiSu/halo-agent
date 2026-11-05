@@ -20,7 +20,7 @@ function emitCancel(wrapper: ReturnType<typeof shallowMount>) {
   wrapper.findComponent(ComposerToolbar).vm.$emit('cancel');
 }
 
-describe('P24 Composer.cancel 反馈', () => {
+describe('Composer.cancel 反馈', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     useToast().clear();

@@ -53,7 +53,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
          // 两协议均允许（D6 一次性放开）
          if (cfg.Protocol != LlmProtocol.Chat && cfg.Protocol != LlmProtocol.Responses)
              throw new NotSupportedException("未知协议: " + cfg.Protocol);
-         // P18：整值比较（direct⟷system 即使 ProxyUrl 同为 null 也必须重建）
+         // 整值比较（direct⟷system 即使 ProxyUrl 同为 null 也必须重建）
          if (!cfg.Proxy.Equals(_cfg.Proxy))
          {
              _http.Dispose();
@@ -510,7 +510,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
         body["stream"] = stream;
          if (_cfg.MaxTokens is not null) body["max_output_tokens"] = _cfg.MaxTokens.Value;
          body["user"] = ReqUser;
-         // P16-F2：store 可配置（默认 true，服务端持久化才能多轮链；网关不支持时靠重建兜底）。
+         // store 可配置（默认 true，服务端持久化才能多轮链；网关不支持时靠重建兜底）。
          body["store"] = _cfg.StoreResponses;
         return body;
     }
@@ -587,7 +587,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                 onEvent(new StreamEvent.ToolCallDelta(0, nm ?? "", frag ?? ""));
                 return false;
             }
-             // P16-F1：function_call 种子（名字/callId 第一次出现的位置；必须先判 type==function_call）。
+             // function_call 种子（名字/callId 第一次出现的位置；必须先判 type==function_call）。
              if (type == "response.output_item.added")
              {
                  if (root.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object
@@ -605,7 +605,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                  }
                  return false;
              }
-             // P16-F1：全量权威替换（防与 delta 片段重复拼接）。
+             // 全量权威替换（防与 delta 片段重复拼接）。
              if (type == "response.function_call_arguments.done")
              {
                  string? oi = root.TryGetProperty("output_index", out var o) ? o.ToString() : null;
@@ -617,7 +617,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient, IDisposable
                  if (!string.IsNullOrEmpty(ag)) acc.SetArguments(oi, iid, ag);
                  return false;
              }
-             // P16-F1：最终快照兜底。
+             // 最终快照兜底。
              if (type == "response.output_item.done")
              {
                  if (root.TryGetProperty("item", out var item) && item.ValueKind == JsonValueKind.Object

@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/components/usage/charts/useUsageCharts.ts
-// P17 图表重构：主图（token 三段堆叠柱 + 命中率折线双轴）+ 模型分布饼图。
+// src/Web.Client/src/components/usage/charts/useUsageCharts.ts
+// 图表重构：主图（token 三段堆叠柱 + 命中率折线双轴）+ 模型分布饼图。
 // echarts 按需引入，禁全量。口径：miss = max(0, input - cached)，后端 prompt 语义不变。
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';

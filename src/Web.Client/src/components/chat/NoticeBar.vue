@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/NoticeBar.vue -->
-<!-- P5 通知条：notice（info/success 3 秒自动消失，error/warn 不自动）/
+<!-- 通知条：notice（info/success 3 秒自动消失，error/warn 不自动）/
      llm.retrying（"正在重试（attempt/max）：reason"）/
      compactionStarted（spinner + "正在压缩上下文…"）/
      resyncRequired（黄条"界面与后台不同步，正在重新载入…"）。

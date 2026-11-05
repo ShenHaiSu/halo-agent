@@ -14,7 +14,7 @@ export interface DropResult {
  *
  * ============ 两个来源必须去重 ============
  *  在宿主里拖放时：
- *    ① P3 的 IDropTarget 会通过 haloHost 推 filesDropped（带完整路径）
+ *    ① 的 IDropTarget 会通过 haloHost 推 filesDropped（带完整路径）
  *    ② 浏览器也会触发原生 drop（带 File 对象，只有文件名）
  *  两者会同时到达。若都处理 → 同一个文件被加两次。
  *  解法：宿主路径优先；若 500ms 内收到过宿主推送，忽略浏览器原生 drop。

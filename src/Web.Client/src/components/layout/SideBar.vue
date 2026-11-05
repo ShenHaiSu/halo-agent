@@ -5,7 +5,7 @@ import { openSettings } from '@/components/settings/SettingsApp.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 
 /**
- * 侧栏：会话列表（P5 完整实现：虚拟滚动 + 分组 + 搜索 + 重命名 + 删除）。
+ * 侧栏：会话列表（完整实现：虚拟滚动 + 分组 + 搜索 + 重命名 + 删除）。
  */
 </script>
 

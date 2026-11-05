@@ -62,7 +62,7 @@ if (opts.Diagnostics)
     return 0;
 }
 
-// ============ 帧服务模式（--stdio / --pipe-name）：P1 行为，原样保留 ============
+// ============ 帧服务模式（--stdio / --pipe-name）：行为，原样保留 ============
 if (opts.Stdio || !string.IsNullOrWhiteSpace(opts.PipeName))
 {
     var serverOpts = new EngineStartupOptions() with
@@ -108,7 +108,7 @@ catch (Exception ex)
     return 3;
 }
 
- // P16-F3：CLI 与 Server 同链路，responses 不再硬拦（ReconfigureActive 已有 responses 分流）。
+ // CLI 与 Server 同链路，responses 不再硬拦（ReconfigureActive 已有 responses 分流）。
  var llmProto = string.Equals(resolved.Protocol, "responses", StringComparison.OrdinalIgnoreCase)
      ? LlmProtocol.Responses : LlmProtocol.Chat;
 

@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/ToolOutput.vue -->
-<!-- P5 D5-4 工具实时输出区：pre 显示截断 + "已截断"提示；ANSI 转义只显示纯文本
+<!-- D5-4 工具实时输出区：pre 显示截断 + "已截断"提示；ANSI 转义只显示纯文本
      （stripAnsi，避免样式爆炸）；每次更新自动滚动到底。 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';

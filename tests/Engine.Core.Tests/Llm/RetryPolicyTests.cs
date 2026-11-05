@@ -59,7 +59,7 @@ public class RetryPolicyTests
     [Fact]
     public void E8_cancellation_inside_io_is_not_retryable()
     {
-        // ★ P24-D1：内层藏着取消信号 → 不值得重试（防御层，权威判断在 AgentSession）。
+        // ★ 内层藏着取消信号 → 不值得重试（防御层，权威判断在 AgentSession）。
         Assert.Null(RetryPolicy.GetRetryReason(new IOException("boom", new OperationCanceledException())));
         Assert.Null(RetryPolicy.GetRetryReason(new IOException("boom", new TaskCanceledException())));
         Assert.Null(RetryPolicy.GetRetryReason(

@@ -9,7 +9,7 @@ namespace HaloAgent.Engine.Server.Tests;
 /// stdio 通道的端到端往返测试。
 /// 这个测试**证明了"后端可独立测试"**：不需要 CefSharp、不需要窗口、
 /// 不需要管道、不需要网络。整个引擎被当成一个命令行程序驱动。
-/// 这也是 P0 的核心验收物之一。
+/// 这也是 的核心验收物之一。
 /// </summary>
 public class StdioRoundtripTests
 {

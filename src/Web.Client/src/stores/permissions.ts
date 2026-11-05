@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/permissions.ts
-// P5 扩展：queue / draftAfterDeny / clear 别名。
+// 扩展：queue / draftAfterDeny / clear 别名。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';

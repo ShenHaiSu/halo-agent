@@ -1,4 +1,4 @@
-// P10-fix3 01：斜杠命令白名单 + 解析 + 去引号（与 useSlash 命令表同源）。
+// 斜杠命令白名单 + 解析 + 去引号（与 useSlash 命令表同源）。
 export const SLASH_COMMANDS = [
   'new',
   'clear',

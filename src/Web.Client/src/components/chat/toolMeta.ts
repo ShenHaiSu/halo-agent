@@ -1,7 +1,7 @@
 // src/Web.Client/src/components/chat/toolMeta.ts
-// P5 D5-4 工具名中文映射 + 可视状态派生 + 折叠记忆。
+// D5-4 工具名中文映射 + 可视状态派生 + 折叠记忆。
 // 参数摘要见 ./toolArgs（summarizeArgs）。
-// P11-E：折叠记忆单源化。以 ui.collapsedTools 为准，本模块的 collapsedToolIds
+// 折叠记忆单源化。以 ui.collapsedTools 为准，本模块的 collapsedToolIds
 // 改为其薄代理（引用点零变更）；三处清空点统一调 clearCollapsedTools()。
 
 import { reactive } from 'vue';
@@ -22,7 +22,7 @@ export interface ToolMeta {
  * 用户才知道危险度。显示"未知工具"会让用户无法判断，一律允许更危险。
  */
 export function toolMeta(name: string, kind?: string): ToolMeta {
-  // P13：分流键 kind 优先于 name；unknown 短路不走任何名称映射（原名展示）。
+  // 分流键 kind 优先于 name；unknown 短路不走任何名称映射（原名展示）。
   if (kind === 'unknown') {
     return { label: name, icon: 'info', badgeVariant: 'default', mutates: false };
   }
@@ -83,7 +83,7 @@ export function deriveState(tool: ToolCallInfo, awaitingUser: boolean): ToolVisu
   return 'pending';
 }
 
-/** P11-D：状态文案唯一实现（ToolCard 头部与未知工具链共用）。 */
+/** 状态文案唯一实现（ToolCard 头部与未知工具链共用）。 */
 export function toolStatusText(state: ToolVisualState): string {
   switch (state) {
     case 'pending':
@@ -104,7 +104,7 @@ export function toolStatusText(state: ToolVisualState): string {
 }
 
 // ---------------------------------------------------------------------------
-// P11-E：折叠记忆单源（ui.collapsedTools 为准）。
+// 折叠记忆单源（ui.collapsedTools 为准）。
 // collapsedToolIds 为其薄代理：ToolCard 引用点零变更；pinia 未挂载时回退本地 Set。
 // 会话内有效、刷新清空语义不变（不持久化）。
 // ---------------------------------------------------------------------------

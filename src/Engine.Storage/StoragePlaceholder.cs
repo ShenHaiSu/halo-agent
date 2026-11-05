@@ -1,8 +1,8 @@
 namespace HaloAgent.Engine.Storage;
 
 /// <summary>
-/// 存储层占位。P2 才实现会话 JSONL / 记忆 / undo 快照 / 索引。
-/// P0 只需要它能编译、能被 Engine.Core 引用。
+/// 存储层占位。后续再实现会话 JSONL / 记忆 / undo 快照 / 索引。
+/// 早期只需要它能编译、能被 Engine.Core 引用。
 /// </summary>
 public static class StoragePlaceholder
 {

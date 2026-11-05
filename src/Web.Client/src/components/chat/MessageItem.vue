@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/MessageItem.vue -->
-<!-- P5 D5-3 单条消息：只有 assistant + 流式中才走增量解析，其余一次性解析。
+<!-- D5-3 单条消息：只有 assistant + 流式中才走增量解析，其余一次性解析。
      流结束时 finalize 做一次完整解析并替换；roleLabel 用 computed（无 options API）。 -->
 <script setup lang="ts">
 import { computed, watch } from 'vue';
@@ -109,7 +109,7 @@ async function retry(): Promise<void> {
 <ToolCard v-for="tc in message.toolCalls" :key="tc.id" :tool="tc" :is-live="isStreaming" />
 </div>
 
-<!-- 截断提示（P24：用户中断优先——若两者同时为 true，“超长截断”会掩盖用户自己的操作） -->
+<!-- 截断提示（用户中断优先——若两者同时为 true，“超长截断”会掩盖用户自己的操作） -->
 <div v-if="userAborted" class="msg-warn">已由你中断。</div>
 <div v-else-if="truncated" class="msg-warn">回答因达到最大长度而被截断。</div>
 </div>

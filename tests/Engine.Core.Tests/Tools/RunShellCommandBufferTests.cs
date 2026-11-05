@@ -5,7 +5,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Tools;
 
-/// <summary>P21-F4：shell 输出字节拼接乱码回归。Decoder 累积解码 + 字符边界丢弃，任何切分下均无 U+FFFD。</summary>
+/// <summary>shell 输出字节拼接乱码回归。Decoder 累积解码 + 字符边界丢弃，任何切分下均无 U+FFFD。</summary>
 public class RunShellCommandBufferTests
 {
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s);

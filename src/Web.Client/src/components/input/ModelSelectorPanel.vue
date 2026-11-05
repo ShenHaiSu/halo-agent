@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/input/ModelSelectorPanel.vue -->
-<!-- 模型选择器分组面板：按 Provider 分组 + 搜索 + listbox 键盘（P12-01）。 -->
+<!-- 模型选择器分组面板：按 Provider 分组 + 搜索 + listbox 键盘（）。 -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import HInput from '@/components/base/HInput.vue';

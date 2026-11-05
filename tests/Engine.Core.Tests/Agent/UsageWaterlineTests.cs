@@ -13,8 +13,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P23 水位线后端：估算公式 / 重置语义 / 计数器递增 / 事件透传 / 快照两段到达。</summary>
-public sealed class P23WaterlineTests
+/// <summary>水位线后端：估算公式 / 重置语义 / 计数器递增 / 事件透传 / 快照两段到达。</summary>
+public sealed class UsageWaterlineTests
 {
     private sealed class EchoTool : ITool
     {

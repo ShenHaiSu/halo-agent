@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/usage/ZhCell.vue -->
-<!-- P17-03 数字单元格：值中文紧凑 + title 精确，避免四处散写 title。 -->
+<!-- 数字单元格：值中文紧凑 + title 精确，避免四处散写 title。 -->
 <script setup lang="ts">
 import { formatNumber, formatZhCount } from '@/utils/format';
 

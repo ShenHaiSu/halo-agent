@@ -1,5 +1,5 @@
-﻿<!-- src/Web.Client/src/components/chat/TurnCard.vue -->
-<!-- P15 TurnCard 三段式：用户消息（+排队 injected） / 过程 details（思考+中途正文+工具卡） / 末轮正文 -->
+<!-- src/Web.Client/src/components/chat/TurnCard.vue -->
+<!-- TurnCard 三段式：用户消息（+排队 injected） / 过程 details（思考+中途正文+工具卡） / 末轮正文 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import type { TurnView } from '@/stores/messages';

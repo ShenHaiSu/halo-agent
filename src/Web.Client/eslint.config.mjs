@@ -31,12 +31,12 @@ export default [
         {
           object: 'window',
           property: 'haloAgent',
-          message: '禁止直接访问 window.haloAgent —— 请使用 @/transport 的 transport.request（见 P07 ADR-005）',
+          message: '禁止直接访问 window.haloAgent —— 请使用 @/transport 的 transport.request（见 ADR-005）',
         },
         {
           object: 'window',
           property: 'haloHost',
-          message: '禁止直接访问 window.haloHost —— 请使用 transport.host（见 P07 ADR-005）',
+          message: '禁止直接访问 window.haloHost —— 请使用 transport.host（见 ADR-005）',
         },
       ],
       'no-restricted-syntax': [

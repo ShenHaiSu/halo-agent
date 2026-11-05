@@ -1,4 +1,4 @@
-﻿using System.Windows.Forms;
+using System.Windows.Forms;
 using Microsoft.Win32;
 
 using CefSharp;
@@ -39,7 +39,7 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
     private readonly object _throttleLock = new();
     private DateTime _lastPush = DateTime.MinValue;
 
-    /// <summary>P3 主入口。</summary>
+    /// <summary>主入口。</summary>
     public MainForm(HostOptions opts, EngineSupervisor? engine, string gpuMode, SingleInstance? single = null)
     {
         _opts = opts;
@@ -233,7 +233,7 @@ public sealed class MainForm : ChromeForm, ITrayHost, ShutdownSequence.IShutdown
         else Close();
     }
 
-    internal bool ConfirmQuitByUser() => true; // P5 改为询问前端；P3 由 BusyExitDialog 覆盖
+    internal bool ConfirmQuitByUser() => true; // 改为询问前端；由 BusyExitDialog 覆盖
 
     /// <summary>当前 GPU 决策（diagnostics/桥接 systemInfo 用）。</summary>
     public string CurrentGpuDecision => _gpuMode;

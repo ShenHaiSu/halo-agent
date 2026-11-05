@@ -60,7 +60,7 @@ public sealed class ToolContext
      void PublishToolOutput(string toolCallId, string delta);
      /// <summary>推送静默预警（level 0/1/2）</summary>
      void PublishSilentAlert(string toolCallId, int level);
-     /// <summary>P18：非模型链路生效代理（WebFetch 用；System 不固化地址）</summary>
+     /// <summary>非模型链路生效代理（WebFetch 用；System 不固化地址）</summary>
      HaloAgent.Engine.Abstractions.Types.EffectiveProxy EffectiveProxy { get; }
      /// <summary>兼容保留：EffectiveProxy 为 Manual 时的 Url，否则 null</summary>
      string? ProxyUrl { get; }

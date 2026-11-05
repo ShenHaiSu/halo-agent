@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/ui.ts
-// P5 扩展：settings / commandPalette / collapsedTools / detailTab 等。
+// 扩展：settings / commandPalette / collapsedTools / detailTab 等。
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { useToast } from '@/composables/useToast';

@@ -66,7 +66,7 @@ const drop = useFileDrop((paths) => addAttachments(paths, true), {
 
 /**
  * ============ 能否发送 ============
- *  询问未答 → 绝不能发（P2 保证单待答，发了会被拒绝，前端不让用户白按）
+ *  询问未答 → 绝不能发（保证单待答，发了会被拒绝，前端不让用户白按）
  *  生成中   → 可以发，但走排队
  * =================================
  */
@@ -131,7 +131,7 @@ async function stepSession(delta: -1 | 1): Promise<void> {
   try {
     await sessions.select(next.id);
   } catch (e) {
-    // P23：store 内已对 state.busy toast，快捷键路径不再重复（预检 return 路径无 throw）。
+    // store 内已对 state.busy toast，快捷键路径不再重复（预检 return 路径无 throw）。
     if (String((e as Error)?.message ?? '').includes('有回合正在执行')) return;
     toast.error(`切换会话失败：${(e as Error).message}`);
   }
@@ -142,7 +142,7 @@ async function submit(): Promise<void> {
   if (!t && attachments.value.length === 0) return;
   if (switching.value) return;
   if (askPending.value) return;
-  // P10-fix3 01：斜杠白名单拦截（askPending 之后、附件拼接/排队/乐观 append 之前）。
+  // 斜杠白名单拦截（askPending 之后、附件拼接/排队/乐观 append 之前）。
   // 斜杠命令不进 messages.append、不进 agent.queue、不进 ↑ 历史。
   const slashCmd = parseSlashCommand(rawInput);
   if (slashCmd) {
@@ -212,7 +212,7 @@ async function cancel(): Promise<void> {
   // 防抖：已经在取消中就别重复发 RPC（用户会连点）。
   if (stream.cancelling) return;
 
-  // ★ P24-D3 阶段1：先在本地进入「正在中断」，不等 RPC 回来。
+  // ★ 阶段1：先在本地进入「正在中断」，不等 RPC 回来。
   //   这是「点了有反应」的唯一保证——RPC 有往返延迟，等它必然显得没反应。
   stream.beginCancel();
 
@@ -230,7 +230,7 @@ async function cancel(): Promise<void> {
       return;
     }
 
-    // ★ P24-O4：cancelled === true 时，不依赖静默期定时器做提示——
+    // ★ cancelled === true 时，不依赖静默期定时器做提示——
     //   定时器只负责“解锁输入框”，用户可感知的通知在这里补。
     //   用 setTimeout 排到静默期之后再检查（不改 state 结构，避免 store 依赖 ui）。
     window.setTimeout(() => {
@@ -240,7 +240,7 @@ async function cancel(): Promise<void> {
       toast.warning('引擎未确认中断，界面已解锁；若模型仍在输出请重启引擎');
     }, 2100);                                  // 略大于 CANCEL_SILENCE_MS
   } catch (e) {
-    // ★ P24-D3：失败必须可见。之前这里是 `catch { /* 已结束 */ }`，
+    // ★ 失败必须可见。之前这里是 `catch { /* 已结束 */ }`，
     //   导致引擎未就绪/桥异常/超时 时按钮「点了完全没反应」。
     stream.endCancel();
     toast.error(`取消失败：${(e as Error).message}`);

@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Storage.Tests;
 
-/// <summary>P16 UsageStore：建库/写入/分页/双键聚合/ux重放幂等/clear/stats。</summary>
+/// <summary>UsageStore：建库/写入/分页/双键聚合/ux重放幂等/clear/stats。</summary>
 public sealed class UsageStoreTests
 {
     private static UsageStore NewStore(out TempDataDir tmp)
@@ -174,7 +174,7 @@ public sealed class UsageStoreTests
      {
          using var tmp = new TempDataDir();
          var db = Path.Combine(tmp.Dir, "usage.db");
-         // 手工建 P23 之前 schema（无 llm_calls 列）并写入一行旧数据。
+         // 手工建 之前 schema（无 llm_calls 列）并写入一行旧数据。
          using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + db))
          {
              conn.Open();

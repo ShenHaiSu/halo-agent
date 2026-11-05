@@ -1,4 +1,4 @@
-﻿# 一条命令启动 P3 开发全套：Vite（后台）+ 宿主开发态。
+# 一条命令启动开发全套：Vite（后台）+ 宿主开发态。
 # 改一行 Vue 代码，1 秒内在 exe 窗口里看到效果（HMR）。
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot

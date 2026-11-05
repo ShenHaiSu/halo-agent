@@ -64,7 +64,7 @@ await using IFrameChannel channel = opts.Mode switch
     _ => throw new ArgumentOutOfRangeException(nameof(opts.Mode), "未知运行模式"),
 };
 
-// P2 装配：真实 agent 循环 + 方法路由；失败时回落到 P1 stub（引擎仍可启动，
+// 装配：真实 agent 循环 + 方法路由；失败时回落到 stub（引擎仍可启动，
 // 例如尚未配置模型时，设置页仍可用）。
 AssembledEngine? asm = null;
 MethodRouter router;
@@ -84,7 +84,7 @@ try
 }
 catch (Exception ex)
 {
-    log.LogWarning(ex, "P2 装配失败，回落到 P1 stub");
+    log.LogWarning(ex, "装配失败，回落到 stub");
     router = new MethodRouter();
     state = new EngineState(opts.DataDir, router);
     var stubs = new StubMethods(state);

@@ -10,7 +10,7 @@ namespace HaloAgent.Desktop.Bridge;
 
 /// <summary>
 /// 暴露给前端 JS 的宿主能力（window.hostBridge）。
-/// ============ 铁律（P1 契约评审红线） ============
+/// ============ 铁律（契约评审红线） ============
 /// 1. 所有方法**必须**返回 Task&lt;T&gt;，禁止同步阻塞。
 ///    同步方法会在 CEF 的 IO 线程上阻塞，直接导致界面卡死。
 /// 2. 内部任何 UI 操作**必须**通过 MainForm.OnUi() 切回 UI 线程。
@@ -25,14 +25,14 @@ public sealed class HostBridge
     private readonly EngineClient? _engine;
     private EngineSupervisor? _supervisor;
 
-    /// <summary>P1 主入口：宿主通过守护进程持有引擎，支持重连与状态查询。</summary>
+    /// <summary>主入口：宿主通过守护进程持有引擎，支持重连与状态查询。</summary>
     public HostBridge(MainForm form, EngineSupervisor supervisor)
     {
         _form = form;
         _supervisor = supervisor;
     }
 
-    /// <summary>P0 兼容入口：直连 EngineClient（无重连）。MainForm/Program 暂用它，后续切到主入口。</summary>
+    /// <summary>兼容入口：直连 EngineClient（无重连）。MainForm/Program 暂用它，后续切到主入口。</summary>
     public HostBridge(MainForm form, EngineClient engine)
     {
         _form = form;
@@ -131,7 +131,7 @@ public sealed class HostBridge
     }
 
     /// <summary>关闭流程里被 MainForm 调用（同步，因为 FormClosing 是同步事件）。</summary>
-    internal bool ConfirmQuitByUser() => true; // P5 改为询问前端；P0 直接放行
+    internal bool ConfirmQuitByUser() => true; // 改为询问前端；直接放行
 
     // ---------------- 系统集成 ----------------
 
@@ -192,19 +192,19 @@ public sealed class HostBridge
         return Task.FromResult(true);
     }
 
-    /// <summary>把主题等 UI 偏好落到宿主侧（P0 只记日志，P4 会写进设置文件）。</summary>
+    /// <summary>把主题等 UI 偏好落到宿主侧（只记日志，会写进设置文件）。</summary>
     public Task<bool> SaveUiPreferenceAsync(string key, string value)
     {
         AppLog.Info($"UI 偏好: {key}={value}");
         return Task.FromResult(true);
     }
 
-    // ---------------- 引擎连通性（P0 专用调试入口） ----------------
+    // ---------------- 引擎连通性（专用调试入口） ----------------
 
     /// <summary>
     /// 前端 → 宿主 → 引擎的连通性测试。
-    /// 注意：这是 P0 专用的调试入口。P1 起，前端不再通过 JS 桥访问引擎，
-    /// 而是通过宿主的持久管道连接（见 P1 的 Transport 设计）。
+    /// 注意：这是 专用的调试入口。起，前端不再通过 JS 桥访问引擎，
+    /// 而是通过宿主的持久管道连接（见 的 Transport 设计）。
     /// </summary>
     public async Task<EnginePingResult> EnginePingAsync()
     {

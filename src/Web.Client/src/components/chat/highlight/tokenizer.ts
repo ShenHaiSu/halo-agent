@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/chat/highlight/tokenizer.ts
-// P5 D5-2 三色高亮：单遍扫描 + sticky 正则。
+// D5-2 三色高亮：单遍扫描 + sticky 正则。
 export type TokenType = 'kw' | 'str' | 'com' | 'num' | 'punct' | 'plain';
 
 export interface Token {

@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/stores/messages.ts
-// P15 TurnCard 三段式：turns 为唯一真相，drafts 按 (turnId:used,kind) 分槽。
+// src/Web.Client/src/stores/messages.ts
+// TurnCard 三段式：turns 为唯一真相，drafts 按 (turnId:used,kind) 分槽。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -65,7 +65,7 @@ export interface Drafts {
 export type ProcessOpenMode = 'auto' | 'userOpen' | 'userClosed';
 
 /**
- * P08-fix 02 唯一适配函数（保留）：消化后端 ToolCallView{args/output} 与前端 ToolCallInfo{arguments,result} 的字段分歧。
+ * 唯一适配函数（保留）：消化后端 ToolCallView{args/output} 与前端 ToolCallInfo{arguments,result} 的字段分歧。
  */
 export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -115,7 +115,7 @@ export function normalizeToolCalls(raw: unknown): ToolCallInfo[] | undefined {
   });
 }
 
-// P11-C：OpenAI 历史格式 tool_calls 结果回填（保留，供旧数据回填用）。
+// OpenAI 历史格式 tool_calls 结果回填（保留，供旧数据回填用）。
 export function buildToolContentMap(raw: Array<Record<string, unknown>>): Map<string, string> {
   const map = new Map<string, string>();
   for (const m of raw) {
@@ -375,10 +375,10 @@ export const useMessagesStore = defineStore('messages', () => {
     text: string,
     truncated: boolean,
     responseId?: string,
-    byUser = false,          // ★ P24-D4
+    byUser = false,          // ★ 用户中断标志。
   ): void {
     const t = ensureTurn(turnId);
-    // O3：若 round.ended 缺失，以 finalUsed 重切（ord<finalUsed 进 process）
+    // 若 round.ended 缺失，以 finalUsed 重切（ord<finalUsed 进 process）
     for (const k of Object.keys(drafts.value)) {
       if (!k.startsWith(`${turnId}:`)) continue;
       const used = Number(k.split(':')[1] ?? '0');
@@ -394,7 +394,7 @@ export const useMessagesStore = defineStore('messages', () => {
     t.final = {
       ...t.final,
       content: text,
-      // ★ P24-D4：区分“用户中断”与“超长截断”。二者互斥（ByUser 优先）。
+      // ★ 区分“用户中断”与“超长截断”。二者互斥（ByUser 优先）。
       truncatedByUser: truncated && byUser,
       truncatedByLength: truncated && !byUser,
       responseId: responseId ?? t.final.responseId,
@@ -406,7 +406,7 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /**
-   * P24-D5：用户中断时，把该 turn 下仍处于 running/pending/awaiting-user 的工具卡统一改判 cancelled。
+   * 用户中断时，把该 turn 下仍处于 running/pending/awaiting-user 的工具卡统一改判 cancelled。
    * 为什么需要：
    *   ① 引擎在“工具执行中被中断”的路径里，部分工具可能没有 tool.finished
    *      （shell 被 TryKill 会发，但其他工具走 ExecuteToolCallAsync 的 catch OCE 分支，不一定发）；
@@ -521,7 +521,7 @@ export const useMessagesStore = defineStore('messages', () => {
                output: typeof u.outputTotal === 'number' ? u.outputTotal : typeof u.output === 'number' ? u.output : 0,
              },
            });
-           // P23：三处快照读取同改（session/sessions/messages 口径一致）；sid 决定全量/填空采纳。
+           // 三处快照读取同改（session/sessions/messages 口径一致）；sid 决定全量/填空采纳。
            sessionStore.applySnapshotWaterline(
              {
                lastPromptTokens: typeof u.lastPromptTokens === 'number' ? u.lastPromptTokens : null,

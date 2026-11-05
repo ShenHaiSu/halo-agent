@@ -1,5 +1,5 @@
-﻿// src/Web.Client/src/components/usage/FilterForm.test.ts
-// P16：provider 切换清空 model；P17：隐私遮蔽开关默认开、label 假名但 value 真值。
+// src/Web.Client/src/components/usage/FilterForm.test.ts
+// provider 切换清空 model；隐私遮蔽开关默认开、label 假名但 value 真值。
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import FilterForm from './FilterForm.vue';

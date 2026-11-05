@@ -4,8 +4,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Storage.Tests.Config;
 
-/// <summary>P18-proxy02：9 格真值表 + 非法组合 + 迁移映射 + 本地旁路。</summary>
-public class P18ProxyTests
+/// <summary>9 格真值表 + 非法组合 + 迁移映射 + 本地旁路。</summary>
+public class ProxySemanticsTests
 {
     private static ProxyConfig G(string? mode, string? url = null) => new() { Mode = mode, Url = url };
     private const string ValidUrl = "http://127.0.0.1:7890";

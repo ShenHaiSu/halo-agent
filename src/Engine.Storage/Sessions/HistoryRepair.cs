@@ -25,7 +25,7 @@ public static class HistoryRepair
 {
     public const string PlaceholderToolReply = "⏹ 用户中断，该工具调用未执行。";
 
-    /// <summary>原地修复。返回补了几条。P14：占位 Tool 的 TsMs = parentAssistantTs+1（parent 为 0 则传 0，交回填处理）。</summary>
+    /// <summary>原地修复。返回补了几条。占位 Tool 的 TsMs = parentAssistantTs+1（parent 为 0 则传 0，交回填处理）。</summary>
     public static int Repair(List<StoredMessage> messages)
     {
         var pending = new List<(string id, long parentTs)>();

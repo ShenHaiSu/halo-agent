@@ -16,7 +16,7 @@
   </ItemGroup>
  
    <ItemGroup>
-     <!-- P16-F2/F4：单测访问 internal 守卫（IsBrokenChain）。 -->
+     <!-- 单测访问 internal 守卫（IsBrokenChain）。 -->
      <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
        <_Parameter1>Engine.Core.Tests</_Parameter1>
      </AssemblyAttribute>

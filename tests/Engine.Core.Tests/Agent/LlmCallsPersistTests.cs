@@ -13,7 +13,7 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P24：turn 级 LLM 调用次数落盘（_turnLlmCalls 随 turn 落盘；零用量 turn 不落行）。</summary>
+/// <summary>turn 级 LLM 调用次数落盘（_turnLlmCalls 随 turn 落盘；零用量 turn 不落行）。</summary>
 public sealed class LlmCallsPersistTests
 {
     private sealed class EchoTool : ITool
@@ -137,7 +137,7 @@ public sealed class LlmCallsPersistTests
         await s.Session.RunTurnAsync("hi", CancellationToken.None);
         var (_, total) = s.Usage.Query(new UsageQuery());
         Assert.Equal(0, total);
-        // 零用量 turn 不落行：其调用次数不持久化（P24 冻结）。
+        // 零用量 turn 不落行：其调用次数不持久化（冻结）。
         Assert.Equal(0, s.Usage.Summary(new UsageQuery()).LlmCalls);
     }
 

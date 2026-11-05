@@ -1,5 +1,5 @@
  // src/Web.Client/src/components/settings/validators.test.ts
- // P22 字段级校验（网络瘦身：mode/url；行为页：maxTurns/retry/compact/persona）。
+ // 字段级校验（网络瘦身：mode/url；行为页：maxTurns/retry/compact/persona）。
  import { describe, expect, it } from 'vitest';
  import {
    isValidHttpUrl,

@@ -56,7 +56,7 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat('zh-CN').format(n);
 }
 
-/** P21 用量单位口径：<1万原始值；万（1万–1亿）；亿（1亿–1兆）；兆（≥1兆）。统一精确两位小数。
+/** 用量单位口径：<1万原始值；万（1万–1亿）；亿（1亿–1兆）；兆（≥1兆）。统一精确两位小数。
  *
  * 档位：v<10000 → formatNumber 精确原始值（含千分位）；10000≤v<1e8 → 万；
  * 1e8≤v<1e12 → 亿；≥1e12 → 兆。统一精确两位小数（不去零）。

@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/session.ts
-// P10 扩展：provider/providerDisplay/model/modelDisplay/protocol/baseUrl/contextWindow/maxTokens/acceptsImages/includeReasoning/proxyInUse/configured。
+// 扩展：provider/providerDisplay/model/modelDisplay/protocol/baseUrl/contextWindow/maxTokens/acceptsImages/includeReasoning/proxyInUse/configured。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
@@ -18,12 +18,12 @@ export const useSessionStore = defineStore('session', () => {
   const maxTurns = ref<number>(200);
   const retry = ref<number>(0);
   const usage = ref({ input: 0, output: 0 });
-  // P23 水位线：最近一次 prompt/cached（实测态）+ 系统提示词估算（空会话）+ 本会话 LLM 调用计数（内存瞬态）。
+  // 水位线：最近一次 prompt/cached（实测态）+ 系统提示词估算（空会话）+ 本会话 LLM 调用计数（内存瞬态）。
   const lastPromptTokens = ref<number | null>(null);
   const lastCachedTokens = ref<number | null>(null);
   const estimatedInitialTokens = ref<number | null>(null);
   const llmCalls = ref<number>(0);
-  // P23 冲突冻结：快照仅 session.id 切换时全量采纳；同会话快照晚到只填空（事件总值覆盖优先）。
+  // 冲突冻结：快照仅 session.id 切换时全量采纳；同会话快照晚到只填空（事件总值覆盖优先）。
   const waterlineSession = ref<string>('');
   const windowMaximized = ref(false);
   const configured = ref(false);
@@ -102,7 +102,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   /**
-   * P23：水位线快照采纳（冲突冻结）。
+   * 水位线快照采纳（冲突冻结）。
    * - sid 与上次全量采纳不同 → 全量覆盖（含 llmCalls 缺字段按 0）。
    * - 同会话晚到快照 → 只填空（null→值），llmCalls 仅在当前为 0 时采纳；事件已推进的值永不回退。
    * - sid 为 null（调用方未提供会话上下文）→ 按同会话填空处理。
@@ -133,7 +133,7 @@ export const useSessionStore = defineStore('session', () => {
       llmCalls.value = u.sessionLlmCalls;
   }
 
-  /** P23：切会话入口先清零（估算态），再由快照覆盖；同水位会话标记一起重置。 */
+  /** 切会话入口先清零（估算态），再由快照覆盖；同水位会话标记一起重置。 */
   function resetWaterline(): void {
     lastPromptTokens.value = null;
     lastCachedTokens.value = null;
@@ -142,7 +142,7 @@ export const useSessionStore = defineStore('session', () => {
     waterlineSession.value = '';
   }
 
-  /** P23：usage 事件总值覆盖（优先于任何同会话快照）。 */
+  /** usage 事件总值覆盖（优先于任何同会话快照）。 */
   function applyUsageEvent(p: { prompt?: unknown; cached?: unknown; llmCalls?: unknown }): void {
     if (typeof p.prompt === 'number') lastPromptTokens.value = p.prompt;
     if (typeof p.cached === 'number') lastCachedTokens.value = p.cached;
@@ -207,7 +207,7 @@ export const useSessionStore = defineStore('session', () => {
      cwd.value = path;
      try {
        const r = await transport.request<{ cwd?: string }>('session.setCwd', { path });
-       // P10-fix3 02：用引擎返回的规范化路径回填，而非输入原文。
+       // 用引擎返回的规范化路径回填，而非输入原文。
        if (r && typeof r.cwd === 'string' && r.cwd) cwd.value = r.cwd;
      } catch (e) {
        cwd.value = prev;

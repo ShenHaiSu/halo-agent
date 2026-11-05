@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using HaloAgent.Engine.Abstractions.Frames;
 using HaloAgent.Engine.Abstractions.Methods;
 using HaloAgent.Engine.Abstractions.Types;
@@ -12,9 +12,9 @@ using Microsoft.Extensions.Logging;
 namespace HaloAgent.Engine.Server.Routing;
 
 /// <summary>
-/// 真实方法路由（P2 替换 P1 的 StubMethods）。
+/// 真实方法路由（替换 的 StubMethods）。
 /// agent.prompt 的关键语义：立即返回 {accepted, turnId}，回合在后台跑，进度走事件流。
-/// 这是 P1 契约的硬要求 —— 如果这里 await 回合，前端会卡在"发送中"直到整轮跑完（可能几分钟）。
+/// 这是 契约的硬要求 —— 如果这里 await 回合，前端会卡在"发送中"直到整轮跑完（可能几分钟）。
 /// </summary>
 public sealed partial class RealMethods
 {
@@ -155,7 +155,7 @@ public sealed partial class RealMethods
 
     public Task<object?> SessionNewAsync(JsonElement? p, CancellationToken ct)
     {
-        // P08-fix 03：跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
+        // 跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
         if (_session.IsBusy)
             throw RpcException.Busy("有回合正在执行，暂不能新建会话");
         _session.StartNewSession();
@@ -164,19 +164,19 @@ public sealed partial class RealMethods
 
     public Task<object?> SessionResumeAsync(JsonElement? p, CancellationToken ct)
     {
-        // P08-fix 03：跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
+        // 跑轮中切换会 corrupt 当前 turn，加 busy 守卫。
         if (_session.IsBusy)
             throw RpcException.Busy("有回合正在执行，暂不能切换会话");
         var id = p?.TryGetProperty("id", out var i) == true ? i.GetString() : null;
         if (string.IsNullOrWhiteSpace(id))
             throw RpcException.ParamsInvalid("id 不能为空");
 
-        // P08-fix 03/04：路径安全，堵 ../../ 逃逸。
+        // 路径安全，堵 ../../ 逃逸。
         var safeId = SanitizeSessionId(id!);
         var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         if (!File.Exists(path))
         {
-            // P08-fix 03：合法空会话宽容（懒创建不变式：不预建空文件）。
+            // 合法空会话宽容（懒创建不变式：不预建空文件）。
             // 内存已丢（重启后）也覆盖：合法 s-* id 无文件即视为空会话，直接 attach + 清空。
             if (IsEmptySessionId(safeId))
             {
@@ -205,7 +205,7 @@ public sealed partial class RealMethods
         });
     }
 
-    /// <summary>P08-fix 03/04：会话 id 洗白，防路径穿越。含 / \ 或 GetFileName 后不一致即判非法。</summary>
+    /// <summary>会话 id 洗白，防路径穿越。含 / \ 或 GetFileName 后不一致即判非法。</summary>
     private static string SanitizeSessionId(string id)
     {
         var trimmed = id.Trim();
@@ -219,7 +219,7 @@ public sealed partial class RealMethods
         return clean;
     }
 
-    /// <summary>P08-fix 03：合法空会话判定（s-* 形）。真不存在的 id 仍走 session.notFound。</summary>
+    /// <summary>合法空会话判定（s-* 形）。真不存在的 id 仍走 session.notFound。</summary>
     private static bool IsEmptySessionId(string safeId)
     {
         if (!safeId.StartsWith("s-", StringComparison.Ordinal) || safeId.Length > 80)
@@ -263,7 +263,7 @@ public sealed partial class RealMethods
         var note = p?.TryGetProperty("note", out var n) == true ? n.GetString() : null;
         if (string.IsNullOrWhiteSpace(id)) throw RpcException.ParamsInvalid("id 不能为空");
 
-        // P08-fix 04：防路径穿越。
+        // 防路径穿越。
         var safeId = SanitizeSessionId(id!);
         var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         SessionStore.WriteNote(path, note);
@@ -275,7 +275,7 @@ public sealed partial class RealMethods
         var id = p?.TryGetProperty("id", out var i) == true ? i.GetString() : null;
         if (string.IsNullOrWhiteSpace(id)) throw RpcException.ParamsInvalid("id 不能为空");
 
-        // P08-fix 04：防路径穿越。
+        // 防路径穿越。
         var safeId = SanitizeSessionId(id!);
         var path = Path.Combine(Paths.SessionsDir, safeId + ".jsonl");
         SessionStore.DeleteHistory(path);
@@ -306,7 +306,7 @@ public sealed partial class RealMethods
          return Task.FromResult<object?>(new { cwd = _session.Cwd });
      }
 
-     /// <summary>P10-fix3：去首尾配对引号 + Trim（与前端 unquoteArgs 同口径，后端再兜底一次）。</summary>
+     /// <summary>去首尾配对引号 + Trim（与前端 unquoteArgs 同口径，后端再兜底一次）。</summary>
      public static string UnquoteCwd(string raw)
      {
          var s = (raw ?? "").Trim();
@@ -344,7 +344,7 @@ public sealed partial class RealMethods
 
     public Task<object?> StateSetPersonaAsync(JsonElement? p, CancellationToken ct)
     {
-        // P23-R5：跑轮中切换人格会就地改写本轮系统提示词，与模型/会话切换保持一致拒绝。
+        // 跑轮中切换人格会就地改写本轮系统提示词，与模型/会话切换保持一致拒绝。
         if (_session.IsBusy)
             throw RpcException.Busy("有回合正在执行，暂不能切换人格");
         var name = p?.TryGetProperty("name", out var n) == true ? n.GetString() ?? "" : "";

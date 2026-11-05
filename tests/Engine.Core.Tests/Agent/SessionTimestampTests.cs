@@ -10,8 +10,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P14-2/3/5：Record 单调、LoadHistory 回填、ProjectSnapshot 真值优先。</summary>
-public sealed class P14TimestampTests
+/// <summary>/3/5：Record 单调、LoadHistory 回填、ProjectSnapshot 真值优先。</summary>
+public sealed class SessionTimestampTests
 {
     private sealed class FakeClock : IClock
     {
@@ -35,13 +35,13 @@ public sealed class P14TimestampTests
         return ((List<ChatMessage>)f.GetValue(session)!).ToList();
     }
 
-    // ---- P14-2a：同 ms 连发 → t, t+1, t+2 ----
+    // ---- 同 ms 连发 → t, t+1, t+2 ----
     [Fact]
     public async Task Record_Stamps_Monotonic_Same_Ms()
     {
         using var f = new AgentFixture();
         var clock = new FakeClock(8000);
-        using var f2 = new P14FixtureWithClock(clock);
+        using var f2 = new FixtureWithClock(clock);
         InvokeRecord(f2.Session, ChatMessage.User("a"));
         InvokeRecord(f2.Session, ChatMessage.User("b"));
         InvokeRecord(f2.Session, ChatMessage.User("c"));
@@ -50,12 +50,12 @@ public sealed class P14TimestampTests
         await Task.CompletedTask;
     }
 
-    // ---- P14-2b：时钟回拨 → 不倒退 ----
+    // ---- 时钟回拨 → 不倒退 ----
     [Fact]
     public void Record_Clock_Backwards_Does_Not_Regress()
     {
         var clock = new FakeClock(new[] { 9000L, 1000L });
-        using var fx = new P14FixtureWithClock(clock);
+        using var fx = new FixtureWithClock(clock);
         InvokeRecord(fx.Session, ChatMessage.User("a"));
         InvokeRecord(fx.Session, ChatMessage.User("b"));
         var mem = MemoryOf(fx.Session).Where(m => m.Role != Role.System).ToList();
@@ -63,18 +63,18 @@ public sealed class P14TimestampTests
         Assert.Equal(9001L, mem[1].TsMs);
     }
 
-    // ---- P14-2c：已有真值不动 ----
+    // ---- 已有真值不动 ----
     [Fact]
     public void Record_Preserves_Existing_TsMs()
     {
         var clock = new FakeClock(9999);
-        using var fx = new P14FixtureWithClock(clock);
+        using var fx = new FixtureWithClock(clock);
         InvokeRecord(fx.Session, ChatMessage.User("a", tsMs: 12345));
         var mem = MemoryOf(fx.Session).Where(m => m.Role != Role.System).ToList();
         Assert.Equal(12345L, mem[0].TsMs);
     }
 
-    // ---- P14-3：全 0 文件回填单调且 last == mtime ----
+    // ---- 全 0 文件回填单调且 last == mtime ----
     [Fact]
     public void LoadHistory_Backfills_FromMtime()
     {
@@ -102,7 +102,7 @@ public sealed class P14TimestampTests
         Assert.Equal(anchorMs, mem[2].TsMs);
     }
 
-    // ---- P14-5a：全真透传 ----
+    // ---- 全真透传 ----
     [Fact]
     public void ProjectSnapshot_Prefers_Real_TsMs()
     {
@@ -120,7 +120,7 @@ public sealed class P14TimestampTests
         Assert.Equal("m-2", snap[1].Id);
     }
 
-    // ---- P14-5b：全 0 降级倒推 ----
+    // ---- 全 0 降级倒推 ----
     [Fact]
     public void ProjectSnapshot_Falls_Back_For_All_Zero()
     {
@@ -139,7 +139,7 @@ public sealed class P14TimestampTests
         Assert.Equal("m-1", snap[0].Id);
     }
 
-    // ---- P14-5c：ToView 透传 ----
+    // ---- ToView 透传 ----
     [Fact]
     public void ToView_Passes_Through_TsMs()
     {
@@ -149,7 +149,7 @@ public sealed class P14TimestampTests
         Assert.Equal(0, z.TsMs);
     }
 
-    // ---- P14 集成：RunTurn 落盘 JSONL 含 ts_ms ----
+    // ---- 集成：RunTurn 落盘 JSONL 含 ts_ms ----
     [Fact]
     public async Task RunTurn_Persists_TsMs_To_Jsonl()
     {
@@ -177,7 +177,7 @@ public sealed class P14TimestampTests
     }
 
     /// <summary>带 FakeClock 的最小会话夹具（避免改动公用 AgentFixture 签名）。</summary>
-    private sealed class P14FixtureWithClock : IDisposable
+    private sealed class FixtureWithClock : IDisposable
     {
         private readonly string? _prev;
         public string DataDir { get; }
@@ -186,7 +186,7 @@ public sealed class P14TimestampTests
         private readonly EventBus _bus;
         private readonly RecordingEventSink _sink;
 
-        public P14FixtureWithClock(IClock clock)
+        public FixtureWithClock(IClock clock)
         {
             DataDir = Path.Combine(Path.GetTempPath(), "halo-p14-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(DataDir);

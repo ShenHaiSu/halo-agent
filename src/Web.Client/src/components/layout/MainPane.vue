@@ -6,7 +6,7 @@ import Composer from '@/components/input/Composer.vue';
 import NoticeBar from '@/components/chat/NoticeBar.vue';
 
 /**
- * 主区：消息列表 + 通知条 + 输入框（P5 完整实现）。
+ * 主区：消息列表 + 通知条 + 输入框（完整实现）。
  */
 const composer = ref<InstanceType<typeof Composer> | null>(null);
 

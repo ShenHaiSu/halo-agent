@@ -1,6 +1,6 @@
 namespace HaloAgent.Engine.Abstractions.Types;
 
-/// <summary>P18-proxy02：代理种类（诊断/日志一律读 Kind，禁止以 ProxyUrl==null 判直连）。</summary>
+/// <summary>代理种类（诊断/日志一律读 Kind，禁止以 ProxyUrl==null 判直连）。</summary>
 public enum ProxyKind
 {
     None = 0,
@@ -8,7 +8,7 @@ public enum ProxyKind
     System = 2,
 }
 
-/// <summary>P18-proxy02：代理有效解析产物。System 不在 Resolve 期固化地址（运行时跟系统）。</summary>
+/// <summary>代理有效解析产物。System 不在 Resolve 期固化地址（运行时跟系统）。</summary>
 public sealed record EffectiveProxy
 {
     public ProxyKind Kind { get; init; } = ProxyKind.None;
@@ -27,7 +27,7 @@ public sealed record EffectiveProxy
     public override int GetHashCode() => HashCode.Combine((int)Kind, Url ?? "");
 }
 
-/// <summary>P18-proxy02：ProxySource 快照口径。</summary>
+/// <summary>ProxySource 快照口径。</summary>
 public static class ProxySources
 {
     public const string GlobalDirect = "global-direct";

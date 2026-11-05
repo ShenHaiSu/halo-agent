@@ -39,7 +39,7 @@ public static class RetryPolicy
 
         if (ex is OperationCanceledException) return null;   // 用户取消 / 超时归 HttpRequestException
 
-        // ★ P24-D1：IOException / HttpRequestException 可能是“取消”的包装形态。
+        // ★ IOException / HttpRequestException 可能是“取消”的包装形态。
         //   本方法拿不到 CancellationToken，只能靠内层异常嗅探；
         //   真正的权威判断在 AgentSession（see EnsureNotCancelled）。
         if (ex is IOException io && HasCancellationInside(io))

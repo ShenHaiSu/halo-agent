@@ -23,7 +23,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
-describe('P24 MessageItem 中断文案优先级', () => {
+describe('MessageItem 中断文案优先级', () => {
   it('F4: 两者同时 true 时只显示「已由你中断。」', () => {
     const w = mount(MessageItem, {
       props: {

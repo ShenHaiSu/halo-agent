@@ -55,7 +55,7 @@ public sealed class EventBus : IAsyncDisposable
     /// <summary>Delta 合并窗口（毫秒）。可用环境变量 HALO_DELTA_MS 覆盖。</summary>
     private readonly int _deltaWindowMs;
 
-    // P15-R2：Delta 累积器按 (kind,used) 分槽，避免跨轮串扰。
+    // Delta 累积器按 (kind,used) 分槽，避免跨轮串扰。
     // ToolOutputDelta 不走 used 分槽（已有 toolCallId 归属）。
     private readonly object _deltaLock = new();
     private readonly Dictionary<(string kind, int used), System.Text.StringBuilder> _deltaBuffers = new();
@@ -149,7 +149,7 @@ public sealed class EventBus : IAsyncDisposable
         TryFlushDeltas();
     }
 
-    /// <summary>P15-R2：同步刷完本轮 delta（发 round.ended/turn.finished 前必须调用，否则尾字 seq 反超）。</summary>
+    /// <summary>同步刷完本轮 delta（发 round.ended/turn.finished 前必须调用，否则尾字 seq 反超）。</summary>
     public void FlushDeltasBlocking()
     {
         // 先按常规窗口刷一次

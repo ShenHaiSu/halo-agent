@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/usage/providerMask.ts
-// P17-04 Provider 纯前端模糊化：默认开，恒 5 位 [a-z0-9] 确定性假名。
+// Provider 纯前端模糊化：默认开，恒 5 位 [a-z0-9] 确定性假名。
 // 只做显示映射，绝不回写请求参数（providerId 过滤恒用真值）。
 
 /** localStorage 开关：'1'=开，'0'=关，缺省=开。 */

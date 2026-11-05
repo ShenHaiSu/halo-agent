@@ -1,5 +1,5 @@
 // src/Web.Client/src/components/settings/providerEditing.test.ts
-// P10 providerEditing 纯函数单测：归一化/校验/dirty；左栏计数、空 provider、active 高亮、responses disabled、dirty 禁切 setActive。
+// providerEditing 纯函数单测：归一化/校验/dirty；左栏计数、空 provider、active 高亮、responses disabled、dirty 禁切 setActive。
  import { describe, expect, it } from 'vitest';
  import { diffActive, hasAlias, mainName, normalizeAlias, normalizeNetwork, normalizeProvidersTree, trimOrNull, validateProvidersTree } from './providerEditing';
 
@@ -75,7 +75,7 @@ describe('dirty 禁切 setActive', () => {
   });
 });
  
- describe('P14 别名原则（Ordinal 精确相等）', () => {
+ describe('别名原则（Ordinal 精确相等）', () => {
    it('正常别名：有 alias 只展示 alias', () => {
      expect(hasAlias('deepseek', 'DeepSeek')).toBe(true);
      expect(mainName('deepseek', 'DeepSeek')).toBe('DeepSeek');
@@ -106,7 +106,7 @@ describe('dirty 禁切 setActive', () => {
    });
  });
 
-describe('P18 network', () => {
+describe('network', () => {
   it('network 归一化默认 follow', () => {
     const t = normalizeProvidersTree(RAW);
     expect(t.providers[0]!.network).toBe('follow');

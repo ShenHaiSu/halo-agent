@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/ReasoningBlock.vue -->
-<!-- P5 D5-3 思考内容折叠块：默认折叠；展开时只渲染前 8000 字符 + 显示剩余（见 03 §6.1）。 -->
+<!-- D5-3 思考内容折叠块：默认折叠；展开时只渲染前 8000 字符 + 显示剩余（见 03 §6.1）。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';

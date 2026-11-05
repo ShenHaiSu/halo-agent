@@ -1,5 +1,5 @@
-﻿<!-- src/Web.Client/src/components/usage/SummaryCards.vue -->
-<!-- P17 用量汇总卡：第一行 总Token / 命中率 / 回合数（一行=一回合），第二行 未命中输入 / 命中缓存 / 输出。值中文紧凑 + title 精确。 -->
+<!-- src/Web.Client/src/components/usage/SummaryCards.vue -->
+<!-- 用量汇总卡：第一行 总Token / 命中率 / 回合数（一行=一回合），第二行 未命中输入 / 命中缓存 / 输出。值中文紧凑 + title 精确。 -->
 <script setup lang="ts">
 import { formatNumber, formatZhCount } from '@/utils/format';
 import { missOf } from './charts/useUsageCharts';

@@ -1,7 +1,7 @@
-# scripts/p5-counterproof.ps1
+# scripts/counterproof-frontend.ps1
 <#
 .SYNOPSIS
-  P5 反证脚本：证明 5 条红线检查与关键静态检查是有效的（不是摆设）。
+  反证脚本：证明 5 条红线检查与关键静态检查是有效的（不是摆设）。
   每个反证：构造违反样本 → 确认检查能抓到 → 清理样本。
   退出码 0 = 全部反证有效。
 #>

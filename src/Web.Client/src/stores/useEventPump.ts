@@ -1,12 +1,12 @@
 // src/Web.Client/src/stores/useEventPump.ts
-// D4-8 事件拉取循环（P1 决策的 pull 模式）。
+// D4-8 事件拉取循环（决策的 pull 模式）。
 import { onBeforeUnmount, onMounted } from 'vue';
 import { transport } from '@/transport';
 import { useMessagesStore } from '@/stores/messages';
 import { dispatchFrames } from '@/stores/eventBridge';
 
 /**
- * 事件拉取循环（P1 决策的 pull 模式）。
+ * 事件拉取循环（决策的 pull 模式）。
  *
  * ============ 为什么用 pull 而不是 push ============
  *  ① 天然背压：前端处理慢了就少拉几次

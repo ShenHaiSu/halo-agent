@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/UnknownToolCard.vue -->
-<!-- P11-D 去嵌套：降级为纯正文组件（头部/折叠/徽/时长唯一一份在 ToolCard）。
+<!-- 去嵌套：降级为纯正文组件（头部/折叠/徽/时长唯一一份在 ToolCard）。
      props 保持 { tool }，prettyArgs + ToolOutput 逻辑原样搬运。 -->
 <script setup lang="ts">
 import { computed } from 'vue';

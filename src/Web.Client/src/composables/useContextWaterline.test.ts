@@ -1,4 +1,4 @@
-// P23：水位线 composable + session 快照/事件冲突冻结。
+// 水位线 composable + session 快照/事件冲突冻结。
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { ref } from 'vue';

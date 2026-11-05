@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/MessageList.vue -->
-<!-- P15：渲染 TurnCard 列表，窗口化以 currentTurn.turnId 为中心 -->
+<!-- 渲染 TurnCard 列表，窗口化以 currentTurn.turnId 为中心 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { throttle } from '@/utils/throttle';

@@ -13,7 +13,7 @@ namespace HaloAgent.Engine.Server;
 /// <summary>
 /// 帧服务主循环。
 ///
-/// ============ 并发模型（P1 定稿） ============
+/// ============ 并发模型（定稿） ============
 ///
 /// 【读】单线程顺序读帧 → 保证请求到达顺序可预期。
 ///
@@ -55,7 +55,7 @@ public sealed class FrameServer
           "asset.personas.save", "asset.personas.delete", "asset.memory.save", "asset.memory.delete",
           "tool.undoRollback", "system.shutdown", "update.install",
           "usage.clear",
-         // ★ P24-D7：agent.cancel 已移出本集合。
+         // ★ agent.cancel 已移出本集合。
          //   它不写业务状态、不发模型请求，只把 turn 级 CTS 置取消。
          //   留在锁内会让取消排在 session.compact（持锁最长 180s）等长任务后面，
          //   表现为“点中止半天没反应”。取消必须永远是最快的路径。

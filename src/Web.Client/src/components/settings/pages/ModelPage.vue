@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/pages/ModelPage.vue -->
-<!-- P14：单列嵌套手风琴（ProviderCard > ProviderHeader + ProviderBody 含 ModelList），Model 永为 Provider 子节点。 -->
+<!-- 单列嵌套手风琴（ProviderCard > ProviderHeader + ProviderBody 含 ModelList），Model 永为 Provider 子节点。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { transport } from '@/transport';
@@ -62,7 +62,7 @@ const pendingDeleteProvider = ref<string | null>(null);
 
 const dirty = computed(() => JSON.stringify(snapshotForDirty()) !== originalJson.value);
 
-/** P14：快照排除 expanded(UI 态)，新建空 Card 纳入 dirty。 */
+/** 快照排除 expanded(UI 态)，新建空 Card 纳入 dirty。 */
 function snapshotForDirty(): unknown {
   return {
     newProviderMode: newProviderMode.value,
@@ -261,7 +261,7 @@ function toSavePayloadWithForce(force: boolean): Record<string, unknown> {
   const providers: Record<string, unknown> = {};
   for (const p of tree.value.providers) {
     providers[p.id] = {
-      // P14 缺席/显式空区分：整树下发一律显式传 displayName，空字串=清除（后端 NormalizeAlias→null）。
+      // 缺席/显式空区分：整树下发一律显式传 displayName，空字串=清除（后端 NormalizeAlias→null）。
       displayName: p.displayName,
       baseUrl: p.baseUrl,
       apiKey: p.newKey || undefined,

@@ -1,4 +1,4 @@
-﻿using HaloAgent.Engine.Abstractions.Events;
+using HaloAgent.Engine.Abstractions.Events;
 using HaloAgent.Engine.Core.Agent;
 using HaloAgent.Engine.Core.Llm;
 using HaloAgent.Engine.Core.Tests.TestSupport;
@@ -6,8 +6,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Agent;
 
-/// <summary>P15 后端分段测试（04 §4.1 1~6）。</summary>
-public sealed class P15SegmentsTests
+/// <summary>后端分段测试（04 §4.1 1~6）。</summary>
+public sealed class MessageSegmentsTests
 {
     [Fact]
     public async Task RoundEnded_MarksDraftVsFinal_Chat()
@@ -56,7 +56,7 @@ public sealed class P15SegmentsTests
         cts.Cancel();
         // cancel 可能抛 OperationCanceledException（RunTurnAsync 透出），也可能返回中断结果
         try { await task; } catch (OperationCanceledException) { }
-        // ★ P24-D2：取消必须有 turn.finished 收尾（旧规格容忍「无 finished」是 bug，见 01 §D2）。
+        // ★ 取消必须有 turn.finished 收尾（旧规格容忍「无 finished」是 bug，见 01 §D2）。
         var fin = await fx.TryWaitForKindAsync(EventKinds.TurnFinished, timeoutMs: 2000);
         Assert.NotNull(fin);
         var p = AgentFixture.PayloadOf<TurnFinishedPayload>(fin!);

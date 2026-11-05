@@ -1,5 +1,5 @@
 // src/Web.Client/src/stores/stream.ts
-// P15：streamingMessageId 删除，改 currentTurn{turnId,activeOrd} + mismatch。
+// streamingMessageId 删除，改 currentTurn{turnId,activeOrd} + mismatch。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
@@ -41,8 +41,8 @@ export const useStreamStore = defineStore('stream', () => {
   const usage = ref({ lastPromptTokens: 0, lastCompletionTokens: 0, dropped: false });
   const queueLength = ref(0);
   const mismatch = ref(0);
-  const cancelling = ref(false);            // ★ P24-D3：已发出取消请求，等引擎收尾
-  const cancelRequestedAt = ref(0);         // ★ P24-D5：取消请求时刻（performance.now()），工具帧判定用
+  const cancelling = ref(false);            // ★ 已发出取消请求，等引擎收尾
+  const cancelRequestedAt = ref(0);         // ★ 取消请求时刻（performance.now()），工具帧判定用
   const cancelTimedOut = ref(false);       // ★ 兜底触发过（UI 可据此提示“可能仍在输出”）
   let cancelTimer: number | null = null;    // 静默期兜底定时器
 
@@ -54,7 +54,7 @@ export const useStreamStore = defineStore('stream', () => {
     currentTurn.value = { turnId, activeOrd: 1 };
     activeTools.value.clear();
     retrying.value = null;
-    endCancel();                       // ★ P24-O3：新回合开始必须清掉上一轮的取消态
+    endCancel();                       // ★ 新回合开始必须清掉上一轮的取消态
   }
 
   function setActiveOrd(ord: number): void {
@@ -66,11 +66,11 @@ export const useStreamStore = defineStore('stream', () => {
     currentTurn.value = null;
     activeTools.value.clear();
     retrying.value = null;
-    endCancel();                       // ★ P24-D3：收尾即退出取消态
+    endCancel();                       // ★ 收尾即退出取消态
   }
 
   /**
-   * P24-D3：进入「正在中断」态。
+   * 进入「正在中断」态。
    * 为什么放在 store 而不是组件：
    *   ① StopButton / Composer / QueueList 都要读它；
    *   ② 静默期定时器必须跨组件存活（组件可能重渲染）；
@@ -86,7 +86,7 @@ export const useStreamStore = defineStore('stream', () => {
       console.warn('[cancel] 静默期 2000ms 内未收到 turn.finished，本地复位');
       cancelling.value = false;
       cancelTimedOut.value = true;
-      // ★ P24-O4：这里不能调 endTurn()。
+      // ★ 这里不能调 endTurn()。
       //   endTurn 会清 currentTurn，导致随后迟到的 turn.finished 找不到宿主、
       //   ensureTurn() 新建一个孤儿 turn —— 用户会看到“两条回复”。
       //   正确做法：只退出 busy（让输入框可用），保留 currentTurn 等迟到帧。

@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 namespace HaloAgent.Engine.Storage.Usage;
 
 /// <summary>
-/// P16 用量持久化：SQLite WAL + 短连接 + 进程内 lock(_gate)。
+/// 用量持久化：SQLite WAL + 短连接 + 进程内 lock(_gate)。
 /// 跨进程（CLI+Server 双开）靠 busy_timeout + 唯一索引兜底。
 /// 铁律：只依赖 Engine.Abstractions + Microsoft.Data.Sqlite，禁止引用 Engine.Core。
 /// </summary>
@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_pm ON usage_events(provider_id, model_id, t
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);";
                     cmd.ExecuteNonQuery();
                 }
-                // P24：老库迁移（新库建表已含列；IF NOT EXISTS 对已存在表无操作，故此处补列）。
+                // 老库迁移（新库建表已含列；IF NOT EXISTS 对已存在表无操作，故此处补列）。
                 EnsureLlmCallsColumn(conn);
                 _created = true;
                 _degraded = false;
@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);
         }
     }
 
-    /// <summary>P24：老库补列（幂等；列已存在则直接返回，异常吞掉走降级由上层判定）。</summary>
+    /// <summary>老库补列（幂等；列已存在则直接返回，异常吞掉走降级由上层判定）。</summary>
     private static void EnsureLlmCallsColumn(SqliteConnection conn)
     {
         try
@@ -454,7 +454,7 @@ VALUES (@ts,@sid,@tid,@pid,@pdisp,@mid,@mdisp,@proto,@p,@c,@o,@t,@lc,@tr,@rec);"
          }
      }
  
-     /// <summary>P17 导出落盘：复用 ExportCsv → 先写 path.tmp 再 rename（引擎写 BOM）。返回 (wrote, truncated)。</summary>
+     /// <summary>导出落盘：复用 ExportCsv → 先写 path.tmp 再 rename（引擎写 BOM）。返回 (wrote, truncated)。</summary>
      public (int Wrote, bool Truncated) ExportFile(UsageQuery q, string path, IReadOnlyDictionary<string, string>? maskMap)
      {
          EnsureCreated();

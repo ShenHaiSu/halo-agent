@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/settings/fields/ProbeResultDialog.vue -->
-<!-- 探测名单 dialog：名单展示 + 搜索过滤 + 勾选加入（P12-03）。基于 HDialog。 -->
+<!-- 探测名单 dialog：名单展示 + 搜索过滤 + 勾选加入（）。基于 HDialog。 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import HDialog from '@/components/base/HDialog.vue';

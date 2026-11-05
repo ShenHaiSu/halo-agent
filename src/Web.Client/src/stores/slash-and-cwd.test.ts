@@ -1,4 +1,4 @@
-// P10-fix3 F1-F7 前端回归（06-测试矩阵）。
+// 前端回归（06-测试矩阵）。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useSessionStore } from './session';

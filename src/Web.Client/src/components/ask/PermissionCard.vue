@@ -18,7 +18,7 @@ const ask = computed(() => perms.pending);
 const title = computed(() => askTitle(ask.value?.kind ?? '', ask.value?.title ?? ''));
 const icon = computed(() => askIcon(ask.value?.kind ?? ''));
 const hasWarning = computed(() => !!ask.value?.warning);
-/** * warning 存在时绝不显示"总是允许"（P2 二次降级在 UI 对齐） */
+/** * warning 存在时绝不显示"总是允许"（二次降级在 UI 对齐） */
 const canAlways = computed(() => ask.value?.allowAlways === true && !hasWarning.value);
 
 /** A-2：有 warning → 拒绝；否则允许一次 */

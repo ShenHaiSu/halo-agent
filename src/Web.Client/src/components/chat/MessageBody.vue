@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/MessageBody.vue -->
-<!-- P5 D5-1 Markdown 渲染入口：全仓唯一允许渲染模型内容的组件。 @allow-innerhtml -->
+<!-- D5-1 Markdown 渲染入口：全仓唯一允许渲染模型内容的组件。 @allow-innerhtml -->
 <!-- 本文件无动态 HTML 注入，用 h() 把 AST 递归构建为 VNode，XSS 物理免疫。 -->
 <script setup lang="ts">
  import { computed, getCurrentInstance, h, popScopeId, pushScopeId, type VNode } from 'vue';

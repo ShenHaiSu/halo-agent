@@ -33,7 +33,7 @@ public sealed class AgentBridge
         Task.FromResult(_clientAccessor()?.IsConnected == true);
 
     /// <summary>
-    /// 发一条 P1 方法请求。返回引擎应答 result 的 JSON 字符串
+    /// 发一条引擎方法请求。返回引擎应答 result 的 JSON 字符串
     ///（camelCase，由引擎侧 HaloJson 原样产生，直接取原文过桥）。
     /// 引擎业务错误 / 未就绪一律 throw（不断言、不吞错）。
     /// </summary>

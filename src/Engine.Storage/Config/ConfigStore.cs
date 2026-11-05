@@ -4,7 +4,7 @@ using HaloAgent.Engine.Storage;
 
 namespace HaloAgent.Engine.Storage.Config;
 
-/// <summary>解析产物（P10 新语义：只认 active_provider/active_model）。</summary>
+/// <summary>解析产物（新语义：只认 active_provider/active_model）。</summary>
 public sealed record ResolvedActiveModel
 {
     public string ProviderId { get; init; } = "";
@@ -18,15 +18,15 @@ public sealed record ResolvedActiveModel
     public bool IncludeReasoningHistory { get; init; } = true;
     public string BaseUrl { get; init; } = "";
     public string? ApiKey { get; init; }
-     /// <summary>P18 兼容保留：仅 manual 有效时有值；诊断一律读 ProxyKind。</summary>
+     /// <summary>兼容保留：仅 manual 有效时有值；诊断一律读 ProxyKind。</summary>
      public string? ProxyUrl { get; init; }
-     /// <summary>P18：最终生效代理值对象。</summary>
+     /// <summary>最终生效代理值对象。</summary>
      public EffectiveProxy EffectiveProxy { get; init; } = EffectiveProxy.None;
-     /// <summary>P18：None | Manual | System。</summary>
+     /// <summary>None | Manual | System。</summary>
      public ProxyKind ProxyKind { get; init; } = ProxyKind.None;
-     /// <summary>P18：global-direct|global-manual|global-system|provider-direct|provider-proxy|bypass-local。</summary>
+     /// <summary>global-direct|global-manual|global-system|provider-direct|provider-proxy|bypass-local。</summary>
      public string ProxySource { get; init; } = ProxySources.GlobalDirect;
-     /// <summary>P18：代理组合降级 warning（空串=无）。</summary>
+     /// <summary>代理组合降级 warning（空串=无）。</summary>
      public string ProxyWarning { get; init; } = "";
      /// <summary>全局代理是否有可用（manual 合法或 system；direct/非法 manual 为无）。</summary>
      public bool GlobalProxyAvailable { get; init; }
@@ -47,7 +47,7 @@ public sealed record ResolvedActiveModel
     public string ProviderName => ProviderId;
 }
 
-/// <summary>旧 ResolvedConfig 别名（P10 已由 ResolvedActiveModel 替代，保留兼容）。</summary>
+/// <summary>旧 ResolvedConfig 别名（已由 ResolvedActiveModel 替代，保留兼容）。</summary>
 
 [Obsolete("Use ResolvedActiveModel")]
 public sealed record ResolvedConfig
@@ -215,7 +215,7 @@ public static class ConfigStore
      {
          Directory.CreateDirectory(Paths.DataDir);
          cfg.BuildTag = ConfigTag;
-         // P18：写时只出 network（清掉旧 use_proxy 残留，避免双源）
+         // 写时只出 network（清掉旧 use_proxy 残留，避免双源）
          foreach (var p in cfg.Providers.Values) p.UseProxyLegacy = null;
          var json = JsonSerializer.Serialize(cfg, StorageJson.Options);
          // 原子写：先写临时文件再替换
@@ -231,7 +231,7 @@ public static class ConfigStore
      public const string ProxyDowngradeWarning = "该服务要求走代理，但全局无可用代理，已降级直连";
      public const string ProxyInvalidUrlWarning = "全局代理地址非法，已降级直连";
  
-     /// <summary>P18 读时内存归一（不强制回写）。全新安装缺省 system；存量守恒 direct。</summary>
+     /// <summary>读时内存归一（不强制回写）。全新安装缺省 system；存量守恒 direct。</summary>
      public static void NormalizeConfig(ConfigModel cfg, bool isNewFile)
      {
          cfg.Proxy ??= new ProxyConfig();
@@ -272,7 +272,7 @@ public static class ConfigStore
          }
      }
  
-     /// <summary>P18：全局 mode 归一（读侧旧映射：custom→manual；auto→direct；未知→direct）。</summary>
+     /// <summary>全局 mode 归一（读侧旧映射：custom→manual；auto→direct；未知→direct）。</summary>
      public static string NormalizeGlobalMode(string? mode)
      {
          var m = (mode ?? "").Trim().ToLowerInvariant();
@@ -287,7 +287,7 @@ public static class ConfigStore
          };
      }
  
-     /// <summary>P18：provider network 归一（未知→follow）。</summary>
+     /// <summary>provider network 归一（未知→follow）。</summary>
      public static string NormalizeProviderNetwork(string? network, bool? useProxyLegacy = null)
      {
          var n = (network ?? "").Trim().ToLowerInvariant();
@@ -304,7 +304,7 @@ public static class ConfigStore
          };
      }
  
-     /// <summary>P18 唯一解析实现：Provider 强制项先裁决；永不因组合抛，只回 warning。</summary>
+     /// <summary>唯一解析实现：Provider 强制项先裁决；永不因组合抛，只回 warning。</summary>
      public static (EffectiveProxy proxy, string warning) TryResolveEffectiveProxy(ProxyConfig global, string providerNetwork)
      {
          var network = NormalizeProviderNetwork(providerNetwork);
@@ -326,7 +326,7 @@ public static class ConfigStore
          return (eff, w);
      }
  
-     /// <summary>P18：全局档位解析（供 WebFetch 等非模型链路使用）。</summary>
+     /// <summary>全局档位解析（供 WebFetch 等非模型链路使用）。</summary>
      public static (EffectiveProxy proxy, string warning) ResolveGlobalEffective(ProxyConfig global)
      {
          var g = NormalizeGlobalMode(global.Mode);
@@ -340,7 +340,7 @@ public static class ConfigStore
          };
      }
  
-     /// <summary>解析生效参数（P10 新语义：只认 active_provider/active_model）。P18：代理组合永不抛。</summary>
+     /// <summary>解析生效参数（新语义：只认 active_provider/active_model）。代理组合永不抛。</summary>
      public static ResolvedActiveModel Resolve(ConfigModel cfg)
      {
          var providerId = cfg.ActiveProvider?.Trim() ?? "";
@@ -412,7 +412,7 @@ public static class ConfigStore
          };
      }
  
-     /// <summary>P18 全局代理：manual 合法→可用；system→可用（运行时跟系统）；direct/非法→无。</summary>
+     /// <summary>全局代理：manual 合法→可用；system→可用（运行时跟系统）；direct/非法→无。</summary>
      public static (bool available, string? url) GlobalProxy(ConfigModel cfg)
      {
          var mode = NormalizeGlobalMode(cfg.Proxy?.Mode);
@@ -434,7 +434,7 @@ public static class ConfigStore
          return avail ? url : null;
      }
  
-     /// <summary>P18：本地/内网旁路主机判定（大小写不敏感，主机小写去尾点；端口已剥离时直接传 host）。</summary>
+     /// <summary>本地/内网旁路主机判定（大小写不敏感，主机小写去尾点；端口已剥离时直接传 host）。</summary>
      public static bool IsBypassedHost(string? host)
      {
          if (string.IsNullOrWhiteSpace(host)) return false;

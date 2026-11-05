@@ -16,7 +16,7 @@ import { useSessionStore } from '@/stores/session';
  *  中：当前会话标题（可点击重命名）
  *  右：详情抽屉开关 + 最小化/最大化/关闭
  *
- * ============ 与 P3 宿主的分工（B 方案：显式拖拽） ============
+ * ============ 与 宿主的分工（B 方案：显式拖拽） ============
  *  - CEF 铺满客户区后 WM_NCHITTEST 到不了窗体，宿主无法靠 hit-test 识别标题栏，
  *    因此拖拽由前端 mousedown 显式发起：调 haloHost.windowDragStart，
  *    宿主 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN/HTCAPTION) 交给系统

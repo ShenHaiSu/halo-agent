@@ -1,5 +1,5 @@
 // src/Web.Client/src/composables/useCompactAction.ts
-// P18：压缩动作复用（Composer / CommandPalette 同逻辑，避免两处分叉）。
+// 压缩动作复用（Composer / CommandPalette 同逻辑，避免两处分叉）。
 import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 

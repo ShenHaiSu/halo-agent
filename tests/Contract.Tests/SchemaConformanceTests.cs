@@ -52,7 +52,7 @@ public class SchemaConformanceTests
     {
         var schemaMethods = Methods.EnumerateObject().Select(p => p.Name).ToHashSet();
 
-        // Router 里注册的方法（P1 阶段由 StubMethods 提供）
+        // Router 里注册的方法（阶段由 StubMethods 提供）
         var implemented = KnownMethods.All.ToHashSet();
 
         var missing = schemaMethods.Except(implemented).ToList();
@@ -176,7 +176,7 @@ public class SchemaConformanceTests
 }
 
 /// <summary>
-/// 已实现方法清单（P1 阶段手写；P2 由 Router 反射生成）。
+/// 已实现方法清单（阶段手写；由 Router 反射生成）。
 /// </summary>
 internal static class KnownMethods
 {
@@ -212,7 +212,7 @@ internal static class KnownMethods
         "fs.browse", "fs.pickFiles", "fs.pickSavePath", "fs.readImageAsBase64",
          // update
          "update.check", "update.install",
-          // usage (P16 5 + P17 exportFile)
+          // usage 
           "usage.query", "usage.summary", "usage.stats", "usage.export", "usage.exportFile", "usage.clear",
      };
 }

@@ -42,7 +42,7 @@ public sealed class RunShellCommandTool : ITool
 
     private const int GracePercent = 20;
     private static readonly TimeSpan GraceCap = TimeSpan.FromMinutes(1);
-    // P21-F4：滚动缓冲由字节改为字符。256KB 字节按中英混合约 2 字节/字折算为 128K 字符。
+    // 滚动缓冲由字节改为字符。256KB 字节按中英混合约 2 字节/字折算为 128K 字符。
     private const int OutputBufferCapChars = 128_000;
     private const int ContextMaxChars = 20_000;
     private const int DeathTailChars = 1500;
@@ -135,7 +135,7 @@ public sealed class RunShellCommandTool : ITool
 
             var outBuf = new RollingBuffer(OutputBufferCapChars);
             var errBuf = new RollingBuffer(OutputBufferCapChars);
-            // P21-F4：stdout/stderr 各持独立 Decoder（非线程安全，禁止共用），跨 ReadAsync 累积未完成字节。
+            // stdout/stderr 各持独立 Decoder（非线程安全，禁止共用），跨 ReadAsync 累积未完成字节。
             var outDec = Encoding.UTF8.GetDecoder();
             var errDec = Encoding.UTF8.GetDecoder();
             var outChars = new char[Encoding.UTF8.GetMaxCharCount(8192)];
@@ -211,7 +211,7 @@ public sealed class RunShellCommandTool : ITool
                         int n = await stream.ReadAsync(chunk.AsMemory(), token).ConfigureAwait(false);
                         if (n == 0) break;
 
-                        // P21-F4：单次解码同时喂给滚动缓冲与实时输出；碎字节由 Decoder 留存到下次，不产生 U+FFFD。
+                        // 单次解码同时喂给滚动缓冲与实时输出；碎字节由 Decoder 留存到下次，不产生 U+FFFD。
                         int c = dec.GetChars(chunk, 0, n, charBuf, 0, flush: false);
                         buf.AppendChars(charBuf, 0, c);
                         lock (pendingDelta) pendingDelta.Append(charBuf, 0, c);
@@ -226,7 +226,7 @@ public sealed class RunShellCommandTool : ITool
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception) { /* 管道关闭：正常 */ }
-                // P21-F4：收尾 flush 一次，把 Decoder 内残留字节解出（中途禁止 flush，避免碎字节变 U+FFFD）。
+                // 收尾 flush 一次，把 Decoder 内残留字节解出（中途禁止 flush，避免碎字节变 U+FFFD）。
                 try
                 {
                     int tail = dec.GetChars(Array.Empty<byte>(), 0, 0, charBuf, 0, flush: true);
@@ -439,7 +439,7 @@ public sealed class RunShellCommandTool : ITool
     // ============================================================
 
     /// <summary>
-    /// P21-F4 有界字符缓冲：超上限从头丢整字符（按 Rune 计）。
+    /// 有界字符缓冲：超上限从头丢整字符（按 Rune 计）。
     /// 为什么丢头部：展示与“死前遗言”都只关心最新输出。
     /// 只追加已解码、无碎字节的数据，从根上消除字节切分产生的 U+FFFD。
     /// </summary>

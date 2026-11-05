@@ -13,7 +13,7 @@
 
 namespace HaloAgent.Engine.Server.Tests;
 
-/// <summary>P16 用量 RPC：校验规则（fromMs&gt;toMs / order=asc / clear未来时间）+ 写入后可查。</summary>
+/// <summary>用量 RPC：校验规则（fromMs&gt;toMs / order=asc / clear未来时间）+ 写入后可查。</summary>
 public sealed class UsageMethodsTests : IDisposable
 {
     private readonly string? _prevDataDir;

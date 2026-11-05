@@ -8,7 +8,7 @@ export interface PasteResult {
   skipped: string[];
 }
 
-/** 宿主可选能力的宽松视图（P3 若未提供则降级，见下） */
+/** 宿主可选能力的宽松视图（若未提供则降级，见下） */
 interface OptionalHostFiles {
   saveFileDialog?: (opts: {
     title: string;

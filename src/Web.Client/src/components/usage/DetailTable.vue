@@ -1,5 +1,5 @@
-﻿<!-- src/Web.Client/src/components/usage/DetailTable.vue -->
-<!-- P17 用量明细表：分页。会话列已删除（后端 sessionId 保留），行 key 仍为 sessionId/turnId。 -->
+<!-- src/Web.Client/src/components/usage/DetailTable.vue -->
+<!-- 用量明细表：分页。会话列已删除（后端 sessionId 保留），行 key 仍为 sessionId/turnId。 -->
 <script setup lang="ts">
 import HButton from '@/components/base/HButton.vue';
 import HEmpty from '@/components/base/HEmpty.vue';

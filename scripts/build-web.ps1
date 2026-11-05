@@ -1,4 +1,4 @@
-﻿# 构建前端，输出到 Host.Desktop\wwwroot（供宿主生产态 app:// 加载）。
+# 构建前端，输出到 Host.Desktop\wwwroot（供宿主生产态 app:// 加载）。
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -26,7 +26,7 @@ Get-ChildItem $wwwroot -Recurse -File |
   Measure-Object -Property Length -Sum |
   ForEach-Object { Write-Host ("总大小: {0:N1} MB / {1} 个文件" -f ($_.Sum / 1MB), $_.Count) }
 
-# P3 验收工具：诊断页 + 契约快照拷入 wwwroot（发布前移除）
-Copy-Item scripts\p3-diag.html "$wwwroot\__diag.html" -Force
+# 验收工具：诊断页 + 契约快照拷入 wwwroot（发布前移除）
+Copy-Item scripts\diag-host.html "$wwwroot\__diag.html" -Force
 Copy-Item contract\agent.schema.json "$wwwroot\__contract.json" -Force
 Write-Host "已拷入 __diag.html + __contract.json（仅验收用）" -ForegroundColor Green

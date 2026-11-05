@@ -610,7 +610,7 @@ export function parseInline(raw: string): MdInline[] {
        if (m) {
          flush();
          const href = m[2]!;
-         // P11-G3：alt 归 alt（无障碍），title 归还悬停；旧快照只有 title 时由渲染层回填 alt。
+         // alt 归 alt（无障碍），title 归还悬停；旧快照只有 title 时由渲染层回填 alt。
          const alt = restoreEscapes(m[1] ?? '') || undefined;
          const title = m[3] ? restoreEscapes(m[3]) : undefined;
          if (isSafeUrl(href, 'img')) {
@@ -796,7 +796,7 @@ function combineAdjacentText(nodes: MdInline[]): MdInline[] {
    parseInline: (s: string) => parseInline(s),
    trimIndent,
    isBlockStart,
-   /** P11-G1：列表项 / 引用起始行（流式提交边界回溯用） */
+   /** 列表项 / 引用起始行（流式提交边界回溯用） */
    isListOrQuoteStart: (line: string): boolean =>
      UL_RE.test(line) || OL_RE.test(line) || QUOTE_RE.test(line),
  };

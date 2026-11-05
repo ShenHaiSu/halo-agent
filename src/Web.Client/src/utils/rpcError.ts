@@ -1,5 +1,5 @@
 // src/Web.Client/src/utils/rpcError.ts
-// P07 错误呈现规范：错误码 → 用户可读文案。
+// 错误呈现规范：错误码 → 用户可读文案。
 
 export interface RpcErrorLike {
   code?: string;

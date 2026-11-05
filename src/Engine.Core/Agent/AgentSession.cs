@@ -1,4 +1,4 @@
-﻿ using System.Text.Json;
+ using System.Text.Json;
  using Microsoft.Extensions.Logging;
  using Microsoft.Extensions.Logging.Abstractions;
 using HaloAgent.Engine.Abstractions;
@@ -33,7 +33,7 @@ public sealed class PendingAskSlot
 }
 
 public sealed record AskAnswer(bool Allow, bool Always);
- /// <summary>P18：压缩结果（含对账字段）。提供 2 元解构以兼容旧调用方。</summary>
+ /// <summary>压缩结果（含对账字段）。提供 2 元解构以兼容旧调用方。</summary>
  public sealed record CompactResult(int Removed, string Summary, int TotalBefore, int TotalAfter, int Seq = 0, int RemovedTurns = 0, int KeptTurns = 0)
  {
      public void Deconstruct(out int removed, out string summary)
@@ -97,7 +97,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private string? _currentToolCallId;
      private PendingAskSlot? _pendingAsk;
      private int _askSeq;
-     // P18：最新一次压缩对账（内存最新一次，不持久化，供 system.diagnostics 用）
+     // 最新一次压缩对账（内存最新一次，不持久化，供 system.diagnostics 用）
      private int _lastCompactRemoved;
      private int _lastCompactBefore;
      private int _lastCompactAfter;
@@ -106,11 +106,11 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private long _usageIn;
      private long _usageOut;
      private long? _lastPromptTokens;
-     /// <summary>P23：最近一次 cached（多 round 取末轮覆盖，与 LastPrompt 同步；注释冻结，禁止改成累加）。</summary>
+     /// <summary>最近一次 cached（多 round 取末轮覆盖，与 LastPrompt 同步；注释冻结，禁止改成累加）。</summary>
      private long? _lastCachedTokens;
-     /// <summary>P23：系统提示词估算占用（空会话水位分子；收到首次 usage 后不再使用直到重置）。</summary>
+     /// <summary>系统提示词估算占用（空会话水位分子；收到首次 usage 后不再使用直到重置）。</summary>
      private long? _estimatedInitialTokens;
-     /// <summary>P23：本会话 LLM 成功调用次数（内存瞬态，不落盘）。</summary>
+     /// <summary>本会话 LLM 成功调用次数（内存瞬态，不落盘）。</summary>
      private long _sessionLlmCalls;
     private int _roundUsed;
     private int _roundLimit;
@@ -124,24 +124,25 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      private long _turnCached;
      private long _turnCompletion;
      private bool _turnHasUsage;
-     /// <summary>P24：本 turn 内 LLM 成功调用次数（与 _sessionLlmCalls 同处递增；零用量 turn 不落行）。</summary>
+     /// <summary>本 turn 内 LLM 成功调用次数（与 _sessionLlmCalls 同处递增；零用量 turn 不落行）。</summary>
      private long _turnLlmCalls;
      private long _lastTsMs;
      private const int RepeatWarn = 3;
      private const int RepeatAbort = 6;
      private const int ContextMaxChars = 20_000;
-    /// <summary>P22：压缩保留轮数（实例字段，活会话经 ReconfigureActive 更新；/compact 与自动压缩共用）。</summary>
+    /// <summary>压缩保留轮数（实例字段，活会话经 ReconfigureActive 更新；/compact 与自动压缩共用）。</summary>
     private int _compactKeepTail = 2;
-    /// <summary>P22：超限自动压缩开关（无头下无效，保持“必停”语义）。</summary>
+    /// <summary>超限自动压缩开关（无头下无效，保持“必停”语义）。</summary>
     private bool _autoCompactOnLimit;
     /// <summary>
-    /// P24 紧急开关：为 false 时退回旧行为（不做取消权威化）。
-    /// 为什么需要：D1 的改动在「取消+网络异常」路径上改变了控制流，
+    /// 紧急开关：为 false 时退回旧行为（不做取消权威化）。
+    /// 为什么需要：取消权威化改动在「取消+网络异常」路径上改变了控制流，
     /// 若线上出现非预期（如误判取消导致正常响应被丢弃），可一键回退而不发版。
-    /// 默认 true；通过环境变量 HALO_P24_CANCEL_AUTH=0 关闭。
+    /// 默认 true；通过环境变量 HALO_CANCEL_AUTH=0 关闭（旧名 HALO_P24_CANCEL_AUTH 仍兼容回退一版）。
     /// </summary>
     private static readonly bool CancelAuthEnabled =
-        Environment.GetEnvironmentVariable("HALO_P24_CANCEL_AUTH") != "0";
+        (Environment.GetEnvironmentVariable("HALO_CANCEL_AUTH")
+            ?? Environment.GetEnvironmentVariable("HALO_P24_CANCEL_AUTH")) != "0";
  
        public AgentSession(
            ILlmClient llm,
@@ -186,9 +187,9 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     // ============================================================
 
     public bool IsBusy => _busy;
-    /// <summary>P24：本 turn 已发起的 LLM 请求次数（用于断言“取消后不再发请求”）。</summary>
+    /// <summary>本 turn 已发起的 LLM 请求次数（用于断言“取消后不再发请求”）。</summary>
     internal long TurnLlmCallsForTest { get { lock (_lock) return _turnLlmCalls; } }
-    /// <summary>P24：当前 turn 是否处于取消态（用于断言收尾时机）。</summary>
+    /// <summary>当前 turn 是否处于取消态（用于断言收尾时机）。</summary>
     public bool IsTurnCancelling => _turnCts?.IsCancellationRequested == true;
     public string SessionId => _store.SessionId;
     public string? HistoryPath => _store.HistoryPath;
@@ -206,7 +207,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      public bool AutoCompactOnLimit { get { lock (_lock) return _autoCompactOnLimit; } }
     public string? CurrentToolCallId => _currentToolCallId;
 
-     /// <summary>P18：非模型链路生效代理（WebFetch 用；System 不固化地址）。</summary>
+     /// <summary>非模型链路生效代理（WebFetch 用；System 不固化地址）。</summary>
      public HaloAgent.Engine.Abstractions.Types.EffectiveProxy EffectiveProxy
      {
          get { lock (_lock) return _globalEffectiveProxy; }
@@ -223,7 +224,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
      }
      public string DataDir => _dataDir;
  
-     /// <summary>P10 热切：持久化 active 指针后同进程换 llm（无需重启）。busy 时由调用方前置拒绝。</summary>
+     /// <summary>热切：持久化 active 指针后同进程换 llm（无需重启）。busy 时由调用方前置拒绝。</summary>
      public void ReconfigureActive(ResolvedActiveModel resolved)
      {
          var proto = (resolved.Protocol ?? "chat").ToLowerInvariant() == "responses"
@@ -277,7 +278,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
           }
      }
  
-     /// <summary>P18：设置全局生效代理（非模型链路用；未配置态回落）。</summary>
+     /// <summary>设置全局生效代理（非模型链路用；未配置态回落）。</summary>
      public void SetGlobalProxy(HaloAgent.Engine.Abstractions.Types.EffectiveProxy proxy)
      {
          lock (_lock) _globalEffectiveProxy = proxy;
@@ -291,7 +292,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  ? HaloAgent.Engine.Abstractions.Types.EffectiveProxy.None
                  : HaloAgent.Engine.Abstractions.Types.EffectiveProxy.Manual(url.Trim());
      }
-     /// <summary>P12-02：保存后 active 悬空/非法时显式置未配置（此前无此方法，只能保持旧内存）。</summary>
+     /// <summary>保存后 active 悬空/非法时显式置未配置（此前无此方法，只能保持旧内存）。</summary>
      public void ClearActive()
      {
          lock (_lock)
@@ -316,7 +317,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          }
          ClearResponseChain();
      }
-     /// <summary>P13 链管理：清链（内存 + 落盘同步）。注意：不碰 _responsesStateless（网关能力粘性，只换模型时重置）。P18：加日志。</summary>
+     /// <summary>链管理：清链（内存 + 落盘同步）。注意：不碰 _responsesStateless（网关能力粘性，只换模型时重置）。加日志。</summary>
      public void ClearResponseChain()
      {
          string? prev;
@@ -333,7 +334,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         lock (_lock) { _lastResponseId = id; }
         try { _store.SaveResponseId(id); } catch { }
     }
-     /// <summary>P12-02：setActive 成功后经存量 notice 事件提示（不新增事件 kind，不改契约）。</summary>
+     /// <summary>setActive 成功后经存量 notice 事件提示（不新增事件 kind，不改契约）。</summary>
      public async Task PublishAgentChangedAsync(string text, CancellationToken ct)
      {
          try
@@ -389,7 +390,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          _ = PublishSessionInfoAsync(CancellationToken.None);
      }
 
-     /// <summary>P10-fix3 E：拒绝裸盘符根与系统目录做 cwd（与 ToolPaths.ResolveChecked 同口径）。</summary>
+     /// <summary>拒绝裸盘符根与系统目录做 cwd（与 ToolPaths.ResolveChecked 同口径）。</summary>
      internal static void ThrowIfProtectedCwd(string full)
      {
          if (full.Length is 2 or 3 && full.Length >= 2 && full[1] == ':')
@@ -408,7 +409,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              throw new ArgumentException("拒绝将工作目录设到此处: " + full);
      }
 
-     /// <summary>P10-fix3 C：公开广播（RealMethods 不直接调私有方法）。</summary>
+     /// <summary>公开广播（RealMethods 不直接调私有方法）。</summary>
      public void PublishSessionInfo()
      {
          _ = PublishSessionInfoAsync(CancellationToken.None);
@@ -425,7 +426,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var cts = _turnCts;
         if (cts is null) return false;
         try { cts.Cancel(); } catch { }      // ★ 必须先置取消态（D6 安全依赖此顺序）
-        var ask = _pendingAsk;               // ★ P24-D8：先取引用再置空，避免与 AnswerAsk 的写入竞态
+        var ask = _pendingAsk;               // ★ 先取引用再置空，避免与 AnswerAsk 的写入竞态
         _pendingAsk = null;
         ask?.Cancel();
         return true;
@@ -504,16 +505,16 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var slot = new PendingAskSlot { Ask = ask };
         _pendingAsk = slot;
 
-        // ★ P24-D6 为什么“取消早于 slot 建立”不会丢信号：
+        // ★ 为什么“取消早于 slot 建立”不会丢信号：
         //   CancellationToken.Register 在 token 已取消时会同步执行回调，
         //   因此即使 CancelTurn 在 _pendingAsk 赋值之前到达（_pendingAsk?.Cancel() 空操作），
         //   cts.Cancel() 也已经把 turnCts 置为取消态，
         //   随后这里的 Register 会立刻回调 slot.Cancel() → 询问立即返回 (false,false)。
-        //   单元测试 P24_CancelBeforeAskSlot_StillDenies 钉死该语义，禁止改成 WaitHandle 等写法。
+        //   单元测试 CancelBeforeAskSlot_StillDenies 钉死该语义，禁止改成 WaitHandle 等写法。
         //   注意：CancelTurn 里 cts.Cancel() 必须先于 _pendingAsk?.Cancel()（顺序不可调换）。
         try
         {
-            // ★ P24-D8：询问帧必须发出去（用 None），否则 ct 已取消时既不发帧、
+            // ★ 询问帧必须发出去（用 None），否则 ct 已取消时既不发帧、
             //   又因抛在 try 之外导致 finally 不执行、_pendingAsk 残留到下一 turn。
             await _bus.PublishStateAsync(
                 ask.Kind == "rounds" ? EventKinds.AskRounds : EventKinds.AskPermission,
@@ -565,7 +566,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          {
              try { RecordTurnUsage(turnId, true); } catch { }
 
-             // ★ P24-D2：流式中取消也必须发 turn.finished。
+             // ★ 流式中取消也必须发 turn.finished。
              //   之前这里直接 PublishBusyAsync(false)，前端只收到 state.busyChanged{false}，
              //   而它不清 currentTurn、不 finalizeTurn → 残稿不落地、无终态文案。
              //   与工具边界取消（:746/:778）保持完全一致的收尾语义。
@@ -589,7 +590,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          }
          catch (Exception ex)
          {
-             // P16-F3：异常出口不再哑巴空帧——Text 带上错误文本（与 notice 同一串文案），前端回填后气泡可见。
+             // 异常出口不再哑巴空帧——Text 带上错误文本（与 notice 同一串文案），前端回填后气泡可见。
              var msg = "⚠ 请求失败: " + ex.Message;
              await _bus.PublishStateAsync(EventKinds.Notice,
                  new NoticePayload { Text = msg, Level = "error" },
@@ -602,7 +603,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  try {
                      Record(ChatMessage.Assistant(msg) with { TurnId = turnId, Ord = fu });
                  } catch { }
-                 // ★ P24-S1：改走统一出口；reason 保留原始异常信息便于排查。
+                 // ★ 改走统一出口；reason 保留原始异常信息便于排查。
                  await FinishAsync(turnId, msg, truncated: true,
                      ct: CancellationToken.None, finalUsed: fu, reason: ex.Message)
                      .ConfigureAwait(false);
@@ -660,14 +661,14 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
         var repeatCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         int toolCallCount = 0;
-          // P16：turn 级用量累积（同 turn 多 round 只记一次，以最终累积为准）
+          // turn 级用量累积（同 turn 多 round 只记一次，以最终累积为准）
           _turnPrompt = 0; _turnCached = 0; _turnCompletion = 0; _turnHasUsage = false; _turnLlmCalls = 0;
 
         while (true)
         {
             ct.ThrowIfCancellationRequested();
 
-             // ===== 预算检查（P22：超限自动压缩） =====
+             // ===== 预算检查（超限自动压缩） =====
              if (used >= budget)
              {
                  bool autoOk = false;
@@ -743,10 +744,10 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              {
                  _usageIn += reply.Usage.PromptTokens;
                  _usageOut += reply.Usage.CompletionTokens;
-                 // P23 冻结：多 round 取末轮 prompt 覆盖（末轮 prompt 已含全量历史，最接近真实水位）；禁止改成累加/首轮。
+                 // 冻结：多 round 取末轮 prompt 覆盖（末轮 prompt 已含全量历史，最接近真实水位）；禁止改成累加/首轮。
                  // _turnPrompt/_turnCached 仍为 turn 内求和供落盘；事件 Prompt 为单轮值。求和 vs 末轮覆盖关系由单测锁定。
                  lock (_lock) { _lastPromptTokens = reply.Usage.PromptTokens; _lastCachedTokens = reply.Usage.CachedTokens; }
-                  // P16：turn 级累积（多 round 求和，FinishAsync 时一次落盘）
+                  // turn 级累积（多 round 求和，FinishAsync 时一次落盘）
                   _turnPrompt += reply.Usage.PromptTokens;
                   _turnCached += reply.Usage.CachedTokens;
                   _turnCompletion += reply.Usage.CompletionTokens;
@@ -784,7 +785,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             {
                 if (ct.IsCancellationRequested)
                 {
-                    // I-3/P15-1.7：给剩余 tool_calls 补占位 + 合成 assistant 占位
+                    // I-3/给剩余 tool_calls 补占位 + 合成 assistant 占位
                     for (int j = i; j < reply.ToolCalls.Count; j++)
                         Record(ChatMessage.Tool(reply.ToolCalls[j].Id, HistoryRepair.PlaceholderToolReply) with { TurnId = turnId, Ord = used });
                     Record(ChatMessage.Assistant("⏹ 生成已中断") with { TurnId = turnId, Ord = used });
@@ -795,7 +796,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                         .ConfigureAwait(false);
                     return new TurnResult("⏹ 生成已中断", toolCallCount, true, _usageIn, _usageOut);
                 }
-                // ★ P24-D1（CP-4）：执行前兑现取消。上面的 :749 分支处理“循环进入时已取消”，
+                // ★ （CP-4）：执行前兑现取消。上面的 :749 分支处理“循环进入时已取消”，
                 //   这里处理“上一个工具执行完之后、下一个开始之前”落下的取消，避免再起新工具。
                 EnsureNotCancelled(ct, "tool-before-execute");
 
@@ -908,8 +909,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 continue;
             }
 
-             // P23 冻结：每次 _llm.ChatStreamAsync 成功返回即 +1（位置在空回复判定之前）——含被丢弃后 continue 的空回复中间态；取消/抛异常未返回不计。
-             // P24：turn 内计数同处递增（零用量回包跳过 usage 事件块，此处才能保证不漏计）。
+             // 冻结：每次 _llm.ChatStreamAsync 成功返回即 +1（位置在空回复判定之前）——含被丢弃后 continue 的空回复中间态；取消/抛异常未返回不计。
+             // turn 内计数同处递增（零用量回包跳过 usage 事件块，此处才能保证不漏计）。
              lock (_lock) { _sessionLlmCalls++; _turnLlmCalls++; }
              // 空回复也重试（几乎总是网络问题）
              if (RetryPolicy.IsEmptyReply(reply))
@@ -923,7 +924,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              return reply;
         }
     }
-     /// <summary>P16-F2：断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。</summary>
+     /// <summary>断链判定（毒 previous_response_id 文案即重建；网关回 400 还是 404 不可信，只看文案）。</summary>
      internal static bool IsBrokenChain(EndpointStatusException ese)
      {
          if (ese.Status != 400 && ese.Status != 404) return false;
@@ -1006,8 +1007,8 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                 continue;
             }
               bool wasStateless = stateless;
-               // P23 冻结：每次 _llm.ResponsesStreamAsync 成功返回即 +1（断链 continue 未发请求不计；取消/抛异常不计；空回复中间态计次）。
-               // P24：turn 内计数同处递增。
+               // 冻结：每次 _llm.ResponsesStreamAsync 成功返回即 +1（断链 continue 未发请求不计；取消/抛异常不计；空回复中间态计次）。
+               // turn 内计数同处递增。
                lock (_lock) { _sessionLlmCalls++; _turnLlmCalls++; }
               if (wasStateless)
               {
@@ -1057,7 +1058,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     }
 
     /// <summary>
-    /// P24-D1：取消的唯一兑现点之一。任何可能阻塞/发起新请求的位置，必须先过这里。
+    /// 取消的唯一兑现点之一。任何可能阻塞/发起新请求的位置，必须先过这里。
     /// 为什么不用 ct.ThrowIfCancellationRequested()：
     ///   ① 需要统一的“取消收尾”语义（记录 + 事件），裸 Throw 分散在各处易漏；
     ///   ② 需要日志留痕，便于线上定位“为什么没停”。
@@ -1070,7 +1071,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     }
 
     /// <summary>
-    /// P24-D1：重试前的统一闸门。返回「要不要重试 + 下一次的 attempt 与原因」。
+    /// 重试前的统一闸门。返回「要不要重试 + 下一次的 attempt 与原因」。
     /// 取消已置位时直接抛 OCE（归一化），绝不返回 Retry=true。
     /// 抽出来的唯一目的：让 ChatWithRetryAsync / ResponsesWithRetryAsync 不可能写得不一致。
     /// </summary>
@@ -1092,7 +1093,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     private async Task HandleRetryAsync(int attempt, string reason, CancellationToken ct)
     {
-        // ★ P24-D1（CP-3）：这里必须显式判定，不能依赖「传进去的 ct 已取消，
+        // ★ （CP-3）：这里必须显式判定，不能依赖「传进去的 ct 已取消，
         //   所以 PublishStateAsync / Task.Delay 自然会抛」这种偶然兜底。
         //   为什么这一处就能覆盖全部重试：
         //     :857 / :955  catch (Exception) 分支
@@ -1323,7 +1324,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          }
      }
  
-     /// <summary>P22 超限分支内部路径：复用 Core，但跳过 _busy 检查（预算分支正处忙回合内，不可直调 CompactAsync）。
+     /// <summary>超限分支内部路径：复用 Core，但跳过 _busy 检查（预算分支正处忙回合内，不可直调 CompactAsync）。
      /// 保留 _compacting 重入 guard；/compact 手动命令不受 autoCompactOnLimit 开关影响（调用方区分）。</summary>
      private async Task<CompactResult> CompactForLimitAsync(CancellationToken ct)
      {
@@ -1543,7 +1544,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          {
              _messages.Clear();
              _lastTsMs = 0;
-             // P23：水位与计数器会话隔离——回到估算态 B + 计数器归零。
+             // 水位与计数器会话隔离——回到估算态 B + 计数器归零。
              _lastPromptTokens = null;
              _lastCachedTokens = null;
              _sessionLlmCalls = 0;
@@ -1562,7 +1563,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              _lastTsMs = 0;
              _fileAlways = false;
              _commandAlways = false;
-             // P23：回到估算态 B + 计数器归零。
+             // 回到估算态 B + 计数器归零。
              _lastPromptTokens = null;
              _lastCachedTokens = null;
              _sessionLlmCalls = 0;
@@ -1607,13 +1608,13 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          lock (_lock)
          {
              _messages.Clear();
-             // P23：LoadHistory/resume 后从 0 起计（内存瞬态）；Last* 保持空，前端显示估算并在首次请求后纠正。不从历史文本反推精确值。
+             // LoadHistory/resume 后从 0 起计（内存瞬态）；Last* 保持空，前端显示估算并在首次请求后纠正。不从历史文本反推精确值。
              _lastPromptTokens = null;
              _lastCachedTokens = null;
              _sessionLlmCalls = 0;
              PushSystemPromptLocked();
              var chatMsgs = MessageAdapters.ToChatMessages(messages);
-             // P14-D4：旧数据读时回填（只动内存，不回写文件）。锚 = 历史文件 mtime。
+             // 旧数据读时回填（只动内存，不回写文件）。锚 = 历史文件 mtime。
              if (chatMsgs.Any(m => m.TsMs == 0))
              {
                  long anchor;
@@ -1803,7 +1804,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     private void Record(ChatMessage msg)
     {
-        // P14-D3：唯一打戳漏斗 + 单调 guard。已有真值（resume/回填）不动；0 才取时钟。
+        // 唯一打戳漏斗 + 单调 guard。已有真值（resume/回填）不动；0 才取时钟。
         lock (_lock)
         {
             if (msg.TsMs == 0)
@@ -1833,7 +1834,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          var prompt = SystemPromptBuilder.Build(
              _cwd, _mode, _store.SessionId, _persona, _dataDir);
          _messages.Insert(0, ChatMessage.System(prompt));
-         // P23：锁内仅做纯字符估算（复用已生成的字符串，不再同步重读文件）。
+         // 锁内仅做纯字符估算（复用已生成的字符串，不再同步重读文件）。
          try { _estimatedInitialTokens = TokenEstimator.Estimate(prompt); } catch { }
      }
 
@@ -1896,16 +1897,16 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
             }, ct).ConfigureAwait(false);
     }
 
-    // ★ P24：参数已增至 7 个，新调用点必须使用命名参数，
+    // ★ 参数已增至 7 个，新调用点必须使用命名参数，
     //   禁止 FinishAsync(turnId, text, true, ct, 3, null, true) 这类位置写法。
      private async Task FinishAsync(string turnId, string text, bool truncated, CancellationToken ct, int finalUsed = 1, string? reason = null, bool byUser = false)
      {
-        // ★ P24：ByUser 蕴含 Truncated，违反即编程错误。
+        // ★ ByUser 蕴含 Truncated，违反即编程错误。
         //   用 Debug.Fail 而非 throw：生产环境不因日志断言炸掉用户会话。
         if (byUser && !truncated)
         {
-            System.Diagnostics.Debug.Fail("P24: ByUser=true 必须 Truncated=true");
-            _log.LogError("P24: ByUser=true 但 Truncated=false（编程错误），已按截断处理");
+            System.Diagnostics.Debug.Fail("ByUser=true 必须 Truncated=true");
+            _log.LogError("ByUser=true 但 Truncated=false（编程错误），已按截断处理");
         }
          RecordTurnUsage(turnId, truncated);
          _bus.FlushDeltasBlocking();
@@ -1920,12 +1921,12 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  ResponseId = rid,
                  FinalUsed = finalUsed,
                  Reason = reason,
-                 // ★ P24-D4：ByUser 只由「用户主动中断」的 3 个调用点置 true。
+                 // ★ ByUser 只由「用户主动中断」的 3 个调用点置 true。
                  ByUser = byUser,
              }, ct).ConfigureAwait(false);
          await PublishBusyAsync(false, ct).ConfigureAwait(false);
      }
-      /// <summary>P16：每非空 turn exactly-once 落盘（靠 ux_usage_turn 幂等；失败不中断对话）。无 Usage 不记。P24：落盘 turn 的 LLM 调用次数（_turnLlmCalls，多 round/重试累加；零用量 turn 不落行，其调用次数不持久化）。</summary>
+      /// <summary>每非空 turn exactly-once 落盘（靠 ux_usage_turn 幂等；失败不中断对话）。无 Usage 不记。落盘 turn 的 LLM 调用次数（_turnLlmCalls，多 round/重试累加；零用量 turn 不落行，其调用次数不持久化）。</summary>
       private void RecordTurnUsage(string turnId, bool truncated)
       {
           if (!_turnHasUsage) return;
@@ -2001,7 +2002,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     private static string TruncateForContext(string s) =>
         TextUtil.TruncateChars(s, ContextMaxChars, "\n…(结果过长已截断)");
 
-    /// <summary>P15-D8 tool.result：头部推送后按需拉尾部。只读快照，不记内容日志。</summary>
+    /// <summary>tool.result：头部推送后按需拉尾部。只读快照，不记内容日志。</summary>
     public Task<HaloAgent.Engine.Abstractions.Events.ToolResultResult> ToolResultAsync(string toolCallId, int offset, int limit, string sessionId, CancellationToken ct)
     {
         offset = Math.Max(0, offset);

@@ -6,8 +6,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Llm;
 
-/// <summary>P10 引擎链路验收：max_tokens/Strip/图片/protocol/headers/代理（T2 钉死 auto=直连已在 Storage 覆盖）。</summary>
-public class P10LlmTests
+/// <summary>引擎链路验收：max_tokens/Strip/图片/protocol/headers/代理（T2 钉死 auto=直连已在 Storage 覆盖）。</summary>
+public class LlmProtocolTests
 {
     private sealed class FakeHttpHandler : HttpMessageHandler
     {
@@ -29,7 +29,7 @@ public class P10LlmTests
     [Fact]
     public void Protocol_responses_throws_NotSupported()
     {
-        // P13 D6 一次性放开：构造允许 responses；按协议显式分流，错配才抛。
+        // D6 一次性放开：构造允许 responses；按协议显式分流，错配才抛。
         using var c = Client(new LlmConfig
         {
             BaseUrl = "http://localhost:11434/v1", Model = "m", Protocol = LlmProtocol.Responses,

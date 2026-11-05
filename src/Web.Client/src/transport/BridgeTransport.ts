@@ -133,7 +133,7 @@ export class BridgeTransport implements Transport {
 // 注意：main.ts 里已有一份基于真机探针的 Window.hostBridge 声明
 // （getSystemInfoAsync / enginePingAsync，全部可选）。
 // 这里不重复声明全局类型，而是运行时取桥并断言为完整形态：
-// D1-4 落地后宿主会补齐 invoke / getEventBatch，Mock 模式下根本走不到这里。
+// 宿主补齐 invoke / getEventBatch 后才走真机，Mock 模式下根本走不到这里。
 interface HostBridgeApi {
   getSystemInfo(): Promise<Record<string, unknown>>;
   invoke(method: string, paramsJson: string): Promise<string>;

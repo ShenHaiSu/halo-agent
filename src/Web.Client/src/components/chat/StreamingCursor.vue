@@ -1,5 +1,5 @@
 <!-- src/Web.Client/src/components/chat/StreamingCursor.vue -->
-<!-- P5 D5-3 流式光标：三个跳动点，只用 opacity 动画（不触发重排），支持减少动效偏好。 -->
+<!-- D5-3 流式光标：三个跳动点，只用 opacity 动画（不触发重排），支持减少动效偏好。 -->
 <template>
   <span class="cursor" aria-label="正在生成">
     <span class="dot" /><span class="dot" /><span class="dot" />

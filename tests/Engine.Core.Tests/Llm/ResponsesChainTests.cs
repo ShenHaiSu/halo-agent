@@ -6,8 +6,8 @@ using Xunit;
 
 namespace HaloAgent.Engine.Core.Tests.Llm;
 
-/// <summary>P16 回归验证（对应 docs/P16-response/fix/04-回归验证.md）。</summary>
-public class P16ResponsesTests
+/// <summary>回归验证（对应 docs//fix/04-回归验证.md）。</summary>
+public class ResponsesChainTests
 {
     private sealed class FakeHttpHandler : HttpMessageHandler
     {

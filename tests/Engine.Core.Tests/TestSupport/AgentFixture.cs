@@ -38,7 +38,7 @@ public sealed class AgentFixture : IDisposable
     public EventBus Bus { get; }
     public ToolRegistry Tools { get; }
     public AgentSession Session { get; }
-    /// <summary>P24：P0-2。传进 Session 的 UsageStore，测试可直接查落库行数（不断言文件）。</summary>
+    /// <summary>。传进 Session 的 UsageStore，测试可直接查落库行数（不断言文件）。</summary>
     public UsageStore Usage { get; }
 
     public AgentFixture(
@@ -109,7 +109,7 @@ public sealed class AgentFixture : IDisposable
         if (hit is null)
             throw new TimeoutException($"等待事件超时: {kind}（已有: {string.Join(",", Sink.Kinds())}）");
     }
-    /// <summary>P24：P0-4。等待某事件到达，超时返回 null（不抛），供 R2 断言 payload 用。</summary>
+    /// <summary>。等待某事件到达，超时返回 null（不抛），供 R2 断言 payload 用。</summary>
     public async Task<RecordingEventSink.RecordedEvent?> TryWaitForKindAsync(string kind, int timeoutMs = 5000)
     {
         var sw = Stopwatch.StartNew();
@@ -123,7 +123,7 @@ public sealed class AgentFixture : IDisposable
         return null;
     }
 
-    /// <summary>P24：P0-4。把 RecordedEvent 的 Payload 反序列化为 C# 载荷（camelCase 命名策略）。</summary>
+    /// <summary>。把 RecordedEvent 的 Payload 反序列化为 C# 载荷（camelCase 命名策略）。</summary>
     public static T PayloadOf<T>(RecordingEventSink.RecordedEvent ev)
     {
         if (ev.Payload is null) throw new InvalidOperationException("事件无 payload");

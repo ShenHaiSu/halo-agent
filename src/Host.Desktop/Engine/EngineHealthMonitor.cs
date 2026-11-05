@@ -2,7 +2,7 @@ namespace HaloAgent.Desktop.Engine;
 
 /// <summary>
 /// 引擎健康监控：10s 心跳 × 3 次失败判卡死。
-/// 心跳必须由引擎监听线程响应（P2 已保证），不能在 agent 回合线程上，否则长任务被误杀。
+/// 心跳必须由引擎监听线程响应（已保证），不能在 agent 回合线程上，否则长任务被误杀。
 /// </summary>
 public sealed class EngineHealthMonitor : IAsyncDisposable
 {

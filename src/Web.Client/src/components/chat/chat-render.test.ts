@@ -1,4 +1,4 @@
-// P11-chat-render 回归用例：A 用户纯文本 / B 链接策略 / C 历史 tool_calls 回填 /
+// 回归用例：A 用户纯文本 / B 链接策略 / C 历史 tool_calls 回填 /
 // D 未知工具去嵌套 / E 折叠单源 / F 裸 diff / G 流式与图片 alt。
 import { beforeEach, describe, expect, it } from 'vitest';
 import { nextTick, ref } from 'vue';

@@ -4,7 +4,7 @@ namespace HaloAgent.Engine.Abstractions.Methods;
 
 // ============================ settings.get ============================
 
- /// <summary>settings.get 结果（P10 新整树：一次拿全）。P18：network 取代 useProxy + effective 下发。P22：行为页 compactKeepTail/autoCompactOnLimit。</summary>
+ /// <summary>settings.get 结果（新整树：一次拿全）。network 取代 useProxy + effective 下发。行为页 compactKeepTail/autoCompactOnLimit。</summary>
  public sealed record SettingsGetResult
  {
      public string ActiveProvider { get; init; } = "";
@@ -24,13 +24,13 @@ namespace HaloAgent.Engine.Abstractions.Methods;
 public sealed record ProviderView
 {
     public string Id { get; init; } = "";
-    /// <summary>别称（P14 别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
+    /// <summary>别称（别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
     public string? DisplayName { get; init; }
     public string BaseUrl { get; init; } = "";
     public bool ApiKeySet { get; init; }
     public bool HeadersEnabled { get; init; } = true;
     public IReadOnlyList<HeaderPair> Headers { get; init; } = Array.Empty<HeaderPair>();
-    /// <summary>P18：follow | proxy | direct。</summary>
+    /// <summary>follow | proxy | direct。</summary>
     public string Network { get; init; } = "follow";
     /// <summary>兼容旧字段：Network != direct（读兼容；新客户端读 Network）。</summary>
     [Obsolete("Use Network")]
@@ -40,7 +40,7 @@ public sealed record ProviderView
     public IReadOnlyList<ModelView> Models { get; init; } = Array.Empty<ModelView>();
 }
 
-/// <summary>P18：单个 Provider 生效代理（供黄条/卡片 tag 显示）。</summary>
+/// <summary>单个 Provider 生效代理（供黄条/卡片 tag 显示）。</summary>
 public sealed record ProviderEffective
 {
     public bool InUse { get; init; }
@@ -52,7 +52,7 @@ public sealed record ProviderEffective
 public sealed record ModelView
 {
     public string Id { get; init; } = "";
-    /// <summary>别称（P14 别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
+    /// <summary>别称（别名原则）：null/空/==Id(Ordinal) 均视为无别名；有别名时为 trim 后的别名。</summary>
     public string? DisplayName { get; init; }
     public string Protocol { get; init; } = "chat";
     public int? ContextWindow { get; init; }
@@ -61,7 +61,7 @@ public sealed record ModelView
     public bool IncludeReasoningHistory { get; init; } = true;
 }
 
-/// <summary>代理设置。P18：system | direct | manual。</summary>
+/// <summary>代理设置。system | direct | manual。</summary>
 public sealed record ProxySettings
 {
     /// <summary>“system” | “direct” | “manual”。</summary>
@@ -87,7 +87,7 @@ public sealed record ProviderSaveEntry
     public bool ClearKey { get; init; }
     public bool? HeadersEnabled { get; init; }
     public IReadOnlyList<HeaderPair>? Headers { get; init; }
-    /// <summary>P18：follow | proxy | direct。</summary>
+    /// <summary>follow | proxy | direct。</summary>
     public string? Network { get; init; }
     /// <summary>旧 useProxy 兼容一个版本（network 缺席时回落）。</summary>
     [Obsolete("Use Network")]
@@ -137,7 +137,7 @@ public sealed record SettingsSetActiveResult
 
  // ============================ settings.saveBehavior ============================
  
- /// <summary>P22 行为页：5 项全局行为配置（maxTurns/retry/persona/compactKeepTail/autoCompactOnLimit）。</summary>
+ /// <summary>行为页：5 项全局行为配置（maxTurns/retry/persona/compactKeepTail/autoCompactOnLimit）。</summary>
  public sealed record SettingsSaveBehaviorParams
  {
      public int? MaxTurns { get; init; }
@@ -147,7 +147,7 @@ public sealed record SettingsSetActiveResult
      public bool? AutoCompactOnLimit { get; init; }
  }
  
- /// <summary>P22 settings.saveBehavior 结果（与 saveNetwork 对齐，只有 ok/warnings）。</summary>
+ /// <summary>settings.saveBehavior 结果（与 saveNetwork 对齐，只有 ok/warnings）。</summary>
  public sealed record SettingsSaveBehaviorResult
  {
      public bool Ok { get; init; }
@@ -156,7 +156,7 @@ public sealed record SettingsSetActiveResult
  
  // ============================ settings.saveNetwork ============================
  
- /// <summary>settings.saveNetwork 参数（P18：全局三档 system/direct/manual + 重试）。P22：retry 已搬家至 saveBehavior，后端保留读兼容。</summary>
+ /// <summary>settings.saveNetwork 参数（全局三档 system/direct/manual + 重试）。retry 已搬家至 saveBehavior，后端保留读兼容。</summary>
  public sealed record SettingsSaveNetworkParams
  {
      /// <summary>代理模式：“system” | “direct” | “manual”（可为空）。</summary>
@@ -167,20 +167,20 @@ public sealed record SettingsSetActiveResult
      public int? Retry { get; init; }
  }
  
- /// <summary>settings.saveNetwork 结果（P18：加 Warnings）。</summary>
+ /// <summary>settings.saveNetwork 结果（加 Warnings）。</summary>
  public sealed record SettingsSaveNetworkResult
  {
      /// <summary>是否成功。</summary>
      public bool Ok { get; init; }
      /// <summary>备注。</summary>
      public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
-     /// <summary>P18：代理组合降级 warning（与 saveProviders 同名，不复用 Notes）。</summary>
+     /// <summary>代理组合降级 warning（与 saveProviders 同名，不复用 Notes）。</summary>
      public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
  }
 
 // ============================ settings.probeModels ============================
 
-/// <summary>settings.probeModels 参数（P18：network 三选项，读时兼容旧 useProxy）。</summary>
+/// <summary>settings.probeModels 参数（network 三选项，读时兼容旧 useProxy）。</summary>
 public sealed record SettingsProbeModelsParams
 {
     /// <summary>服务地址。</summary>
@@ -189,7 +189,7 @@ public sealed record SettingsProbeModelsParams
     public string? ApiKey { get; init; }
     public string? ProviderId { get; init; }
     public IReadOnlyList<HeaderPair>? Headers { get; init; }
-    /// <summary>P18：follow | proxy | direct（试算优先）。</summary>
+    /// <summary>follow | proxy | direct（试算优先）。</summary>
     public string? Network { get; init; }
     /// <summary>旧 useProxy 兼容（network 缺席时回落）。</summary>
     [Obsolete("Use Network")]
@@ -198,18 +198,18 @@ public sealed record SettingsProbeModelsParams
     public bool ClearKey { get; init; }
 }
 
-/// <summary>settings.probeModels 结果（P18：加 via/latencyMs）。</summary>
+/// <summary>settings.probeModels 结果（加 via/latencyMs）。</summary>
 public sealed record SettingsProbeModelsResult
 {
     /// <summary>模型名列表。</summary>
     public IReadOnlyList<string> Models { get; init; } = Array.Empty<string>();
-    /// <summary>P18：本次探测走的代理。</summary>
+    /// <summary>本次探测走的代理。</summary>
     public ProbeVia? Via { get; init; }
-    /// <summary>P18：全程耗时毫秒（含 responses ping）。</summary>
+    /// <summary>全程耗时毫秒（含 responses ping）。</summary>
     public long LatencyMs { get; init; }
 }
 
-/// <summary>P18：probe 生效代理回包。</summary>
+/// <summary>probe 生效代理回包。</summary>
 public sealed record ProbeVia
 {
     public string Source { get; init; } = "";

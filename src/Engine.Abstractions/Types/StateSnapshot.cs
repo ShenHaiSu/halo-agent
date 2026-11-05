@@ -21,7 +21,7 @@ public sealed record StateSnapshot
     public IReadOnlyList<string> Queue { get; init; } = Array.Empty<string>();
     /// <summary>待回答的询问（同一时刻最多一个）。</summary>
     public PendingAsk? PendingAsk { get; init; }
-    /// <summary>P15：回合视图（替代扁平 Messages）。</summary>
+    /// <summary>回合视图（替代扁平 Messages）。</summary>
     public IReadOnlyList<TurnView> Turns { get; init; } = Array.Empty<TurnView>();
     /// <summary>备注（info/warn/error）。</summary>
     public IReadOnlyList<Note> Notes { get; init; } = Array.Empty<Note>();
@@ -55,7 +55,7 @@ public sealed record SessionState
     public string? HistoryPath { get; init; }
 }
 
-/// <summary>智能体状态（P10：active 指针 + 模型能力位）。</summary>
+/// <summary>智能体状态（active 指针 + 模型能力位）。</summary>
 public sealed record AgentState
 {
     /// <summary>是否有回合正在执行。</summary>
@@ -92,11 +92,11 @@ public sealed record AgentState
     public bool IncludeReasoning { get; init; } = true;
      /// <summary>本次模型请求是否走代理（脱敏 bool）。</summary>
      public bool ProxyInUse { get; init; }
-     /// <summary>P18：None | Manual | System（诊断一律读此字段）。</summary>
+     /// <summary>None | Manual | System（诊断一律读此字段）。</summary>
      public string ProxyKind { get; init; } = "None";
-     /// <summary>P18：global-direct|global-manual|global-system|provider-direct|provider-proxy|bypass-local。</summary>
+     /// <summary>global-direct|global-manual|global-system|provider-direct|provider-proxy|bypass-local。</summary>
      public string ProxySource { get; init; } = "";
-     /// <summary>P18：代理地址脱敏（仅 Manual 有值）。</summary>
+     /// <summary>代理地址脱敏（仅 Manual 有值）。</summary>
      public string? ProxyMaskedUrl { get; init; }
     /// <summary>最大轮数。</summary>
     public int MaxTurns { get; init; }
@@ -126,11 +126,11 @@ public sealed record RoundState
      public long OutputTotal { get; init; }
      /// <summary>上次 prompt token 数（可为空）。</summary>
      public long? LastPromptTokens { get; init; }
-     /// <summary>P23：最近一次 cached token 数（可为空，老快照缺字段按 null）。</summary>
+     /// <summary>最近一次 cached token 数（可为空，老快照缺字段按 null）。</summary>
      public long? LastCachedTokens { get; init; }
-     /// <summary>P23：空会话系统提示词估算占用（可为空，老快照缺字段按 null）。</summary>
+     /// <summary>空会话系统提示词估算占用（可为空，老快照缺字段按 null）。</summary>
      public long? EstimatedInitialTokens { get; init; }
-     /// <summary>P23：本会话 LLM 成功调用次数（内存瞬态，不落盘；缺字段按 0）。</summary>
+     /// <summary>本会话 LLM 成功调用次数（内存瞬态，不落盘；缺字段按 0）。</summary>
      public long SessionLlmCalls { get; init; }
  }
 

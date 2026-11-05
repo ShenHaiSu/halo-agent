@@ -3,11 +3,11 @@ using HaloAgent.Engine.Abstractions.Types;
 namespace HaloAgent.Engine.Server;
 
 /// <summary>
-/// 引擎运行状态（P1 简版）。
+/// 引擎运行状态（简版）。
 ///
-/// P2 会把这一份状态搬进 Engine.Core 的 AgentSession，
+/// 会把这一份状态搬进 Engine.Core 的 AgentSession，
 /// 但协议面的形状不变 —— 这就是"先定契约、后填实现"的好处。
-/// P10：stub/未配置态同样使用新 AgentState 形状。
+/// stub/未配置态同样使用新 AgentState 形状。
 /// </summary>
 public sealed class EngineState
 {
