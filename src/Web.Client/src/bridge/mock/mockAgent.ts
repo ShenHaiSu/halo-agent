@@ -1,7 +1,8 @@
-// src/Web.Client/src/bridge/mock/mockAgent.ts
+﻿// src/Web.Client/src/bridge/mock/mockAgent.ts
 // D4-7 无宿主时的假引擎（已改为行为表驱动，见 behaviors.ts）。
 import type { HaloFrame, PollResult } from '../types';
-import { BEHAVIORS, mockAppendMessage } from './behaviors';
+import { BEHAVIORS, getCurrentMockSessionId, mockAppendMessage } from './behaviors';
+import { buildTitle } from '@/utils/sessionTitle';
 
 /**
  * 无宿主时的假引擎。
@@ -23,8 +24,9 @@ import { BEHAVIORS, mockAppendMessage } from './behaviors';
 let seqCounter = 0;
 const events: HaloFrame[] = [];
 let busy = false;
-let currentTurnId = '';                    // ★ 当前 mock 回合 id（cancel 时用真实 id，不能硬编码 'mock'）
-const timers = new Set<number>();          // ★ 回放定时器句柄，cancel 时统一清理
+let currentTurnId = '';
+let lastMockUserText = '';
+const timers = new Set<number>();
 function emit(kind: string, payload: unknown): void {
   events.push({ t: 'evt', seq: ++seqCounter, k: kind, p: payload });
   // 限制内存
@@ -42,6 +44,16 @@ function later(ms: number, fn: () => void): void {
 function clearTimers(): void {
   for (const h of timers) window.clearTimeout(h);
   timers.clear();
+}
+
+function mockFinishedSession(): { id: string; title: string; mtimeMs: number; userMsgs: number; assistantMsgs: number } {
+  return {
+    id: getCurrentMockSessionId(),
+    title: buildTitle(lastMockUserText || 'Mock 首问'),
+    mtimeMs: Date.now(),
+    userMsgs: 1,
+    assistantMsgs: 1,
+  };
 }
 
 const SAMPLE_REPLY = [
@@ -96,7 +108,7 @@ const SAMPLE_REPLY = [
 
    const tick = () => {
      if (i >= chunks.length) {
-       emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false, responseId: 'resp-mock-1' });
+       emit('turn.finished', { turnId, text: SAMPLE_REPLY, truncated: false, responseId: 'resp-mock-1', finalUsed: 1, session: mockFinishedSession() });
        // 用户发言已在 agent.prompt 行为里落盘，这里只落助理回复。
        mockAppendMessage('assistant', SAMPLE_REPLY);
        busy = false;
@@ -121,6 +133,7 @@ export function createMockAgent() {
     async request(method: string, params: unknown): Promise<unknown> {
       // agent.prompt 保留流式副作用（用户发言落盘在 BEHAVIORS 里同步完成）
       if (method === 'agent.prompt') {
+        lastMockUserText = String((params as { text?: unknown } | null)?.text ?? '');
         runMockTurn();
       }
       if (method === 'agent.cancel') {
@@ -136,6 +149,7 @@ export function createMockAgent() {
           truncated: true,
           byUser: true,
           finalUsed: 1,
+          session: mockFinishedSession(),
         });
         emit('state.busyChanged', { busy: false, queueLength: 0 });
         return { cancelled: true };

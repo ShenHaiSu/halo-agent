@@ -2134,6 +2134,21 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          _bus.FlushDeltasBlocking();
          string? rid;
          lock (_lock) rid = _lastResponseId;
+         TurnFinishedSessionSnapshot? snap = null;
+         try
+         {
+             var s = _store.GetSummary(_store.SessionId);
+             if (s is not null)
+                 snap = new TurnFinishedSessionSnapshot
+                 {
+                     Id = s.Id,
+                     Title = s.Title,
+                     MtimeMs = s.MtimeMs,
+                     UserMsgs = s.UserMsgs,
+                     AssistantMsgs = s.AssistantMsgs,
+                 };
+         }
+         catch { snap = null; }
          await _bus.PublishStateAsync(EventKinds.TurnFinished,
              new TurnFinishedPayload
              {
@@ -2145,6 +2160,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
                  Reason = reason,
                  // ★ ByUser 只由「用户主动中断」的 3 个调用点置 true。
                  ByUser = byUser,
+                 Session = snap,
              }, ct).ConfigureAwait(false);
          await PublishBusyAsync(false, ct).ConfigureAwait(false);
      }
@@ -2194,12 +2210,22 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
 
     private async Task PublishSessionInfoAsync(CancellationToken ct)
     {
+        string? title = null;
+        long? mtime = null;
+        try
+        {
+            var s = _store.GetSummary(_store.SessionId);
+            if (s is not null) { title = s.Title; mtime = s.MtimeMs; }
+        }
+        catch { }
         await _bus.PublishStateAsync(EventKinds.SessionInfo,
             new SessionInfoPayload
             {
                 Id = _store.SessionId,
                 Cwd = _cwd,
                 HistoryPath = _store.HistoryPath,
+                Title = title,
+                MtimeMs = mtime,
             }, ct).ConfigureAwait(false);
     }
 

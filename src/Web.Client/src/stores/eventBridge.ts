@@ -1,4 +1,4 @@
-// src/Web.Client/src/stores/eventBridge.ts
+﻿// src/Web.Client/src/stores/eventBridge.ts
 // 按 (used,kind) 路由 + 轮级搬运 + 双草稿 + 三态折叠。
 import { normalizeToolCalls, useMessagesStore } from './messages';
 import { clearCollapsedTools } from '@/components/chat/toolMeta';
@@ -7,11 +7,33 @@ import { usePermissionsStore } from './permissions';
 import { useSessionStore } from './session';
 import { useQueueStore } from './queue';
 import { useUiStore } from './ui';
-import { isSwitching } from './sessions';
+import { isSwitching, useSessionsStore } from './sessions';
 import { transport } from '@/transport';
 import type { HaloFrame } from '@/bridge/types';
 
 type Frame = { t?: string; seq?: number; k: string; p?: unknown };
+
+function mergeFinishedSession(p: Record<string, unknown>): void {
+  try {
+    const su = p.session as {
+      id?: unknown;
+      title?: unknown;
+      mtimeMs?: unknown;
+      userMsgs?: unknown;
+      assistantMsgs?: unknown;
+    } | null | undefined;
+    if (!su || typeof su !== 'object') return;
+    useSessionsStore().applySessionUpdate({
+      id: typeof su.id === 'string' ? su.id : '',
+      title: typeof su.title === 'string' ? su.title : null,
+      mtimeMs: typeof su.mtimeMs === 'number' ? su.mtimeMs : null,
+      userMsgs: typeof su.userMsgs === 'number' ? su.userMsgs : null,
+      assistantMsgs: typeof su.assistantMsgs === 'number' ? su.assistantMsgs : null,
+    });
+  } catch {
+    /* 标题合并失败不影响收尾 */
+  }
+}
 
 function asRecord(p: unknown): Record<string, unknown> {
   return (p ?? {}) as Record<string, unknown>;
@@ -139,6 +161,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
                 byUserForeign,
               );
             }
+            mergeFinishedSession(p);
             break;
           }
           const finalUsed = Number(p.finalUsed ?? 0);
@@ -163,6 +186,7 @@ export function dispatchFrames(frames: HaloFrame[]): void {
           );
           // truncated 回合 auto 保持展开直到手动收：不写 userClosed，TurnCard computed 处理
           stream.endTurn();            // 内部会 endCancel()（见 4.2）
+          mergeFinishedSession(p);
           break;
         }
         case 'text.delta': {
@@ -352,6 +376,13 @@ export function dispatchFrames(frames: HaloFrame[]): void {
         case 'session.info': {
           const p = asRecord(f.p);
           useSessionStore().applyInfo({ id: p.id, cwd: p.cwd, historyPath: p.historyPath });
+          try {
+            useSessionsStore().applySessionUpdate({
+              id: String((p.id as string) ?? useSessionStore().id ?? ''),
+              title: typeof p.title === 'string' ? (p.title as string) : null,
+              mtimeMs: typeof p.mtimeMs === 'number' ? (p.mtimeMs as number) : null,
+            });
+          } catch { /* ignore */ }
           break;
         }
         case 'session.historyLoaded': {

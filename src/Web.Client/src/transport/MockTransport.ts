@@ -1,5 +1,6 @@
-import type { HaloMethod, HaloParams, HaloResult, EventFrame } from '@/contract/agent';
+﻿import type { HaloMethod, HaloParams, HaloResult, EventFrame } from '@/contract/agent';
 import type { StateSnapshot } from '@/contract/agent';
+import { buildTitle } from '@/utils/sessionTitle';
 import { TransportError, type ConnState, type PollResult, type Transport } from './types';
 import { getScenario, type Scenario } from './mock/scenarios';
 import { buildEmptySnapshot } from './mock/snapshot';
@@ -25,6 +26,7 @@ export class MockTransport implements Transport {
   private disposed = false;
   private replayTimers: number[] = [];
   private pendingAskResolve: ((allow: boolean, always: boolean) => void) | null = null;
+  private lastUserText = '';
 
   constructor(private readonly opts: { speed?: number } = {}) {}
 
@@ -42,6 +44,7 @@ export class MockTransport implements Transport {
 
       case 'agent.prompt': {
         const p = params as unknown as { text: string };
+        this.lastUserText = typeof p.text === 'string' ? p.text : '';
         this.startReplay(p.text);
         return { accepted: true, turnId: 'mock-turn-1' } as unknown as HaloResult<M>;
       }
@@ -66,6 +69,7 @@ export class MockTransport implements Transport {
           truncated: true,
           byUser: true,
           finalUsed: 1,
+          session: this.mockFinishedSession(),
         });
         this.pushEvent('state.busyChanged', { busy: false, queueLength: 0 });
         return { cancelled: true } as unknown as HaloResult<M>;
@@ -154,7 +158,11 @@ export class MockTransport implements Transport {
       acc += step.afterMs / speed;
       const timer = window.setTimeout(() => {
         if (this.disposed) return;
-        this.pushEvent(step.kind, step.payload);
+        if (step.kind === 'turn.finished') {
+          this.pushEvent(step.kind, { ...(step.payload as Record<string, unknown>), session: this.mockFinishedSession() });
+        } else {
+          this.pushEvent(step.kind, step.payload);
+        }
 
         if (step.kind === 'ask.permission') {
           // 暂停回放，等用户回答
@@ -177,6 +185,16 @@ export class MockTransport implements Transport {
       }, acc);
       this.replayTimers.push(timer);
     }
+  }
+
+  private mockFinishedSession(): { id: string; title: string; mtimeMs: number; userMsgs: number; assistantMsgs: number } {
+    return {
+      id: this.snapshot.session?.id ?? 's-mock-1',
+      title: buildTitle(this.lastUserText || 'Mock 首问'),
+      mtimeMs: Date.now(),
+      userMsgs: 1,
+      assistantMsgs: 1,
+    };
   }
 
   private stopReplay() {

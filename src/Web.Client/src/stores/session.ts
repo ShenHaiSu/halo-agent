@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { transport } from '@/transport';
+import { NEW_SESSION_TITLE } from '@/utils/sessionTitle';
 
 export type PermissionMode = 'ask' | 'acceptEdits' | 'bypassPermissions' | 'yolo';
 
@@ -10,7 +11,7 @@ const MODE_KEY = 'haloagent.mode';
 
 export const useSessionStore = defineStore('session', () => {
   const id = ref<string>('');
-  const title = ref<string>('新会话');
+  const title = ref<string>(NEW_SESSION_TITLE);
   const cwd = ref<string>('');
   const historyPath = ref<string>('');
   const mode = ref<PermissionMode>('ask');

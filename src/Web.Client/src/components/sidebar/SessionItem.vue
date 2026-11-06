@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/sidebar/SessionItem.vue -->
+﻿<!-- src/Web.Client/src/components/sidebar/SessionItem.vue -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { SessionListItem } from '@/stores/sessions';
@@ -7,6 +7,7 @@ import { transport } from '@/transport';
 import { useToast } from '@/composables/useToast';
 import { copyText } from '@/utils/clipboard';
 import { formatRelativeTime } from '@/utils/format';
+import { NEW_SESSION_TITLE } from '@/utils/sessionTitle';
 import HInput from '@/components/base/HInput.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import SessionContextMenu, { type SessionMenuKey } from './SessionContextMenu.vue';
@@ -30,7 +31,7 @@ const editInput = ref<InstanceType<typeof HInput> | null>(null);
 let armTimer: ReturnType<typeof setTimeout> | null = null;
 
 const active = computed(() => sessions.currentId === props.session.id);
-const title = computed(() => props.session.title || '新对话');
+const title = computed(() => props.session.title || NEW_SESSION_TITLE);
 const sub = computed(() => formatRelativeTime(props.session.mtime));
 const deleteLabel = computed(() => (armingDelete.value ? '再次点击确认删除' : '删除会话'));
 

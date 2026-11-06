@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HaloAgent.Engine.Storage;
@@ -391,67 +391,16 @@ public sealed class SessionStore : IDisposable
 
                 foreach (var rawLine in File.ReadLines(file))
                 {
-                    var line = rawLine.Trim();
-                    if (line.Length == 0) continue;
-
-                    JsonDocument? doc = null;
-                    try { doc = JsonDocument.Parse(line); }
-                    catch { continue; }
-
-                    using (doc)
-                    {
-                        var root = doc.RootElement;
-                        if (root.ValueKind != JsonValueKind.Object) continue;
-                        if (root.TryGetProperty("meta", out _))
-                        {
-                            try { meta = JsonSerializer.Deserialize<HistoryMeta>(line, StorageJson.Compact); }
-                            catch { }
-                            continue;
-                        }
-
-                        var body = root.TryGetProperty("msg", out var inner) && inner.ValueKind == JsonValueKind.Object
-                            ? inner : root;
-                        if (!body.TryGetProperty("role", out var roleEl) ||
-                            roleEl.ValueKind != JsonValueKind.String) continue;
-
-                        var role = roleEl.GetString();
-                        if (role == "user")
-                        {
-                            userMsgs++;
-                            if (title.Length == 0 &&
-                                body.TryGetProperty("content", out var c) &&
-                                c.ValueKind == JsonValueKind.String)
-                            {
-                                title = (c.GetString() ?? "").Trim().Replace('\n', ' ');
-                                if (title.Length > 60) title = title[..60] + "…";
-                            }
-                        }
-                        else if (role == "assistant")
-                        {
-                            assistantMsgs++;
-                        }
-                    }
+                    ScanSummaryLine(rawLine, ref meta, ref title, ref userMsgs, ref assistantMsgs);
                 }
 
-                var notePath = Path.ChangeExtension(file, ".meta.json");
-                string? note = null;
-                if (File.Exists(notePath))
-                {
-                    try
-                    {
-                        using var nd = JsonDocument.Parse(File.ReadAllText(notePath));
-                        if (nd.RootElement.TryGetProperty("note", out var nv) &&
-                            nv.ValueKind == JsonValueKind.String)
-                            note = nv.GetString();
-                    }
-                    catch { }
-                }
+                var note = ReadNote(file);
 
                 entries.Add(new HistoryEntry
                 {
                     Path = file,
                     Id = Path.GetFileNameWithoutExtension(file),
-                    Title = string.IsNullOrEmpty(title) ? "(空会话)" : title,
+                    Title = string.IsNullOrEmpty(title) ? SessionTitle.EmptyTitle : title,
                     Note = note,
                     Headless = meta?.Meta?.Headless ?? false,
                     Cwd = meta?.Meta?.Cwd,
@@ -471,6 +420,110 @@ public sealed class SessionStore : IDisposable
         try { if (File.Exists(path)) File.Delete(path); } catch { }
         var notePath = Path.ChangeExtension(path, ".meta.json");
         try { if (File.Exists(notePath)) File.Delete(notePath); } catch { }
+    }
+
+    private static string? ReadNote(string file)
+    {
+        var notePath = Path.ChangeExtension(file, ".meta.json");
+        if (!File.Exists(notePath)) return null;
+        try
+        {
+            using var nd = JsonDocument.Parse(File.ReadAllText(notePath));
+            if (nd.RootElement.TryGetProperty("note", out var nv) &&
+                nv.ValueKind == JsonValueKind.String)
+                return nv.GetString();
+        }
+        catch { }
+        return null;
+    }
+
+    private static IEnumerable<string> ReadAllLinesShared(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var sr = new StreamReader(fs, new UTF8Encoding(false));
+        string? line;
+        while ((line = sr.ReadLine()) is not null) yield return line;
+    }
+
+    private static void ScanSummaryLine(string rawLine, ref HistoryMeta? meta, ref string title, ref int userMsgs, ref int assistantMsgs)    {
+        var line = rawLine.Trim();
+        if (line.Length == 0) return;
+        JsonDocument? doc = null;
+        try { doc = JsonDocument.Parse(line); } catch { return; }
+        using (doc)
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+            if (root.TryGetProperty("meta", out _))
+            {
+                try { meta = JsonSerializer.Deserialize<HistoryMeta>(line, StorageJson.Compact); }
+                catch { }
+                return;
+            }
+            var body = root.TryGetProperty("msg", out var inner) && inner.ValueKind == JsonValueKind.Object
+                ? inner : root;
+            if (!body.TryGetProperty("role", out var roleEl) ||
+                roleEl.ValueKind != JsonValueKind.String) return;
+            var role = roleEl.GetString();
+            if (role == "user")
+            {
+                userMsgs++;
+                if (title.Length == 0 &&
+                    body.TryGetProperty("content", out var c) &&
+                    c.ValueKind == JsonValueKind.String)
+                {
+                    var candidate = SessionTitle.Build(c.GetString());
+                    if (!SessionTitle.IsEmpty(candidate)) title = candidate;
+                }
+            }
+            else if (role == "assistant")
+            {
+                assistantMsgs++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 单条会话摘要（供 turn.finished 捎带）。
+    /// 只读目标文件：首条 role==user 的 content 算标题 + 计数 + mtime；note 侧读 .meta.json。
+    /// 文件不存在返回 null（调用方不发 session 字段，降级由前端处理）。
+    /// 任何 IO/解析异常返回 null，绝不抛（收尾路径禁止因标题中断 turn）。
+    /// </summary>
+    public HistoryEntry? GetSummary(string sessionId)
+    {
+        string path;
+        lock (_lock)
+        {
+            if (_path is null) return null;
+            // 仅支持当前会话（跨会话查询走 ListHistory；收尾帧只查自己）。
+            if (!string.Equals(SessionId, sessionId, StringComparison.Ordinal)) return null;
+            path = _path;
+        }
+        try
+        {
+            if (!File.Exists(path)) return null;
+            string title = "";
+            int userMsgs = 0, assistantMsgs = 0;
+            HistoryMeta? ignoredMeta = null;
+            foreach (var rawLine in ReadAllLinesShared(path))
+            {
+                ScanSummaryLine(rawLine, ref ignoredMeta, ref title, ref userMsgs, ref assistantMsgs);
+            }
+            var note = ReadNote(path);
+            return new HistoryEntry
+            {
+                Path = path,
+                Id = sessionId,
+                Title = string.IsNullOrEmpty(title) ? SessionTitle.EmptyTitle : title,
+                Note = note,
+                Headless = false,
+                Cwd = null,
+                MtimeMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds(),
+                UserMsgs = userMsgs,
+                AssistantMsgs = assistantMsgs,
+            };
+        }
+        catch { return null; }
     }
 
     public static void WriteNote(string path, string? note)

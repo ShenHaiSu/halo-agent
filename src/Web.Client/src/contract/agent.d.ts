@@ -856,6 +856,14 @@ export interface HaloEventPayloads {
   finalUsed: number
   /** 本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。 */
   byUser?: boolean
+  /** 收尾时刻的会话摘要快照（可选）。缺失时前端走降级纠偏，不阻塞收尾。 */
+  session?: {
+  id: string
+  title: string
+  mtimeMs?: number
+  userMsgs?: number
+  assistantMsgs?: number
+} | null
 }
   /** text.delta */
   'text.delta': {
@@ -937,6 +945,8 @@ export interface HaloEventPayloads {
   id?: string
   cwd?: string
   historyPath?: string | null
+  title?: string | null
+  mtimeMs?: number | null
 }
   /** session.historyLoaded */
   'session.historyLoaded': {

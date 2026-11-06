@@ -1,5 +1,10 @@
  # 契约变更记录
 
+ ## [4] — 会话标题实时刷新（非破坏性，只做加法，不升版本）
+
+ - 事件载荷新增可选：`turn.finished.session{id,title,mtimeMs,userMsgs,assistantMsgs}` / `session.info.title,mtimeMs`（缺失时前端降级，不升 contractVersion）
+ - 前端跑 `node scripts/gen-contract-types.mjs` 重生成 `src/Web.Client/src/contract/agent.d.ts`。
+
  ## [4] — Tool 模块改造（非破坏性，只做加法，不升版本）
  
  - `tool.finished payload += skipped?/skipReason?`（截断批次未执行时置位；老前端忽略即按普通结果展示）。

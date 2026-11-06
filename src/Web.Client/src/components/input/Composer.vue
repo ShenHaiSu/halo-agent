@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/input/Composer.vue -->
+﻿<!-- src/Web.Client/src/components/input/Composer.vue -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useMessagesStore } from '@/stores/messages';
@@ -32,6 +32,7 @@ import { createInputHandler } from './composerInput';
 import { handleComposerKeydown } from './composerKeys';
 import { pasteImages } from './pasteImage';
 import { parseSlashCommand, unquoteArgs } from '@/utils/slash';
+import { buildTitle, isPlaceholderTitle } from '@/utils/sessionTitle';
 
 const messages = useMessagesStore();
 const stream = useStreamStore();
@@ -188,6 +189,11 @@ async function submit(): Promise<void> {
   // 空闲 → 发送（乐观追加，失败恢复草稿，I-7）
   const draftBackup = { text: t, attachments: [...attachments.value] };
   messages.appendOptimisticUser(finalText);
+  const cur = sessions.items.find((s) => s.id === sessions.currentId);
+  if (cur && !cur.note && isPlaceholderTitle(cur.title)) {
+    cur.title = buildTitle(finalText);
+    cur.mtimeMs = Date.now();
+  }
   text.value = '';
   attachments.value = [];
   if (t) pushHistory(t);

@@ -33,6 +33,19 @@ public sealed record TurnFinishedPayload
     /// 前端据此区分文案：“已由你中断” vs “输出超长已截断” vs “请求失败”。
     /// </summary>
     public bool ByUser { get; init; }
+
+    /// <summary>收尾时刻会话摘要（可选；老消费方忽略）。</summary>
+    public TurnFinishedSessionSnapshot? Session { get; init; }
+}
+
+/// <summary>turn.finished 捎带的会话摘要（与会话列表同语义的最小子集）。</summary>
+public sealed record TurnFinishedSessionSnapshot
+{
+    public string Id { get; init; } = "";
+    public string Title { get; init; } = "";
+    public long MtimeMs { get; init; }
+    public int UserMsgs { get; init; }
+    public int AssistantMsgs { get; init; }
 }
 
 /// <summary>text.delta 载荷。</summary>
@@ -182,6 +195,10 @@ public sealed record SessionInfoPayload
     public string Cwd { get; init; } = "";
     /// <summary>历史文件路径（可为空）。</summary>
     public string? HistoryPath { get; init; }
+    /// <summary>会话标题（可选；空会话为 null，前端忽略保持占位）。</summary>
+    public string? Title { get; init; }
+    /// <summary>历史文件毫秒戳（可选）。</summary>
+    public long? MtimeMs { get; init; }
 }
 
 /// <summary>session.historyLoaded 载荷。</summary>

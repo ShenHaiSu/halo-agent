@@ -236,6 +236,7 @@ public sealed partial class RealMethods
     {
         var query = p?.TryGetProperty("query", out var q) == true ? q.GetString() : null;
 
+        // Title 由 SessionStore.ListHistory 经 SessionTitle.Build 现算（真相源，勿在此另算）。
         var items = SessionStore.ListHistory()
             .Where(h => string.IsNullOrWhiteSpace(query)
                         || h.Title.Contains(query, StringComparison.OrdinalIgnoreCase)

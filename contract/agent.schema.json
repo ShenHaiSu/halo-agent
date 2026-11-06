@@ -3163,6 +3163,37 @@
           "byUser": {
             "type": "boolean",
             "description": "本次截断是否由用户主动中断造成。ByUser=true 时 truncated 必为 true。"
+          },
+          "session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "收尾时刻的会话摘要快照（可选）。缺失时前端走降级纠偏，不阻塞收尾。",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "mtimeMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "userMsgs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assistantMsgs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ]
           }
         },
         "required": [
@@ -3409,6 +3440,19 @@
               "string",
               "null"
             ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mtimeMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
           }
         }
       }

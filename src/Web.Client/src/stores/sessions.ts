@@ -1,4 +1,4 @@
-// src/Web.Client/src/stores/sessions.ts
+﻿// src/Web.Client/src/stores/sessions.ts
 // 分组/搜索/重命名(note)/删除二次确认在组件层；store 只做数据。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
@@ -11,6 +11,7 @@ import { useQueueStore } from './queue';
  import { clearCollapsedTools } from '@/components/chat/toolMeta';
 import { useToast } from '@/composables/useToast';
 import { formatRelativeTime } from '@/utils/format';
+import { NEW_SESSION_TITLE } from '@/utils/sessionTitle';
 import type { SessionSummary } from '@/contract/agent';
 // 切换令牌。select 进入即 +1 并快照；任何异步返回后若令牌已变则直接丢弃，
 // 保证快速连点 A→B→A 只保留最后一次，无旧快照覆盖新会话。
@@ -43,7 +44,8 @@ function toSummary(raw: unknown): SessionSummary {
   const o = (raw ?? {}) as Record<string, unknown>;
   return {
     id: String(o.id ?? ''),
-    title: String(o.title ?? o.note ?? '新对话'),
+    // 缺字段兜底：兼容老引擎，显示收敛在会话列表项统一处理。
+    title: String(o.title ?? o.note ?? NEW_SESSION_TITLE),
     note: typeof o.note === 'string' ? o.note : null,
     cwd: typeof o.cwd === 'string' ? o.cwd : null,
     headless: o.headless === true,
@@ -102,6 +104,26 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   function relativeTimeOf(item: SessionListItem): string {
     return formatRelativeTime(item.mtime);
+  }
+
+  /** turn.finished/session.info 捎带的会话摘要增量合并。只写 title/mtime/counters，永不碰 note。 */
+  function applySessionUpdate(u: {
+    id: string;
+    title?: string | null;
+    mtimeMs?: number | null;
+    userMsgs?: number | null;
+    assistantMsgs?: number | null;
+  }): void {
+    if (!u || typeof u.id !== 'string' || !u.id) return;
+    const target = items.value.find((s) => s.id === u.id);
+    if (!target) return;
+    if (typeof u.title === 'string' && u.title) {
+      target.title = u.title;
+    }
+    if (typeof u.mtimeMs === 'number' && u.mtimeMs > 0) target.mtimeMs = u.mtimeMs;
+    else if (typeof u.title === 'string' && u.title) target.mtimeMs = Date.now();
+    if (typeof u.userMsgs === 'number') target.userMsgs = u.userMsgs;
+    if (typeof u.assistantMsgs === 'number') target.assistantMsgs = u.assistantMsgs;
   }
 
   async function load(): Promise<void> {
@@ -294,7 +316,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       const nid = res?.id ?? res?.sessionId ?? '';
       if (nid) {
         currentId.value = nid;
-        items.value.unshift({ id: nid, title: '新会话', mtimeMs: Date.now(), headless: false });
+        items.value.unshift({ id: nid, title: NEW_SESSION_TITLE, mtimeMs: Date.now(), headless: false });
         sessionInfo.applyInfo({ sessionId: nid });
       }
       await messages.loadSnapshot();
@@ -360,6 +382,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     grouped,
     current,
     relativeTimeOf,
+    applySessionUpdate,
     load,
     select,
     createNew,
