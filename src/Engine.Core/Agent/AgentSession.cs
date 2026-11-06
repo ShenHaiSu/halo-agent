@@ -150,10 +150,15 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
  
      /// <summary>实例级开关：构造时取默认，单测可改。</summary>
      private bool _toolParallelEnabled = ToolParallelDefault;
- 
+
+     /// <summary>历史投影裁剪开关：默认关，复用实例开关机制，不新增环境变量。仅投影发给模型的上下文，不动落盘。</summary>
+     private bool _contextPruneEnabled;
+
      /// <summary>仅测试用：切换并行开关。</summary>
      public void SetToolParallelForTest(bool enabled) => _toolParallelEnabled = enabled;
- 
+
+     /// <summary>仅测试/度量用：切换历史投影裁剪（默认关）。</summary>
+     public void SetContextPruneForTest(bool enabled) => _contextPruneEnabled = enabled;
        public AgentSession(
            ILlmClient llm,
            ToolRegistry tools,
@@ -1164,12 +1169,14 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
          JsonElement args;
          try
          {
-             args = ToolArgumentParser.Parse(tc.Function.Arguments);
+             args = ToolArgumentParser.Parse(tc.Function.Arguments, suspectedTruncationBudget: 8000);
          }
          catch (Exception ex)
          {
+             var rawShown = tc.Function.Arguments ?? "";
+             if (rawShown.Length > 200) rawShown = rawShown[..200] + "…";
              var msg = "工具 \"" + name + "\" 参数解析失败: " + ex.Message + "\n"
-                     + "请按工具定义的 JSON Schema 重新构造 arguments 后再次调用。";
+                     + "请按工具定义的 JSON Schema 重新构造 arguments 后再次调用。收到的前 200 字：" + rawShown;
              await EmitToolStartedAsync(callId, name, "", null, ct, used).ConfigureAwait(false);
              await EmitToolFinishedAsync(callId, name, false, msg, ct, used).ConfigureAwait(false);
              return new ImmediateToolOutcome(msg, false);
@@ -1442,6 +1449,7 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
              {
                  output += "\n\n⚠ 同一个调用（工具 + 参数完全一样）你已经重复第 " + count + " 次了，"
                          + "结果不会变。换参数/换工具/换思路，或直接汇报现状与卡点；"
+                         + "换 grep 定位 / 缩小窗口重读 / 换行号锚定，勿盲重第 4 次；"
                          + "再重复到 " + RepeatAbort + " 次本轮会被中止。";
              }
  
@@ -1963,42 +1971,48 @@ public sealed class AgentSession : IToolHost, IAsyncDisposable
     //  内部辅助
     // ============================================================
 
-    /// <summary>
-    /// 构造发送给大模型的上下文切片。
-    /// 从后往前找到最新的 CompactMarker，仅拼接 System Prompt + 摘要A + 截断点之后的完整回合。
-    /// </summary>
-    public List<ChatMessage> BuildLlmContext()
-    {
-        lock (_lock)
-        {
-            int lastMarkerIdx = _messages.FindLastIndex(m => m.IsCompactMarker);
-            if (lastMarkerIdx == -1)
-            {
-                return _messages.ToList();
-            }
+     /// <summary>
+     /// 构造发送给大模型的上下文切片。
+     /// 从后往前找到最新的 CompactMarker，仅拼接 System Prompt + 摘要A + 截断点之后的完整回合。
+     /// 历史投影裁剪默认关：开启后仅对返回的投影做旧 tool 结果截断，不改写 _messages（append-only，保前缀缓存）。
+     /// </summary>
+     public List<ChatMessage> BuildLlmContext()
+     {
+         List<ChatMessage> baseCtx;
+         bool prune;
+         lock (_lock)
+         {
+             int lastMarkerIdx = _messages.FindLastIndex(m => m.IsCompactMarker);
+             if (lastMarkerIdx == -1)
+             {
+                 baseCtx = _messages.ToList();
+             }
+             else
+             {
+                 var marker = (CompactMarkerMessage)_messages[lastMarkerIdx];
+                 var context = new List<ChatMessage>();
+                 if (_messages.Count > 0)
+                 {
+                     context.Add(_messages[0]);
+                 }
 
-            var marker = (CompactMarkerMessage)_messages[lastMarkerIdx];
-            var context = new List<ChatMessage>();
-            if (_messages.Count > 0)
-            {
-                context.Add(_messages[0]);
-            }
+                 context.Add(ChatMessage.User(
+                     "【此前会话背景与进展摘要 (细节以历史归档为准)】\n" + marker.Summary,
+                     marker.TsMs));
 
-            context.Add(ChatMessage.User(
-                "【此前会话背景与进展摘要 (细节以历史归档为准)】\n" + marker.Summary,
-                marker.TsMs));
-
-            for (int i = lastMarkerIdx + 1; i < _messages.Count; i++)
-            {
-                if (!_messages[i].IsCompactMarker)
-                {
-                    context.Add(_messages[i]);
-                }
-            }
-
-            return context;
-        }
-    }
+                 for (int i = lastMarkerIdx + 1; i < _messages.Count; i++)
+                 {
+                     if (!_messages[i].IsCompactMarker)
+                     {
+                         context.Add(_messages[i]);
+                     }
+                 }
+                 baseCtx = context;
+             }
+             prune = _contextPruneEnabled;
+         }
+         return ContextProjector.ProjectForLlm(baseCtx, prune);
+     }
 
     private void ResetResponsesChainAfterCompact()
     {
