@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,7 +17,8 @@ public sealed class GrepSearchTool : ITool
     public string Name => "grep_search";
     public string Description =>
         "在文件中按正则搜索文本内容,返回 路径:行号:内容" +
-        $"。缺省返回前 {ToolLimits.GrepDefaultLimit} 条，最多 {ToolLimits.GrepMaxLimit} 条";
+        $"。缺省返回前 {ToolLimits.GrepDefaultLimit} 条，最多 {ToolLimits.GrepMaxLimit} 条" +
+        $"；可选 context=N 附带前后 N 行（最多 {ToolLimits.GrepMaxContextLines} 行）";
 
     public string? PromptSnippet => "按内容搜索文件";
 
@@ -24,6 +26,7 @@ public sealed class GrepSearchTool : ITool
     {
         "找内容用 grep_search，不要跑 findstr/grep/Select-String",
         "正则写简单些，复杂正则容易超时",
+        "改文件先 grep 定位，再小窗口读确认，避免整文件灌入上下文",
     };
 
     public JsonElement ParameterSchema { get; } = JsonDocument.Parse(
@@ -32,7 +35,8 @@ public sealed class GrepSearchTool : ITool
         "\"pattern\": { \"type\": \"string\", \"description\": \"正则表达式,如 'TODO|FIXME'\" }," +
         "\"path\":    { \"type\": \"string\", \"description\": \"搜索目录或文件,缺省当前工作目录\" }," +
         "\"glob\":    { \"type\": \"string\", \"description\": \"只搜索匹配该 glob 的文件,如 '*.rs'\" }," +
-        "\"limit\":   { \"type\": \"integer\", \"description\": \"最多返回条数，缺省 " + ToolLimits.GrepDefaultLimit + "，最多 " + ToolLimits.GrepMaxLimit + "\" }" +
+        "\"limit\":   { \"type\": \"integer\", \"description\": \"最多返回条数，缺省 " + ToolLimits.GrepDefaultLimit + "，最多 " + ToolLimits.GrepMaxLimit + "\" }," +
+        "\"context\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": " + ToolLimits.GrepMaxContextLines + ", \"description\": \"命中前后附带 N 行上下文，缺省 0（仅命中行）\" }" +
         "}," +
         "\"required\": [\"pattern\"]}").RootElement.Clone();
 
@@ -40,7 +44,7 @@ public sealed class GrepSearchTool : ITool
 
     public Task<ToolResult> ExecuteAsync(JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var pattern = ctx.TypedArgs?.StringOrNull("pattern") ?? args.GetStringOrNull("pattern");
+        var pattern = ReadRequired(ctx, args, "pattern");
         if (string.IsNullOrEmpty(pattern)) return Task.FromResult(ToolResult.Failure("pattern 不能为空"));
 
          Regex re;
@@ -58,12 +62,14 @@ public sealed class GrepSearchTool : ITool
              return Task.FromResult(ToolResult.Failure($"正则表达式无效: {ex.Message}{hint}"));
          }
 
-        var pathRaw = ctx.TypedArgs?.StringOrNull("path") ?? args.GetStringOrNull("path");
+        var pathRaw = ReadOptional(ctx, args, "path");
         var target = pathRaw is null ? ctx.Cwd : ToolPaths.Resolve(ctx.Cwd, pathRaw);
-        var globFilter = ctx.TypedArgs?.StringOrNull("glob") ?? args.GetStringOrNull("glob");
+        var globFilter = ReadOptional(ctx, args, "glob");
 
-        var limitRaw = ctx.TypedArgs?.LongOrNull("limit") ?? args.GetLongOrNull("limit");
+        var limitRaw = ReadLong(ctx, args, "limit");
         var limit = (int)Math.Clamp(limitRaw ?? ToolLimits.GrepDefaultLimit, 1, ToolLimits.GrepMaxLimit);
+        var contextRaw = ReadLong(ctx, args, "context");
+        var context = (int)Math.Clamp(contextRaw ?? 0, 0, ToolLimits.GrepMaxContextLines);
 
         var files = new List<string>();
         if (File.Exists(target)) files.Add(target);
@@ -96,19 +102,37 @@ public sealed class GrepSearchTool : ITool
             if (text.Contains('\0')) continue;   // 二进制
 
             scanned++;
-            int lineNo = 0;
-            foreach (var line in text.Split('\n'))
+            var lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
             {
-                lineNo++;
                 bool hit;
-                try { hit = re.IsMatch(line); }
+                try { hit = re.IsMatch(lines[i]); }
                 catch (RegexMatchTimeoutException) { hit = false; }
 
                 if (!hit) continue;
 
-                var shown = line.TrimEnd('\r');
+                var shown = lines[i].TrimEnd('\r');
                 if (shown.Length > ToolLimits.GrepMaxLineChars) shown = shown.Substring(0, ToolLimits.GrepMaxLineChars) + "…";
-                results.Add($"{file}:{lineNo}:{shown}");
+                if (context == 0)
+                {
+                    results.Add($"{file}:{i + 1}:{shown}");
+                }
+                else
+                {
+                    var sbHit = new StringBuilder();
+                    sbHit.Append($"{file}:{i + 1}:{shown}");
+                    int from = Math.Max(0, i - context);
+                    int to = Math.Min(lines.Length - 1, i + context);
+                    for (int k = from; k <= to; k++)
+                    {
+                        if (k == i) continue;
+                        var ctxLine = lines[k].TrimEnd('\r');
+                        if (ctxLine.Length > ToolLimits.GrepMaxLineChars) ctxLine = ctxLine[..ToolLimits.GrepMaxLineChars] + "…";
+                        sbHit.Append($"\n  {file}:{k + 1}:{ctxLine}");
+                        if (sbHit.Length > 2000) { sbHit.Append("\n  …(上下文已截断)"); break; }
+                    }
+                    results.Add(sbHit.ToString());
+                }
 
                 if (results.Count >= limit * 2) break;   // 多收一点用于计数
             }
@@ -125,6 +149,29 @@ public sealed class GrepSearchTool : ITool
             sb.Append($"…(还有 {results.Count - limit} 条未显示；调大 limit 或缩小 path)\n");
 
         return Task.FromResult(ToolResult.Success(sb.ToString()));
+    }
+
+    private static string? ReadRequired(ToolContext ctx, JsonElement args, string name)
+    {
+        if (ctx.TypedArgs is not null)
+        {
+            try { return ctx.TypedArgs.RequiredString(name); }
+            catch (InvalidOperationException) { return null; }
+        }
+        Debug.WriteLine($"[grep_search] TypedArgs 缺失，走 legacy 分支 name={name}");
+        return args.GetStringOrNull(name);
+    }
+
+    private static string? ReadOptional(ToolContext ctx, JsonElement args, string name)
+    {
+        if (ctx.TypedArgs is not null) return ctx.TypedArgs.StringOrNull(name);
+        return args.GetStringOrNull(name);
+    }
+
+    private static long? ReadLong(ToolContext ctx, JsonElement args, string name)
+    {
+        if (ctx.TypedArgs is not null) return ctx.TypedArgs.LongOrNull(name);
+        return args.GetLongOrNull(name);
     }
 
     private static void CollectFiles(string root, List<string> files, CancellationToken ct)

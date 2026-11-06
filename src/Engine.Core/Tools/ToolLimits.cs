@@ -12,10 +12,10 @@ namespace HaloAgent.Engine.Core.Tools;
 /// </summary>
 public static class ToolLimits
 {
-    // ---------- read_file ----------
-    /// <summary>单次读取的默认行数上限。</summary>
-    public const int ReadDefaultMaxLines = 2000;
-    /// <summary>单次读取的字符上限（超出则尾部省略并给续读提示）。</summary>
+     // ---------- read_file ----------
+     /// <summary>单次读取的默认行数上限。</summary>
+     public const int ReadDefaultMaxLines = 350;
+     /// <summary>单次读取的字符上限（超出则尾部省略并给续读提示）。</summary>
     public const int ReadMaxChars = 50_000;
     /// <summary>单行超过该字符数时单独截断并提示。</summary>
     public const int ReadMaxLineChars = 2000;
@@ -29,8 +29,10 @@ public static class ToolLimits
     public const int GrepMaxLineChars = 500;
     /// <summary>单文件参与扫描的最大字节数。</summary>
     public const int GrepMaxFileBytes = 8 * 1024 * 1024;
-    /// <summary>正则匹配超时（秒），防灾难性回溯。</summary>
-    public const int GrepRegexTimeoutSeconds = 5;
+     /// <summary>正则匹配超时（秒），防灾难性回溯。</summary>
+     public const int GrepRegexTimeoutSeconds = 5;
+     /// <summary>命中上下文行上限（前后各最多 N 行，防 token 爆炸）。</summary>
+     public const int GrepMaxContextLines = 5;
 
     // ---------- glob ----------
     public const int GlobDefaultLimit = 1000;
