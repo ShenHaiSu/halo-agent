@@ -1,0 +1,4 @@
+*.exe
+!.gitkeep
+!README.md
+*.msu
