@@ -55,17 +55,17 @@ public sealed class ToolSemanticsTests
         Assert.Contains("用 offset=", r.Output);
     }
 
-    [Fact]
-    public async Task ReadFile_default_limit_is_2000()
-    {
-        using var f = new AgentFixture();
-        var path = Path.Combine(f.Cwd, "big2.txt");
-        File.WriteAllLines(path, Enumerable.Range(1, 3000).Select(i => "line-" + i));
-        var tool = new ReadFileTool();
-        var r = await tool.ExecuteAsync(Obj("{\"path\":\"" + path.Replace("\\", "\\\\") + "\"}"), Ctx(f), CancellationToken.None);
-        Assert.True(r.Ok);
-        Assert.Contains("用 offset=2000 继续读取", r.Output);
-    }
+     [Fact]
+     public async Task ReadFile_default_limit_is_2000()
+     {
+         using var f = new AgentFixture();
+         var path = Path.Combine(f.Cwd, "big2.txt");
+         File.WriteAllLines(path, Enumerable.Range(1, 3000).Select(i => "line-" + i));
+         var tool = new ReadFileTool();
+         var r = await tool.ExecuteAsync(Obj("{\"path\":\"" + path.Replace("\\", "\\\\") + "\"}"), Ctx(f), CancellationToken.None);
+         Assert.True(r.Ok);
+         Assert.Contains($"用 offset={ToolLimits.ReadDefaultMaxLines} 继续读取", r.Output);
+     }
 
     [Fact]
     public async Task Edit_no_change_is_rejected()

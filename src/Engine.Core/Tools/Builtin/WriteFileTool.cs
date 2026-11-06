@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using HaloAgent.Engine.Core.Permissions;
 
@@ -21,24 +22,29 @@ public sealed class WriteFileTool : ITool
     public IReadOnlyList<string> PromptGuidelines => new[]
     {
         "新建文件或整体覆写用 write_file；只改局部用 edit",
+        "内容来自被截断的 read 时禁止直接覆写；同一文件多改分多次 edit",
     };
 
     public JsonElement ParameterSchema { get; } = JsonDocument.Parse(@"{
       ""type"": ""object"",
       ""properties"": {
         ""path"":    { ""type"": ""string"", ""description"": ""目标文件路径,相对或绝对"" },
-        ""content"": { ""type"": ""string"", ""description"": ""完整的新文件内容"" }
+        ""content"": { ""type"": ""string"", ""description"": ""完整文件内容；只改局部请用 edit；内容来自被截断的 read 时禁止直接覆写"" },
+        ""expectedHash"": { ""type"": ""string"", ""description"": ""可选乐观并发：read/edit 成功回包里的短 hash；传入则写前比对，不一致拒绝"" }
       },
       ""required"": [""path"", ""content""]
     }").RootElement.Clone();
 
     public PermissionChecker.Operation Operation => PermissionChecker.Operation.WriteFile;
 
+    public ToolExecutionMode ExecutionMode => ToolExecutionMode.Sequential;
+
     public async Task<ToolResult> ExecuteAsync(
         JsonElement args, ToolContext ctx, CancellationToken ct)
     {
-        var rawPath = ctx.TypedArgs?.StringOrNull("path") ?? args.GetStringOrNull("path");
-        var content = ctx.TypedArgs?.StringOrNull("content") ?? args.GetStringOrNull("content");
+        var rawPath = ReadRequired(ctx, args, "path");
+        var content = ReadRequired(ctx, args, "content");
+        var expectedHash = ReadOptional(ctx, args, "expectedHash");
         if (rawPath is null) return ToolResult.Failure("path 不能为空");
         if (content is null) return ToolResult.Failure("content 不能为空");
 
@@ -58,16 +64,27 @@ public sealed class WriteFileTool : ITool
 
         return await FileMutationQueue.RunAsync(full, async () =>
         {
+            // 乐观并发：在队列 lambda 内比对（CAS），否则 TOCTOU
+            if (!string.IsNullOrEmpty(expectedHash) && File.Exists(full))
+            {
+                byte[] curRaw;
+                try { curRaw = await File.ReadAllBytesAsync(full, ct).ConfigureAwait(false); }
+                catch (Exception ex) { return ToolResult.Failure($"读取 {full} 失败: {ex.Message}"); }
+                var curText = System.Text.Encoding.UTF8.GetString(curRaw);
+                if (curText.Length > 0 && curText[0] == '\uFEFF') curText = curText[1..];
+                var actual = EditFeedback.ComputeShortHash(curText);
+                if (!string.Equals(actual, expectedHash.Trim(), StringComparison.OrdinalIgnoreCase))
+                    return ToolResult.Failure($"文件已被改动（期望 {expectedHash.Trim()} 实际 {actual}），请重读后再写");
+            }
+
             // ② undo 快照（失败则不写）
             var backup = await ctx.Host.BackupAsync(full, "write_file", ct).ConfigureAwait(false);
             if (!backup.BackedUp && backup.Error is not null)
                 return ToolResult.Failure($"备份失败，已取消写入: {backup.Error}");
 
             // ③ 写入
-            // ★ D9-A3：写盘前检查 U+FFFD。只 Debug 留痕、不拒绝写入（用户可能真的想写这个符号）。
-            //   正常 SSE 解码修好后这里不应再出现；若出现，说明上游仍有解码点漏网。
             if (content.Contains('\uFFFD'))
-                System.Diagnostics.Debug.WriteLine($"[write_file] content contains U+FFFD path={full}");
+                Debug.WriteLine($"[write_file] content contains U+FFFD path={full}");
 
             try
             {
@@ -80,8 +97,32 @@ public sealed class WriteFileTool : ITool
             }
 
              var bytes = System.Text.Encoding.UTF8.GetByteCount(content);
+             int lines = EditFeedback.CountLines(content);
+             string newHash = EditFeedback.ComputeShortHash(content);
              var note = createdParent ? $"（已自动创建目录 {parent}）" : "";
-             return ToolResult.Success($"已写入 {full} ({bytes} 字节){note}");
+             return ToolResult.Success(EditFeedback.BuildWriteSuccessMessage(full, bytes, lines, newHash, note));
         }).ConfigureAwait(false);
+    }
+
+    private static string? ReadRequired(ToolContext ctx, JsonElement args, string name)
+    {
+        if (ctx.TypedArgs is not null)
+        {
+            try { return ctx.TypedArgs.RequiredString(name); }
+            catch (InvalidOperationException) { return null; }
+        }
+        Debug.WriteLine($"[write_file] TypedArgs 缺失，走 legacy 分支 name={name}");
+        return args.GetStringOrNull(name);
+    }
+
+    private static string? ReadOptional(ToolContext ctx, JsonElement args, string name)
+    {
+        if (ctx.TypedArgs is not null)
+        {
+            if (!ctx.TypedArgs.Has(name)) return null;
+            try { return ctx.TypedArgs.RequiredString(name); }
+            catch (InvalidOperationException) { return ctx.TypedArgs.StringOrNull(name); }
+        }
+        return args.GetStringOrNull(name);
     }
 }
