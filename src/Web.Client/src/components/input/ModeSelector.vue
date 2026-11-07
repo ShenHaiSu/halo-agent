@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/input/ModeSelector.vue -->
+﻿<!-- src/Web.Client/src/components/input/ModeSelector.vue -->
 <!-- 输入框上方权限级别快切触发器 + 弹出面板，仿 ModelSelector 的功能与样式。 -->
 <!-- 点选即切换，无二次确认；后端落盘，前端只做即时反馈。 -->
 <script setup lang="ts">
@@ -56,6 +56,11 @@ function closePanel(): void {
   focusTrigger();
 }
 
+function openSettingsAndClose(): void {
+  closePanel();
+  openSettings('permissions');
+}
+
 function focusTrigger(): void {
   void nextTick(() => {
     const el = triggerRef.value?.querySelector('button') as HTMLElement | null;
@@ -111,7 +116,7 @@ onBeforeUnmount(() => {
         :current="session.mode"
         @select="onSelect"
         @close="closePanel"
-        @open-settings="openSettings('permissions')"
+        @open-settings="openSettingsAndClose"
       />
     </div>
   </div>

@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/input/ModelSelector.vue -->
+﻿<!-- src/Web.Client/src/components/input/ModelSelector.vue -->
 <!-- 主界面模型选择器触发器 + 拉数 + setActive（）。挂在 Composer composer-box 之后独立一行。 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
@@ -104,6 +104,11 @@ function closePanel(): void {
   focusTrigger();
 }
 
+function openSettingsAndClose(): void {
+  closePanel();
+  openSettings('model');
+}
+
 function focusTrigger(): void {
   void nextTick(() => {
     const el = triggerRef.value?.querySelector('button') as HTMLElement | null;
@@ -200,7 +205,7 @@ onBeforeUnmount(() => {
         :active-model="session.model"
         @select="onSelect"
         @close="closePanel"
-        @open-settings="openSettings('model')"
+        @open-settings="openSettingsAndClose"
       />
     </div>
   </div>
