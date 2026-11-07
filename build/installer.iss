@@ -1,11 +1,17 @@
 ﻿; ============================================================
-;  HaloAgent 安装器 —— 最小可用版
+;  HaloAgent 安装器 —— 最小可用版（x86 / x64 双版本同源）
 ;
-;  编译：
-;    ISCC.exe /DAppVersion=0.0.1 /DPlatform=x86 ^
-;             /DSourceDir=<dist\win-x86 绝对路径> ^
+;  编译（由 build-dist.ps1 -Both 自动跑两遍，各出一个安装包）：
+;    ISCC.exe /DAppVersion=0.0.1 /DPlatform=x64 ^
+;             /DSourceDir=<dist\win-x64 绝对路径> ^
 ;             /DOutDir=<输出目录绝对路径> ^
+;             /DKB_BUNDLED=1 ^
 ;             build\installer.iss
+;
+;  两个安装包：
+;    HaloAgentSetup-x64-<ver>.exe  64 位 Win7 SP1 / 10 / 11（主推；Win7 末代 = Chromium 109 + .NET 6）
+;    HaloAgentSetup-x86-<ver>.exe  32 位 Win7 SP1 兜底（x86 进程通吃 32/64 位系统）
+;  两者共用同一 AppId：同机安装 = 升级覆盖，不会并存两份。
 ;
 ;  说明：本文件是"能装能跑能卸"的最小集。
 ;        先决条件拦截、静默安装、更新模式见 docs/P22-bundle/11。
@@ -15,19 +21,19 @@
   #define AppVersion "0.0.1"
 #endif
 #ifndef Platform
-  #define Platform "x86"
+  #define Platform "x64"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\dist\win-x86"
+  #define SourceDir "..\dist\win-x64"
 #endif
- #ifndef OutDir
-   #define OutDir "..\artifacts\" + AppVersion + "\win-" + Platform
- #endif
- ; 由 build-dist.ps1 按 build/vcredist 下 MSU 是否齐套传入（/DKB_BUNDLED=1/0）。
- ; 为 0 时 Win7 缺 KB 照旧硬拦；为 1 且有管理员时放行，由 ssPostInstall 代装。
- #ifndef KB_BUNDLED
-   #define KB_BUNDLED "0"
- #endif
+#ifndef OutDir
+  #define OutDir "..\artifacts\" + AppVersion + "\win-" + Platform
+#endif
+; 由 build-dist.ps1 按 build/vcredist 下 MSU 是否齐套传入（/DKB_BUNDLED=1/0）。
+; 为 0 时 Win7 缺 KB 照旧硬拦；为 1 且有管理员时放行，由 ssPostInstall 代装。
+#ifndef KB_BUNDLED
+  #define KB_BUNDLED "0"
+#endif
 
 [Setup]
 ; ---------- 身份 ----------
@@ -58,8 +64,9 @@ PrivilegesRequiredOverridesAllowed=dialog
 MinVersion=6.1sp1
 
 ; ---------- 架构 ----------
-; x86 包：允许装在 32/64 位系统上
-; x64 包：声明 64 位安装模式，注册表走 64 位视图
+; x86 包：允许装在 32/64 位系统上（x86compatible 含 x64compatible）
+; x64 包：只允许 64 位系统，声明 64 位安装模式，注册表/文件走 64 位视图
+;         （32 位 Win7 上会直接被 Inno 拦下，这是预期行为：请下 x86 包）
 #if Platform == "x64"
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -130,16 +137,17 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; \
 ; Source: "THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
  ; ---------- VC++ 运行库（方案 C：随包 + 无条件静默装，见 docs/P22-bundle/11 §2/§6）----------
- ; 二进制需自备（许可原因不入库）：build/vcredist/vcredist_x86.exe / vcredist_x64.exe
- ; （微软官方“Visual C++ 2015-2022 Redistributable”合一包）。
+ ; 二进制不入库（许可原因），放 build/vcredist/ 下，按平台二选一随包：
+ ;   x64 包 -> VC_redist.x64.exe
+ ;   x86 包 -> VC_redist.x86.exe
  ; skipifsourcedoesntexist：没放二进制也能编译安装器；放了则自动随包。
  #if Platform == "x86"
- Source: "vcredist\vcredist_x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
+ Source: "vcredist\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
  #else
- Source: "vcredist\vcredist_x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
+ Source: "vcredist\VC_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
  #endif
  ; ---------- KB2533623（Win7 内核补丁，体积小；x86 包需同时带双架构，安装时按内核选择下发）----------
- ; MSU 放 build/vcredist/（用户已备好）；skipifsourcedoesntexist：没放也能编译。
+ ; MSU 放 build/vcredist/；skipifsourcedoesntexist：没放也能编译。
  #if Platform == "x86"
  Source: "vcredist\Windows6.1-KB2533623-x86.msu"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
  Source: "vcredist\Windows6.1-KB2533623-x64.msu"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
@@ -155,16 +163,20 @@ Name: "{group}\卸载 HaloAgent"; Filename: "{uninstallexe}"
  Name: "{autodesktop}\HaloAgent"; Filename: "{app}\HaloAgent.exe"; \
      IconFilename: "{app}\HaloAgent.exe"; Tasks: desktopicon
  
+
+
+[Run]
  
- [Run]
  ; ---------- VC++ 静默安装（方案 C：无条件执行，vcredist 自己判断已装则秒退）----------
  ; skipifdoesntexist：没随包（没放二进制）则跳过，不报错。
+ ; 注意：[Run] 段没有 StatusMsg 参数（只有 [Files] 有），所以进度文案走 Description；
+ ;       静默安装时 Description 本就不显示，正好让 VC 运行库装得无感。
  #if Platform == "x86"
- Filename: "{tmp}\vcredist_x86.exe"; Parameters: "/install /quiet /norestart"; \
-     StatusMsg: "{cm:InstallingVCRedist}"; Flags: waituntilterminated skipifdoesntexist
+ Filename: "{tmp}\VC_redist.x86.exe"; Parameters: "/install /quiet /norestart"; \
+     Description: "{cm:InstallingVCRedist}"; Flags: waituntilterminated skipifdoesntexist
  #else
- Filename: "{tmp}\vcredist_x64.exe"; Parameters: "/install /quiet /norestart"; \
-     StatusMsg: "{cm:InstallingVCRedist}"; Flags: waituntilterminated skipifdoesntexist
+ Filename: "{tmp}\VC_redist.x64.exe"; Parameters: "/install /quiet /norestart"; \
+     Description: "{cm:InstallingVCRedist}"; Flags: waituntilterminated skipifdoesntexist
  #endif
  
  ; ---------- 启动应用（KB 要求重启时跳过，用户重启重跑后再启动）----------
@@ -236,7 +248,8 @@ Type: dirifempty;     Name: "{localappdata}\HaloAgent"
    h := LoadLibraryW('msvcp140.dll');
    if h <> 0 then FreeLibrary(h) else begin Result := True; Exit; end;
  #if Platform == "x64"
-   { 32 位安装器下 {sys} 指向 System32，正好用来探 64 位 vcruntime140_1.dll（见 11 §2.2 修正 5） }
+   // 32 位安装器下 {sys} 指向 System32，正好用来探 64 位 vcruntime140_1.dll（见 11 §2.2 修正 5）。
+   // 注意：这里必须用 // 注释，不能用 Pascal 的 { } 注释 —— 注释体里的 {sys} 会让注释提前闭合。
    if not FileExists(ExpandConstant('{sys}\vcruntime140_1.dll')) then
      Result := True;
  #endif
