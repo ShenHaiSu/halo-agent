@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/settings/provider/ProviderConnForm.vue -->
+﻿<!-- src/Web.Client/src/components/settings/provider/ProviderConnForm.vue -->
 <!-- P27 全页第一区块「连接」：基本字段（双列密排）+ 网络 + 扩展收纳（存储/请求头/危险区/探活）
      + 模型列表拉取行。说明文字只以 ⓘ 存在（定稿 §5）。 -->
 <script setup lang="ts">
@@ -113,13 +113,6 @@ function setStore(v: 'default' | 'true' | 'false'): void {
           @update:model-value="setNewKey"
         />
         <span v-if="keySet" class="inline-hint">已设</span>
-        <HSwitch
-          v-if="keySet"
-          :model-value="p.clearKey"
-          label="保存时清除 Key"
-          @update:model-value="(v: boolean) => emit('update:clear-key', v)"
-        />
-        <span v-if="keySet" class="inline-hint">清除</span>
       </FieldRow>
 
       <FieldRow label="注册名" desc="不可改。改名=新建+删旧；正则 ^[a-z0-9][a-z0-9-_]{0,63}$">
