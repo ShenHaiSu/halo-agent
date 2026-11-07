@@ -1,5 +1,5 @@
-<!-- src/Web.Client/src/components/settings/provider/ModelDenseTable.vue -->
-<!-- P27 全页第二区块「模型」密表：7 列固定 grid（简要列居中）+ 展开行 8 行字段（定稿 §6）。 -->
+﻿<!-- src/Web.Client/src/components/settings/provider/ModelDenseTable.vue -->
+<!-- P27 全页第二区块「模型」密表：名称 + 操作 2 列 + 展开行 8 行字段。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import HInput from '@/components/base/HInput.vue';
@@ -7,8 +7,16 @@ import HButton from '@/components/base/HButton.vue';
 import HSwitch from '@/components/base/HSwitch.vue';
 import HaloIcon from '@/components/icons/HaloIcon.vue';
 import FieldRow from '../fields/FieldRow.vue';
-import { mainName, type ModelEdit, type ProvidersTree } from '../providerEditing';
+import { hasAlias, type ModelEdit, type ProvidersTree } from '../providerEditing';
 import { filterModels, formatCtxLabel, formatOutLabel, isActiveModel } from '../providerFormat';
+
+/** 折叠行名称：有别名 → `别名 (本名)`；无别名 → 本名；本名空 → (未命名)。 */
+function labelOf(m: ModelEdit): string {
+  const id = m.id ?? '';
+  const alias = (m.displayName ?? '').trim();
+  if (!id) return alias || '(未命名)';
+  return hasAlias(id, alias) ? `${alias} (${id})` : id;
+}
 
 const props = defineProps<{
   providerId: string;
@@ -31,9 +39,6 @@ const MAXTOK_PRESETS = [5000, 20000, 50000, 60000] as const;
 const query = ref('');
 
 const visibleIndexes = computed(() => filterModels(props.models, query.value));
-const activeCount = computed(() =>
-  props.models.filter((m) => isActiveModel(props.tree, props.providerId, m.id)).length
-);
 
 function err(m: ModelEdit, field: string): string | null {
   return props.errors[`${m.id}.${field}`] ?? null;
@@ -104,7 +109,7 @@ function toNullableInt(v: string): number | null {
       <HButton
         size="sm"
         variant="ghost"
-        :disabled="activeCount === 0"
+        :disabled="models.length === 0"
         title="把第一个模型设为使用中"
         @click="emit('set-active')"
       >
@@ -114,12 +119,7 @@ function toNullableInt(v: string): number | null {
 
     <div class="mtab">
       <div class="mrow mrow-h" role="row">
-        <span />
         <span class="c-name">名称</span>
-        <span class="c-c">协议</span>
-        <span class="c-c">上下文</span>
-        <span class="c-c">输出</span>
-        <span class="c-c">图片</span>
         <span class="c-ops">操作</span>
       </div>
 
@@ -140,28 +140,14 @@ function toNullableInt(v: string): number | null {
           @click="toggle(models[idx]!)"
           @keydown.enter.prevent="toggle(models[idx]!)"
         >
-          <span class="c-st">
-            <span
-              v-if="isActiveModel(tree, providerId, models[idx]!.id)"
-              class="dot"
-              aria-label="使用中"
-            />
-            <span v-else class="mut" aria-hidden="true">·</span>
-          </span>
-          <span class="c-name nm" :title="models[idx]!.id">{{
-            mainName(models[idx]!.id, models[idx]!.displayName) || '(未命名)'
-          }}</span>
-          <span class="c-c mut">{{ models[idx]!.protocol === 'responses' ? 'resp' : 'chat' }}</span>
-          <span class="c-c num">{{ formatCtxLabel(models[idx]!.contextWindow) }}</span>
-          <span class="c-c num">{{ formatOutLabel(models[idx]!.maxTokens) }}</span>
-          <span class="c-c">{{ models[idx]!.acceptsImages ? '图' : '—' }}</span>
+          <span class="c-name nm" :title="labelOf(models[idx]!)">{{ labelOf(models[idx]!) }}</span>
           <span class="c-ops">
             <button
               type="button"
               class="icobtn"
               :class="{ star: isActiveModel(tree, providerId, models[idx]!.id) }"
               :aria-pressed="isActiveModel(tree, providerId, models[idx]!.id)"
-              :aria-label="`${mainName(models[idx]!.id, models[idx]!.displayName)}，设为使用中`"
+              :aria-label="`${labelOf(models[idx]!)}，设为使用中`"
               title="设为使用中"
               @click.stop="emit('set-active')"
             >
@@ -173,7 +159,7 @@ function toNullableInt(v: string): number | null {
             <button
               type="button"
               class="icobtn"
-              :aria-label="`${mainName(models[idx]!.id, models[idx]!.displayName)}，${models[idx]!.expanded ? '收起' : '展开'}详情`"
+              :aria-label="`${labelOf(models[idx]!)}，${models[idx]!.expanded ? '收起' : '展开'}详情`"
               :aria-expanded="!!models[idx]!.expanded"
               :title="models[idx]!.expanded ? '收起' : '展开'"
               @click.stop="toggle(models[idx]!)"
@@ -183,7 +169,7 @@ function toNullableInt(v: string): number | null {
             <button
               type="button"
               class="icobtn"
-              :aria-label="`删除模型 ${mainName(models[idx]!.id, models[idx]!.displayName)}`"
+              :aria-label="`删除模型 ${labelOf(models[idx]!)}`"
               title="删除"
               @click.stop="emit('delete-model', models[idx]!.id)"
             >
@@ -369,7 +355,7 @@ function toNullableInt(v: string): number | null {
 }
 .mrow {
   display: grid;
-  grid-template-columns: 26px minmax(160px, 1.6fr) 84px 84px 70px 56px auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   padding: 0 var(--space-2-5);
@@ -413,20 +399,6 @@ function toNullableInt(v: string): number | null {
   outline: 2px solid hsl(var(--accent) / 0.4);
   outline-offset: -1px;
 }
-.c-st {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: hsl(var(--accent));
-}
-.mut {
-  color: hsl(var(--fg-subtle));
-}
 .c-name {
   text-align: left;
   min-width: 0;
@@ -437,15 +409,6 @@ function toNullableInt(v: string): number | null {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* 简要列（协议/上下文/输出/图片）居中 */
-.c-c {
-  text-align: center;
-  white-space: nowrap;
-  color: hsl(var(--fg));
-}
-.num {
-  font-variant-numeric: tabular-nums;
 }
 .c-ops {
   text-align: right;
@@ -580,16 +543,13 @@ function toNullableInt(v: string): number | null {
 .num-input {
   max-width: 130px;
 }
-/* 窄窗：简要列藏进展开行，只留 状态/名称/操作 */
+/* 窄窗：只留 名称/操作，收紧边距 */
 @media (max-width: 760px) {
   .mrow {
-    grid-template-columns: 26px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: var(--space-1) var(--space-2);
   }
   .mrow-h {
-    display: none;
-  }
-  .c-c {
     display: none;
   }
   .mexp {

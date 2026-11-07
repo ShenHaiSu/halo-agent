@@ -1,4 +1,4 @@
-<!-- src/Web.Client/src/components/settings/pages/ModelPage.vue -->
+﻿<!-- src/Web.Client/src/components/settings/pages/ModelPage.vue -->
 <!-- P27 定稿：左 220px Provider 一级列表（不展示 Model）+ 右单卷轴双区块（连接 / 模型密表）。
      依据 docs/P27-FrontEnd-Enhance/定稿-Provider-Model双区块版.md。
      无 tab / 锚点条 / tag / 描述段 / 生效行；说明只以 ⓘ 存在。 -->
@@ -505,21 +505,11 @@ watch(density, applyDensity);
           <div class="detail-head">
             <h3 class="detail-title">{{ mainName(current.id, current.displayName) }}</h3>
             <span class="detail-id">{{ current.id }}</span>
-            <HButton
-              size="sm"
-              variant="secondary"
-              :disabled="current.models.length === 0"
-              title="把该 Provider 设为使用中"
-              @click="setActive"
-            >
-              设为使用中
-            </HButton>
           </div>
 
           <ProviderConnForm
             :provider="current"
             :errors="currentErrors"
-            :global-mode="globalMode"
             :fetch-status="fetchStatus"
             @change="markDirty"
             @update:clear-key="

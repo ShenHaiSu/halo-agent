@@ -1,5 +1,5 @@
 ﻿<!-- src/Web.Client/src/components/settings/provider/ProviderConnForm.vue -->
-<!-- P27 全页第一区块「连接」：基本字段（双列密排）+ 网络 + 扩展收纳（存储/请求头/危险区/探活）
+<!-- P27 全页第一区块：基本字段（双列密排）+ 网络 + 扩展收纳（存储/模型列表/请求头/危险区）
      + 模型列表拉取行。说明文字只以 ⓘ 存在（定稿 §5）。 -->
 <script setup lang="ts">
 import { computed } from 'vue';
@@ -16,8 +16,6 @@ const props = defineProps<{
   provider: ProviderEdit;
   /** 字段错误（键为 field，如 baseUrl / id / network） */
   errors: Record<string, string>;
-  /** 全局代理模式（仅用于「生效」提示） */
-  globalMode: string;
   /** 拉取状态文案（未拉取 / 拉取中… / 已拉取到 N 个） */
   fetchStatus: string;
 }>();
@@ -32,19 +30,6 @@ const emit = defineEmits<{
 }>();
 
 const p = computed(() => props.provider);
-
-/** 生效态（只读透传）：表达走哪条路，不占额外行。 */
-const effectiveText = computed(() => {
-  const e = p.value.effective;
-  if (!e) {
-    if (p.value.network === 'follow') return `跟随全局（${props.globalMode}）`;
-    return p.value.network === 'proxy' ? '走代理' : '直连';
-  }
-  if (!e.inUse) {
-    return e.source === 'bypass-local' ? '本地直连' : `直连（${e.source}）`;
-  }
-  return e.source === 'global-system' ? '跟随系统走代理' : `走代理（${e.source}）`;
-});
 
 const keySet = computed(() => p.value.apiKeySet);
 const keyPlaceholder = computed(() =>
@@ -82,10 +67,6 @@ function setStore(v: 'default' | 'true' | 'false'): void {
 
 <template>
   <section class="psec" aria-label="连接">
-    <div class="psec-head">
-      <h3 class="psec-title">连接</h3>
-      <span class="psec-sub">地址 · Key · 标识 · 网络 · 存储 · 请求头 · 模型拉取</span>
-    </div>
 
     <div class="grid2">
       <FieldRow
@@ -112,7 +93,6 @@ function setStore(v: 'default' | 'true' | 'false'): void {
           autocomplete="off"
           @update:model-value="setNewKey"
         />
-        <span v-if="keySet" class="inline-hint">已设</span>
       </FieldRow>
 
       <FieldRow label="注册名" desc="不可改。改名=新建+删旧；正则 ^[a-z0-9][a-z0-9-_]{0,63}$">
@@ -159,7 +139,6 @@ function setStore(v: 'default' | 'true' | 'false'): void {
           直连
         </button>
       </div>
-      <span class="inline-hint" :title="effectiveText">生效：{{ effectiveText }}</span>
       <span v-if="p.effective?.warning" class="inline-warn" role="status">
         {{ p.effective.warning }}
       </span>
@@ -169,62 +148,40 @@ function setStore(v: 'default' | 'true' | 'false'): void {
     <div class="subdiv">
       <div class="subdiv-title">扩展</div>
 
-      <div class="grid2">
-        <FieldRow
-          label="存储"
-          desc="控制 responses 请求体的 store 字段：缺省=不发送（兼容最好）；开=服务端持久化省 token；关=显式不持久化"
-        >
-          <div class="seg" role="group" aria-label="服务端存储">
-            <button
-              type="button"
-              class="seg-btn"
-              :class="{ on: p.responseStore === 'default' }"
-              :aria-pressed="p.responseStore === 'default'"
-              @click="setStore('default')"
-            >
-              缺省
-            </button>
-            <button
-              type="button"
-              class="seg-btn"
-              :class="{ on: p.responseStore === 'true' }"
-              :aria-pressed="p.responseStore === 'true'"
-              @click="setStore('true')"
-            >
-              开
-            </button>
-            <button
-              type="button"
-              class="seg-btn"
-              :class="{ on: p.responseStore === 'false' }"
-              :aria-pressed="p.responseStore === 'false'"
-              @click="setStore('false')"
-            >
-              关
-            </button>
-          </div>
-        </FieldRow>
-
-        <FieldRow
-          label="请求头"
-          :desc="`该 Provider 专属；空名称保存时过滤。当前 ${headerN} 个`"
-        >
-          <span class="inline-hint hdr-summary" :title="headerText">{{ headerText }}</span>
-          <HSwitch
-            :model-value="p.headersEnabled"
-            label="启用自定义请求头"
-            @update:model-value="(v: boolean) => emit('update:headers-enabled', v)"
-          />
-          <span class="inline-hint">{{ p.headersEnabled ? '启用' : '停用' }}</span>
-        </FieldRow>
-      </div>
-
-      <FieldRow label="危险区">
-        <HButton size="sm" variant="danger" @click="emit('request-delete')">删除 Provider</HButton>
-      </FieldRow>
-
-      <FieldRow label="探活" desc="连通性检查由下方模型列表统一拉取（/models）">
-        <span class="inline-hint">由下方「模型列表」统一拉取</span>
+      <FieldRow
+        label="responseStore存储"
+        class="label-wide"
+        desc="控制 responses 请求体的 store 字段：缺省=不发送（兼容最好）；开=服务端持久化省 token；关=显式不持久化"
+      >
+        <div class="seg" role="group" aria-label="服务端存储">
+          <button
+            type="button"
+            class="seg-btn"
+            :class="{ on: p.responseStore === 'default' }"
+            :aria-pressed="p.responseStore === 'default'"
+            @click="setStore('default')"
+          >
+            缺省
+          </button>
+          <button
+            type="button"
+            class="seg-btn"
+            :class="{ on: p.responseStore === 'true' }"
+            :aria-pressed="p.responseStore === 'true'"
+            @click="setStore('true')"
+          >
+            开
+          </button>
+          <button
+            type="button"
+            class="seg-btn"
+            :class="{ on: p.responseStore === 'false' }"
+            :aria-pressed="p.responseStore === 'false'"
+            @click="setStore('false')"
+          >
+            关
+          </button>
+        </div>
       </FieldRow>
 
       <!-- 模型列表拉取行：复用 ModelProbe（探测弹窗 + 勾选并入） -->
@@ -245,10 +202,22 @@ function setStore(v: 'default' | 'true' | 'false'): void {
         <span class="inline-hint" role="status">{{ fetchStatus }}</span>
       </FieldRow>
 
-      <!-- 请求头明细：展开式（默认收起，摘要在上方行内） -->
+      <FieldRow
+        label="自定义请求头"
+        :desc="`该 Provider 专属；空名称保存时过滤。当前 ${headerN} 个：${headerText}`"
+      >
+        <HSwitch
+          :model-value="p.headersEnabled"
+          label="自定义请求头"
+          @update:model-value="(v: boolean) => emit('update:headers-enabled', v)"
+        />
+        <span class="inline-hint">{{ p.headersEnabled ? '启用' : '关闭' }}</span>
+      </FieldRow>
+
+      <!-- 请求头明细：展开式（默认收起） -->
       <details class="hdr-box">
         <summary class="hdr-summary-btn">
-          请求头明细（{{ headerN }}）· {{ p.headersEnabled ? '已启用' : '已停用' }}
+          请求头明细（{{ headerN }}）· {{ p.headersEnabled ? '已启用' : '已关闭' }}
         </summary>
         <div class="hdr-box-body">
           <HeadersEditor
@@ -257,6 +226,10 @@ function setStore(v: 'default' | 'true' | 'false'): void {
           />
         </div>
       </details>
+
+      <FieldRow label="危险区">
+        <HButton size="sm" variant="danger" @click="emit('request-delete')">删除 Provider</HButton>
+      </FieldRow>
     </div>
   </section>
 </template>
@@ -269,27 +242,6 @@ function setStore(v: 'default' | 'true' | 'false'): void {
 }
 .psec:last-child {
   border-bottom: 0;
-}
-.psec-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  margin: 2px 0 var(--space-1-5);
-  min-width: 0;
-}
-.psec-title {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 700;
-  color: hsl(var(--fg));
-}
-.psec-sub {
-  font-size: var(--text-2xs);
-  color: hsl(var(--fg-subtle));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 .grid2 {
   display: grid;
@@ -323,8 +275,9 @@ function setStore(v: 'default' | 'true' | 'false'): void {
   font-size: var(--text-2xs);
   color: hsl(var(--warning));
 }
-.hdr-summary {
-  font-family: var(--font-mono);
+/* responseStore存储标签较长，放宽标签列避免省略 */
+.label-wide.frow {
+  grid-template-columns: 140px minmax(0, 1fr);
 }
 /* 三段 seg：底 bg-muted，选中白底 accent 字 */
 .seg {
@@ -377,16 +330,13 @@ function setStore(v: 'default' | 'true' | 'false'): void {
   color: hsl(var(--fg));
 }
 .hdr-box-body {
-  padding: var(--space-1) 0 var(--space-1) 86px;
+  padding: var(--space-1) 0;
   min-width: 0;
 }
-/* 窄窗：双列变单列；请求头明细不再缩进 */
+/* 窄窗：双列变单列 */
 @media (max-width: 640px) {
   .grid2 {
     grid-template-columns: 1fr;
-  }
-  .hdr-box-body {
-    padding-left: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
