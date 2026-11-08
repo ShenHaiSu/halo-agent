@@ -1,4 +1,5 @@
 using Host.Desktop.Bridge;
+using Host.Desktop.Engine;
 using Host.Desktop.Infrastructure.Config;
 using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Infrastructure.Storage;
@@ -28,6 +29,7 @@ public static class ServiceRegistration
         AddSession(p);
         AddTools(p);
         AddAgent(p);
+        AddEngine(p);
         AddBridge(p, mainForm, gpuDisabled);
         return p;
     }
@@ -111,6 +113,22 @@ public static class ServiceRegistration
         ));
     }
 
+    /// <summary>
+    /// Frame boundary singletons: router, host-side ring, cutover switches and
+    /// the in-process link. Registered before the bridges so both the legacy
+    /// facade and the converged frame entry resolve from one container.
+    /// </summary>
+    public static void AddEngine(HaloServiceProvider p)
+    {
+        p.AddSingleton(sp => new HaloAgent.Engine.FrameServer());
+        p.AddSingleton(sp => new EventRingBuffer());
+        p.AddSingleton(sp => EngineRouting.FromEnvironment());
+        p.AddSingleton(sp => new InProcChannel(
+            sp.GetRequiredService<HaloAgent.Engine.FrameServer>(),
+            sp.GetRequiredService<EventRingBuffer>()
+        ));
+    }
+
     public static void AddBridge(HaloServiceProvider p, Form? mainForm, bool gpuDisabled)
     {
         SkillWriter.ChangedNotifier = (isSkill, scope, name) =>
@@ -147,6 +165,11 @@ public static class ServiceRegistration
             skillMemoryService: sp.GetRequiredService<SkillMemoryService>(),
             subCoordinator: sp.GetRequiredService<SubAgentCoordinator>(),
             toolRegistry: sp.GetRequiredService<ToolRegistry>()
+        ));
+        p.AddSingleton(sp => new HostBridge(
+            sp.GetRequiredService<InProcChannel>(),
+            sp.GetRequiredService<EngineRouting>(),
+            mainForm
         ));
     }
 }

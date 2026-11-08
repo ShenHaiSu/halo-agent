@@ -24,13 +24,16 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <!-- need21-B01: 程序集依赖方向 Desktop → Services/Tools/LlmGateway/Infrastructure/Core + Bridge.Contracts -->
-    <ProjectReference Include="..\HaloAgent.Core\HaloAgent.Core.csproj" />
-    <ProjectReference Include="..\HaloAgent.Infrastructure\HaloAgent.Infrastructure.csproj" />
-    <ProjectReference Include="..\HaloAgent.LlmGateway\HaloAgent.LlmGateway.csproj" />
-    <ProjectReference Include="..\HaloAgent.Tools\HaloAgent.Tools.csproj" />
-    <ProjectReference Include="..\HaloAgent.Services\HaloAgent.Services.csproj" />
-    <ProjectReference Include="..\HaloAgent.Bridge.Contracts\HaloAgent.Bridge.Contracts.csproj" />
+     <!-- Frame boundary: shell links the engine in-process; web clients reach it via HostBridge. -->
+     <ProjectReference Include="..\HaloAgent.Engine.Abstractions\HaloAgent.Engine.Abstractions.csproj" />
+     <ProjectReference Include="..\HaloAgent.Engine\HaloAgent.Engine.csproj" />
+     <!-- need21-B01: 程序集依赖方向 Desktop → Services/Tools/LlmGateway/Infrastructure/Core + Bridge.Contracts -->
+     <ProjectReference Include="..\HaloAgent.Core\HaloAgent.Core.csproj" />
+     <ProjectReference Include="..\HaloAgent.Infrastructure\HaloAgent.Infrastructure.csproj" />
+     <ProjectReference Include="..\HaloAgent.LlmGateway\HaloAgent.LlmGateway.csproj" />
+     <ProjectReference Include="..\HaloAgent.Tools\HaloAgent.Tools.csproj" />
+     <ProjectReference Include="..\HaloAgent.Services\HaloAgent.Services.csproj" />
+     <ProjectReference Include="..\HaloAgent.Bridge.Contracts\HaloAgent.Bridge.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('wwwroot')" />
