@@ -1,5 +1,6 @@
 import { checkJoin, renderBlockHtml, renderFallbackHtml, splitBlocks } from './markdownBlocks';
 import { classifySource } from './renderContentLimits';
+import { blockHash } from './turnGroup';
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -36,4 +37,47 @@ export function renderMarkdown(content: string): string {
 /** 流式逃生路径（localStorage 'halo-stream-md' = 'off' 时）：纯文本，不做 Markdown 解析。 */
 export function renderStreamingText(content: string): string {
   return escapeHtml(content || '');
+}
+
+// ---- need02-P4（p4-md）：稳态渲染缓存 ----
+// 长轮次里同一正文会被反复 computed（打字机 + 交接 + 展开收起），每次整源重跑。
+// 键 = blockHash(content)（FNV-1a + 长度，复用 turnGroup.ts），LRU 200 条。纯渲染缓存，
+// 不改变任何输出；p4-md=off 时调用方走 renderMarkdown 直跑（见 MessageTimeline.renderHtml）。
+
+const MD_CACHE_MAX = 200;
+const mdCache = new Map<string, string>();
+let mdCacheHits = 0;
+let mdCacheMisses = 0;
+
+export function renderMarkdownCached(content: string): string {
+  const src = content || '';
+  const key = blockHash(src);
+  const hit = mdCache.get(key);
+  if (hit !== undefined) {
+    mdCacheHits++;
+    // LRU：命中上浮（delete+set 搬到尾部）。
+    mdCache.delete(key);
+    mdCache.set(key, hit);
+    return hit;
+  }
+  mdCacheMisses++;
+  const html = renderMarkdown(src);
+  mdCache.set(key, html);
+  if (mdCache.size > MD_CACHE_MAX) {
+    const oldest = mdCache.keys().next();
+    if (!oldest.done) mdCache.delete(oldest.value);
+  }
+  return html;
+}
+
+/** 缓存观测（测试/调试用）。 */
+export function markdownCacheStats(): { size: number; hits: number; misses: number } {
+  return { size: mdCache.size, hits: mdCacheHits, misses: mdCacheMisses };
+}
+
+/** 清空缓存（测试隔离/内存兜底用）。 */
+export function clearMarkdownCache(): void {
+  mdCache.clear();
+  mdCacheHits = 0;
+  mdCacheMisses = 0;
 }

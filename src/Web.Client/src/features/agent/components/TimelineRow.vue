@@ -1,7 +1,8 @@
 <template>
   <div v-if="item.kind === 'user'" :ref="anchorRef(item.key)" class="flex justify-end">
     <div
-      class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+      class="max-w-[85%] rounded-lg bg-elevated border px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+      :class="pendingCls"
       @contextmenu.prevent="emit('user-menu', $event, item)"
     >
       <template v-for="(part, pi) in userParts(String(item.msg?.content ?? ''))" :key="pi">
@@ -20,6 +21,8 @@
             object-fit="cover"
             class="rounded border msg-thumb-slot"
             :data-testid="`msg-image-${img.imageId}`"
+            @load="markImgLoaded"
+            @error="markImgLoaded"
           />
           <!-- 丢失：保留原有标签语义，但占同一尺寸槽位 -->
           <n-tag v-else-if="isImgLost(img)" size="small" :bordered="true" :title="img.fileName" class="msg-thumb-slot">
@@ -30,6 +33,25 @@
         </template>
       </div>
       <div v-if="hasLost(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
+      <!-- need02-P1：乐观 user 态（右下小字，不占高度跳变） -->
+      <div
+        v-if="pendingState === 'sending'"
+        data-testid="pending-sending"
+        class="mt-1 flex items-center justify-end gap-1 text-[11px] text-secondary select-none"
+      >
+        <span class="pending-spinner" aria-hidden="true" />
+        <span>发送中…</span>
+      </div>
+      <div
+        v-else-if="pendingState === 'failed'"
+        data-testid="pending-failed"
+        class="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-red-500 select-none"
+      >
+        <span>发送失败·点击重发</span>
+        <button type="button" class="pending-retry-btn" data-testid="pending-retry-btn" @click.stop="emit('retry-pending', item)">
+          重发
+        </button>
+      </div>
     </div>
   </div>
   <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
@@ -46,6 +68,44 @@
       :tool-key="toolKey"
       @toggle="emit('toggle', $event)"
     />
+  </div>
+  <!-- need02-P2：用户轮次块（D1=B；p2 off 时无此 kind，回旧链）。 -->
+  <div v-else-if="item.kind === 'user-turn'" :ref="anchorRef(item.key)">
+    <UserTurnBlock
+      v-if="item.turn"
+      :turn="item.turn"
+      :expanded="isExpanded(item.turn.key || item.key)"
+      :reading-window="!!readingWindow"
+      :render-html="renderHtml"
+      :render-stream="renderStreamFn"
+      :card-for="cardFor"
+      :tool-key="toolKey"
+      :msg-images="msgImages"
+      :thumb-of="thumbOf"
+      :img-lost="imgLost"
+      :live-segs="liveSegsValue"
+      :streaming-text="streamingTextValue"
+      :is-generating="!!isGeneratingValue"
+      :stream-md-kill-switch="!!streamMdKillSwitch"
+      :pending-status="pendingStatusOfTurn"
+      :live-completing="!!liveCompleting && !!isLast"
+      :handoff-anim="handoffAnim !== false"
+      :single-process="singleProcess !== false"
+      @toggle="emit('toggle', $event)"
+      @user-menu="(e) => emit('user-menu', e, item)"
+      @assistant-menu="(e) => emit('assistant-menu', e, item)"
+      @link-click="emit('link-click', $event)"
+      @retry-pending="emit('retry-pending', item)"
+    />
+    <!-- need02-P4（P4b#6）：轮内 notice（仅末条；p4 off 时回 TimelineView 全局 alert，见 noticeInTurn）。 -->
+    <div v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError)" class="mt-1.5 space-y-1.5" data-testid="user-turn-notice">
+      <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
+      <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
+      <div v-if="showRetry" class="flex items-center gap-2">
+        <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')">重试本轮</n-button>
+        <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')">忽略</n-button>
+      </div>
+    </div>
   </div>
   <div v-else :ref="anchorRef(item.key)">
     <TurnGroupItem
@@ -65,14 +125,29 @@
       @link-click="emit('link-click', $event)"
     />
   </div>
+  <!-- need02-P4（P4b#6）：轮内 notice 兜底（末条非 user-turn 时，如 system 尾，挂行尾而非丢提示）。 -->
+  <div
+    v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError) && item.kind !== 'user-turn'"
+    class="mt-1.5 space-y-1.5"
+    data-testid="user-turn-notice"
+  >
+    <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
+    <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
+    <div v-if="showRetry" class="flex items-center gap-2">
+      <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')">重试本轮</n-button>
+      <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')">忽略</n-button>
+    </div>
+  </div>
 </template>
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import TurnGroupItem from './TurnGroupItem.vue';
 import TurnRunItem from './TurnRunItem.vue';
+import UserTurnBlock from './UserTurnBlock.vue';
 import SkillPillChip from './SkillPillChip.vue';
 import { userParts } from '../utils/userParts';
 
@@ -96,18 +171,109 @@ const props = defineProps<{
   imgLost?: (img: ChatImageRef) => boolean;
   /** need-01：历史阅读窗口内不点亮合并舱的「运行中」态（与 useTimeline.readingWindow 同源）。 */
   readingWindow?: boolean;
+  /** need02-P1：pending 判定/状态（缺省回落到 id 前缀，保证老调用方不炸）。 */
+  isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
+  pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
+  /** need02-P2：内嵌 LiveBody 用（仅运行轮消费；稳态轮忽略）。 */
+  liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
+  streamingText?: string;
+  isGenerating?: boolean;
+  streamMdKillSwitch?: boolean;
+  renderStream?: (text: string) => string;
+  /** need02-P3：末条标记（TranscriptTail 透传；交接窗 liveCompleting 只对末轮生效）。 */
+  isLast?: boolean;
+  /** need02-P3：轮末交接窗（model.liveCompleting；TimelineRow 按 isLast 门控后透给 UserTurnBlock）。 */
+  liveCompleting?: boolean;
+  /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省 true（老调用方行为不变）。 */
+  handoffAnim?: boolean;
+  /** P02-P1：单容器三段模板开关；缺省 true（老调用方行为不变，off 回旧链）。 */
+  singleProcess?: boolean;
+  /** need02-P4（P4b#6）：轮内 notice 开关（p4&&p2；false 时 notice 回 TimelineView 全局区）。 */
+  noticeInTurn?: boolean;
+  turnNotice?: string;
+  lastError?: string;
+  showRetry?: boolean;
 }>();
 /** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
 function isImgLost(img: ChatImageRef): boolean {
   if (props.imgLost) return props.imgLost(img);
   return img.lost === true;
 }
+/** P03-P2：图片解码打点——load/error 后给底层 img 挂 data-loaded，settle 采样据此放行；缺失回退靠 600ms 兜底封顶。 */
+function markImgLoaded(e: Event): void {
+  try {
+    const t = e.target as HTMLElement | null;
+    t?.setAttribute?.('data-loaded', 'true');
+  } catch {
+    /* ignore */
+  }
+}
+/** need02-P1：pending 态（sending/failed/''）。 */
+const pendingState = computed<string>(() => {
+  try {
+    if (props.pendingStatus) return String(props.pendingStatus(props.item.msg) || '');
+    const id = String(props.item.msg?.id || '');
+    return id.startsWith('pending-') ? 'sending' : '';
+  } catch {
+    return '';
+  }
+});
+/** need02-P2：user-turn 头的 pending 态（复用 pendingStatus(msg) 于 turn.userMsg）。 */
+const pendingStatusOfTurn = computed<string>(() => {
+  try {
+    const t = (props.item as unknown as { turn?: { userMsg?: UnifiedChatMessage } }).turn;
+    const um = t?.userMsg;
+    if (!um) return '';
+    if (props.pendingStatus) return String(props.pendingStatus(um) || '');
+    const id = String(um.id || '');
+    return id.startsWith('pending-') ? 'sending' : '';
+  } catch {
+    return '';
+  }
+});
+const liveSegsValue = computed(() => {
+  try {
+    return (props.liveSegs || []) as never[];
+  } catch {
+    return [];
+  }
+});
+const streamingTextValue = computed(() => String(props.streamingText || ''));
+const isGeneratingValue = computed(() => props.isGenerating === true);
+const renderStreamFn = (t: string): string => {
+  try {
+    if (props.renderStream) return String(props.renderStream(t) || '');
+  } catch {
+    /* fallthrough */
+  }
+  try {
+    return String(props.renderHtml(t) || '');
+  } catch {
+    return String(t || '');
+  }
+};
+const isPendingMsg = computed<boolean>(() => {
+  try {
+    if (props.isPending) return !!props.isPending(props.item.msg);
+    return String(props.item.msg?.id || '').startsWith('pending-');
+  } catch {
+    return false;
+  }
+});
+void isPendingMsg.value;
+const pendingCls = computed<string>(() => {
+  if (pendingState.value === 'failed') return 'border-red-400 pending-failed-bubble';
+  return 'border-subtle';
+});
 const emit = defineEmits<{
   toggle: [key: string];
   'user-menu': [e: MouseEvent, item: TimelineEntry];
   'assistant-menu': [e: MouseEvent, item: TimelineEntry];
   'link-click': [e: MouseEvent];
   'content-menu': [e: MouseEvent];
+  'retry-pending': [item: TimelineEntry];
+  retry: [];
+  dismiss: [];
 }>();
 void emit;
 </script>
@@ -138,5 +304,41 @@ void emit;
   .msg-thumb-skeleton {
     animation: none;
   }
+}
+/* need02-P1：pending 态只动 opacity，不做高度动画（05 R6）。 */
+.pending-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--border-subtle);
+  border-top-color: var(--text-secondary);
+  animation: pending-spin 0.9s linear infinite;
+  display: inline-block;
+}
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-spinner {
+    animation: none;
+  }
+}
+.pending-failed-bubble {
+  border-color: #f87171 !important;
+}
+.pending-retry-btn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  border: 1px solid #f87171;
+  color: #ef4444;
+  background: transparent;
+  cursor: pointer;
+}
+.pending-retry-btn:hover {
+  background: #fef2f2;
 }
 </style>

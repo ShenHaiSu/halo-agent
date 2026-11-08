@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halo-agent.local/contract/agent.schema.json",
+  "title": "Agent frame contract (frozen subset, single source of truth)",
+  "description": "Backend owns session context, turn scheduling, tool calls and the event sequence; the web client only renders lazily and pulls batches on a timer. This file is the only source of truth for frame envelopes, method names, event names and error codes. After the freeze only optional fields may be added; field semantics and types must not change.",
+  "contractVersion": "0.1.0",
+  "contractDate": "2026-11-08",
+  "methods": [
+    "system.ping",
+    "system.info",
+    "session.new",
+    "session.resume",
+    "session.rename",
+    "session.delete",
+    "session.clear",
+    "session.list",
+    "session.get",
+    "session.history",
+    "session.compact",
+    "session.setCwd",
+    "agent.prompt",
+    "agent.queue",
+    "agent.cancel",
+    "agent.retry",
+    "agent.drain",
+    "agent.answer",
+    "agent.unqueue",
+    "state.snapshot",
+    "state.mode",
+    "state.persona",
+    "state.maxTurns",
+    "tool.undoRollback",
+    "settings.saveProviders",
+    "settings.setActive",
+    "settings.saveNetwork",
+    "settings.saveBehavior",
+    "asset.skills.list",
+    "asset.skills.get",
+    "asset.memory.list",
+    "asset.memory.save",
+    "asset.personas.list",
+    "asset.personas.get",
+    "usage.query",
+    "usage.clear",
+    "host.pickDirectory",
+    "host.openPath"
+  ],
+  "events": [
+    "turn.started",
+    "text.delta",
+    "text.done",
+    "tool.start",
+    "tool.delta",
+    "tool.end",
+    "tool.confirm",
+    "turn.done",
+    "turn.failed",
+    "turn.cancelled",
+    "session.updated",
+    "session.compacted",
+    "state.changed",
+    "usage.tick"
+  ],
+  "errorCodes": [
+    "INVALID_PARAMS",
+    "NOT_FOUND",
+    "TURN_IN_PROGRESS",
+    "COMPACTING",
+    "RATE_LIMITED",
+    "PROVIDER_AUTH",
+    "NETWORK_FAIL",
+    "TOOL_DENIED",
+    "TOOL_TIMEOUT",
+    "CANCELLED",
+    "INTERNAL"
+  ],
+  "definitions": {
+    "requestFrame": {
+      "type": "object",
+      "required": ["t", "id", "m"],
+      "properties": {
+        "t": { "const": "req" },
+        "id": { "type": "integer", "minimum": 0 },
+        "m": { "$ref": "#/definitions/methodName" },
+        "p": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "responseFrame": {
+      "type": "object",
+      "required": ["t", "id", "ok"],
+      "properties": {
+        "t": { "const": "res" },
+        "id": { "type": "integer", "minimum": 0 },
+        "ok": { "type": "boolean" },
+        "r": { "type": "object" },
+        "e": { "$ref": "#/definitions/errorBody" }
+      },
+      "additionalProperties": true
+    },
+    "eventFrame": {
+      "type": "object",
+      "required": ["t", "seq", "k"],
+      "properties": {
+        "t": { "const": "evt" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "k": { "$ref": "#/definitions/eventKind" },
+        "p": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "methodName": {
+      "type": "string",
+      "enum": [
+        "system.ping",
+        "system.info",
+        "session.new",
+        "session.resume",
+        "session.rename",
+        "session.delete",
+        "session.clear",
+        "session.list",
+        "session.get",
+        "session.history",
+        "session.compact",
+        "session.setCwd",
+        "agent.prompt",
+        "agent.queue",
+        "agent.cancel",
+        "agent.retry",
+        "agent.drain",
+        "agent.answer",
+        "agent.unqueue",
+        "state.snapshot",
+        "state.mode",
+        "state.persona",
+        "state.maxTurns",
+        "tool.undoRollback",
+        "settings.saveProviders",
+        "settings.setActive",
+        "settings.saveNetwork",
+        "settings.saveBehavior",
+        "asset.skills.list",
+        "asset.skills.get",
+        "asset.memory.list",
+        "asset.memory.save",
+        "asset.personas.list",
+        "asset.personas.get",
+        "usage.query",
+        "usage.clear",
+        "host.pickDirectory",
+        "host.openPath"
+      ]
+    },
+    "eventKind": {
+      "type": "string",
+      "enum": [
+        "turn.started",
+        "text.delta",
+        "text.done",
+        "tool.start",
+        "tool.delta",
+        "tool.end",
+        "tool.confirm",
+        "turn.done",
+        "turn.failed",
+        "turn.cancelled",
+        "session.updated",
+        "session.compacted",
+        "state.changed",
+        "usage.tick"
+      ]
+    },
+    "errorCode": {
+      "type": "string",
+      "enum": [
+        "INVALID_PARAMS",
+        "NOT_FOUND",
+        "TURN_IN_PROGRESS",
+        "COMPACTING",
+        "RATE_LIMITED",
+        "PROVIDER_AUTH",
+        "NETWORK_FAIL",
+        "TOOL_DENIED",
+        "TOOL_TIMEOUT",
+        "CANCELLED",
+        "INTERNAL"
+      ]
+    },
+    "errorBody": {
+      "type": "object",
+      "required": ["code", "msg"],
+      "properties": {
+        "code": { "$ref": "#/definitions/errorCode" },
+        "msg": { "type": "string" },
+        "hint": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "type": "object",
+  "required": ["t"],
+  "properties": {
+    "t": { "enum": ["req", "res", "evt"] }
+  }
+}

@@ -38,6 +38,10 @@ import {
   refreshAfterTool,
   stopGenerating,
 } from './turnEvents';
+import { readNeed02Flags } from '@features/need02/utils/need02Flags';
+import { debug as need02Debug } from '@features/need02/utils/need02Debug';
+import { makePendingUser, type PendingUser } from '@features/session/utils/pendingUser';
+import type { ChatImageRef } from '@shared/bridge/hostBridge';
 
 let listenersBound = false;
 
@@ -86,10 +90,48 @@ export const useAgentTurn = defineStore('agent-turn', () => {
   const isAnyGenerating = computed(() => runningSessionIds.value.length > 0);
 
   /** need22-P2 F2：幂等发送。生成 requestId=uuid 透传后端；连点第二发 toast + 忽略，不起新轮。 */
+  /** need02-P1：p1 on 时发送瞬间插入乐观 pending（≤100ms 首现），后端回包后由 workspace 对账转正。 */
+  function buildPendingImages(kept: AgentSendAttachment[]): { images: ChatImageRef[]; previews: Record<string, string> } {
+    const images: ChatImageRef[] = [];
+    const previews: Record<string, string> = {};
+    for (const a of kept) {
+      const attId = String((a as AgentSendAttachment).attId || '').trim();
+      if (!attId) continue;
+      const mime = String((a as AgentSendAttachment).mime || 'image/png');
+      const b64 = String((a as AgentSendAttachment).base64 || '');
+      images.push({
+        imageId: attId,
+        fileName: String((a as AgentSendAttachment).fileName || attId),
+        mime,
+        relPath: '',
+        width: 0,
+        height: 0,
+        sizeBytes: b64.length,
+        sha16: attId,
+      });
+      if (b64) previews[attId] = `data:${mime};base64,${b64}`;
+    }
+    return { images, previews };
+  }
+  function isP1On(): boolean {
+    try {
+      return readNeed02Flags().p1;
+    } catch {
+      return true;
+    }
+  }
+  /** need02-P1：重发必须新 requestId（R4：后端去重字典会吞复用 requestId）。旧 failed 标记 superseded，不复用。 */
+  function markPendingFailed(t: AgentTurnState, code: string | null): void {
+    if (t.pendingUser) {
+      t.pendingUser.status = 'failed';
+      t.pendingUser.errorCode = code;
+      touch(t);
+    }
+  }
   async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
     const content = (text || '').trim();
     const sessionId = activeSessionId.value;
-    const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && a.base64) : [];
+    const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && (a as AgentSendAttachment).base64) : [];
     if ((!content && readyFiles.length === 0) || !sessionId) return false;
     if (isCompacting(sessionId)) {
       toast('warning', '压缩中，新一轮请稍候');
@@ -101,6 +143,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
       toast('warning', `上一轮仍在进行中（requestId=${cur.requestId || 'unknown'}），本发已忽略`);
       return false;
     }
+    const p1On = isP1On();
     const prevRequestId = cur.requestId || '';
     const prevPrompt = cur.lastPrompt || '';
     const rt = agentRuntime();
@@ -110,6 +153,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const maxImages = rt.maxImages();
     const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
     const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
+    const requestId = newRequestId();
     // resetTurnState 内联（旧语义；分片缓冲归 stream 侧）
     dropSegBuf(sessionId);
     turns.value[sessionId] = emptyTurnState(sessionId, fallbackProtocol.value);
@@ -120,13 +164,26 @@ export const useAgentTurn = defineStore('agent-turn', () => {
       /* 时间刷新永不阻断主链路 */
     }
     const t = ensureTurn(sessionId);
-    const requestId = newRequestId();
+    // need02-P1：先插 pending 再调桥（p1 off 时回旧链：不插 pending）。
+    let pending: PendingUser | null = null;
+    if (p1On) {
+      const { images, previews } = buildPendingImages(kept);
+      pending = makePendingUser({ requestId, sessionId, content, images, previews });
+      t.pendingUser = pending;
+      try {
+        need02Debug('pending-insert', { requestId, at: Date.now(), contentLen: content.length, images: images.length });
+        haloEventBus.emitLocal('need02:pending', { sessionId, requestId, key: pending.key });
+      } catch {
+        /* 埋点/事件永不阻断主链路 */
+      }
+    }
     t.requestId = requestId;
     markSeenRequest(requestId);
     t.isGenerating = true;
     t.streamingActive = true;
     t.lastErrorInfo = null;
     t.lastPrompt = content;
+    t.lastAttachments = kept.slice();
     touch(t);
     try {
       const res = await startAgentTurn(getBridgeTransport(), {
@@ -143,6 +200,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
           // 后端重入拒绝：旧轮不受影响，恢复旧 requestId/原文继续跟旧轮
           t.requestId = prevRequestId;
           t.lastPrompt = prevPrompt || t.lastPrompt;
+          if (p1On) markPendingFailed(t, 'TURN_IN_PROGRESS');
           t.lastError = res.message || '上一轮仍在进行中';
           t.lastErrorInfo = { code: 'TURN_IN_PROGRESS', message: t.lastError, retry: false };
           toast('warning', t.lastError);
@@ -150,6 +208,8 @@ export const useAgentTurn = defineStore('agent-turn', () => {
           return false;
         }
         if (res.code === 'COMPACTING') {
+          // need02-P1：COMPACTING 发送前即拒，pending 不留（回滚即无痕）。
+          if (p1On) t.pendingUser = null;
           t.lastError = res.message || '该会话正在压缩上下文';
           t.lastErrorInfo = { code: 'COMPACTING', message: t.lastError, retry: false };
           t.isGenerating = false;
@@ -159,6 +219,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
           touch(t);
           return false;
         }
+        if (p1On) markPendingFailed(t, res.code || 'AGENT_START_ERROR');
         t.lastError = res.message || '启动 Agent 推理失败';
         t.lastErrorInfo = { code: res.code || 'AGENT_START_ERROR', message: t.lastError, retry: true };
         t.isGenerating = false;
@@ -173,6 +234,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
       return true;
     } catch (err) {
       console.error('[agent-turn] sendPrompt failed:', err);
+      if (p1On) markPendingFailed(t, 'SEND_FAILED');
       t.lastError = err instanceof Error ? err.message : String(err);
       t.lastErrorInfo = { code: 'SEND_FAILED', message: t.lastError, retry: true };
       t.isGenerating = false;
@@ -185,6 +247,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
   }
 
   /** need22-P2 F5：失败重试（用 lastPrompt 原文重发；成功清错误态）。 */
+  /** need02-P1：重试带图（lastAttachments），新 requestId，旧 failed 不复用。p1 off 时回旧链（仅文本）。 */
   async function retryLastTurn(targetSessionId?: string): Promise<boolean> {
     void targetSessionId;
     const sid = activeSessionId.value.trim();
@@ -192,11 +255,24 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const t = ensureTurn(sid);
     if (t.isGenerating) return false;
     const text = (t.lastPrompt || '').trim();
-    if (!text) return false;
+    const atts = Array.isArray(t.lastAttachments) ? t.lastAttachments.slice() : [];
+    if (!text && atts.length === 0) return false;
     t.lastError = '';
     t.lastErrorInfo = null;
     touch(t);
+    if (isP1On() && atts.length > 0) return sendPrompt(text, atts);
     return sendPrompt(text);
+  }
+
+  /** need02-P1：replay/branch/delete 先清本 session pending，避免旧乐观串入新历史。 */
+  function clearPending(sessionId?: string): void {
+    const sid = (sessionId ?? activeSessionId.value).trim();
+    if (!sid) return;
+    const t = getTurn(sid);
+    if (t && t.pendingUser) {
+      t.pendingUser = null;
+      touch(t);
+    }
   }
 
   function clearLastError(targetSessionId?: string): void {
@@ -213,6 +289,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const rt = agentRuntime();
     const sid = (activeSessionId.value || '').trim();
     if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
+    clearPending(sid);
     const text = rt.findMessageContent(sid, msgId).trim();
     if (!text) return false;
     try {
@@ -233,6 +310,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const rt = agentRuntime();
     const sid = (activeSessionId.value || '').trim();
     if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
+    clearPending(sid);
     try {
       const res = await rt.truncateHistory(rt.workspaceId(), sid, assistantId, true);
       if (!res.ok) return false;
@@ -298,6 +376,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     pauseTurn,
     resumeTurn,
     retryLastTurn,
+    clearPending,
     clearLastError,
     isCompacting,
     sendPrompt,

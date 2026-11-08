@@ -1,6 +1,6 @@
 /** M4 收敛项：settle veil 语义 + 增量归并等价性（§2 验收 / §3.2 正确性）。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSettleController, FADE_MS, MAX_MS, STABLE_FRAMES } from './transcriptSettle';
+import { createSettleController, LEAVE_MS, MAX_MS, STABLE_FRAMES } from './transcriptSettle';
 import { buildTurnGroups, buildTurnGroupsIncremental } from './turnGroup';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 
@@ -29,7 +29,8 @@ describe('settle veil 控制器（M4-§2）', () => {
     expect(ctrl.phase).toBe('leaving');
     // 淡出期间仍盖着（避免提前露出未稳定的内容）
     expect(ctrl.veilCovering).toBe(true);
-    vi.advanceTimersByTime(FADE_MS);
+    // P03：退出时长收敛到 LEAVE_MS=180（= CSS --veil-leave-ms）；FADE_MS 仅废弃别名
+    vi.advanceTimersByTime(LEAVE_MS);
     expect(ctrl.veilCovering).toBe(false);
     expect(ctrl.phase).toBe('off');
   });
@@ -41,7 +42,7 @@ describe('settle veil 控制器（M4-§2）', () => {
     expect(ctrl.veilCovering).toBe(true);
     vi.advanceTimersByTime(MAX_MS);
     expect(ctrl.phase).toBe('leaving');
-    vi.advanceTimersByTime(FADE_MS);
+    vi.advanceTimersByTime(LEAVE_MS);
     expect(ctrl.veilCovering).toBe(false);
   });
 
@@ -51,7 +52,7 @@ describe('settle veil 控制器（M4-§2）', () => {
     ctrl.onPhase = (p) => phases.push(p);
     const sample = { scrollHeight: 10, clientHeight: 10 };
     for (let i = 0; i < STABLE_FRAMES; i++) ctrl.sample(sample);
-    vi.advanceTimersByTime(FADE_MS);
+    vi.advanceTimersByTime(LEAVE_MS);
     expect(phases).toEqual(['leaving', 'off']);
   });
 });

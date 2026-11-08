@@ -4,12 +4,15 @@
 import { ref } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
+import type { PendingUser } from '@features/session/utils/pendingUser';
 
 export type StreamSegKind = 'text' | 'reasoning' | 'tool';
 export interface StreamSeg {
   key: string;
   kind: StreamSegKind;
   iteration: number;
+  /** need02-P2：续写键 requestId（保留 iteration 做明细分节；05 R4 新 requestId 不复用）。 */
+  runId?: string;
   text?: string;
   callId?: string;
   persisted?: boolean;
@@ -78,6 +81,12 @@ export interface AgentTurnState {
   requestId: string;
   /** need22-P2 F5：失败重试用原文（成功/新发后清空） */
   lastPrompt: string;
+  /** need02-P1：失败重试用附件（含图重发带图；成功/新发后更新） */
+  lastAttachments: AgentSendAttachment[];
+  /** need02-P1：乐观 user（分桶天然隔离；null=无 pending；仅视图层 overlay，不写 jsonl） */
+  pendingUser: PendingUser | null;
+  /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
+  liveCompleting: boolean;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -141,6 +150,9 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     lastErrorInfo: null,
     requestId: '',
     lastPrompt: '',
+    lastAttachments: [],
+    pendingUser: null,
+    liveCompleting: false,
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
     curIteration: 0,
@@ -164,6 +176,24 @@ export function getTurn(sessionId: string): AgentTurnState | null {
   const sid = (sessionId || '').trim();
   if (!sid) return null;
   return turns.value[sid] || null;
+}
+
+/** need02-P1：pending 读写（分桶隔离；调用方不得就地改 PendingUser 字段外对象）。 */
+export function getPendingUser(sessionId: string): PendingUser | null {
+  const t = getTurn(sessionId);
+  return t?.pendingUser || null;
+}
+export function setPendingUser(sessionId: string, pending: PendingUser | null): void {
+  const t = ensureTurn(sessionId);
+  t.pendingUser = pending;
+  touch(t);
+}
+export function dropPendingUser(sessionId: string): void {
+  const t = getTurn(sessionId);
+  if (t && t.pendingUser) {
+    t.pendingUser = null;
+    touch(t);
+  }
 }
 
 export function touch(t: AgentTurnState): void {
@@ -226,19 +256,22 @@ export function tailSeg(t: AgentTurnState): StreamSeg | null {
   return t.segs.length ? t.segs[t.segs.length - 1] : null;
 }
 export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string): void {
+  // need02-P2：续写键放宽到 runId（= requestId，兼容旧 iteration 分节；05 R4 新轮新 requestId）。
+  const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted) {
+  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId) {
     tail.text = (tail.text || '') + chunk;
     return;
   }
   const n = t.segs.length;
-  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, text: chunk });
+  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk });
 }
 export function pushToolSeg(t: AgentTurnState, callId: string): void {
   if (!callId) return;
+  const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration) return;
-  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, callId });
+  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration && String(tail.runId || '') === runId) return;
+  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId });
 }
 /**
  * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。

@@ -4,8 +4,13 @@
     class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative transcript-scroll"
     data-testid="message-timeline"
     :data-transcript-settling="veilCovering ? 'true' : undefined"
+    :data-need02="need02Attr"
   >
-    <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
+    <div
+      :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'"
+      :inert="veilCovering && motionOn !== false ? true : undefined"
+      :aria-busy="veilCovering ? 'true' : undefined"
+    >
       <div v-if="isEmpty" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
           <Bot class="w-8 h-8 text-accent" />
@@ -33,15 +38,29 @@
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
             :reading-window="!!readingWindow"
+            :is-pending="isPending"
+            :pending-status="pendingStatus"
+            :live-segs="[]"
+            :streaming-text="''"
+            :is-generating="isGenerating"
+            :stream-md-kill-switch="!!streamMdKillSwitch"
+            :render-stream="renderStream"
+            :is-last="false"
+            :live-completing="false"
+            :handoff-anim="handoffAnim !== false"
+            :single-process="singleProcess !== false"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
+            @retry-pending="(item) => emit('retry-pending', item)"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
           />
         </template>
       </TranscriptHistory>
       <TranscriptTail :entries="tailList">
-        <template #default="{ entry }">
+        <template #default="{ entry, isLast }">
           <TimelineRow
             :item="entry as TimelineEntry"
             :is-expanded="isExpanded"
@@ -60,10 +79,28 @@
             :protocol-of="protocolOf"
             :cache-line-of="cacheLineOf"
             :reading-window="!!readingWindow"
+            :is-pending="isPending"
+            :pending-status="pendingStatus"
+            :live-segs="liveSegsFor(entry as TimelineEntry)"
+            :streaming-text="''"
+            :is-generating="isGenerating"
+            :stream-md-kill-switch="!!streamMdKillSwitch"
+            :render-stream="renderStream"
+            :is-last="!!isLast"
+            :live-completing="!!liveCompleting"
+            :handoff-anim="handoffAnim !== false"
+            :single-process="singleProcess !== false"
+            :notice-in-turn="!!noticeInTurn"
+            :turn-notice="turnNotice"
+            :last-error="lastError"
+            :show-retry="showRetry"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
             @link-click="emit('link-click', $event)"
+            @retry-pending="(item) => emit('retry-pending', item)"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
           />
         </template>
         <template #live>
@@ -71,9 +108,9 @@
                （聊天流只增不减，高度动画会与 overflow-anchor / 平滑跟随互相拉扯）。 -->
           <Transition name="live-turn">
             <div
-              v-if="hasActiveTurn"
+              v-if="showAxisTail"
               data-testid="active-turn-container"
-              class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
+              class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0"
             >
               <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
                 <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -82,7 +119,7 @@
               </div>
               <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
                    注意 CLAUDE 红线：`.seg-leave-active` 必须 position:absolute 脱流，否则「下移再上移」。 -->
-              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="seg-list space-y-2">
+              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="turn-body seg-list">
                 <StreamSegItem
                   v-for="(seg, i) in segs"
                   :key="seg.key"
@@ -100,7 +137,7 @@
                   v-if="fallbackCards.length"
                   name="seg"
                   tag="div"
-                  class="space-y-1.5 seg-list"
+                  class="turn-body seg-list"
                   data-testid="active-turn-tools"
                 >
                   <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
@@ -121,13 +158,13 @@
           </Transition>
         </template>
       </TranscriptTail>
-      <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">
+      <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
         {{ turnNotice }}
       </n-alert>
-      <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">
+      <n-alert v-if="lastError && !noticeInTurn" type="error" class="text-xs" data-testid="turn-error-alert">
         {{ lastError }}
       </n-alert>
-      <div v-if="showRetry" class="flex items-center gap-2">
+      <div v-if="showRetry && !noticeInTurn" class="flex items-center gap-2">
         <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')"> 重试本轮 </n-button>
         <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')"> 忽略 </n-button>
       </div>
@@ -153,21 +190,28 @@
         @delete="emit('menu-delete')"
       />
     </div>
-    <div v-if="veilCovering" class="transcript-veil" aria-hidden="true">
+    <div
+      v-if="veilCovering"
+      class="transcript-veil"
+      :class="{ 'is-pre-enter': veilPreEnter, 'is-leaving': veilLeaving }"
+      aria-hidden="true"
+    >
       <div class="transcript-skeleton" />
       <div class="transcript-skeleton short" />
       <div class="transcript-skeleton" />
     </div>
-    <button
-      v-if="showJumpVisible"
-      type="button"
-      class="show-jump-pill"
-      data-testid="show-jump"
-      title="回到底部"
-      @click="emit('jump-latest')"
-    >
-      回到底部
-    </button>
+    <Transition name="show-jump">
+      <button
+        v-if="showJumpVisible"
+        type="button"
+        class="show-jump-pill"
+        data-testid="show-jump"
+        title="回到底部"
+        @click="emit('jump-latest')"
+      >
+        回到底部
+      </button>
+    </Transition>
   </div>
 </template>
 <script setup lang="ts">
@@ -215,6 +259,8 @@ const props = defineProps<{
   segKillSwitch: boolean;
   /** need23-R5：流式 Markdown 逃生开关（true=回落纯文本）。 */
   streamMdKillSwitch?: boolean;
+  /** need02-P2: inner live body for UserTurnBlock (empty = steady render). */
+  liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
   fallbackCards: AgentToolCard[];
   streamingText: string;
   showThinking: boolean;
@@ -232,6 +278,24 @@ const props = defineProps<{
   showJumpBtn?: boolean;
   readingWindow?: boolean;
   veilCovering?: boolean;
+  veilLeaving?: boolean;
+  veilPreEnter?: boolean;
+  motionOn?: boolean;
+  /** need02-P0：开关透传串（data-need02），缺省 undefined 时不渲染该属性，零视觉变更。 */
+  need02Attr?: string;
+  /** need02-P1：pending 判定/状态（可选，缺省时 TimelineRow 回落到 id 前缀）。 */
+  isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
+  pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
+  /** need02-P3：轮末交接窗（model.liveCompleting；仅末轮行透给 UserTurnBlock，见 is-last 门控）。 */
+  liveCompleting?: boolean;
+  /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省开（老调用方行为不变）。 */
+  handoffAnim?: boolean;
+  /** need02-P4（P4b#6）：轮内 notice（p4&&p2；true 时全局 alert 隐藏，notice 收进末轮底部）。 */
+  noticeInTurn?: boolean;
+  /** P02-P0b：轴尾 Live 容器去留；默认开=收敛进轮内，轴尾隐藏（off 回旧链双容器）。 */
+  liveCoalesce?: boolean;
+  /** P02-P1：单容器三段模板开关；默认开（off 回旧链）。 */
+  singleProcess?: boolean;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
@@ -246,11 +310,11 @@ const emit = defineEmits<{
   'menu-branch': [];
   'menu-delete': [];
   'jump-latest': [];
+  'retry-pending': [item: TimelineEntry];
 }>();
 const scroll = useTemplateRef<HTMLElement>('scroll');
 onMounted(() => emit('ready', scroll.value));
 onUnmounted(() => emit('ready', null));
-
 const historyList = computed<TimelineEntry[]>(() => {
   if (props.historyItems) return props.historyItems;
   return props.items.slice(0, Math.max(0, props.items.length - TAIL_FALLBACK));
@@ -260,8 +324,32 @@ const tailList = computed<TimelineEntry[]>(() => {
   if (props.historyItems) return [];
   return props.items.slice(Math.max(0, props.items.length - TAIL_FALLBACK));
 });
+/**
+ * live 归属键：最后一个 user-turn 条目（全量 items，不看 tail 切片）。
+ * 旧做法用 TranscriptTail 的 isLast（= 尾部数组末项）判定，末项往往是 user 或 system；
+ * 新 user 刚发出、尚无 assistant 条目时末项是旧轮，live 段被挂到旧轮 → 折叠栏跑到用户消息上方。
+ * 这里以「当前会话最后一个用户轮」为唯一归属，只有它能拿到 liveSegs。
+ */
+const liveOwnerKey = computed<string>(() => {
+  const all = props.items || [];
+  for (let i = all.length - 1; i >= 0; i--) {
+    const e = all[i] as TimelineEntry & { turn?: { key?: string } };
+    if (e.kind === 'user-turn') return String(e.turn?.key || e.key || '');
+  }
+  return '';
+});
+type LiveSeg = { kind: string; key: string; text: string; card: unknown };
+function liveSegsFor(entry: TimelineEntry): LiveSeg[] {
+  const e = entry as TimelineEntry & { turn?: { key?: string } };
+  if (e.kind !== 'user-turn') return [];
+  const key = String(e.turn?.key || e.key || '');
+  if (!key || key !== liveOwnerKey.value) return [];
+  return (props.liveSegs || []) as LiveSeg[];
+}
 // 显示条件 (showJump||readingWindow)&&!veilCovering
 const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
+/** P02-P0b：轴尾容器可见性——默认收敛进轮内（开=隐藏）；off 回旧链双容器。 */
+const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce === false);
 </script>
 <style scoped>
 /* M1-6 滚动锚定与滚动条槽位：配合 M2 的渐进跟随才真正生效——
@@ -360,5 +448,85 @@ const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow
   border: none;
   cursor: pointer;
   z-index: 6;
+  z-index: 6;
+}
+/* P03 veil-motion：变量声明在 scroll 层（veil 子树外可读，MessageTimeline 从 sampleEl 读取） */
+.transcript-scroll {
+  --veil-enter-ms: 120ms;
+  --veil-leave-ms: 180ms;
+  --veil-ease-enter: ease-out;
+  --veil-ease-leave: ease-in;
+}
+/* P03：veil 类名淡出（背景色由文件尾全局 style 块按 html.dark/light 直连，scoped 内禁写主题选择器） */
+.transcript-veil {
+  transition: opacity var(--veil-enter-ms) var(--veil-ease-enter);
+  opacity: 1;
+  pointer-events: none;
+}
+.transcript-veil.is-pre-enter {
+  opacity: 0;
+}
+.transcript-veil.is-leaving {
+  opacity: 0;
+  transition: opacity var(--veil-leave-ms) var(--veil-ease-leave);
+}
+/* P03：内容微淡入（仅 veil-motion-on 门控内生效，关开关零副作用） */
+.veil-motion-on .chat-timeline-centered,
+.veil-motion-on .chat-timeline-full {
+  transition: opacity 120ms ease-out;
+}
+.transcript-scroll[data-transcript-settling] .chat-timeline-centered,
+.transcript-scroll[data-transcript-settling] .chat-timeline-full {
+  opacity: 0.97;
+}
+.transcript-scroll:not([data-transcript-settling]) .chat-timeline-centered,
+.transcript-scroll:not([data-transcript-settling]) .chat-timeline-full {
+  opacity: 1;
+}
+/* P03：pill 淡入（与 veil 类名体系不同名，避免串扰） */
+.show-jump-pill {
+  transition: opacity 120ms ease-out;
+}
+.show-jump-enter-active {
+  transition: opacity 120ms ease-out;
+}
+.show-jump-enter-from {
+  opacity: 0;
+}
+/* P03：reduced-motion 下零动画（含存量缺失的 veil-shimmer，本期补） */
+@media (prefers-reduced-motion: reduce) {
+  .transcript-veil,
+  .transcript-veil.is-leaving,
+  .transcript-skeleton {
+    transition: none;
+    animation: none;
+  }
+  .veil-motion-on .chat-timeline-centered,
+  .veil-motion-on .chat-timeline-full {
+    transition: none;
+  }
+  .show-jump-pill,
+  .show-jump-enter-active {
+    transition: none;
+  }
+}
+</style>
+<style>
+/* P03 主题接线（全局块，不经 scoped 编译）。
+ * 原因：scoped 内 global 函数式写法（html.dark + 后代 veil/skeleton）会被编译器丢弃后代选择器、
+ * 输出为光秃 html.dark（实测输出为证），导致暗黑兜底挂错元素、veil 回退亮色。 */
+html.dark .transcript-veil {
+  background: var(--n-body-color, #0d1117);
+}
+html.light .transcript-veil {
+  background: var(--n-body-color, #f8fafc);
+}
+html.light .transcript-skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+}
+html.dark .transcript-skeleton {
+  background: linear-gradient(90deg, #1b2430 25%, #2a3646 50%, #1b2430 75%);
+  background-size: 200% 100%;
 }
 </style>

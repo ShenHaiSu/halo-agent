@@ -68,6 +68,7 @@ import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import { buildTimelineItems } from '@features/agent/composables/useTimelineGroups';
 import { buildHistoryToc, type TocItem } from '@features/session/utils/historyToc';
+import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import HistoryBubble from './HistoryBubble.vue';
 
 const PAGE = 200;
@@ -112,6 +113,12 @@ const entries = computed<TimelineEntry[]>(() => {
     return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
   }
   // need21-F05：主会话归并只在 useAgentTelemetry 算一次，与 Timeline 共享同一结果（不再各自 buildTurnGroups/去重）
+  try {
+    const flags = readNeed02Flags();
+    if (flags.p2) return (agentTelemetry as unknown as { activeUserTurnEntries: TimelineEntry[] }).activeUserTurnEntries;
+  } catch {
+    /* fallthrough legacy */
+  }
   return agentTelemetry.activeTimelineEntries;
 });
 
