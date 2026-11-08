@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\HaloAgent.Engine.Abstractions\HaloAgent.Engine.Abstractions.csproj" />
+  </ItemGroup>
+</Project>
