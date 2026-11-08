@@ -268,9 +268,10 @@ export function useTimeline() {
     }
     return 1;
   }
-  function ensureMountWindow(): void {
+  function resetMountWindow(): void {
     // need02-P4（p4-window）：首屏按权重预算挂载（TURN_WINDOW_WEIGHT≈15 平均轮），超高轮仍整轮挂载；
     // off 时回条数旧链（INITIAL_MOUNT/WINDOW_MIN）。
+    // 切会话只调此处：只算 hiddenAbove，不碰 scrollTop（停顶部由调用方显式 scrollTop = 0）。
     if (isP4SubOn('window', null, need02Flags)) {
       hiddenAbove.value = hiddenAboveByWeight(
         timelineItems.value.map((e) => ({
@@ -282,6 +283,9 @@ export function useTimeline() {
     } else {
       hiddenAbove.value = Math.max(0, timelineItems.value.length - INITIAL_MOUNT);
     }
+  }
+  function ensureMountWindow(): void {
+    resetMountWindow();
     requestAnimationFrame(() => {
       if (!follow.pinnedRef.value || !paneVisible.value) return;
       hiddenAbove.value = Math.max(0, timelineItems.value.length - WINDOW_MIN);
@@ -339,6 +343,7 @@ export function useTimeline() {
     // 注意：这里**绝不**调 pin.scheduleToBottom()。用户会滚到近顶说明他在往上读历史，
     // 此时把他拽回底部既违背意图、又会让扩窗白做（刚加载的更早内容立刻滚出视口）。
     // 「仍贴底时扩窗后回到底部」是 ensureMountWindow 的职责，与顶部扩窗互斥。
+    // 切会话路径只调 resetMountWindow（纯算窗口、不拽底），与此处互斥关系不变。
     void nextTick(() => {
       anchorPrepend(scrollEl.value, before);
     });
@@ -799,27 +804,32 @@ export function useTimeline() {
     }
     scrollEl.value = null;
   }
+  // 切会话守卫：切换后 timelineItems 0→N 的一次性暴涨不触发自动跟随，消费一次即清。
+  let sessionSwitchGuard = false;
   watch(
     () => workspaceStore.activeSessionId,
     () => {
       menu.closeMenu();
       clearReadingWindow();
-      if (!paneVisible.value) return;
-      follow.onSendRisingEdge(() => pin.forceToBottom());
-      ensureMountWindow();
+      // 切会话不再自动滑到底：停顶部 + 亮小药丸，用户手动点 pill 回到底部。
+      sessionSwitchGuard = true;
+      follow.releaseFollow();
+      resetMountWindow();
+      if (scrollEl.value) scrollEl.value.scrollTop = 0;
     }
   );
   watch(
     () => timelineItems.value.length,
     () => {
+      if (sessionSwitchGuard) {
+        // 切会话后的异步加载（0→N 暴涨）：按新数据重算窗口并保持顶部，不跟随到底。
+        sessionSwitchGuard = false;
+        resetMountWindow();
+        if (scrollEl.value) scrollEl.value.scrollTop = 0;
+        return;
+      }
       if (!paneVisible.value || !follow.pinnedRef.value) return;
       void nextTick(() => pin.scheduleToBottom());
-    }
-  );
-  watch(
-    () => workspaceStore.loadingMessages,
-    (loading) => {
-      if (!loading && paneVisible.value && follow.pinnedRef.value) pin.forceToBottom();
     }
   );
   // need23-R3 / M2-3：活动容器内文本增长不改变 timelineItems.length，但会撑高内容。
@@ -891,6 +901,7 @@ export function useTimeline() {
     tailEntries,
     visibleHistoryEntries,
     hiddenAbove,
+    resetMountWindow,
     ensureMountWindow,
     growWindowTop,
     handleTopReach,

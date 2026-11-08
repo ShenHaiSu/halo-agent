@@ -1,189 +1,186 @@
 <template>
-  <div
-    ref="scroll"
-    class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative transcript-scroll"
-    data-testid="message-timeline"
-    :data-need02="need02Attr"
-  >
-    <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
-      <div v-if="isEmpty" class="py-10 text-center space-y-2">
-        <div class="flex justify-center">
-          <Bot class="w-8 h-8 text-accent" />
+  <div class="flex-1 min-h-0 min-w-0 max-w-full relative flex flex-col" data-testid="message-timeline" :data-need02="need02Attr">
+    <div ref="scroll" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden transcript-scroll">
+      <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
+        <div v-if="isEmpty" class="py-10 text-center space-y-2">
+          <div class="flex justify-center">
+            <Bot class="w-8 h-8 text-accent" />
+          </div>
+          <p class="text-sm text-primary font-medium">在下方输入任务指令，Agent 将自动编排工具完成</p>
+          <p class="text-xs text-secondary font-mono">默认 Runner：CMD 优先 / PYTHON 次之 · 禁用 PowerShell 专属语法</p>
         </div>
-        <p class="text-sm text-primary font-medium">在下方输入任务指令，Agent 将自动编排工具完成</p>
-        <p class="text-xs text-secondary font-mono">默认 Runner：CMD 优先 / PYTHON 次之 · 禁用 PowerShell 专属语法</p>
-      </div>
-      <TranscriptHistory :entries="historyList">
-        <template #default="{ entry }">
-          <TimelineRow
-            :item="entry as TimelineEntry"
-            :is-expanded="isExpanded"
-            :is-run-expanded="isRunExpanded"
-            :anchor-ref="anchorRef"
-            :msg-images="msgImages"
-            :thumb-of="thumbOf"
-            :has-lost="hasLost"
-            :img-lost="imgLost"
-            :render-html="renderHtml"
-            :card-for="cardFor"
-            :tool-key="toolKey"
-            :has-failed="hasFailed"
-            :failed-count="failedCount"
-            :show-telemetry="showTelemetry"
-            :protocol-of="protocolOf"
-            :cache-line-of="cacheLineOf"
-            :reading-window="!!readingWindow"
-            :is-pending="isPending"
-            :pending-status="pendingStatus"
-            :live-segs="[]"
-            :streaming-text="''"
-            :is-generating="isGenerating"
-            :stream-md-kill-switch="!!streamMdKillSwitch"
-            :render-stream="renderStream"
-            :is-last="false"
-            :live-completing="false"
-            :handoff-anim="handoffAnim !== false"
-            :single-process="singleProcess !== false"
-            @toggle="emit('toggle', $event)"
-            @user-menu="(e, item) => emit('user-menu', e, item)"
-            @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
-            @link-click="emit('link-click', $event)"
-            @retry-pending="(item) => emit('retry-pending', item)"
-            @retry="emit('retry')"
-            @dismiss="emit('dismiss')"
-          />
-        </template>
-      </TranscriptHistory>
-      <TranscriptTail :entries="tailList">
-        <template #default="{ entry, isLast }">
-          <TimelineRow
-            :item="entry as TimelineEntry"
-            :is-expanded="isExpanded"
-            :is-run-expanded="isRunExpanded"
-            :anchor-ref="anchorRef"
-            :msg-images="msgImages"
-            :thumb-of="thumbOf"
-            :has-lost="hasLost"
-            :img-lost="imgLost"
-            :render-html="renderHtml"
-            :card-for="cardFor"
-            :tool-key="toolKey"
-            :has-failed="hasFailed"
-            :failed-count="failedCount"
-            :show-telemetry="showTelemetry"
-            :protocol-of="protocolOf"
-            :cache-line-of="cacheLineOf"
-            :reading-window="!!readingWindow"
-            :is-pending="isPending"
-            :pending-status="pendingStatus"
-            :live-segs="liveSegsFor(entry as TimelineEntry)"
-            :streaming-text="''"
-            :is-generating="isGenerating"
-            :stream-md-kill-switch="!!streamMdKillSwitch"
-            :render-stream="renderStream"
-            :is-last="!!isLast"
-            :live-completing="!!liveCompleting"
-            :handoff-anim="handoffAnim !== false"
-            :single-process="singleProcess !== false"
-            :notice-in-turn="!!noticeInTurn"
-            :turn-notice="turnNotice"
-            :last-error="lastError"
-            :show-retry="showRetry"
-            @toggle="emit('toggle', $event)"
-            @user-menu="(e, item) => emit('user-menu', e, item)"
-            @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
-            @link-click="emit('link-click', $event)"
-            @retry-pending="(item) => emit('retry-pending', item)"
-            @retry="emit('retry')"
-            @dismiss="emit('dismiss')"
-          />
-        </template>
-        <template #live>
-          <!-- M3-1：活动容器整块进出过渡。只做 opacity + 极小位移，**不碰 height/max-height**
+        <TranscriptHistory :entries="historyList">
+          <template #default="{ entry }">
+            <TimelineRow
+              :item="entry as TimelineEntry"
+              :is-expanded="isExpanded"
+              :is-run-expanded="isRunExpanded"
+              :anchor-ref="anchorRef"
+              :msg-images="msgImages"
+              :thumb-of="thumbOf"
+              :has-lost="hasLost"
+              :img-lost="imgLost"
+              :render-html="renderHtml"
+              :card-for="cardFor"
+              :tool-key="toolKey"
+              :has-failed="hasFailed"
+              :failed-count="failedCount"
+              :show-telemetry="showTelemetry"
+              :protocol-of="protocolOf"
+              :cache-line-of="cacheLineOf"
+              :reading-window="!!readingWindow"
+              :is-pending="isPending"
+              :pending-status="pendingStatus"
+              :live-segs="[]"
+              :streaming-text="''"
+              :is-generating="isGenerating"
+              :stream-md-kill-switch="!!streamMdKillSwitch"
+              :render-stream="renderStream"
+              :is-last="false"
+              :live-completing="false"
+              :handoff-anim="handoffAnim !== false"
+              :single-process="singleProcess !== false"
+              @toggle="emit('toggle', $event)"
+              @user-menu="(e, item) => emit('user-menu', e, item)"
+              @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
+              @link-click="emit('link-click', $event)"
+              @retry-pending="(item) => emit('retry-pending', item)"
+              @retry="emit('retry')"
+              @dismiss="emit('dismiss')"
+            />
+          </template>
+        </TranscriptHistory>
+        <TranscriptTail :entries="tailList">
+          <template #default="{ entry, isLast }">
+            <TimelineRow
+              :item="entry as TimelineEntry"
+              :is-expanded="isExpanded"
+              :is-run-expanded="isRunExpanded"
+              :anchor-ref="anchorRef"
+              :msg-images="msgImages"
+              :thumb-of="thumbOf"
+              :has-lost="hasLost"
+              :img-lost="imgLost"
+              :render-html="renderHtml"
+              :card-for="cardFor"
+              :tool-key="toolKey"
+              :has-failed="hasFailed"
+              :failed-count="failedCount"
+              :show-telemetry="showTelemetry"
+              :protocol-of="protocolOf"
+              :cache-line-of="cacheLineOf"
+              :reading-window="!!readingWindow"
+              :is-pending="isPending"
+              :pending-status="pendingStatus"
+              :live-segs="liveSegsFor(entry as TimelineEntry)"
+              :streaming-text="''"
+              :is-generating="isGenerating"
+              :stream-md-kill-switch="!!streamMdKillSwitch"
+              :render-stream="renderStream"
+              :is-last="!!isLast"
+              :live-completing="!!liveCompleting"
+              :handoff-anim="handoffAnim !== false"
+              :single-process="singleProcess !== false"
+              :notice-in-turn="!!noticeInTurn"
+              :turn-notice="turnNotice"
+              :last-error="lastError"
+              :show-retry="showRetry"
+              @toggle="emit('toggle', $event)"
+              @user-menu="(e, item) => emit('user-menu', e, item)"
+              @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
+              @link-click="emit('link-click', $event)"
+              @retry-pending="(item) => emit('retry-pending', item)"
+              @retry="emit('retry')"
+              @dismiss="emit('dismiss')"
+            />
+          </template>
+          <template #live>
+            <!-- M3-1：活动容器整块进出过渡。只做 opacity + 极小位移，**不碰 height/max-height**
                （聊天流只增不减，高度动画会与 overflow-anchor / 平滑跟随互相拉扯）。 -->
-          <Transition name="live-turn">
-            <div
-              v-if="showAxisTail"
-              data-testid="active-turn-container"
-              class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0"
-            >
-              <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
-                <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                <span>{{ thinkingLine }}</span>
-                <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
-              </div>
-              <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
+            <Transition name="live-turn">
+              <div
+                v-if="showAxisTail"
+                data-testid="active-turn-container"
+                class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0"
+              >
+                <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
+                  <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>{{ thinkingLine }}</span>
+                  <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
+                </div>
+                <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
                    注意 CLAUDE 红线：`.seg-leave-active` 必须 position:absolute 脱流，否则「下移再上移」。 -->
-              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="turn-body seg-list">
-                <StreamSegItem
-                  v-for="(seg, i) in segs"
-                  :key="seg.key"
-                  :seg="seg"
-                  :stream-md-kill-switch="!!streamMdKillSwitch"
-                  :render-stream="renderStream"
-                  :is-tail="i === segs.length - 1"
-                  :is-generating="isGenerating"
-                  @link-click="emit('link-click', $event)"
-                />
-              </TransitionGroup>
-              <template v-else-if="segKillSwitch">
-                <!-- M3-3：逃生分支（segKillSwitch）里的工具卡同样逐个淡入 -->
-                <TransitionGroup
-                  v-if="fallbackCards.length"
-                  name="seg"
-                  tag="div"
-                  class="turn-body seg-list"
-                  data-testid="active-turn-tools"
-                >
-                  <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
+                <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="turn-body seg-list">
+                  <StreamSegItem
+                    v-for="(seg, i) in segs"
+                    :key="seg.key"
+                    :seg="seg"
+                    :stream-md-kill-switch="!!streamMdKillSwitch"
+                    :render-stream="renderStream"
+                    :is-tail="i === segs.length - 1"
+                    :is-generating="isGenerating"
+                    @link-click="emit('link-click', $event)"
+                  />
                 </TransitionGroup>
-                <div
-                  v-if="streamingText"
-                  class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-                  style="white-space: pre-wrap"
-                  @click="emit('link-click', $event)"
-                  v-html="renderStream(streamingText)"
-                />
-              </template>
-              <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
-                <Loader2 class="w-3.5 h-3.5 animate-spin" />
-                <span>Agent 推理中...</span>
+                <template v-else-if="segKillSwitch">
+                  <!-- M3-3：逃生分支（segKillSwitch）里的工具卡同样逐个淡入 -->
+                  <TransitionGroup
+                    v-if="fallbackCards.length"
+                    name="seg"
+                    tag="div"
+                    class="turn-body seg-list"
+                    data-testid="active-turn-tools"
+                  >
+                    <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
+                  </TransitionGroup>
+                  <div
+                    v-if="streamingText"
+                    class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
+                    style="white-space: pre-wrap"
+                    @click="emit('link-click', $event)"
+                    v-html="renderStream(streamingText)"
+                  />
+                </template>
+                <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
+                  <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                  <span>Agent 推理中...</span>
+                </div>
               </div>
-            </div>
-          </Transition>
-        </template>
-      </TranscriptTail>
-      <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
-        {{ turnNotice }}
-      </n-alert>
-      <n-alert v-if="lastError && !noticeInTurn" type="error" class="text-xs" data-testid="turn-error-alert">
-        {{ lastError }}
-      </n-alert>
-      <div v-if="showRetry && !noticeInTurn" class="flex items-center gap-2">
-        <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')"> 重试本轮 </n-button>
-        <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')"> 忽略 </n-button>
+            </Transition>
+          </template>
+        </TranscriptTail>
+        <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
+          {{ turnNotice }}
+        </n-alert>
+        <n-alert v-if="lastError && !noticeInTurn" type="error" class="text-xs" data-testid="turn-error-alert">
+          {{ lastError }}
+        </n-alert>
+        <div v-if="showRetry && !noticeInTurn" class="flex items-center gap-2">
+          <n-button size="small" type="error" ghost data-testid="turn-retry-btn" @click="emit('retry')"> 重试本轮 </n-button>
+          <n-button size="small" quaternary data-testid="turn-error-dismiss" @click="emit('dismiss')"> 忽略 </n-button>
+        </div>
+        <div
+          v-if="liveTelemetry"
+          class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2"
+          title="IN为末轮快照，多轮工具调用轮内多次请求只记末次占用，累计见顶栏Σ"
+        >
+          <span>协议: {{ liveTelemetry.protocol }}</span>
+          <span v-if="liveTelemetry.ttft !== null">首字: {{ liveTelemetry.ttft }}ms</span>
+          <span>In: {{ liveTelemetry.input }} (Cache {{ liveTelemetry.cached }} · {{ liveTelemetry.cachePercent }})</span>
+          <span>Out: {{ liveTelemetry.output }}</span>
+        </div>
+        <MessageContextMenu
+          :visible="menuVisible"
+          :x="menuX"
+          :y="menuY"
+          :busy="menuBusy"
+          :can-copy="menuCanCopy"
+          @copy="emit('menu-copy')"
+          @replay="emit('menu-replay')"
+          @branch="emit('menu-branch')"
+          @delete="emit('menu-delete')"
+        />
       </div>
-      <div
-        v-if="liveTelemetry"
-        class="text-[11px] text-secondary font-mono flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-subtle pt-2"
-        title="IN为末轮快照，多轮工具调用轮内多次请求只记末次占用，累计见顶栏Σ"
-      >
-        <span>协议: {{ liveTelemetry.protocol }}</span>
-        <span v-if="liveTelemetry.ttft !== null">首字: {{ liveTelemetry.ttft }}ms</span>
-        <span>In: {{ liveTelemetry.input }} (Cache {{ liveTelemetry.cached }} · {{ liveTelemetry.cachePercent }})</span>
-        <span>Out: {{ liveTelemetry.output }}</span>
-      </div>
-      <MessageContextMenu
-        :visible="menuVisible"
-        :x="menuX"
-        :y="menuY"
-        :busy="menuBusy"
-        :can-copy="menuCanCopy"
-        @copy="emit('menu-copy')"
-        @replay="emit('menu-replay')"
-        @branch="emit('menu-branch')"
-        @delete="emit('menu-delete')"
-      />
     </div>
     <Transition name="show-jump">
       <button
@@ -389,11 +386,11 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
   }
 }
 /* 硬切：会话切换无骨架遮罩 / 无内容微淡入，直接替换 timelineItems。 */
+/* 回到底部 pill：absolute 悬浮于滚动容器之外，不占 scrollHeight，避免出现又收回的抖动。 */
 .show-jump-pill {
-  position: sticky;
+  position: absolute;
   bottom: 12px;
-  float: right;
-  margin-right: 16px;
+  right: 16px;
   height: 32px;
   padding: 0 12px;
   border-radius: 9999px;
@@ -404,11 +401,9 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
   border: none;
   cursor: pointer;
   z-index: 6;
-}
-/* P03：pill 淡入（与会话切换无关，保留） */
-.show-jump-pill {
   transition: opacity 120ms ease-out;
 }
+/* P03：pill 淡入（与会话切换无关，保留） */
 .show-jump-enter-active {
   transition: opacity 120ms ease-out;
 }
