@@ -5,15 +5,17 @@ import { MAX_BATCH } from './types';
 /**
  * Production frame transport over the thin host boundary.
  * Delegates to the host-owned `invoke` / `getEventBatch` pair exposed on
- * the raw host object; this file is the only production place allowed to
- * touch that object, so business code stays host-free.
+ * the frame object (`hostFrame`, falling back to `hostBridge` when the
+ * shell still serves the legacy facade); this file is the only production
+ * place allowed to touch those objects, so business code stays host-free.
  */
 export class BridgeTransport implements FrameTransport {
   private requestId = 1;
 
   private rawHost(): Record<string, unknown> | null {
     try {
-      const host = (globalThis as unknown as { hostBridge?: unknown }).hostBridge;
+      const scope = globalThis as unknown as { hostFrame?: unknown; hostBridge?: unknown };
+      const host = scope.hostFrame ?? scope.hostBridge;
       if (!host || typeof host !== 'object') return null;
       return host as Record<string, unknown>;
     } catch {
