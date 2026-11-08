@@ -26,6 +26,21 @@ public sealed class FrameServer : IAsyncDisposable
     private readonly IEventJournal _events;
     private readonly IEngineLog _log;
     private readonly EngineContext _context;
+    private readonly SessionLedger _sessions = new();
+    private readonly TurnCoordinator _turns;
+    private readonly UsageLedger _usage = new();
+    private readonly AttachmentIndex _attachments = new();
+    private static readonly HashSet<string> ReadOnlyMethods =
+        new(StringComparer.Ordinal)
+        {
+            "system.ping",
+            "system.info",
+            "session.list",
+            "session.get",
+            "session.history",
+            "state.snapshot",
+            "usage.query",
+        };
     private CancellationTokenSource? _loopScope;
     private Task? _loopTask;
 
@@ -34,6 +49,7 @@ public sealed class FrameServer : IAsyncDisposable
         _events = events ?? new MemoryEventJournal();
         _log = log ?? NullEngineLog.Instance;
         _context = new EngineContext(_state, _events, _log);
+        _turns = new TurnCoordinator(_state);
         _queue = Channel.CreateBounded<QueueItem>(
             new BoundedChannelOptions(QueueBound)
             {
@@ -43,10 +59,23 @@ public sealed class FrameServer : IAsyncDisposable
             }
         );
         SkeletonRoutes.RegisterInto(_routes);
+        EngineRoutes.RegisterInto(
+            _routes,
+            _state,
+            _sessions,
+            _turns,
+            _usage,
+            _attachments,
+            _events
+        );
     }
 
     public EngineState State => _state;
     public IEventJournal Events => _events;
+    public SessionLedger Sessions => _sessions;
+    public TurnCoordinator Turns => _turns;
+    public UsageLedger Usage => _usage;
+    public AttachmentIndex Attachments => _attachments;
 
     public void Register(string method, FrameHandler handler)
     {
@@ -125,8 +154,24 @@ public sealed class FrameServer : IAsyncDisposable
             );
         }
 
-        bool signaled = _context.TryCancelTurn(turnId);
-        _events.Append("turn.cancelled", new { turnId, signaled });
+        bool signaled = _turns.MarkCancelled(turnId);
+        string? sessionId = _turns.TrySessionOf(turnId, out string? found) ? found : null;
+        if (
+            !_turns.TrySessionOf(turnId, out _)
+            && _state.TryTakeTurnSession(turnId, out string? legacySession)
+        )
+        {
+            sessionId = legacySession;
+        }
+        _events.Append(
+            "turn.cancelled",
+            new
+            {
+                turnId,
+                sessionId,
+                signaled
+            }
+        );
         var response = signaled
             ? ResponseFrame.Success(request.Id, new { turnId, signaled })
             : ResponseFrame.Fail(
@@ -154,6 +199,10 @@ public sealed class FrameServer : IAsyncDisposable
                         "NOT_FOUND",
                         $"Unknown method '{item.Request.Method}'."
                     );
+                }
+                else if (ReadOnlyMethods.Contains(item.Request.Method))
+                {
+                    response = await handler(item.Request, _context, token).ConfigureAwait(false);
                 }
                 else
                 {
