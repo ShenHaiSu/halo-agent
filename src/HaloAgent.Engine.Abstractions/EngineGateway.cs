@@ -100,9 +100,12 @@ public sealed class EngineTurnOptions
 
     /// <summary>History rows offered to the gateway per round.</summary>
     public int HistoryWindow { get; set; } = 50;
+
+    /// <summary>Seconds a write confirmation or ask_user gate waits before timing out.</summary>
+    public int ConfirmTimeoutSec { get; set; } = 300;
 }
 
-/// <summary>Tool outcome produced by the tool station (filled in by the later tool work).</summary>
+/// <summary>Tool outcome produced by the tool station with full card fields.</summary>
 public sealed record EngineToolResult(
     string ToolCallId,
     string ToolName,
@@ -110,7 +113,16 @@ public sealed record EngineToolResult(
     string Output,
     string? ErrorCode = null,
     long DurationMs = 0,
-    int? TimeoutMs = null
+    int? TimeoutMs = null,
+    int? ExitCode = null,
+    long? FileBytes = null,
+    string? ErrorPayloadJson = null,
+    string? SpilledFile = null,
+    IReadOnlyList<EngineImageReference>? Images = null,
+    IReadOnlyList<string>? ValidatedWarnings = null,
+    bool Truncated = false,
+    int? TruncatedChars = null,
+    string? PersistedText = null
 );
 
 /// <summary>

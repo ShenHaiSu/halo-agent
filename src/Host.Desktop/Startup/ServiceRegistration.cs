@@ -122,17 +122,49 @@ public static class ServiceRegistration
     {
         // Startup backfill: reload persisted ledgers into the engine before the
         // first frame arrives. Corrupt lines are skipped inside the loader, and
-        // a backfill failure must never block the shell.
+        // a backfill failure must never block the shell. The true tool station
+        // is mounted here; clearing the runner falls back to the deferred
+        // placeholder without touching the loop.
         p.AddSingleton(sp =>
         {
             var server = new HaloAgent.Engine.FrameServer();
+            StoragePathManager storage = sp.GetRequiredService<StoragePathManager>();
+            string root;
             try
             {
-                string root = sp.GetRequiredService<StoragePathManager>().CurrentDataRoot;
+                root = storage.CurrentDataRoot;
                 server.LoadSessions(root);
             }
             catch
             { /* backfill is best effort; startup continues without history */
+                root = storage.CurrentDataRoot;
+            }
+            server.ConfigureDataRoot(root);
+            try
+            {
+                var backend = new HostToolBackend(
+                    sp.GetRequiredService<ToolRegistry>(),
+                    sp.GetRequiredService<IWorkspaceSessionService>(),
+                    storage,
+                    sp.GetRequiredService<AgentConfigService>()
+                );
+                server.ConfigureToolRunner(
+                    new HaloAgent.Engine.EngineToolExecutor(
+                        backend,
+                        new HaloAgent.Engine.EngineToolExecutor.Options
+                        {
+                            DataRoot = root,
+                            WorkspaceResolver = sessionId =>
+                                ResolveEngineWorkspace(server, sessionId),
+                            AgentRoleResolver = sessionId => ResolveEngineRole(server, sessionId),
+                            ParentSessionResolver = sessionId =>
+                                ResolveEngineParent(server, sessionId),
+                        }
+                    )
+                );
+            }
+            catch
+            { /* tool station stays optional; the loop keeps its deferred placeholder */
             }
             return server;
         });
@@ -142,6 +174,61 @@ public static class ServiceRegistration
             sp.GetRequiredService<HaloAgent.Engine.FrameServer>(),
             sp.GetRequiredService<EventRingBuffer>()
         ));
+    }
+
+    private static string ResolveEngineWorkspace(
+        HaloAgent.Engine.FrameServer server,
+        string sessionId
+    )
+    {
+        try
+        {
+            if (
+                server.Sessions.TryGetDescriptor(sessionId, out var descriptor)
+                && descriptor is not null
+            )
+            {
+                return string.IsNullOrWhiteSpace(descriptor.WorkspaceId)
+                    ? "default"
+                    : descriptor.WorkspaceId;
+            }
+        }
+        catch { }
+        return "default";
+    }
+
+    private static string ResolveEngineRole(HaloAgent.Engine.FrameServer server, string sessionId)
+    {
+        try
+        {
+            if (
+                server.Sessions.TryGetDescriptor(sessionId, out var descriptor)
+                && descriptor is not null
+            )
+            {
+                return string.IsNullOrWhiteSpace(descriptor.AgentRole)
+                    ? "main"
+                    : descriptor.AgentRole;
+            }
+        }
+        catch { }
+        return "main";
+    }
+
+    private static string? ResolveEngineParent(
+        HaloAgent.Engine.FrameServer server,
+        string sessionId
+    )
+    {
+        try
+        {
+            if (server.Sessions.TryGetDescriptor(sessionId, out var descriptor))
+            {
+                return descriptor?.ParentSessionId;
+            }
+        }
+        catch { }
+        return null;
     }
 
     public static void AddBridge(HaloServiceProvider p, Form? mainForm, bool gpuDisabled)

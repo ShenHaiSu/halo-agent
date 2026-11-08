@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HaloAgent.Engine.Abstractions;
 
 namespace HaloAgent.Engine;
@@ -362,8 +363,17 @@ public sealed class TurnRunner
                     roundResult.ToolCalls,
                     roundResult.Usage
                 );
-                await DispatchToolsAsync(sessionId, turnId, roundResult.ToolCalls, turnToken)
+                bool keepGoing = await DispatchToolsAsync(
+                        sessionId,
+                        turnId,
+                        roundResult.ToolCalls,
+                        turnToken
+                    )
                     .ConfigureAwait(false);
+                if (!keepGoing)
+                {
+                    return;
+                }
             }
 
             _context.Events.Append(
@@ -645,7 +655,7 @@ public sealed class TurnRunner
         return await moveTask.ConfigureAwait(false);
     }
 
-    private async Task DispatchToolsAsync(
+    private async Task<bool> DispatchToolsAsync(
         string sessionId,
         string turnId,
         IReadOnlyList<EngineToolCall> calls,
@@ -693,52 +703,809 @@ public sealed class TurnRunner
                 );
                 await Task.CompletedTask.ConfigureAwait(false);
             }
-            return;
+            return true;
         }
 
-        IReadOnlyList<EngineToolResult> outcomes;
-        try
-        {
-            outcomes = await runner
-                .ExecuteAsync(sessionId, turnId, calls, turnToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            FailTurn(sessionId, turnId, "INTERNAL", TrimHint(ex.Message));
-            throw new OperationCanceledException();
-        }
+        string workspaceId = ResolveWorkspace(sessionId);
+        string agentRole = ResolveAgentRole(sessionId);
 
-        foreach (EngineToolResult outcome in outcomes)
+        foreach (EngineToolCall rawCall in calls)
         {
             turnToken.ThrowIfCancellationRequested();
+            string callId = string.IsNullOrWhiteSpace(rawCall.Id)
+                ? Guid.NewGuid().ToString("N")
+                : rawCall.Id.Trim();
+            string toolName = (rawCall.Name ?? string.Empty).Trim();
+            string argsJson = string.IsNullOrWhiteSpace(rawCall.ArgumentsJson)
+                ? "{}"
+                : rawCall.ArgumentsJson;
+            var call = new EngineToolCall(callId, toolName, argsJson);
+            string argsPreview = EngineToolPolicy.BuildArgsPreview(argsJson);
+            string policy = EngineToolPolicy.PolicyOf(toolName);
+
             _context.Events.Append(
-                "tool.end",
+                "tool.start",
+                new
+                {
+                    turnId,
+                    toolCallId = callId,
+                    toolName,
+                    argsPreview,
+                    policy,
+                }
+            );
+
+            if (string.Equals(toolName, "ask_user", StringComparison.OrdinalIgnoreCase))
+            {
+                EngineToolResult asked = await RunAskUserAsync(
+                        sessionId,
+                        turnId,
+                        call,
+                        agentRole,
+                        workspaceId,
+                        argsPreview,
+                        turnToken
+                    )
+                    .ConfigureAwait(false);
+                EmitToolEnd(turnId, asked);
+                AppendToolHistory(sessionId, turnId, call, asked);
+                continue;
+            }
+
+            if (EngineToolPolicy.NeedsConfirmation(toolName))
+            {
+                bool? approved = await RequestWriteApprovalAsync(
+                        sessionId,
+                        turnId,
+                        call,
+                        workspaceId,
+                        argsPreview,
+                        turnToken
+                    )
+                    .ConfigureAwait(false);
+                if (approved is null)
+                {
+                    _context.Events.Append(
+                        "turn.cancelled",
+                        new
+                        {
+                            turnId,
+                            sessionId,
+                            reason = "timeout"
+                        }
+                    );
+                    _turns.Finish(turnId, TurnOutcome.Cancelled);
+                    return false;
+                }
+                if (!approved.Value)
+                {
+                    turnToken.ThrowIfCancellationRequested();
+                    var denied = new EngineToolResult(
+                        callId,
+                        toolName,
+                        false,
+                        $"Tool '{toolName}' was rejected by the user.",
+                        "TOOL_DENIED",
+                        0,
+                        null,
+                        -1,
+                        null,
+                        EngineToolPolicy.BuildErrorPayload("TOOL_DENIED", "rejected"),
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        $"Tool '{toolName}' was rejected by the user."
+                    );
+                    EmitToolEnd(turnId, denied);
+                    AppendToolHistory(sessionId, turnId, call, denied);
+                    _context.Events.Append(
+                        "turn.cancelled",
+                        new
+                        {
+                            turnId,
+                            sessionId,
+                            reason = "rejected"
+                        }
+                    );
+                    _turns.Finish(turnId, TurnOutcome.Cancelled);
+                    return false;
+                }
+            }
+
+            EngineToolResult outcome;
+            try
+            {
+                IReadOnlyList<EngineToolResult> single = await runner
+                    .ExecuteAsync(sessionId, turnId, new[] { call }, turnToken)
+                    .ConfigureAwait(false);
+                outcome =
+                    single.FirstOrDefault()
+                    ?? FailOutcome(
+                        callId,
+                        toolName,
+                        "INTERNAL",
+                        "Tool station returned no result."
+                    );
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                FailTurn(sessionId, turnId, "INTERNAL", TrimHint(ex.Message));
+                throw new OperationCanceledException();
+            }
+
+            EmitProgressDelta(turnId, outcome);
+            EmitToolEnd(turnId, outcome);
+            AppendToolHistory(sessionId, turnId, call, outcome);
+        }
+
+        return true;
+    }
+
+    private async Task<bool?> RequestWriteApprovalAsync(
+        string sessionId,
+        string turnId,
+        EngineToolCall call,
+        string workspaceId,
+        string argsPreview,
+        CancellationToken turnToken
+    )
+    {
+        int waitSec = _context.TurnOptions?.ConfirmTimeoutSec ?? 300;
+        waitSec = Math.Clamp(waitSec, 1, 3600);
+        _context.Events.Append(
+            "tool.confirm",
+            new
+            {
+                turnId,
+                toolCallId = call.Id,
+                toolName = call.Name,
+                argsPreview,
+                policy = "confirm",
+                timeoutSec = waitSec,
+                sessionId,
+            }
+        );
+        _turns.RaiseConfirmation(turnId, call.Id, call.Name, ToArgsElement(call.ArgumentsJson));
+        ConfirmationAnswer? answer = await _turns
+            .WaitForAnswerAsync(turnId, call.Id, TimeSpan.FromSeconds(waitSec), turnToken)
+            .ConfigureAwait(false);
+        if (answer is null)
+        {
+            return null;
+        }
+        if (!answer.Approved)
+        {
+            turnToken.ThrowIfCancellationRequested();
+            return false;
+        }
+        return true;
+    }
+
+    private async Task<EngineToolResult> RunAskUserAsync(
+        string sessionId,
+        string turnId,
+        EngineToolCall call,
+        string agentRole,
+        string workspaceId,
+        string argsPreview,
+        CancellationToken turnToken
+    )
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        EngineToolResult Fail(string code, string message)
+        {
+            sw.Stop();
+            string display = EngineToolPolicy.BuildDisplay(message, null, out bool t, out int n);
+            return new EngineToolResult(
+                call.Id,
+                call.Name,
+                false,
+                display,
+                code,
+                sw.ElapsedMilliseconds,
+                null,
+                -1,
+                null,
+                EngineToolPolicy.BuildErrorPayload(code, message),
+                null,
+                null,
+                null,
+                t,
+                t ? n : null,
+                EngineToolPolicy.BuildPersisted(message)
+            );
+        }
+
+        if (string.Equals(agentRole, "sub", StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(
+                "TOOL_DENIED",
+                "[SUBAGENT_ASK_DENIED] Nested questions are disabled; "
+                    + "continue with a conservative default and note the assumption for the main session."
+            );
+        }
+
+        var parsed = ParseAskUserArgs(call.ArgumentsJson);
+        if (parsed.ErrorCode is not null)
+        {
+            return Fail(parsed.ErrorCode, parsed.Error ?? "ask_user arguments are invalid.");
+        }
+
+        int waitSec = Math.Clamp(parsed.TimeoutSec, 1, 3600);
+        string ticketId = "ask_" + Guid.NewGuid().ToString("N").Substring(0, 16);
+        _context.Events.Append(
+            "tool.confirm",
+            new
+            {
+                turnId,
+                toolCallId = call.Id,
+                toolName = call.Name,
+                argsPreview,
+                policy = "confirm",
+                timeoutSec = waitSec,
+                questions = parsed.Questions.Select(q => new
+                {
+                    id = q.Id,
+                    question = q.Question,
+                    options = q.Options.Select(o => new
+                    {
+                        label = o.Label,
+                        description = o.Description
+                    }),
+                    multiSelect = q.MultiSelect,
+                    allowCustom = q.AllowCustom,
+                    @default = q.Default,
+                }),
+                questionYaml = parsed.QuestionYaml,
+                ticketId,
+                sessionId,
+            }
+        );
+        _turns.RaiseConfirmation(
+            turnId,
+            call.Id,
+            call.Name,
+            ToArgsElement(call.ArgumentsJson),
+            ticketId
+        );
+        ConfirmationAnswer? answer = await _turns
+            .WaitForAnswerAsync(turnId, call.Id, TimeSpan.FromSeconds(waitSec), turnToken)
+            .ConfigureAwait(false);
+        if (answer is null)
+        {
+            return Fail(
+                "TOOL_TIMEOUT",
+                $"Waiting for the user answer timed out ({waitSec}s, ticket {ticketId}); "
+                    + "continue with a conservative default and ask again with fewer questions if still blocked."
+            );
+        }
+        if (!answer.Approved || turnToken.IsCancellationRequested)
+        {
+            turnToken.ThrowIfCancellationRequested();
+            return Fail(
+                "TOOL_DENIED",
+                "The question was dismissed by the user; "
+                    + "continue with a conservative default instead of asking again."
+            );
+        }
+
+        string answersJson = string.IsNullOrWhiteSpace(answer.AnswersJson)
+            ? "{}"
+            : answer.AnswersJson;
+        string output = BuildAskOutput(parsed.Questions, answersJson, ticketId);
+        sw.Stop();
+        string display = EngineToolPolicy.BuildDisplay(
+            output,
+            null,
+            out bool truncated,
+            out int omitted
+        );
+        return new EngineToolResult(
+            call.Id,
+            call.Name,
+            true,
+            display,
+            null,
+            sw.ElapsedMilliseconds,
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            truncated,
+            truncated ? omitted : null,
+            EngineToolPolicy.BuildPersisted(output)
+        );
+    }
+
+    private void EmitProgressDelta(string turnId, EngineToolResult outcome)
+    {
+        int fullLength = outcome.TruncatedChars ?? outcome.Output.Length;
+        if (!outcome.Truncated && fullLength <= EngineToolPolicy.PersistLimit)
+        {
+            return;
+        }
+        try
+        {
+            _context.Events.Append(
+                "tool.delta",
                 new
                 {
                     turnId,
                     toolCallId = outcome.ToolCallId,
-                    ok = outcome.Success,
-                    success = outcome.Success,
-                    output = Truncate(outcome.Output),
-                    errorCode = outcome.ErrorCode,
+                    delta = $"[progress] {fullLength} chars received; card shows the preview"
+                        + (
+                            string.IsNullOrWhiteSpace(outcome.SpilledFile)
+                                ? "."
+                                : $" (full text: {outcome.SpilledFile})."
+                        ),
                 }
             );
-            _sessions.Append(
-                sessionId,
-                "tool",
-                outcome.Output,
+        }
+        catch { }
+    }
+
+    private void EmitToolEnd(string turnId, EngineToolResult outcome)
+    {
+        _context.Events.Append(
+            "tool.end",
+            new
+            {
                 turnId,
-                messageId: null,
-                toolCallId: outcome.ToolCallId,
-                name: outcome.ToolName,
-                errorCode: outcome.ErrorCode
+                toolCallId = outcome.ToolCallId,
+                ok = outcome.Success,
+                success = outcome.Success,
+                output = outcome.Output,
+                exitCode = outcome.ExitCode,
+                durationMs = outcome.DurationMs,
+                fileBytes = outcome.FileBytes,
+                errorCode = outcome.ErrorCode,
+                errorPayload = outcome.ErrorPayloadJson,
+                spilledFile = outcome.SpilledFile,
+                images = outcome.Images?.Select(i => new
+                {
+                    fileName = i.FileName,
+                    relPath = i.RelPath,
+                    mime = i.Mime,
+                    width = i.Width,
+                    height = i.Height,
+                    sizeBytes = i.SizeBytes,
+                    isMissing = i.IsMissing,
+                }),
+                validatedWarnings = outcome.ValidatedWarnings,
+                truncated = outcome.Truncated,
+                truncatedChars = outcome.TruncatedChars,
+            }
+        );
+    }
+
+    private void AppendToolHistory(
+        string sessionId,
+        string turnId,
+        EngineToolCall call,
+        EngineToolResult outcome
+    )
+    {
+        string persisted = outcome.PersistedText ?? outcome.Output;
+        IReadOnlyList<SessionImageReference>? images = outcome
+            .Images?.Select(i => new SessionImageReference(
+                string.IsNullOrWhiteSpace(i.FileName) ? i.RelPath : i.FileName,
+                string.IsNullOrWhiteSpace(i.FileName) ? i.RelPath : i.FileName,
+                i.Mime,
+                i.RelPath,
+                i.Width,
+                i.Height,
+                i.SizeBytes,
+                i.IsMissing
+            ))
+            .ToList();
+        string? warnings = outcome.ValidatedWarnings is { Count: > 0 }
+            ? string.Join("; ", outcome.ValidatedWarnings)
+            : null;
+        _sessions.Append(
+            sessionId,
+            "tool",
+            persisted,
+            turnId,
+            messageId: null,
+            toolCallId: outcome.ToolCallId,
+            name: outcome.ToolName,
+            images: images,
+            validatedWarnings: warnings,
+            errorCode: outcome.ErrorCode
+        );
+    }
+
+    private static EngineToolResult FailOutcome(
+        string callId,
+        string toolName,
+        string code,
+        string message
+    )
+    {
+        string display = EngineToolPolicy.BuildDisplay(message, null, out bool t, out int n);
+        return new EngineToolResult(
+            callId,
+            toolName,
+            false,
+            display,
+            code,
+            0,
+            null,
+            -1,
+            null,
+            EngineToolPolicy.BuildErrorPayload(code, message),
+            null,
+            null,
+            null,
+            t,
+            t ? n : null,
+            EngineToolPolicy.BuildPersisted(message)
+        );
+    }
+
+    private string ResolveWorkspace(string sessionId)
+    {
+        try
+        {
+            if (_sessions.TryGetDescriptor(sessionId, out var descriptor) && descriptor is not null)
+            {
+                return string.IsNullOrWhiteSpace(descriptor.WorkspaceId)
+                    ? "default"
+                    : descriptor.WorkspaceId;
+            }
+        }
+        catch { }
+        return "default";
+    }
+
+    private string ResolveAgentRole(string sessionId)
+    {
+        try
+        {
+            if (_sessions.TryGetDescriptor(sessionId, out var descriptor) && descriptor is not null)
+            {
+                return string.IsNullOrWhiteSpace(descriptor.AgentRole)
+                    ? "main"
+                    : descriptor.AgentRole;
+            }
+        }
+        catch { }
+        return "main";
+    }
+
+    private static JsonElement ToArgsElement(string? argumentsJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
+            );
+            return doc.RootElement.Clone();
+        }
+        catch
+        {
+            using JsonDocument empty = JsonDocument.Parse("{}");
+            return empty.RootElement.Clone();
+        }
+    }
+
+    public sealed record AskOption(string Label, string? Description);
+
+    public sealed record AskQuestion(
+        string Id,
+        string Question,
+        List<AskOption> Options,
+        bool MultiSelect,
+        bool AllowCustom,
+        string? Default
+    );
+
+    public sealed record AskParseResult(
+        List<AskQuestion> Questions,
+        string? QuestionYaml,
+        int TimeoutSec,
+        string? ErrorCode,
+        string? Error
+    );
+
+    public static AskParseResult ParseAskUserArgs(string? argumentsJson)
+    {
+        const int defaultTimeout = 300;
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            return new AskParseResult(
+                new List<AskQuestion>(),
+                null,
+                defaultTimeout,
+                "MISSING_REQUIRED_PARAM",
+                "ask_user requires at least one question: pass question, questions or questionsYaml."
             );
         }
+
+        JsonElement root;
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(argumentsJson.Trim());
+            root = doc.RootElement.Clone();
+        }
+        catch
+        {
+            return new AskParseResult(
+                new List<AskQuestion>(),
+                null,
+                defaultTimeout,
+                "INVALID_JSON_ARGUMENTS",
+                "ask_user arguments must be a JSON object string."
+            );
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return new AskParseResult(
+                new List<AskQuestion>(),
+                null,
+                defaultTimeout,
+                "INVALID_JSON_ARGUMENTS",
+                "ask_user arguments must be a JSON object string."
+            );
+        }
+
+        int timeout = defaultTimeout;
+        if (
+            root.TryGetProperty("timeoutSec", out JsonElement timeoutNode)
+            && timeoutNode.ValueKind == JsonValueKind.Number
+            && timeoutNode.TryGetInt32(out int parsedTimeout)
+        )
+        {
+            timeout = Math.Clamp(parsedTimeout, 1, 3600);
+        }
+
+        if (
+            root.TryGetProperty("questionsYaml", out JsonElement yamlNode)
+            && yamlNode.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(yamlNode.GetString())
+        )
+        {
+            return new AskParseResult(
+                new List<AskQuestion>(),
+                yamlNode.GetString()!.Trim(),
+                timeout,
+                null,
+                null
+            );
+        }
+
+        if (root.TryGetProperty("questions", out JsonElement questionsNode))
+        {
+            if (questionsNode.ValueKind == JsonValueKind.String)
+            {
+                string raw = (questionsNode.GetString() ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return MissingQuestions(timeout);
+                }
+                if (raw.StartsWith("[") || raw.StartsWith("{"))
+                {
+                    try
+                    {
+                        using JsonDocument inner = JsonDocument.Parse(raw);
+                        JsonElement payload = inner.RootElement.Clone();
+                        if (payload.ValueKind == JsonValueKind.Array)
+                        {
+                            return BuildQuestions(payload, timeout);
+                        }
+                        return BuildQuestions(payload, timeout, single: true);
+                    }
+                    catch
+                    {
+                        return InvalidQuestions(timeout);
+                    }
+                }
+                return new AskParseResult(new List<AskQuestion>(), raw, timeout, null, null);
+            }
+            if (questionsNode.ValueKind == JsonValueKind.Array)
+            {
+                return BuildQuestions(questionsNode, timeout);
+            }
+            return InvalidQuestions(timeout);
+        }
+
+        if (root.TryGetProperty("question", out JsonElement singleNode))
+        {
+            if (singleNode.ValueKind == JsonValueKind.String)
+            {
+                string text = (singleNode.GetString() ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(text))
+                {
+                    return MissingQuestions(timeout);
+                }
+                return new AskParseResult(
+                    new List<AskQuestion>
+                    {
+                        new("q1", text, new List<AskOption>(), false, true, null),
+                    },
+                    null,
+                    timeout,
+                    null,
+                    null
+                );
+            }
+            if (singleNode.ValueKind == JsonValueKind.Object)
+            {
+                return BuildQuestions(singleNode, timeout, single: true);
+            }
+            return InvalidQuestions(timeout);
+        }
+
+        return MissingQuestions(timeout);
+    }
+
+    private static AskParseResult MissingQuestions(int timeout) =>
+        new(
+            new List<AskQuestion>(),
+            null,
+            timeout,
+            "MISSING_REQUIRED_PARAM",
+            "ask_user requires at least one question: pass question, questions or questionsYaml."
+        );
+
+    private static AskParseResult InvalidQuestions(int timeout) =>
+        new(
+            new List<AskQuestion>(),
+            null,
+            timeout,
+            "CONSTRAINT_VIOLATION",
+            "questions must be an array of 1-4 {id, question, options?} objects or a YAML string."
+        );
+
+    private static AskParseResult BuildQuestions(JsonElement node, int timeout, bool single = false)
+    {
+        var items = new List<JsonElement>();
+        if (single)
+        {
+            items.Add(node);
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            items.AddRange(node.EnumerateArray());
+        }
+        else
+        {
+            return InvalidQuestions(timeout);
+        }
+
+        if (items.Count == 0 || items.Count > 4)
+        {
+            return InvalidQuestions(timeout);
+        }
+
+        var questions = new List<AskQuestion>();
+        int index = 0;
+        foreach (JsonElement item in items)
+        {
+            index++;
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                return InvalidQuestions(timeout);
+            }
+            string id =
+                item.TryGetProperty("id", out JsonElement idNode)
+                && idNode.ValueKind == JsonValueKind.String
+                    ? (idNode.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
+            if (string.IsNullOrEmpty(id))
+            {
+                id = "q" + index;
+            }
+            string text =
+                item.TryGetProperty("question", out JsonElement textNode)
+                && textNode.ValueKind == JsonValueKind.String
+                    ? (textNode.GetString() ?? string.Empty).Trim()
+                    : string.Empty;
+            if (string.IsNullOrEmpty(text))
+            {
+                return new AskParseResult(
+                    new List<AskQuestion>(),
+                    null,
+                    timeout,
+                    "MISSING_REQUIRED_PARAM",
+                    $"question {id} is empty; every question needs text."
+                );
+            }
+            var options = new List<AskOption>();
+            if (
+                item.TryGetProperty("options", out JsonElement optionsNode)
+                && optionsNode.ValueKind == JsonValueKind.Array
+            )
+            {
+                foreach (JsonElement option in optionsNode.EnumerateArray())
+                {
+                    if (option.ValueKind == JsonValueKind.String)
+                    {
+                        string label = (option.GetString() ?? string.Empty).Trim();
+                        if (!string.IsNullOrEmpty(label))
+                        {
+                            options.Add(new AskOption(label, null));
+                        }
+                    }
+                    else if (option.ValueKind == JsonValueKind.Object)
+                    {
+                        string label =
+                            option.TryGetProperty("label", out JsonElement labelNode)
+                            && labelNode.ValueKind == JsonValueKind.String
+                                ? (labelNode.GetString() ?? string.Empty).Trim()
+                                : string.Empty;
+                        if (string.IsNullOrEmpty(label))
+                        {
+                            continue;
+                        }
+                        string? description =
+                            option.TryGetProperty("description", out JsonElement descNode)
+                            && descNode.ValueKind == JsonValueKind.String
+                                ? descNode.GetString()
+                                : null;
+                        options.Add(new AskOption(label, description));
+                    }
+                }
+                if (options.Count > 6)
+                {
+                    return new AskParseResult(
+                        new List<AskQuestion>(),
+                        null,
+                        timeout,
+                        "CONSTRAINT_VIOLATION",
+                        $"question {id} carries more than 6 options; trim to 6 or fewer."
+                    );
+                }
+            }
+            bool multiSelect =
+                item.TryGetProperty("multiSelect", out JsonElement multiNode)
+                && multiNode.ValueKind == JsonValueKind.True;
+            string? fallback =
+                item.TryGetProperty("default", out JsonElement defaultNode)
+                && defaultNode.ValueKind == JsonValueKind.String
+                    ? defaultNode.GetString()
+                    : null;
+            questions.Add(new AskQuestion(id, text, options, multiSelect, true, fallback));
+        }
+
+        return new AskParseResult(questions, null, timeout, null, null);
+    }
+
+    internal static string BuildAskOutput(
+        List<AskQuestion> questions,
+        string answersJson,
+        string ticketId
+    )
+    {
+        string answers = string.IsNullOrWhiteSpace(answersJson) ? "{}" : answersJson.Trim();
+        if (answers.Length > 2000)
+        {
+            answers = answers.Substring(0, 2000) + " … [answers truncated]";
+        }
+        if (questions.Count == 0)
+        {
+            return $"User answered (ticket {ticketId}):\n```json\n{answers}\n```";
+        }
+        var lines = new System.Text.StringBuilder();
+        lines.AppendLine($"User answered {questions.Count} question(s) (ticket {ticketId}):");
+        foreach (AskQuestion question in questions)
+        {
+            lines.AppendLine($"- {question.Id}: {question.Question}");
+        }
+        lines.AppendLine("```json");
+        lines.AppendLine(answers);
+        lines.AppendLine("```");
+        return lines.ToString().TrimEnd();
     }
 
     private void PersistAssistant(

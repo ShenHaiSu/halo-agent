@@ -166,6 +166,7 @@ public sealed class MainForm : Form
         var server = new HaloAgent.Engine.FrameServer();
         try
         {
+            server.ConfigureDataRoot(_storageManager.CurrentDataRoot);
             server.LoadSessions(_storageManager.CurrentDataRoot);
         }
         catch (Exception ex)

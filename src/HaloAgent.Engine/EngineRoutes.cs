@@ -497,7 +497,8 @@ internal static class EngineRoutes
                     ResponseFrame.Fail(request.Id, "INVALID_PARAMS", "turnId is required.")
                 );
             }
-            if (!turns.TryTakeConfirmation(turnId, out _))
+            string? toolCallId = ReadOptionalString(request.Payload, "toolCallId");
+            if (!turns.TryTakeConfirmation(turnId, toolCallId, out var pending))
             {
                 return Task.FromResult(
                     ResponseFrame.Fail(
@@ -507,31 +508,70 @@ internal static class EngineRoutes
                     )
                 );
             }
-            turns.ResolveConfirmation(turnId, approved);
+            string? ticketId = ReadOptionalString(request.Payload, "ticketId");
+            if (
+                !string.IsNullOrWhiteSpace(ticketId)
+                && !string.IsNullOrWhiteSpace(pending!.TicketId)
+                && !string.Equals(ticketId!.Trim(), pending.TicketId, StringComparison.Ordinal)
+            )
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "NOT_FOUND",
+                        "Ticket does not match the pending confirmation.",
+                        "ASK_TICKET_MISMATCH"
+                    )
+                );
+            }
+            string? answersJson =
+                ReadOptionalString(request.Payload, "answers")
+                ?? ReadOptionalString(request.Payload, "answersJson");
+            if (!turns.ResolveConfirmation(turnId, toolCallId, approved, answersJson))
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "NOT_FOUND",
+                        "No pending confirmation for this turn."
+                    )
+                );
+            }
             if (!turns.TrySessionOf(turnId, out string? sessionId))
             {
                 return Task.FromResult(
                     ResponseFrame.Fail(request.Id, "NOT_FOUND", "Turn is unknown.")
                 );
             }
-            if (approved)
+            // Echo-path confirmations ("edit.apply") have no runner waiter, so the
+            // route closes the turn here. True-loop gates are resumed by the
+            // waiting runner, which owns the follow-up events.
+            bool echoStyle = string.Equals(
+                pending!.ToolName,
+                "edit.apply",
+                StringComparison.Ordinal
+            );
+            if (echoStyle)
             {
-                events.Append("tool.end", new { turnId, ok = true });
-                events.Append("turn.done", new { turnId, sessionId });
-                turns.Finish(turnId, TurnOutcome.Done);
-            }
-            else
-            {
-                events.Append(
-                    "turn.cancelled",
-                    new
-                    {
-                        turnId,
-                        sessionId,
-                        reason = "rejected"
-                    }
-                );
-                turns.Finish(turnId, TurnOutcome.Cancelled);
+                if (approved)
+                {
+                    events.Append("tool.end", new { turnId, ok = true });
+                    events.Append("turn.done", new { turnId, sessionId });
+                    turns.Finish(turnId, TurnOutcome.Done);
+                }
+                else
+                {
+                    events.Append(
+                        "turn.cancelled",
+                        new
+                        {
+                            turnId,
+                            sessionId,
+                            reason = "rejected"
+                        }
+                    );
+                    turns.Finish(turnId, TurnOutcome.Cancelled);
+                }
             }
             return Task.FromResult(ResponseFrame.Success(request.Id, new { turnId, approved }));
         };

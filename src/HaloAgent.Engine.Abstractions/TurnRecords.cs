@@ -27,5 +27,9 @@ public sealed record ConfirmationRequest(
     string ToolCallId,
     string ToolName,
     JsonElement Args,
-    DateTimeOffset RaisedAt
+    DateTimeOffset RaisedAt,
+    string TicketId = ""
 );
+
+/// <summary>Answer delivered to a waiting confirmation gate.</summary>
+public sealed record ConfirmationAnswer(bool Approved, string? AnswersJson);
