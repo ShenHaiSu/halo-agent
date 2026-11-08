@@ -76,6 +76,32 @@ public sealed class FrameServer : IAsyncDisposable
     public TurnCoordinator Turns => _turns;
     public UsageLedger Usage => _usage;
     public AttachmentIndex Attachments => _attachments;
+    public IEngineContext Context => _context;
+
+    public void ConfigureGateway(IEngineGateway? gateway)
+    {
+        _context.Gateway = gateway;
+    }
+
+    public void ConfigureBudget(IEngineBudget? budget)
+    {
+        _context.Budget = budget;
+    }
+
+    public void ConfigureTurnOptions(EngineTurnOptions? options)
+    {
+        _context.TurnOptions = options ?? new EngineTurnOptions();
+    }
+
+    public void ConfigureDataRoot(string dataRoot)
+    {
+        _context.DataRoot = dataRoot ?? string.Empty;
+    }
+
+    public void ConfigureToolRunner(IEngineToolRunner? runner)
+    {
+        _context.ToolRunner = runner;
+    }
 
     public void Register(string method, FrameHandler handler)
     {

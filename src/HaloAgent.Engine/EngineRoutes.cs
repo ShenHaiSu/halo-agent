@@ -374,7 +374,7 @@ internal static class EngineRoutes
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
             string text = FrameServer.ReadString(request.Payload, "text");
-            if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(text))
+            if (string.IsNullOrWhiteSpace(sessionId))
             {
                 return Task.FromResult(
                     ResponseFrame.Fail(
@@ -384,10 +384,26 @@ internal static class EngineRoutes
                     )
                 );
             }
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "INVALID_PARAMS",
+                        "Prompt text is required.",
+                        "EMPTY_PROMPT"
+                    )
+                );
+            }
             if (!sessions.TryGetTitle(sessionId, out _))
             {
                 return Task.FromResult(
-                    ResponseFrame.Fail(request.Id, "NOT_FOUND", "Session is unknown.")
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "NOT_FOUND",
+                        "Session is unknown.",
+                        "INVALID_SESSION"
+                    )
                 );
             }
             if (sessions.IsCompacting(sessionId))
@@ -398,6 +414,17 @@ internal static class EngineRoutes
                         "COMPACTING",
                         "Wait for compaction or stop it first."
                     )
+                );
+            }
+            string? callerKey = ReadOptionalString(request.Payload, "requestId");
+            if (
+                !string.IsNullOrWhiteSpace(callerKey)
+                && turns.TryGetRequestTurn(callerKey!, out string? replayed)
+                && !string.IsNullOrWhiteSpace(replayed)
+            )
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(request.Id, new { turnId = replayed })
                 );
             }
             string turnId = Guid.NewGuid().ToString("N");
@@ -412,78 +439,49 @@ internal static class EngineRoutes
                     )
                 );
             }
-            bool needsConfirm = TryReadBool(request.Payload, "needsConfirm");
-            sessions.Append(sessionId, "user", text, turnId);
-            events.Append("turn.started", new { turnId, sessionId });
-            events.Append("text.delta", new { turnId, delta = text });
-            events.Append("text.done", new { turnId, length = text.Length });
-            usage.Record(text.Length / 4, text.Length / 4);
-            events.Append(
-                "usage.tick",
-                new
-                {
-                    turnId,
-                    inputTokens = text.Length / 4,
-                    outputTokens = text.Length / 4,
-                }
-            );
-            if (needsConfirm)
+            if (!string.IsNullOrWhiteSpace(callerKey))
             {
-                string toolCallId = Guid.NewGuid().ToString("N");
-                turns.RaiseConfirmation(turnId, toolCallId, "edit.apply", request.Payload);
-                events.Append(
-                    "tool.confirm",
-                    new
-                    {
-                        turnId,
-                        toolCallId,
-                        toolName = "edit.apply"
-                    }
-                );
-                sessions.Append(sessionId, "assistant", text, turnId);
+                turns.RememberRequestTurn(callerKey!, turnId);
+            }
+            if (context.Gateway is null)
+            {
                 return Task.FromResult(
-                    ResponseFrame.Success(request.Id, new { turnId, awaitingConfirmation = true })
+                    RunEchoTurn(
+                        request,
+                        sessions,
+                        turns,
+                        usage,
+                        events,
+                        attachments,
+                        turnId,
+                        sessionId,
+                        text
+                    )
                 );
             }
-            var attached = RegisterAttachments(request.Payload, sessionId, attachments);
-            string toolCall = Guid.NewGuid().ToString("N");
-            events.Append(
-                "tool.start",
-                new
-                {
-                    turnId,
-                    toolCallId = toolCall,
-                    toolName = "reply",
-                    attachments = attached.Select(a => new
-                    {
-                        digest = a.Digest,
-                        fileName = a.FileName,
-                        byteSize = a.ByteSize,
-                        path = a.RelativePath
-                    })
-                }
+            string? providerId = ReadOptionalString(request.Payload, "providerId");
+            string? modelId = ReadOptionalString(request.Payload, "modelId");
+            string workspaceId =
+                sessions.TryGetDescriptor(sessionId, out var known) && known is not null
+                    ? known.WorkspaceId
+                    : SessionIdentity.DefaultWorkspace;
+            sessions.Append(sessionId, "user", text, turnId);
+            events.Append("turn.started", new { turnId, sessionId });
+            var runner = new TurnRunner(context, sessions, turns, usage);
+            CancellationToken turnToken = context.TurnToken(turnId);
+            _ = Task.Run(
+                () =>
+                    runner.RunPromptTurnAsync(
+                        sessionId,
+                        turnId,
+                        text,
+                        providerId,
+                        modelId,
+                        workspaceId,
+                        turnToken
+                    ),
+                CancellationToken.None
             );
-            events.Append(
-                "tool.delta",
-                new
-                {
-                    turnId,
-                    toolCallId = toolCall,
-                    delta = text
-                }
-            );
-            events.Append(
-                "tool.end",
-                new
-                {
-                    turnId,
-                    toolCallId = toolCall,
-                    ok = true
-                }
-            );
-            sessions.Append(sessionId, "assistant", text, turnId);
-            events.Append("turn.done", new { turnId, sessionId });
-            turns.Finish(turnId, TurnOutcome.Done);
             return Task.FromResult(ResponseFrame.Success(request.Id, new { turnId }));
         };
 
@@ -568,6 +566,25 @@ internal static class EngineRoutes
             }
             string turnId = Guid.NewGuid().ToString("N");
             turns.TryStart(sessionId, turnId, request.Id, out _);
+            if (context.Gateway is null)
+            {
+                events.Append(
+                    "turn.started",
+                    new
+                    {
+                        turnId,
+                        sessionId,
+                        retriedFrom = last.TurnId
+                    }
+                );
+                events.Append("turn.done", new { turnId, sessionId });
+                turns.Finish(turnId, TurnOutcome.Done);
+                return Task.FromResult(ResponseFrame.Success(request.Id, new { turnId }));
+            }
+            string retryWorkspace =
+                sessions.TryGetDescriptor(sessionId, out var retryKnown) && retryKnown is not null
+                    ? retryKnown.WorkspaceId
+                    : SessionIdentity.DefaultWorkspace;
             events.Append(
                 "turn.started",
                 new
@@ -577,8 +594,22 @@ internal static class EngineRoutes
                     retriedFrom = last.TurnId
                 }
             );
-            events.Append("turn.done", new { turnId, sessionId });
-            turns.Finish(turnId, TurnOutcome.Done);
+            var retryRunner = new TurnRunner(context, sessions, turns, usage);
+            CancellationToken retryToken = context.TurnToken(turnId);
+            string retryText = last.Text;
+            _ = Task.Run(
+                () =>
+                    retryRunner.RunPromptTurnAsync(
+                        sessionId,
+                        turnId,
+                        retryText,
+                        null,
+                        null,
+                        retryWorkspace,
+                        retryToken
+                    ),
+                CancellationToken.None
+            );
             return Task.FromResult(ResponseFrame.Success(request.Id, new { turnId }));
         };
 
@@ -852,6 +883,91 @@ internal static class EngineRoutes
             return null;
         }
         return node.GetString();
+    }
+
+    internal static ResponseFrame RunEchoTurn(
+        RequestFrame request,
+        SessionLedger sessions,
+        TurnCoordinator turns,
+        UsageLedger usage,
+        IEventJournal events,
+        AttachmentIndex attachments,
+        string turnId,
+        string sessionId,
+        string text
+    )
+    {
+        bool needsConfirm = TryReadBool(request.Payload, "needsConfirm");
+        sessions.Append(sessionId, "user", text, turnId);
+        events.Append("turn.started", new { turnId, sessionId });
+        events.Append("text.delta", new { turnId, delta = text });
+        events.Append("text.done", new { turnId, length = text.Length });
+        usage.Record(text.Length / 4, text.Length / 4);
+        events.Append(
+            "usage.tick",
+            new
+            {
+                turnId,
+                inputTokens = text.Length / 4,
+                outputTokens = text.Length / 4,
+            }
+        );
+        if (needsConfirm)
+        {
+            string toolCallId = Guid.NewGuid().ToString("N");
+            turns.RaiseConfirmation(turnId, toolCallId, "edit.apply", request.Payload);
+            events.Append(
+                "tool.confirm",
+                new
+                {
+                    turnId,
+                    toolCallId,
+                    toolName = "edit.apply"
+                }
+            );
+            sessions.Append(sessionId, "assistant", text, turnId);
+            return ResponseFrame.Success(request.Id, new { turnId, awaitingConfirmation = true });
+        }
+        var attached = RegisterAttachments(request.Payload, sessionId, attachments);
+        string toolCall = Guid.NewGuid().ToString("N");
+        events.Append(
+            "tool.start",
+            new
+            {
+                turnId,
+                toolCallId = toolCall,
+                toolName = "reply",
+                attachments = attached.Select(a => new
+                {
+                    digest = a.Digest,
+                    fileName = a.FileName,
+                    byteSize = a.ByteSize,
+                    path = a.RelativePath
+                })
+            }
+        );
+        events.Append(
+            "tool.delta",
+            new
+            {
+                turnId,
+                toolCallId = toolCall,
+                delta = text
+            }
+        );
+        events.Append(
+            "tool.end",
+            new
+            {
+                turnId,
+                toolCallId = toolCall,
+                ok = true
+            }
+        );
+        sessions.Append(sessionId, "assistant", text, turnId);
+        events.Append("turn.done", new { turnId, sessionId });
+        turns.Finish(turnId, TurnOutcome.Done);
+        return ResponseFrame.Success(request.Id, new { turnId });
     }
 
     internal static string[] ReadEnabledBatches()

@@ -16,6 +16,9 @@ public sealed class TurnCoordinator
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConfirmationRequest> _confirmations =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _requestTurns =
+        new(StringComparer.Ordinal);
+    private const int RequestEchoBound = 5000;
     private readonly EngineState _state;
 
     public TurnCoordinator(EngineState state)
@@ -168,5 +171,32 @@ public sealed class TurnCoordinator
             _activeBySession.TryRemove(sessionId, out _);
         }
         return signaled;
+    }
+
+    public bool TryGetRequestTurn(string requestKey, out string? turnId)
+    {
+        turnId = null;
+        if (string.IsNullOrWhiteSpace(requestKey))
+        {
+            return false;
+        }
+        return _requestTurns.TryGetValue(requestKey.Trim(), out turnId);
+    }
+
+    public void RememberRequestTurn(string requestKey, string turnId)
+    {
+        if (string.IsNullOrWhiteSpace(requestKey) || string.IsNullOrWhiteSpace(turnId))
+        {
+            return;
+        }
+        try
+        {
+            if (_requestTurns.Count >= RequestEchoBound)
+            {
+                _requestTurns.Clear();
+            }
+            _requestTurns[requestKey.Trim()] = turnId;
+        }
+        catch { }
     }
 }
