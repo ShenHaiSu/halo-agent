@@ -67,7 +67,17 @@ export class MockTransport implements FrameTransport {
       case 'system.ping':
         return { ok: true, result: { pong: true } };
       case 'system.info':
-        return { ok: true, result: { version: '0.1.0', queueBound: 64, journalCapacity: this.capacity } };
+        return {
+          ok: true,
+          result: {
+            version: '0.1.0',
+            queueBound: 64,
+            journalCapacity: this.capacity,
+            routing: { enabledBatches: [] },
+            bridgeVersion: 2,
+            contractVersion: '0.1.1',
+          },
+        };
       case 'session.new': {
         const title = typeof params['title'] === 'string' && params['title'].trim() !== '' ? (params['title'] as string) : 'New session';
         const sessionId = `mock-session-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6)}`;

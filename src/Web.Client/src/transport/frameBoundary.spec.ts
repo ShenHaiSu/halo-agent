@@ -44,7 +44,10 @@ describe('frame boundary selection and fallback', () => {
     expect(viaFallback.result?.['method']).toBe('system.ping');
 
     scope['hostFrame'] = {
-      invoke: async () => JSON.stringify({ t: 'res', id: 7, ok: true, r: { frame: true } }),
+      invoke: async (body: string) => {
+        const request = JSON.parse(body) as { id: number };
+        return JSON.stringify({ t: 'res', id: request.id, ok: true, r: { frame: true } });
+      },
       getEventBatch: async () => JSON.stringify({ frames: [], nextSeq: 0, hasGap: false, droppedEstimate: 0 }),
     };
     const preferred = new BridgeTransport();

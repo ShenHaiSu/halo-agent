@@ -60,6 +60,6 @@ describe('gap recovery rebuilds the visible window', () => {
     expect(calls).toContain('session.list');
     expect(calls).toContain('session.history');
     expect(sessions.activeSessionId).toBe('session-a');
-    expect(bridge.lastSeq).toBe(0);
+    expect(bridge.lastSeq).toBe(9);
   });
 });

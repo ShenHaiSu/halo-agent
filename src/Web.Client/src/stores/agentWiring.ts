@@ -1,9 +1,9 @@
 /** need21-F05: agent 域跨 store 接线（旧 stores/agentStore.ts 转发部分的唯一继承者，位于 src/stores 接线层）。
- * 旧转发删除后仍需有人做两件事（否则发送/会话同步链路断）：
- * 1. 向新 store 注入 workspace/session/config/askUser 运行时适配（registerAgentRuntimeContext）。
- * 2. session 切换同步 + persistedMessages 投影 + session:switched 事件桥接。
- * 由 App.vue setup 调用一次（幂等）；新代码禁止再建组合转发 store。
- * 注意：本文件是唯一允许直 import 各 store 的 agent 接线点；features/agent/stores 下新 store 仍禁止直调其他 store（eslint 卡死）。
+* 旧转发删除后仍需有人做两件事（否则发送/会话同步链路断）：
+* 1. 向新 store 注入 workspace/session/config/askUser 运行时适配（registerAgentRuntimeContext）。
+* 2. session 切换同步 + persistedMessages 投影 + session:switched 事件桥接。
+* 由 App.vue setup 调用一次（幂等）；新代码禁止再建组合转发 store。
+* 注意：本文件是唯一允许直 import 各 store 的 agent 接线点；features/agent/stores 下新 store 仍禁止直调其他 store（eslint 卡死）。
  */
 import { watch } from 'vue';
 import { getHostBridge, haloEventBus } from '@shared/bridge/hostBridge';
@@ -13,6 +13,31 @@ import { useConfigStore } from '@/stores/configStore';
 import { useAskUserStore } from '@/stores/askUserStore';
 import { setActiveSessionId, setActiveWorkspaceId, setFallbackProtocol, setPersistedMessages } from '@features/agent/stores/model';
 import { registerAgentRuntimeContext } from '@features/agent/stores/runtime';
+import { EventBridge, type PumpStatsHandler } from '@/stores/eventBridge';
+import { SEQ_STORAGE_KEY, type FrameTransport } from '@/transport/types';
+
+/**
+ * Sole factory for the main frame pump. Production mounting stays on the
+ * cutover station; until then tests and specs build the pump through this
+ * helper so beat values (30ms busy / 200ms idle / 2s backoff) have one source.
+ */
+export function createFrameEventBridge(
+  transport: FrameTransport,
+  options: { storageKey?: string; onStats?: PumpStatsHandler } = {},
+): EventBridge {
+  return new EventBridge(transport, {
+    storageKey: options.storageKey ?? SEQ_STORAGE_KEY,
+    busyMs: 30,
+    idleMs: 200,
+    backoffCapMs: 2000,
+    ...(options.onStats ? { onStats: options.onStats } : {}),
+  });
+}
+
+/** Prime the cursor after the pump is built, without replaying old frames. */
+export async function primeFrameEventBridge(bridge: EventBridge): Promise<void> {
+  await bridge.refreshBaseline();
+}
 
 let wiringDone = false;
 

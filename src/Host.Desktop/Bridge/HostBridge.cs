@@ -74,6 +74,16 @@ public sealed class HostBridge
                     ? node
                     : JsonDocument.Parse("{}").RootElement;
 
+            if (string.Equals(method, "system.ping", StringComparison.Ordinal))
+            {
+                return SuccessResponse(id, new JsonObject { ["pong"] = true });
+            }
+
+            if (string.Equals(method, "system.info", StringComparison.Ordinal))
+            {
+                return SuccessResponse(id, BuildSystemInfo());
+            }
+
             if (_routing.IsHostOnly(method))
             {
                 return await HandleHostOnlyAsync(id, method, payload).ConfigureAwait(false);
@@ -237,6 +247,29 @@ public sealed class HostBridge
     {
         var start = new ProcessStartInfo { FileName = path, UseShellExecute = true, };
         Process.Start(start);
+    }
+
+    /// <summary>
+    /// Capability probe answered by the shell itself so the web client can
+    /// explain why an area stays on the legacy chain even when its batch is off.
+    /// </summary>
+    private JsonObject BuildSystemInfo()
+    {
+        var batches = new JsonArray();
+        foreach (string batch in _routing.EnabledBatches)
+        {
+            batches.Add(batch);
+        }
+
+        return new JsonObject
+        {
+            ["version"] = HaloAgent.Engine.Abstractions.ContractCatalog.ContractVersion,
+            ["queueBound"] = HaloAgent.Engine.FrameServer.QueueBound,
+            ["journalCapacity"] = _channel.Ring.Capacity,
+            ["routing"] = new JsonObject { ["enabledBatches"] = batches, },
+            ["bridgeVersion"] = HaloAgent.Bridge.Contracts.BridgeVersion.ProtocolVersion,
+            ["contractVersion"] = HaloAgent.Engine.Abstractions.ContractCatalog.ContractVersion,
+        };
     }
 
     private static string SuccessResponse(long id, JsonNode? result)
