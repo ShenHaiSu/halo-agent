@@ -43,3 +43,22 @@ export function sampleResponse(id: number): ContractResponseFrame {
 export function sampleEvent(seq: number): ContractEventFrame {
   return { t: 'evt', seq, k: 'usage.tick', p: {} };
 }
+
+export const frozenContractVersion = '0.1.1';
+
+export function assertFrozenContractVersion(): void {
+  if (contractVersionInUse !== frozenContractVersion) {
+    throw new Error(
+      `frozen contract drift: code expects ${frozenContractVersion} but generated surface is ${String(contractVersionInUse)}`
+    );
+  }
+}
+
+export function buildTitleRequest(id: number, sessionId: string, title: string): ContractRequestFrame {
+  const method: ContractMethod = 'session.title';
+  return { t: 'req', id, m: method, p: { sessionId, title } };
+}
+
+export function isTitleMethod(method: ContractMethod): boolean {
+  return method === 'session.title';
+}

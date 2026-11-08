@@ -35,6 +35,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Contract freeze gates
+        run: pnpm contract:check && pnpm contract:freeze
+
       - name: Selfcheck
         run: pnpm selfcheck
 

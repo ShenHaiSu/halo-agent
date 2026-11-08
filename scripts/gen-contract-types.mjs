@@ -1,19 +1,36 @@
-// Reads contract/agent.schema.json and emits the typed frontend surface.
+// Reads contract/agent.schema.json and emits the typed surfaces.
+// The schema file is the only authority; this script pushes the frozen
+// name lists to the frontend types plus the two C# mirrors so the three
+// sides stay identical without hand edits.
 // Usage: node scripts/gen-contract-types.mjs [--check]
-// --check exits non-zero when the generated file is stale (used by CI).
+// --check exits non-zero when any generated file is stale (used by CI).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaPath = resolve(here, '../contract/agent.schema.json');
-const outPath = resolve(here, '../src/Web.Client/src/contract/agent.d.ts');
+const outDts = resolve(here, '../src/Web.Client/src/contract/agent.d.ts');
+const outBridge = resolve(
+  here,
+  '../src/HaloAgent.Bridge.Contracts/AgentContract.cs',
+);
+const outCatalog = resolve(
+  here,
+  '../src/HaloAgent.Engine.Abstractions/ContractCatalog.cs',
+);
+
+const NEWLINE = '\r\n';
+
+function toNewlines(text) {
+  return text.replace(/\r\n|\r|\n/g, NEWLINE);
+}
 
 function unionOf(values) {
   return values.map((v) => JSON.stringify(v)).join(' | ');
 }
 
-function render(schema) {
+function renderDts(schema) {
   const version = schema.contractVersion;
   const methods = schema.methods;
   const events = schema.events;
@@ -57,6 +74,48 @@ export type ContractFrame = ContractRequestFrame | ContractResponseFrame | Contr
 `;
 }
 
+function csList(values, indent) {
+  return values.map((v) => `${indent}\"${v}\",`).join('\n');
+}
+
+function syncCSharp(source, version, methods, events, codes) {
+  let text = source;
+  const versionPattern = /public const string ContractVersion = \"[^\"]+\";/;
+  if (!versionPattern.test(text)) {
+    console.error('C# mirror is missing ContractVersion; refusing to patch.');
+    process.exit(1);
+  }
+  text = text.replace(
+    versionPattern,
+    `public const string ContractVersion = \"${version}\";`,
+  );
+
+  const sectionPattern = (name) =>
+    new RegExp(
+      `(public static readonly IReadOnlyList<string> ${name} = new\\[\\][\\s\\S]*?\\{)([\\s\\S]*?)(\\};)`,
+    );
+  const fill = (name, values) => {
+    const pattern = sectionPattern(name);
+    if (!pattern.test(text)) {
+      console.error(`C# mirror is missing ${name} list; refusing to patch.`);
+      process.exit(1);
+    }
+    text = text.replace(
+      pattern,
+      (_all, head, _body, tail) =>
+        `${head}\n${csList(values, '        ')}\n    ${tail}`,
+    );
+  };
+  fill('Methods', methods);
+  fill('Events', events);
+  fill('ErrorCodes', codes);
+  return text;
+}
+
+function normalizedEqual(a, b) {
+  return a.replace(/\r\n|\r/g, '\n') === b.replace(/\r\n|\r/g, '\n');
+}
+
 const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
 for (const key of ['contractVersion', 'methods', 'events', 'errorCodes']) {
   if (schema[key] === undefined) {
@@ -64,16 +123,47 @@ for (const key of ['contractVersion', 'methods', 'events', 'errorCodes']) {
     process.exit(1);
   }
 }
-const text = render(schema);
+const dtsText = toNewlines(renderDts(schema));
+const bridgeSource = readFileSync(outBridge, 'utf8');
+const catalogSource = readFileSync(outCatalog, 'utf8');
+const bridgeText = toNewlines(
+  syncCSharp(
+    bridgeSource,
+    schema.contractVersion,
+    schema.methods,
+    schema.events,
+    schema.errorCodes,
+  ),
+);
+const catalogText = toNewlines(
+  syncCSharp(
+    catalogSource,
+    schema.contractVersion,
+    schema.methods,
+    schema.events,
+    schema.errorCodes,
+  ),
+);
 
 if (process.argv.includes('--check')) {
-  const current = readFileSync(outPath, 'utf8');
-  if (current !== text) {
-    console.error('generated contract types are stale: rerun node scripts/gen-contract-types.mjs');
+  const problems = [];
+  if (!normalizedEqual(readFileSync(outDts, 'utf8'), dtsText))
+    problems.push(outDts);
+  if (!normalizedEqual(bridgeSource, bridgeText)) problems.push(outBridge);
+  if (!normalizedEqual(catalogSource, catalogText)) problems.push(outCatalog);
+  if (problems.length > 0) {
+    console.error(
+      'generated contract mirrors are stale, rerun node scripts/gen-contract-types.mjs:',
+    );
+    for (const file of problems) console.error(`  - ${file}`);
     process.exit(1);
   }
-  console.log('contract types are fresh.');
+  console.log('contract mirrors are fresh.');
 } else {
-  writeFileSync(outPath, text);
-  console.log(`wrote ${outPath}`);
+  writeFileSync(outDts, dtsText);
+  writeFileSync(outBridge, bridgeText);
+  writeFileSync(outCatalog, catalogText);
+  console.log(`wrote ${outDts}`);
+  console.log(`wrote ${outBridge}`);
+  console.log(`wrote ${outCatalog}`);
 }

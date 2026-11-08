@@ -8,7 +8,7 @@ namespace HaloAgent.Engine.Abstractions;
 /// </summary>
 public static class ContractCatalog
 {
-    public const string ContractVersion = "0.1.0";
+    public const string ContractVersion = "0.1.1";
 
     public static readonly IReadOnlyList<string> Methods = new[]
     {
@@ -17,6 +17,7 @@ public static class ContractCatalog
         "session.new",
         "session.resume",
         "session.rename",
+        "session.title",
         "session.delete",
         "session.clear",
         "session.list",
