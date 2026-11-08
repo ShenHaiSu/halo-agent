@@ -103,6 +103,27 @@ public sealed class EngineTurnOptions
 
     /// <summary>Seconds a write confirmation or ask_user gate waits before timing out.</summary>
     public int ConfirmTimeoutSec { get; set; } = 300;
+
+    /// <summary>Token ceiling for the budget bar; overrun ends the turn as limited.</summary>
+    public int BudgetMaxTokens { get; set; } = 128000;
+
+    /// <summary>Master switch for true token accounting; off falls back to char estimate.</summary>
+    public bool EnableTrueBudget { get; set; } = true;
+
+    /// <summary>Master switch for true context compaction; off keeps the char stub.</summary>
+    public bool EnableTrueCompaction { get; set; } = true;
+
+    /// <summary>Master switch for the memory turn queue; off keeps the stub reply.</summary>
+    public bool EnableTrueQueue { get; set; } = true;
+
+    /// <summary>Turn groups kept on each side of the summary during compaction.</summary>
+    public int CompactKeepGroups { get; set; } = 6;
+
+    /// <summary>Seconds a compaction summary request may run before it is treated as timed out.</summary>
+    public int CompactTimeoutSec { get; set; } = 20;
+
+    /// <summary>Token ceiling for one compaction summary request.</summary>
+    public int CompactMaxTokens { get; set; } = 50;
 }
 
 /// <summary>Tool outcome produced by the tool station with full card fields.</summary>

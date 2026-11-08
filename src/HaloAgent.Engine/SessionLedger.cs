@@ -19,6 +19,8 @@ public sealed class SessionLedger
     private readonly Dictionary<string, long> _nextIndex = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _aliases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _compacting = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CancellationTokenSource> _compactTokens =
+        new(StringComparer.Ordinal);
     private readonly List<string> _workspaceFallbackAudit = new();
 
     public bool EnsureSession(string sessionId, string title, string workspaceId = "default")
@@ -521,12 +523,73 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            string key = ResolveAlias(sessionId);
-            if (!_sessions.ContainsKey(key) || _compacting.Contains(key))
+            string key = ResolveAliasLocked(sessionId);
+            if (
+                string.IsNullOrWhiteSpace(key)
+                || !_sessions.ContainsKey(key)
+                || _compacting.Contains(key)
+            )
             {
                 return false;
             }
             _compacting.Add(key);
+            try
+            {
+                if (_compactTokens.TryGetValue(key, out var previous))
+                {
+                    try
+                    {
+                        previous.Dispose();
+                    }
+                    catch { }
+                }
+                _compactTokens[key] = new CancellationTokenSource();
+            }
+            catch { }
+            return true;
+        }
+    }
+
+    public CancellationToken CompactionToken(string sessionId)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAliasLocked(sessionId);
+            if (!string.IsNullOrEmpty(key) && _compactTokens.TryGetValue(key, out var scope))
+            {
+                return scope.Token;
+            }
+            return CancellationToken.None;
+        }
+    }
+
+    public bool TryCancelCompaction(string sessionId)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAliasLocked(sessionId);
+            if (string.IsNullOrEmpty(key) || !_compacting.Contains(key))
+            {
+                return false;
+            }
+            if (_compactTokens.TryGetValue(key, out var scope))
+            {
+                try
+                {
+                    scope.Cancel();
+                }
+                catch { }
+            }
+            _compacting.Remove(key);
+            if (_compactTokens.TryGetValue(key, out var owned))
+            {
+                _compactTokens.Remove(key);
+                try
+                {
+                    owned.Dispose();
+                }
+                catch { }
+            }
             return true;
         }
     }
@@ -535,8 +598,17 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            string key = ResolveAlias(sessionId);
+            string key = ResolveAliasLocked(sessionId);
             _compacting.Remove(key);
+            if (_compactTokens.TryGetValue(key, out var owned))
+            {
+                _compactTokens.Remove(key);
+                try
+                {
+                    owned.Dispose();
+                }
+                catch { }
+            }
             if (_history.TryGetValue(key, out var list))
             {
                 list.Clear();
@@ -566,8 +638,134 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            return _compacting.Contains(ResolveAlias(sessionId));
+            return _compacting.Contains(ResolveAliasLocked(sessionId));
         }
+    }
+
+    public IReadOnlyList<string> ListTreeSessions(string rootSessionId)
+    {
+        lock (_gate)
+        {
+            string root = ResolveAliasLocked(rootSessionId);
+            var found = new List<string>();
+            if (string.IsNullOrEmpty(root) || !_sessions.ContainsKey(root))
+            {
+                return found;
+            }
+            found.Add(root);
+            bool grown = true;
+            while (grown)
+            {
+                grown = false;
+                foreach (var entry in _sessions)
+                {
+                    if (found.Contains(entry.Key, StringComparer.Ordinal))
+                    {
+                        continue;
+                    }
+                    string? parent = entry.Value.ParentSessionId;
+                    if (
+                        !string.IsNullOrWhiteSpace(parent)
+                        && found.Contains(ResolveAliasLocked(parent), StringComparer.Ordinal)
+                    )
+                    {
+                        found.Add(entry.Key);
+                        grown = true;
+                    }
+                }
+            }
+            return found;
+        }
+    }
+
+    public bool TryCompactWithSummary(
+        string sessionId,
+        string summary,
+        int keepLastGroups,
+        out int removed,
+        out int kept
+    )
+    {
+        lock (_gate)
+        {
+            removed = 0;
+            kept = 0;
+            string key = ResolveAliasLocked(sessionId);
+            if (
+                string.IsNullOrEmpty(key)
+                || !_history.TryGetValue(key, out var list)
+                || list.Count == 0
+            )
+            {
+                return false;
+            }
+            int keep = keepLastGroups <= 0 ? 6 : Math.Clamp(keepLastGroups, 1, 32);
+            var groups = GroupByTurn(list);
+            if (groups.Count <= keep + 1)
+            {
+                return false;
+            }
+            int tailStart = Math.Max(1, groups.Count - keep);
+            var anchor = groups.Take(1).SelectMany(g => g).ToList();
+            var tail = groups.Skip(tailStart).SelectMany(g => g).ToList();
+            var middle = groups.Skip(1).Take(tailStart - 1).SelectMany(g => g).ToList();
+            if (middle.Count == 0)
+            {
+                return false;
+            }
+            removed = middle.Count;
+            var rewritten = new List<StoredMessage>(anchor.Count + tail.Count + 1);
+            rewritten.AddRange(anchor);
+            long index = (_nextIndex.TryGetValue(key, out long next) ? next : list.Count) + 1;
+            _nextIndex[key] = index;
+            var now = DateTimeOffset.UtcNow;
+            rewritten.Add(
+                new StoredMessage(
+                    index,
+                    "system",
+                    summary,
+                    string.Empty,
+                    now,
+                    SessionIdentity.NewMessageId(),
+                    CreatedAt: now
+                )
+            );
+            rewritten.AddRange(tail);
+            _history[key] = rewritten;
+            kept = rewritten.Count;
+            if (_sessions.TryGetValue(key, out var descriptor))
+            {
+                _sessions[key] = descriptor with { UpdatedAtUtc = now };
+            }
+            return true;
+        }
+    }
+
+    private static IReadOnlyList<IReadOnlyList<StoredMessage>> GroupByTurn(
+        IReadOnlyList<StoredMessage> rows
+    )
+    {
+        var groups = new List<List<StoredMessage>>();
+        foreach (var row in rows)
+        {
+            string turn = row.TurnId ?? string.Empty;
+            if (groups.Count > 0)
+            {
+                string headTurn =
+                    groups[^1].Count > 0 ? groups[^1][0].TurnId ?? string.Empty : string.Empty;
+                bool sameTurn =
+                    !string.IsNullOrEmpty(turn)
+                    && string.Equals(turn, headTurn, StringComparison.Ordinal);
+                bool bothLoose = string.IsNullOrEmpty(turn) && string.IsNullOrEmpty(headTurn);
+                if (sameTurn || bothLoose)
+                {
+                    groups[^1].Add(row);
+                    continue;
+                }
+            }
+            groups.Add(new List<StoredMessage> { row });
+        }
+        return groups;
     }
 
     public IReadOnlyList<StoredMessage> Snapshot(string sessionId)

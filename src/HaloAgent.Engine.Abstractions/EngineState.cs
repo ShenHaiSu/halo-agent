@@ -18,6 +18,11 @@ public sealed class EngineState
     private readonly Queue<long> _echoOrder = new();
     private readonly object _echoGate = new();
     private const int EchoCacheBound = 5000;
+    private long _cancelCount;
+    private long _cancelTotalMs;
+    private long _cancelMaxMs;
+    private long _compactRejectCount;
+    private readonly object _metricGate = new();
 
     public string? ActiveSessionId { get; set; }
     public string Mode { get; set; } = "normal";
@@ -68,6 +73,45 @@ public sealed class EngineState
     {
         _turnTokens.TryRemove(turnId, out _);
         _turns.TryRemove(turnId, out _);
+    }
+
+    public void RecordCancel(TimeSpan duration)
+    {
+        long ms = Math.Max(0, (long)duration.TotalMilliseconds);
+        lock (_metricGate)
+        {
+            _cancelCount++;
+            _cancelTotalMs += ms;
+            if (ms > _cancelMaxMs)
+            {
+                _cancelMaxMs = ms;
+            }
+        }
+    }
+
+    public void RecordCompactReject()
+    {
+        lock (_metricGate)
+        {
+            _compactRejectCount++;
+        }
+    }
+
+    public (long Count, long TotalMs, long MaxMs, double AverageMs) CancelMetrics()
+    {
+        lock (_metricGate)
+        {
+            double average = _cancelCount == 0 ? 0 : (double)_cancelTotalMs / _cancelCount;
+            return (_cancelCount, _cancelTotalMs, _cancelMaxMs, average);
+        }
+    }
+
+    public long CompactRejectCount()
+    {
+        lock (_metricGate)
+        {
+            return _compactRejectCount;
+        }
     }
 
     /// <summary>Bounded idempotency echo: same request id replays the stored reply.</summary>

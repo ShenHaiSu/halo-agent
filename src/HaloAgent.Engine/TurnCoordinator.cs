@@ -17,6 +17,8 @@ public sealed class TurnCoordinator
     private readonly ConcurrentDictionary<string, PendingGate> _gates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _requestTurns =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _cancelAt =
+        new(StringComparer.Ordinal);
     private const int RequestEchoBound = 5000;
     private readonly EngineState _state;
 
@@ -70,6 +72,14 @@ public sealed class TurnCoordinator
         {
             _turns[turnId] = current with { Outcome = outcome };
         }
+        if (_cancelAt.TryRemove(turnId, out var requestedAt))
+        {
+            try
+            {
+                _state.RecordCancel(DateTimeOffset.UtcNow - requestedAt);
+            }
+            catch { }
+        }
         RemoveGatesFor(turnId);
         if (
             TrySessionOf(turnId, out string? sessionId)
@@ -109,6 +119,49 @@ public sealed class TurnCoordinator
             return null;
         }
         return _activeBySession.TryGetValue(sessionId, out string? turnId) ? turnId : null;
+    }
+
+    public IReadOnlyList<string> ActiveTurnsForSessions(Func<string, bool> sessionInTree)
+    {
+        var matches = new List<string>();
+        foreach (var entry in _activeBySession)
+        {
+            bool inside = false;
+            try
+            {
+                inside = sessionInTree(entry.Key);
+            }
+            catch
+            {
+                inside = false;
+            }
+            if (!inside)
+            {
+                continue;
+            }
+            if (IsActive(entry.Value))
+            {
+                matches.Add(entry.Value);
+            }
+        }
+        return matches;
+    }
+
+    public IReadOnlyList<string> CancelTreeBySessions(Func<string, bool> sessionInTree)
+    {
+        var cancelled = new List<string>();
+        foreach (string turnId in ActiveTurnsForSessions(sessionInTree))
+        {
+            if (MarkCancelled(turnId))
+            {
+                cancelled.Add(turnId);
+            }
+            else if (!IsActive(turnId))
+            {
+                cancelled.Add(turnId);
+            }
+        }
+        return cancelled;
     }
 
     public void RaiseConfirmation(
@@ -195,6 +248,36 @@ public sealed class TurnCoordinator
         return CompleteGate(gate, new ConfirmationAnswer(approved, answersJson));
     }
 
+    /// <summary>
+    /// Clears one pending gate without answering it, used when the linked
+    /// question times out or the turn tree is cancelled from the outside.
+    /// </summary>
+    public bool RemoveTimeout(string turnId, string? toolCallId = null)
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(toolCallId))
+        {
+            var matches = GatesFor(turnId);
+            if (matches.Count == 0)
+            {
+                return false;
+            }
+            foreach (var gate in matches)
+            {
+                RemoveGate(gate);
+            }
+            return true;
+        }
+        if (_gates.TryGetValue(GateKey(turnId, toolCallId), out var single))
+        {
+            return RemoveGate(single);
+        }
+        return false;
+    }
+
     public async Task<ConfirmationAnswer?> WaitForAnswerAsync(
         string turnId,
         string toolCallId,
@@ -231,10 +314,26 @@ public sealed class TurnCoordinator
 
     public bool MarkCancelled(string turnId)
     {
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            return false;
+        }
+        bool wasActive = IsActive(turnId);
         bool signaled = _state.TryCancelTurn(turnId);
+        if (wasActive)
+        {
+            _cancelAt[turnId] = DateTimeOffset.UtcNow;
+        }
         if (_turns.TryGetValue(turnId, out var current))
         {
-            _turns[turnId] = current with { Outcome = TurnOutcome.Cancelled };
+            if (wasActive)
+            {
+                _turns[turnId] = current with { Outcome = TurnOutcome.Cancelled };
+            }
+        }
+        else if (!signaled)
+        {
+            return false;
         }
         FailGatesFor(turnId, "cancelled");
         if (
@@ -293,7 +392,7 @@ public sealed class TurnCoordinator
         return matches;
     }
 
-    private bool CompleteGate(PendingGate gate, ConfirmationAnswer answer)
+    private bool RemoveGate(PendingGate gate)
     {
         bool removed = false;
         foreach (var entry in _gates)
@@ -303,6 +402,12 @@ public sealed class TurnCoordinator
                 removed |= _gates.TryRemove(new KeyValuePair<string, PendingGate>(entry.Key, gate));
             }
         }
+        return removed;
+    }
+
+    private bool CompleteGate(PendingGate gate, ConfirmationAnswer answer)
+    {
+        bool removed = RemoveGate(gate);
         if (!removed)
         {
             return false;

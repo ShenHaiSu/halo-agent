@@ -1,0 +1,113 @@
+{
+  "contractVersion": "0.1.1",
+  "station": "cancel-budget-queue",
+  "title": "Frame/legacy parity checklist — cancel tree, true compaction, true budget and FIFO queue landed",
+  "acceptance": {
+    "cancelTree": "agent.cancel with sessionId cancels child turns before the parent turn and clears the queue; CancelTreeStopsChildBeforeParent",
+    "confirmTimeout": "confirmation waits expire per call key without dropping sibling pendings; ConfirmationTimeoutRemovesOnlyTheExpiredGate",
+    "removeTimeout": "linked question timeouts clear the matching gate; RemoveTimeoutClearsLinkedQuestion",
+    "trueCompaction": "session.compact summarizes through the gateway pool, keeps anchor plus tail groups and fires compactStarted plus compacted; TrueCompactionKeepsTailAndFiresCompacted",
+    "compactReject": "prompts during compaction fail COMPACTING and bump the reject counter; CompactingSessionRejectsPromptAndCountsReject",
+    "cancelCompaction": "session.compact with cancel stops a running compaction; CancelCompactionFlagStopsRunningCompaction",
+    "budgetFields": "usage.query carries maxTokens, usagePercentage, occupancyState and usedIsEstimated from real tokens; UsageQueryCarriesBudgetFields",
+    "budgetLimit": "denied budgets end the turn as RATE_LIMITED before gateway traffic; BudgetExceededEmitsRateLimited",
+    "queueFifo": "agent.queue, agent.drain and agent.unqueue keep memory FIFO order with depth; QueueKeepsFifoOrderAndDrainStartsPrompt",
+    "retryOrigin": "agent.retry replays the last user text with retriedFrom; RetryCarriesRetriedFrom",
+    "observableMetrics": "system.info exposes cancel counts, compact rejects and queue depth; SystemInfoExposesCancelAndQueueMetrics",
+    "titleDetails": "session.title locks explicitly and surfaces NO_USER_MESSAGE plus lock rejection; TitleLockAndFailureDetails",
+    "emissionCodes": "RATE_LIMITED and COMPACTING each fire at least once across the station suite (contract codes stay frozen; title failures travel as details NO_USER_MESSAGE, NO_PROVIDER, TITLE_PARSE_EMPTY, TITLE_SAVE_FAILED with NO_API_KEY and TITLE_TIMEOUT host-side)",
+    "rollback": "HALO_ENGINE_COMPACT, HALO_ENGINE_BUDGET and HALO_ENGINE_QUEUE switches fall back to char stub plus stub queue with no contract change"
+  },
+  "areas": {
+    "history": [
+      {
+        "checked": true,
+        "id": "history-list-page",
+        "note": "session.list/get paged read matches legacy; workspace-scoped, no silent full scan (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-item-shape",
+        "note": "history rows carry id, tool calls, tokens and reasoning; compaction rewrites keep anchor plus tail groups with a system summary (inherited, still green)"
+      },
+      {
+        "checked": false,
+        "id": "history-delete-cascade",
+        "note": "session.delete removes child sessions too — scheduled with the cutover station"
+      },
+      {
+        "checked": true,
+        "id": "history-workspace-scope",
+        "note": "list/get filter by workspace, no silent full scan; compaction resolves workspace per descriptor (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-frontend-map",
+        "note": "frame page maps to render messages (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-convergent-read",
+        "note": "prompt echo plus matching turn.done settle and incremental catch-up (inherited, still green)"
+      }
+    ],
+    "settings": [
+      {
+        "checked": false,
+        "id": "settings-roundtrip",
+        "note": "later station"
+      }
+    ],
+    "tool": [
+      {
+        "checked": true,
+        "id": "tool-card-lifecycle",
+        "note": "tool.start carries argsPreview/policy, tool.delta fires at most once per oversized call, tool.end carries success/output/exitCode/durationMs/fileBytes/errorCode/errorPayload/spilledFile/images/validatedWarnings/truncated (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "tool-confirm-questions",
+        "note": "write approval and ask_user confirm carry argsPreview/policy/timeoutSec/sessionId; ask_user additionally carries questions/questionYaml/ticketId; confirmation waits expire per call key and clear through the linked timeout path (inherited, still green)"
+      },
+      {
+        "checked": false,
+        "id": "tool-spawn-fanout",
+        "note": "engine returns the [SUBAGENT_INTERNAL] marker shape with parent linkage; sub-session Barrier fan-out stays on the legacy chain until the cutover station"
+      }
+    ],
+    "turn": [
+      {
+        "checked": true,
+        "id": "turn-prompt-retry",
+        "note": "agent.prompt and agent.retry both run the detached loop with live deltas and real tool dispatch when the gateway and runner handles are set; retry carries retriedFrom and bumps the retry counter"
+      },
+      {
+        "checked": true,
+        "id": "turn-cancel-tree",
+        "note": "agent.cancel stays on the fastest path for a single turn and fans out child-before-parent for a session tree, including linked question cleanup and queue clearing"
+      },
+      {
+        "checked": true,
+        "id": "turn-failure-copy",
+        "note": "turn.failed keeps the frozen reason set; budget overruns use RATE_LIMITED only and compaction contention uses COMPACTING with an observable reject counter"
+      }
+    ],
+    "usage": [
+      {
+        "checked": true,
+        "id": "usage-budget-bar",
+        "note": "usage.tick/query carry real input/output/cached tokens with maxTokens, usagePercentage, occupancyState and usedIsEstimated from the cached budget snapshot; backend overruns end turns as RATE_LIMITED while the display bar cutover stays with the settings station"
+      }
+    ]
+  },
+  "verifiedBy": [
+    "tests/HaloAgent.Engine.Tests/CancelBudgetQueueTests.cs (12 facts)",
+    "tests/HaloAgent.Engine.Tests/EngineReplayTests.cs",
+    "tests/HaloAgent.Engine.Tests/TurnLifecycleTests.cs",
+    "tests/HaloAgent.Engine.Tests/JournalAndCancelTests.cs",
+    "dotnet test tests/HaloAgent.Engine.Tests — 79 passed, 0 failed",
+    "dotnet test tests/Contract.Tests — 39 passed, 0 failed",
+    "dotnet test tests/HaloAgent.BridgeContract.Tests — 7 passed, 0 failed",
+    "dotnet test tests/HaloAgent.Tests — 553 passed, 0 failed"
+  ]
+}

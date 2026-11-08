@@ -29,6 +29,7 @@ public sealed class FrameServer : IAsyncDisposable
     private readonly SessionLedger _sessions = new();
     private readonly TurnCoordinator _turns;
     private readonly UsageLedger _usage = new();
+    private readonly TurnQueue _turnQueue = new();
     private readonly AttachmentIndex _attachments = new();
     private static readonly HashSet<string> ReadOnlyMethods =
         new(StringComparer.Ordinal)
@@ -66,7 +67,8 @@ public sealed class FrameServer : IAsyncDisposable
             _turns,
             _usage,
             _attachments,
-            _events
+            _events,
+            _turnQueue
         );
     }
 
@@ -75,6 +77,7 @@ public sealed class FrameServer : IAsyncDisposable
     public SessionLedger Sessions => _sessions;
     public TurnCoordinator Turns => _turns;
     public UsageLedger Usage => _usage;
+    public TurnQueue TurnQueue => _turnQueue;
     public AttachmentIndex Attachments => _attachments;
     public IEngineContext Context => _context;
 
@@ -91,6 +94,11 @@ public sealed class FrameServer : IAsyncDisposable
     public void ConfigureTurnOptions(EngineTurnOptions? options)
     {
         _context.TurnOptions = options ?? new EngineTurnOptions();
+        try
+        {
+            _usage.SetMaxTokens(_context.TurnOptions.BudgetMaxTokens);
+        }
+        catch { }
     }
 
     public void ConfigureDataRoot(string dataRoot)
@@ -251,7 +259,8 @@ public sealed class FrameServer : IAsyncDisposable
     )
     {
         string turnId = ReadString(request.Payload, "turnId");
-        if (string.IsNullOrWhiteSpace(turnId))
+        string sessionIdArg = ReadString(request.Payload, "sessionId");
+        if (string.IsNullOrWhiteSpace(turnId) && string.IsNullOrWhiteSpace(sessionIdArg))
         {
             return ResponseFrame.Fail(
                 request.Id,
@@ -260,35 +269,99 @@ public sealed class FrameServer : IAsyncDisposable
             );
         }
 
-        bool signaled = _turns.MarkCancelled(turnId);
-        string? sessionId = _turns.TrySessionOf(turnId, out string? found) ? found : null;
-        if (
-            !_turns.TrySessionOf(turnId, out _)
-            && _state.TryTakeTurnSession(turnId, out string? legacySession)
-        )
+        if (!string.IsNullOrWhiteSpace(turnId))
         {
-            sessionId = legacySession;
-        }
-        _events.Append(
-            "turn.cancelled",
-            new
+            bool signaled = _turns.MarkCancelled(turnId);
+            string? sessionId = _turns.TrySessionOf(turnId, out string? found) ? found : null;
+            if (
+                !_turns.TrySessionOf(turnId, out _)
+                && _state.TryTakeTurnSession(turnId, out string? legacySession)
+            )
             {
-                turnId,
-                sessionId,
-                signaled
+                sessionId = legacySession;
             }
-        );
-        var response = signaled
-            ? ResponseFrame.Success(request.Id, new { turnId, signaled })
-            : ResponseFrame.Fail(
-                request.Id,
-                "NOT_FOUND",
-                "Turn is unknown or already finished.",
-                turnId
+            _turns.RemoveTimeout(turnId);
+            _events.Append(
+                "turn.cancelled",
+                new
+                {
+                    turnId,
+                    sessionId,
+                    signaled
+                }
             );
-        _state.StoreEcho(request.Id, response);
+            var response = signaled
+                ? ResponseFrame.Success(request.Id, new { turnId, signaled })
+                : ResponseFrame.Fail(
+                    request.Id,
+                    "NOT_FOUND",
+                    "Turn is unknown or already finished.",
+                    turnId
+                );
+            _state.StoreEcho(request.Id, response);
+            await Task.CompletedTask;
+            return response;
+        }
+
+        string rootSession = sessionIdArg.Trim();
+        IReadOnlyList<string> tree = _sessions.ListTreeSessions(rootSession);
+        if (tree.Count == 0)
+        {
+            var missing = ResponseFrame.Fail(request.Id, "NOT_FOUND", "Session is unknown.");
+            _state.StoreEcho(request.Id, missing);
+            return missing;
+        }
+        var treeSet = new HashSet<string>(tree, StringComparer.Ordinal);
+        IReadOnlyList<string> cancelled = _turns.CancelTreeBySessions(treeSet.Contains);
+        foreach (string cancelledTurn in cancelled)
+        {
+            _turns.RemoveTimeout(cancelledTurn);
+            string? turnSession = _turns.TrySessionOf(cancelledTurn, out string? located)
+                ? located
+                : rootSession;
+            _events.Append(
+                "turn.cancelled",
+                new
+                {
+                    turnId = cancelledTurn,
+                    sessionId = turnSession,
+                    signaled = true,
+                    reason = "cancelled",
+                }
+            );
+        }
+        int compactCancelled = 0;
+        foreach (string member in tree)
+        {
+            if (_sessions.TryCancelCompaction(member))
+            {
+                compactCancelled++;
+                _events.Append(
+                    "session.updated",
+                    new { sessionId = member, reason = "compactCancelled" }
+                );
+            }
+            _turnQueue.Clear(member);
+        }
+        var treeResponse =
+            cancelled.Count > 0 || compactCancelled > 0
+                ? ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        sessionId = rootSession,
+                        cancelledTurns = cancelled,
+                        compactCancelled
+                    }
+                )
+                : ResponseFrame.Fail(
+                    request.Id,
+                    "NOT_FOUND",
+                    "No running turn in this session tree."
+                );
+        _state.StoreEcho(request.Id, treeResponse);
         await Task.CompletedTask;
-        return response;
+        return treeResponse;
     }
 
     private async Task ReadLoopAsync(CancellationToken token)

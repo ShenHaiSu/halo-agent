@@ -274,7 +274,19 @@ public sealed class TurnRunner
         }
 
         int estimated = EstimateTokens(promptText) + EstimateHistoryTokens(sessionId);
-        IEngineBudget? budget = _context.Budget;
+        bool budgetGate = _context.TurnOptions is null || _context.TurnOptions.EnableTrueBudget;
+        try
+        {
+            budgetGate =
+                budgetGate
+                && !string.Equals(
+                    Environment.GetEnvironmentVariable("HALO_ENGINE_BUDGET"),
+                    "0",
+                    StringComparison.Ordinal
+                );
+        }
+        catch { }
+        IEngineBudget? budget = budgetGate ? _context.Budget : null;
         if (budget is not null)
         {
             BudgetDecision verdict;
@@ -312,6 +324,26 @@ public sealed class TurnRunner
             for (int round = 1; round <= maxRounds; round++)
             {
                 turnToken.ThrowIfCancellationRequested();
+                bool trueBudget =
+                    _context.TurnOptions is null || _context.TurnOptions.EnableTrueBudget;
+                if (trueBudget)
+                {
+                    try
+                    {
+                        var live = _usage.BudgetStatus();
+                        if (live.MaxTokens > 0 && live.UsedTokens >= live.MaxTokens)
+                        {
+                            FailTurn(
+                                sessionId,
+                                turnId,
+                                "RATE_LIMITED",
+                                "Budget exceeded; try compacting the session."
+                            );
+                            return;
+                        }
+                    }
+                    catch { }
+                }
                 var request = new EngineLlmRequest(
                     sessionId,
                     turnId,
@@ -604,10 +636,18 @@ public sealed class TurnRunner
 
         _context.Events.Append("text.done", new { turnId, length = text.Length });
 
+        bool estimated = usage is null;
         long inputTokens = usage?.InputTokens ?? EstimateTokens(promptOf(request));
         long outputTokens = usage?.OutputTokens ?? EstimateTokens(text);
         long cachedTokens = usage?.CachedTokens ?? 0;
-        _usage.Record(inputTokens, outputTokens, cachedTokens);
+        if (estimated)
+        {
+            _usage.RecordEstimated(inputTokens, outputTokens);
+        }
+        else
+        {
+            _usage.Record(inputTokens, outputTokens, cachedTokens);
+        }
         _context.Events.Append(
             "usage.tick",
             new
@@ -616,6 +656,7 @@ public sealed class TurnRunner
                 inputTokens,
                 outputTokens,
                 cachedTokens,
+                usedIsEstimated = estimated,
             }
         );
 
