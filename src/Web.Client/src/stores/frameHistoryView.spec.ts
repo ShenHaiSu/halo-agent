@@ -63,11 +63,11 @@ describe('frame history view source', () => {
     expect(resolveHistoryMode(['turn'])).toBe('legacy');
   });
 
-  it('keeps every other face on legacy while history rides frame', () => {
+  it('lets the owned faces ride frame while unowned faces stay legacy', () => {
     const override = ['history', 'turn', 'tool', 'usage', 'settings'] as const;
     expect(resolveMode('history', [...override])).toBe('frame');
-    expect(resolveMode('turn', [...override])).toBe('legacy');
-    expect(resolveMode('tool', [...override])).toBe('legacy');
+    expect(resolveMode('turn', [...override])).toBe('frame');
+    expect(resolveMode('tool', [...override])).toBe('frame');
     expect(resolveMode('usage', [...override])).toBe('legacy');
     expect(resolveMode('settings', [...override])).toBe('legacy');
   });

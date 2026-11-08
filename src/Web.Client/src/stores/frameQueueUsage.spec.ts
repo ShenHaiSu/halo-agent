@@ -30,9 +30,14 @@ describe('frame queue store', () => {
   it('routes queue calls through the bound transport', async () => {
     const store = useFrameQueueStore();
     expect(await store.enqueue({})).toBe(false);
-    store.bind(new MockTransport());
+    const transport = new MockTransport();
+    store.bind(transport);
     expect(await store.enqueue({})).toBe(true);
-    expect(await store.cancelTurn('turn-7')).toBe(true);
+    const created = await transport.invoke('session.new', { title: 'demo' });
+    const sessionId = created.result?.['sessionId'] as string;
+    const prompted = await transport.invoke('agent.prompt', { sessionId, text: 'hi', needsConfirm: true });
+    const turnId = prompted.result?.['turnId'] as string;
+    expect(await store.cancelTurn(turnId)).toBe(true);
     expect(await store.answer(true)).toBe(false);
     expect(store.lastError).not.toBe('');
   });

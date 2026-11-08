@@ -13,7 +13,17 @@ export interface ProjectedTurn {
   turnId: string;
   sessionId: string;
   text: string;
+  /** Streamed reasoning channel; rendered in the timeline reasoning slot. */
+  reasoning: string;
   status: ProjectedTurnStatus;
+  /** Failure record from turn.failed; shown in the outcome card. */
+  reason: string;
+  hint: string;
+  /** Cancel record from turn.cancelled; null until the event arrives. */
+  signaled: boolean | null;
+  cancelReason: string;
+  /** Section number from the history index; null when the event omits it. */
+  sectionIndex: number | null;
   tools: ProjectedToolCall[];
   updatedSeq: number;
 }
@@ -21,6 +31,16 @@ export interface ProjectedTurn {
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === 'string' ? value : '';
+}
+
+function readSectionIndex(record: Record<string, unknown>): number | null {
+  const candidates = [record['historyIndex'], record['index'], record['sectionIndex']];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0) {
+      return Math.floor(candidate);
+    }
+  }
+  return null;
 }
 
 /**
@@ -92,7 +112,20 @@ export class TurnProjectionBoard {
   private ensure(turnId: string, sessionId: string, seq: number): ProjectedTurn {
     let card = this.turns.get(turnId);
     if (!card) {
-      card = { turnId, sessionId, text: '', status: 'running', tools: [], updatedSeq: seq };
+      card = {
+        turnId,
+        sessionId,
+        text: '',
+        reasoning: '',
+        status: 'running',
+        reason: '',
+        hint: '',
+        signaled: null,
+        cancelReason: '',
+        sectionIndex: null,
+        tools: [],
+        updatedSeq: seq,
+      };
       this.turns.set(turnId, card);
       if (sessionId !== '') {
         const ids = this.bySession.get(sessionId) ?? [];
@@ -118,6 +151,8 @@ export class TurnProjectionBoard {
     if (turnId === '') return;
     const card = this.ensure(turnId, readString(params, 'sessionId'), seq);
     card.status = 'running';
+    const section = readSectionIndex(params);
+    if (section !== null) card.sectionIndex = section;
     card.updatedSeq = seq;
   }
 
@@ -125,7 +160,11 @@ export class TurnProjectionBoard {
     const turnId = readString(params, 'turnId');
     if (turnId === '') return;
     const card = this.ensure(turnId, readString(params, 'sessionId'), seq);
-    card.text += readString(params, 'delta');
+    if (readString(params, 'kind') === 'reasoning') {
+      card.reasoning += readString(params, 'delta');
+    } else {
+      card.text += readString(params, 'delta');
+    }
     card.updatedSeq = seq;
   }
 
@@ -195,6 +234,15 @@ export class TurnProjectionBoard {
     if (turnId === '') return;
     const card = this.ensure(turnId, readString(params, 'sessionId'), seq);
     card.status = status;
+    if (status === 'failed') {
+      card.reason = readString(params, 'reason') || readString(params, 'code');
+      card.hint = readString(params, 'hint');
+    }
+    if (status === 'cancelled') {
+      const signaled = params['signaled'];
+      card.signaled = typeof signaled === 'boolean' ? signaled : null;
+      card.cancelReason = readString(params, 'reason');
+    }
     card.updatedSeq = seq;
   }
 }
