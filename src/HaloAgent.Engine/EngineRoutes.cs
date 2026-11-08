@@ -213,6 +213,7 @@ internal static class EngineRoutes
                     index = m.Index,
                     role = m.Role,
                     text = TruncateForDisplay(m.Text),
+                    truncated = m.Text.Length > TruncatePreviewLimit,
                     turnId = m.TurnId,
                 })
                 .ToList();
@@ -348,6 +349,7 @@ internal static class EngineRoutes
                     ResponseFrame.Success(request.Id, new { turnId, awaitingConfirmation = true })
                 );
             }
+            var attached = RegisterAttachments(request.Payload, sessionId, attachments);
             string toolCall = Guid.NewGuid().ToString("N");
             events.Append(
                 "tool.start",
@@ -355,7 +357,14 @@ internal static class EngineRoutes
                 {
                     turnId,
                     toolCallId = toolCall,
-                    toolName = "reply"
+                    toolName = "reply",
+                    attachments = attached.Select(a => new
+                    {
+                        digest = a.Digest,
+                        fileName = a.FileName,
+                        byteSize = a.ByteSize,
+                        path = a.RelativePath
+                    })
                 }
             );
             events.Append(
@@ -487,7 +496,21 @@ internal static class EngineRoutes
         routes["tool.undoRollback"] = (request, context, token) =>
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
-            events.Append("session.updated", new { sessionId, reason = "rollback" });
+            if (!sessions.TryRollbackLast(sessionId, out var removed))
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "NOT_FOUND", "Nothing to roll back.")
+                );
+            }
+            events.Append(
+                "session.updated",
+                new
+                {
+                    sessionId,
+                    reason = "rollback",
+                    removedTurnId = removed!.TurnId
+                }
+            );
             return Task.FromResult(
                 ResponseFrame.Success(request.Id, new { sessionId, rolledBack = true })
             );
@@ -611,13 +634,55 @@ internal static class EngineRoutes
         return defaultValue;
     }
 
+    internal const int TruncatePreviewLimit = 2048;
+
     internal static string TruncateForDisplay(string text)
     {
-        const int previewLimit = 2048;
-        if (string.IsNullOrEmpty(text) || text.Length <= previewLimit)
+        if (string.IsNullOrEmpty(text) || text.Length <= TruncatePreviewLimit)
         {
             return text;
         }
-        return text.Substring(0, previewLimit);
+        return text.Substring(0, TruncatePreviewLimit);
+    }
+
+    internal static IReadOnlyList<AttachmentReference> RegisterAttachments(
+        JsonElement payload,
+        string sessionId,
+        AttachmentIndex attachments
+    )
+    {
+        var registered = new List<AttachmentReference>();
+        if (
+            payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("attachments", out var node)
+            || node.ValueKind != JsonValueKind.Array
+        )
+        {
+            return registered;
+        }
+        foreach (var entry in node.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            string digest = entry.TryGetProperty("digest", out var digestNode)
+                ? digestNode.GetString() ?? string.Empty
+                : string.Empty;
+            string fileName = entry.TryGetProperty("fileName", out var nameNode)
+                ? nameNode.GetString() ?? "attachment.bin"
+                : "attachment.bin";
+            long byteSize =
+                entry.TryGetProperty("byteSize", out var sizeNode)
+                && sizeNode.TryGetInt64(out long parsed)
+                    ? parsed
+                    : 0;
+            if (string.IsNullOrWhiteSpace(digest))
+            {
+                continue;
+            }
+            registered.Add(attachments.Register(digest, sessionId, fileName, byteSize));
+        }
+        return registered;
     }
 }

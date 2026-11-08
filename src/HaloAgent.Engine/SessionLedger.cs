@@ -73,6 +73,21 @@ public sealed class SessionLedger
         }
     }
 
+    public bool TryRollbackLast(string sessionId, out StoredMessage? removed)
+    {
+        lock (_gate)
+        {
+            removed = null;
+            if (!_history.TryGetValue(sessionId, out var list) || list.Count == 0)
+            {
+                return false;
+            }
+            removed = list[^1];
+            list.RemoveAt(list.Count - 1);
+            return true;
+        }
+    }
+
     public IReadOnlyList<(string SessionId, string Title)> List()
     {
         lock (_gate)

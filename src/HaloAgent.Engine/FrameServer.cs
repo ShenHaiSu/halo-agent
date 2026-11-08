@@ -139,6 +139,62 @@ public sealed class FrameServer : IAsyncDisposable
     public EventBatch ReadEvents(long sinceSequence, int maxCount) =>
         _events.ReadSince(sinceSequence, maxCount);
 
+    /// <summary>
+    /// Persists every known session ledger to the directory with atomic
+    /// rewrite plus backup, so a failed compaction or rewrite can be rolled back.
+    /// </summary>
+    public void SaveSessions(string directory)
+    {
+        foreach (var entry in _sessions.List())
+        {
+            JsonlHistoryFile.Save(
+                directory,
+                entry.SessionId,
+                entry.Title,
+                _sessions.Snapshot(entry.SessionId)
+            );
+        }
+    }
+
+    /// <summary>Reloads persisted ledgers back into memory; corrupt lines are skipped.</summary>
+    public void LoadSessions(string directory)
+    {
+        foreach (var entry in _sessions.List().ToList())
+        {
+            _sessions.Delete(entry.SessionId);
+        }
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+        foreach (string metaPath in Directory.EnumerateFiles(directory, "*.meta.json"))
+        {
+            string sessionId = Path.GetFileNameWithoutExtension(metaPath);
+            if (sessionId.EndsWith(".meta", StringComparison.Ordinal))
+            {
+                sessionId = sessionId.Substring(0, sessionId.Length - ".meta".Length);
+            }
+            if (JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages))
+            {
+                _sessions.Restore(sessionId, title, messages);
+            }
+        }
+    }
+
+    /// <summary>Restores one session from its backup file after a bad rewrite.</summary>
+    public bool RollbackSession(string directory, string sessionId)
+    {
+        bool restored = JsonlHistoryFile.TryRollback(directory, sessionId);
+        if (
+            restored
+            && JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages)
+        )
+        {
+            _sessions.Restore(sessionId, title, messages);
+        }
+        return restored;
+    }
+
     private async Task<ResponseFrame> HandleCancelFastAsync(
         RequestFrame request,
         CancellationToken cancellationToken
