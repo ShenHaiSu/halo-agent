@@ -1,6 +1,11 @@
 <template>
   <KeepAlive :max="3">
-    <div v-show="paneActive" :aria-hidden="paneActive ? undefined : 'true'" class="flex-1 min-h-0 min-w-0 flex flex-col">
+    <div
+      v-show="paneActive"
+      :aria-hidden="paneActive ? undefined : 'true'"
+      class="flex-1 min-h-0 min-w-0 flex flex-col"
+      :class="motionOn ? 'veil-motion-on' : ''"
+    >
       <TimelineView
         :is-empty="t.persistedMessages.length === 0 && !t.stream.hasActiveTurn"
         :items="t.timelineItems"
@@ -9,6 +14,9 @@
         :show-jump-btn="!!t.showJump"
         :reading-window="!!t.readingWindow"
         :veil-covering="veilCovering"
+        :veil-leaving="veilLeaving"
+        :veil-pre-enter="veilPreEnter"
+        :motion-on="motionOn"
         :chat-width-mode="t.chatWidthMode"
         :is-expanded="t.isTurnExpanded"
         :is-run-expanded="t.isRunExpanded"
@@ -118,45 +126,156 @@ t.setPaneVisible(true);
  */
 const veilCovering = ref(false);
 const VEIL_MIN_MESSAGES = 5;
+const VEIL_MOTION_KEY = 'halo-veil-motion';
 const workspaceStore = useWorkspaceStore();
 let settleCtrl: SettleController | null = null;
 let sampleEl: HTMLElement | null = null;
 let sampleRaf = 0;
-
+let postLeaveFrames = 0;
+let leavingHeight = 0;
+let skipImgQuery = false;
+function readVeilMotionFlag(): boolean {
+  try {
+    const raw = localStorage.getItem(VEIL_MOTION_KEY);
+    if (raw === null) return true;
+    return raw !== 'off' && raw !== '0' && raw !== 'false';
+  } catch {
+    if (import.meta.env.DEV) {
+      try {
+        console.debug('[veil-motion] flag read failed, degrade to off');
+      } catch {
+        /* ignore */
+      }
+    }
+    return false;
+  }
+}
+const veilMotionOn = ref(readVeilMotionFlag());
+const veilReduced = ref(false);
+try {
+  veilReduced.value = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+} catch {
+  veilReduced.value = false;
+}
+const motionOn = computed(() => veilMotionOn.value && !veilReduced.value);
+const veilLeaving = ref(false);
+const veilPreEnter = ref(false);
 function stopSampling(): void {
   if (sampleRaf) cancelAnimationFrame(sampleRaf);
   sampleRaf = 0;
 }
-
+function readLeaveMs(): number | undefined {
+  try {
+    if (!sampleEl) return undefined;
+    const raw = getComputedStyle(sampleEl).getPropertyValue('--veil-leave-ms').trim();
+    if (!raw) return undefined;
+    if (raw.endsWith('ms')) {
+      const v = parseFloat(raw);
+      return Number.isFinite(v) ? v : undefined;
+    }
+    if (raw.endsWith('s')) {
+      const v = parseFloat(raw) * 1000;
+      return Number.isFinite(v) ? v : undefined;
+    }
+    const v = parseFloat(raw);
+    return Number.isFinite(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function countImgPending(): number {
+  if (!sampleEl) return 0;
+  try {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+    const n = sampleEl.querySelectorAll('img:not([data-loaded])').length;
+    if (typeof performance !== 'undefined' && performance.now() - t0 > 1) skipImgQuery = true;
+    return n;
+  } catch {
+    return 0;
+  }
+}
 function startSampling(): void {
   stopSampling();
+  let frame = 0;
   const loop = (): void => {
     sampleRaf = 0;
-    if (!veilCovering.value || !settleCtrl || !sampleEl) return;
-    settleCtrl.sample({ scrollHeight: sampleEl.scrollHeight, clientHeight: sampleEl.clientHeight });
-    if (!veilCovering.value) return;
+    if (!settleCtrl || !sampleEl) return;
+    if (settleCtrl.phase === 'off') return;
+    frame++;
+    let imgPending = 0;
+    if (motionOn.value && !(skipImgQuery && frame % 2 === 0)) imgPending = countImgPending();
+    const s = { scrollHeight: sampleEl.scrollHeight, clientHeight: sampleEl.clientHeight, imgPending };
+    if (settleCtrl.phase === 'leaving') {
+      postLeaveFrames++;
+      if (postLeaveFrames >= 2 && Math.abs(s.scrollHeight - leavingHeight) > 8) {
+        settleCtrl.revertToCovering();
+        postLeaveFrames = 0;
+        leavingHeight = s.scrollHeight;
+      }
+      if ((settleCtrl.phase as string) !== 'off') sampleRaf = requestAnimationFrame(loop);
+      return;
+    }
+    settleCtrl.sample(s);
+    if ((settleCtrl.phase as string) === 'off') return;
     sampleRaf = requestAnimationFrame(loop);
   };
   sampleRaf = requestAnimationFrame(loop);
 }
-
 function beginSettle(): void {
   settleCtrl?.dispose();
   stopSampling();
-  // 短会话（新会话/极少消息）不遮：本来就不会露白，闪一下骨架屏反而更糟。
+  postLeaveFrames = 0;
+  if (sampleEl) {
+    try {
+      sampleEl.scrollTop = 0;
+    } catch {
+      /* ignore */
+    }
+  }
   const shortSession = (t.persistedMessages?.length || 0) < VEIL_MIN_MESSAGES;
-  settleCtrl = createSettleController({ shortSession });
+  if (!motionOn.value) {
+    settleCtrl = createSettleController({ shortSession });
+  } else {
+    const leaveMs = readLeaveMs();
+    settleCtrl = createSettleController({ shortSession, leaveMs, minCoverMs: 120 });
+  }
   veilCovering.value = settleCtrl.veilCovering;
-  settleCtrl.onPhase = () => {
-    veilCovering.value = settleCtrl ? settleCtrl.veilCovering : false;
-    if (!veilCovering.value) stopSampling();
+  veilLeaving.value = motionOn.value && settleCtrl.veilLeaving;
+  if (veilCovering.value && motionOn.value) {
+    veilPreEnter.value = true;
+    requestAnimationFrame(() => {
+      veilPreEnter.value = false;
+    });
+  } else {
+    veilPreEnter.value = false;
+  }
+  settleCtrl.onPhase = (p) => {
+    if (!settleCtrl) return;
+    if (p === 'leaving') {
+      veilCovering.value = true;
+      veilLeaving.value = motionOn.value;
+      if (sampleEl) leavingHeight = sampleEl.scrollHeight;
+      postLeaveFrames = 0;
+    } else if (p === 'covering') {
+      veilCovering.value = true;
+      veilLeaving.value = false;
+      postLeaveFrames = 0;
+      if (sampleEl) leavingHeight = sampleEl.scrollHeight;
+    } else {
+      veilCovering.value = false;
+      veilLeaving.value = false;
+      veilPreEnter.value = false;
+      stopSampling();
+    }
   };
   if (veilCovering.value) startSampling();
 }
-
 watch(
   () => workspaceStore.activeSessionId,
-  () => beginSettle()
+  (newId, oldId) => {
+    if (newId === oldId) return;
+    beginSettle();
+  }
 );
 onUnmounted(() => {
   stopSampling();

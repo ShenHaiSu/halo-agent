@@ -23,6 +23,8 @@
               height="96"
               object-fit="cover"
               class="rounded border msg-thumb-slot"
+              @load="markImgLoaded"
+              @error="markImgLoaded"
             />
             <n-tag v-else-if="imgLostWrap(img)" size="small" :bordered="true" :title="img.fileName" class="msg-thumb-slot">
               {{ img.fileName }}
@@ -287,6 +289,15 @@ function imgLostWrap(img: ChatImageRef): boolean {
     return (img as ChatImageRef).lost === true;
   } catch {
     return false;
+  }
+}
+/** P03-P2：图片解码打点（与 TimelineRow 同源；缺失回退靠 600ms 兜底封顶）。 */
+function markImgLoaded(e: Event): void {
+  try {
+    const t = e.target as HTMLElement | null;
+    t?.setAttribute?.('data-loaded', 'true');
+  } catch {
+    /* ignore */
   }
 }
 function groupOf(st: UserTurnStep): TurnGroup {

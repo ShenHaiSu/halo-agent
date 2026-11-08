@@ -21,6 +21,8 @@
             object-fit="cover"
             class="rounded border msg-thumb-slot"
             :data-testid="`msg-image-${img.imageId}`"
+            @load="markImgLoaded"
+            @error="markImgLoaded"
           />
           <!-- 丢失：保留原有标签语义，但占同一尺寸槽位 -->
           <n-tag v-else-if="isImgLost(img)" size="small" :bordered="true" :title="img.fileName" class="msg-thumb-slot">
@@ -196,6 +198,15 @@ const props = defineProps<{
 function isImgLost(img: ChatImageRef): boolean {
   if (props.imgLost) return props.imgLost(img);
   return img.lost === true;
+}
+/** P03-P2：图片解码打点——load/error 后给底层 img 挂 data-loaded，settle 采样据此放行；缺失回退靠 600ms 兜底封顶。 */
+function markImgLoaded(e: Event): void {
+  try {
+    const t = e.target as HTMLElement | null;
+    t?.setAttribute?.('data-loaded', 'true');
+  } catch {
+    /* ignore */
+  }
 }
 /** need02-P1：pending 态（sending/failed/''）。 */
 const pendingState = computed<string>(() => {

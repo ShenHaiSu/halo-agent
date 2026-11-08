@@ -6,6 +6,15 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="alternate icon" type="image/png" href="./favicon.png" />
     <title>Halo-Agent Desktop</title>
+    <script>
+      try {
+        var raw = localStorage.getItem('halo.appearance.v1');
+        var mode = raw ? JSON.parse(raw).themeMode : 'dark';
+        var root = document.documentElement;
+        root.classList.remove('dark', 'light');
+        root.classList.add(mode === 'light' ? 'light' : 'dark');
+      } catch (e) { /* 首屏缺省即 dark，无 class 时 veil 按亮回退可接受 */ }
+    </script>
   </head>
   <body>
     <div id="app"></div>

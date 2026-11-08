@@ -6,7 +6,11 @@
     :data-transcript-settling="veilCovering ? 'true' : undefined"
     :data-need02="need02Attr"
   >
-    <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
+    <div
+      :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'"
+      :inert="veilCovering && motionOn !== false ? true : undefined"
+      :aria-busy="veilCovering ? 'true' : undefined"
+    >
       <div v-if="isEmpty" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
           <Bot class="w-8 h-8 text-accent" />
@@ -186,21 +190,28 @@
         @delete="emit('menu-delete')"
       />
     </div>
-    <div v-if="veilCovering" class="transcript-veil" aria-hidden="true">
+    <div
+      v-if="veilCovering"
+      class="transcript-veil"
+      :class="{ 'is-pre-enter': veilPreEnter, 'is-leaving': veilLeaving }"
+      aria-hidden="true"
+    >
       <div class="transcript-skeleton" />
       <div class="transcript-skeleton short" />
       <div class="transcript-skeleton" />
     </div>
-    <button
-      v-if="showJumpVisible"
-      type="button"
-      class="show-jump-pill"
-      data-testid="show-jump"
-      title="回到底部"
-      @click="emit('jump-latest')"
-    >
-      回到底部
-    </button>
+    <Transition name="show-jump">
+      <button
+        v-if="showJumpVisible"
+        type="button"
+        class="show-jump-pill"
+        data-testid="show-jump"
+        title="回到底部"
+        @click="emit('jump-latest')"
+      >
+        回到底部
+      </button>
+    </Transition>
   </div>
 </template>
 <script setup lang="ts">
@@ -267,6 +278,9 @@ const props = defineProps<{
   showJumpBtn?: boolean;
   readingWindow?: boolean;
   veilCovering?: boolean;
+  veilLeaving?: boolean;
+  veilPreEnter?: boolean;
+  motionOn?: boolean;
   /** need02-P0：开关透传串（data-need02），缺省 undefined 时不渲染该属性，零视觉变更。 */
   need02Attr?: string;
   /** need02-P1：pending 判定/状态（可选，缺省时 TimelineRow 回落到 id 前缀）。 */
@@ -434,5 +448,85 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
   border: none;
   cursor: pointer;
   z-index: 6;
+  z-index: 6;
+}
+/* P03 veil-motion：变量声明在 scroll 层（veil 子树外可读，MessageTimeline 从 sampleEl 读取） */
+.transcript-scroll {
+  --veil-enter-ms: 120ms;
+  --veil-leave-ms: 180ms;
+  --veil-ease-enter: ease-out;
+  --veil-ease-leave: ease-in;
+}
+/* P03：veil 类名淡出（背景色由文件尾全局 style 块按 html.dark/light 直连，scoped 内禁写主题选择器） */
+.transcript-veil {
+  transition: opacity var(--veil-enter-ms) var(--veil-ease-enter);
+  opacity: 1;
+  pointer-events: none;
+}
+.transcript-veil.is-pre-enter {
+  opacity: 0;
+}
+.transcript-veil.is-leaving {
+  opacity: 0;
+  transition: opacity var(--veil-leave-ms) var(--veil-ease-leave);
+}
+/* P03：内容微淡入（仅 veil-motion-on 门控内生效，关开关零副作用） */
+.veil-motion-on .chat-timeline-centered,
+.veil-motion-on .chat-timeline-full {
+  transition: opacity 120ms ease-out;
+}
+.transcript-scroll[data-transcript-settling] .chat-timeline-centered,
+.transcript-scroll[data-transcript-settling] .chat-timeline-full {
+  opacity: 0.97;
+}
+.transcript-scroll:not([data-transcript-settling]) .chat-timeline-centered,
+.transcript-scroll:not([data-transcript-settling]) .chat-timeline-full {
+  opacity: 1;
+}
+/* P03：pill 淡入（与 veil 类名体系不同名，避免串扰） */
+.show-jump-pill {
+  transition: opacity 120ms ease-out;
+}
+.show-jump-enter-active {
+  transition: opacity 120ms ease-out;
+}
+.show-jump-enter-from {
+  opacity: 0;
+}
+/* P03：reduced-motion 下零动画（含存量缺失的 veil-shimmer，本期补） */
+@media (prefers-reduced-motion: reduce) {
+  .transcript-veil,
+  .transcript-veil.is-leaving,
+  .transcript-skeleton {
+    transition: none;
+    animation: none;
+  }
+  .veil-motion-on .chat-timeline-centered,
+  .veil-motion-on .chat-timeline-full {
+    transition: none;
+  }
+  .show-jump-pill,
+  .show-jump-enter-active {
+    transition: none;
+  }
+}
+</style>
+<style>
+/* P03 主题接线（全局块，不经 scoped 编译）。
+ * 原因：scoped 内 global 函数式写法（html.dark + 后代 veil/skeleton）会被编译器丢弃后代选择器、
+ * 输出为光秃 html.dark（实测输出为证），导致暗黑兜底挂错元素、veil 回退亮色。 */
+html.dark .transcript-veil {
+  background: var(--n-body-color, #0d1117);
+}
+html.light .transcript-veil {
+  background: var(--n-body-color, #f8fafc);
+}
+html.light .transcript-skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+}
+html.dark .transcript-skeleton {
+  background: linear-gradient(90deg, #1b2430 25%, #2a3646 50%, #1b2430 75%);
+  background-size: 200% 100%;
 }
 </style>
