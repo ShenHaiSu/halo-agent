@@ -46,12 +46,7 @@
         class="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-red-500 select-none"
       >
         <span>发送失败·点击重发</span>
-        <button
-          type="button"
-          class="pending-retry-btn"
-          data-testid="pending-retry-btn"
-          @click.stop="emit('retry-pending', item)"
-        >
+        <button type="button" class="pending-retry-btn" data-testid="pending-retry-btn" @click.stop="emit('retry-pending', item)">
           重发
         </button>
       </div>
@@ -93,6 +88,7 @@
       :pending-status="pendingStatusOfTurn"
       :live-completing="!!liveCompleting && !!isLast"
       :handoff-anim="handoffAnim !== false"
+      :single-process="singleProcess !== false"
       @toggle="emit('toggle', $event)"
       @user-menu="(e) => emit('user-menu', e, item)"
       @assistant-menu="(e) => emit('assistant-menu', e, item)"
@@ -128,7 +124,11 @@
     />
   </div>
   <!-- need02-P4（P4b#6）：轮内 notice 兜底（末条非 user-turn 时，如 system 尾，挂行尾而非丢提示）。 -->
-  <div v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError) && item.kind !== 'user-turn'" class="mt-1.5 space-y-1.5" data-testid="user-turn-notice">
+  <div
+    v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError) && item.kind !== 'user-turn'"
+    class="mt-1.5 space-y-1.5"
+    data-testid="user-turn-notice"
+  >
     <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
     <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
     <div v-if="showRetry" class="flex items-center gap-2">
@@ -184,6 +184,8 @@ const props = defineProps<{
   liveCompleting?: boolean;
   /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省 true（老调用方行为不变）。 */
   handoffAnim?: boolean;
+  /** P02-P1：单容器三段模板开关；缺省 true（老调用方行为不变，off 回旧链）。 */
+  singleProcess?: boolean;
   /** need02-P4（P4b#6）：轮内 notice 开关（p4&&p2；false 时 notice 回 TimelineView 全局区）。 */
   noticeInTurn?: boolean;
   turnNotice?: string;
@@ -247,7 +249,7 @@ const isPendingMsg = computed<boolean>(() => {
     return false;
   }
 });
-void isPendingMsg;
+void isPendingMsg.value;
 const pendingCls = computed<string>(() => {
   if (pendingState.value === 'failed') return 'border-red-400 pending-failed-bubble';
   return 'border-subtle';

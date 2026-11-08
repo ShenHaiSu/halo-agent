@@ -14,6 +14,7 @@ import {
   NEED02_FLAG_KEYS,
   need02Attr,
   readNeed02Flags,
+  readP02Flags,
   resolveTimelineMode,
   type Need02StorageLike,
 } from '@features/need02/utils/need02Flags';
@@ -120,5 +121,24 @@ describe('need02Attr 透传串', () => {
 
   it('混合', () => {
     expect(need02Attr({ p1: true, p2: false, p3: true, p4: false })).toBe('p1:on,p2:off,p3:on,p4:off');
+  });
+});
+
+describe('P02 readP02Flags 三开关', () => {
+  it('缺省全开', () => {
+    expect(readP02Flags(fakeStorage())).toEqual({ liveCoalesce: true, singleProcess: true, projectionMerge: true });
+  });
+
+  it('显式 off 关闭且互相独立', () => {
+    expect(readP02Flags(fakeStorage({ 'halo-live-coalesce': 'OFF' })).liveCoalesce).toBe(false);
+    expect(readP02Flags(fakeStorage({ 'halo-single-process': 'off' })).singleProcess).toBe(false);
+    expect(readP02Flags(fakeStorage({ 'halo-projection-merge': 'off' })).projectionMerge).toBe(false);
+    const one = readP02Flags(fakeStorage({ 'halo-live-coalesce': 'off' }));
+    expect(one.singleProcess).toBe(true);
+    expect(one.projectionMerge).toBe(true);
+  });
+
+  it('storage 抛错降级为关（旧链），绝不炸时间轴', () => {
+    expect(readP02Flags(throwingStorage())).toEqual({ liveCoalesce: false, singleProcess: false, projectionMerge: false });
   });
 });

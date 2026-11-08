@@ -57,6 +57,7 @@ function mountTimeline(segs: unknown[]) {
       protocolOf: () => '',
       cacheLineOf: () => '',
       hasActiveTurn: true,
+      liveCoalesce: false,
       thinkingLine: '',
       isGenerating: false,
       segs: segs as never,

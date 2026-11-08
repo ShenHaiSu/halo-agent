@@ -31,6 +31,8 @@
         :notice-in-turn="!!t.noticeInTurn"
         :has-active-turn="t.stream.hasActiveTurn && !t.need02Flags.p2"
         :thinking-line="`思考中… · 本轮 ${t.curIterToolCount} 个工具 · 第 ${t.curIteration} 轮`"
+        :live-coalesce="p02.liveCoalesce"
+        :single-process="p02.singleProcess"
         :is-generating="t.transcriptRunning"
         :segs="t.displaySegs"
         :live-segs="t.liveInclusiveSegs"
@@ -73,7 +75,7 @@ import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import TimelineView from './TimelineView.vue';
 import { useTimeline } from '../composables/useTimeline';
 import { renderMarkdown, renderMarkdownCached, renderStreamingText } from '@features/session/utils/markdownRender';
-import { isP4SubOn } from '@features/need02/utils/need02Flags';
+import { isP4SubOn, useP02Flags } from '@features/need02/utils/need02Flags';
 import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
 import type { UserTurn } from '@features/session/utils/userTurn';
 import { createSettleController, type SettleController } from '@features/session/utils/transcriptSettle';
@@ -91,9 +93,18 @@ function renderHtml(s: string): string {
 }
 
 const t = reactive(useTimeline());
-// Hidden pane never follows/pages/samples; 显隐保留滚动（v-show 不重建 DOM）。
+/** P02：渲染三开关入口一次快照（后续只读；失败降级旧链，见 readP02Flags）。 */
+const p02 = useP02Flags();
+if (import.meta.env.DEV) {
+  try {
+    console.debug('[p02] flags snapshot', { ...p02 });
+  } catch {
+    /* ignore */
+  }
+}
 const paneActive = ref(true);
 t.setPaneVisible(true);
+// Hidden pane never follows/pages/samples; 显隐保留滚动（v-show 不重建 DOM）。
 
 /**
  * M4-§2：settle veil（骨架遮罩）**只用于会话切换 / 历史大量加载**。

@@ -12,6 +12,7 @@ import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@
 import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import { buildUserTurns } from '@features/session/utils/userTurn';
 import { buildUserTurnsIncremental, createUserTurnsCache } from '@features/session/utils/userTurn';
+import { isLiveOwner } from '@features/session/utils/turnRender';
 import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode, useTimelineNav } from './useTimelineNav';
@@ -185,7 +186,17 @@ export function useTimeline() {
           const pt = (prev as unknown as { turn?: Record<string, unknown> }).turn;
           const ct = (e as unknown as { turn?: Record<string, unknown> }).turn;
           if (pt && ct) {
-            const keys = ['userId', 'stepCount', 'toolCount', 'failedCount', 'contentChars', 'reasoningChars', 'isRunning', 'phase', 'endedAtUtc'] as const;
+            const keys = [
+              'userId',
+              'stepCount',
+              'toolCount',
+              'failedCount',
+              'contentChars',
+              'reasoningChars',
+              'isRunning',
+              'phase',
+              'endedAtUtc',
+            ] as const;
             let same = true;
             for (const k of keys) {
               if (String(pt[k] ?? '') !== String(ct[k] ?? '')) {
@@ -261,7 +272,13 @@ export function useTimeline() {
     // need02-P4（p4-window）：首屏按权重预算挂载（TURN_WINDOW_WEIGHT≈15 平均轮），超高轮仍整轮挂载；
     // off 时回条数旧链（INITIAL_MOUNT/WINDOW_MIN）。
     if (isP4SubOn('window', null, need02Flags)) {
-      hiddenAbove.value = hiddenAboveByWeight(timelineItems.value.map((e) => ({ key: e.key, kind: String((e as unknown as { kind?: string }).kind || ''), steps: weightOfItem(e) - 1 })));
+      hiddenAbove.value = hiddenAboveByWeight(
+        timelineItems.value.map((e) => ({
+          key: e.key,
+          kind: String((e as unknown as { kind?: string }).kind || ''),
+          steps: weightOfItem(e) - 1,
+        }))
+      );
     } else {
       hiddenAbove.value = Math.max(0, timelineItems.value.length - INITIAL_MOUNT);
     }
@@ -456,16 +473,19 @@ export function useTimeline() {
     let argsJson = '';
     const rawAssistant = persistedMessages.value.find((x) => String(x.id) === group.assistantId);
     const rawCalls = (
-      rawAssistant as unknown as {
-        toolCalls?: Array<{
-          id?: string;
-          callId?: string;
-          argumentsJson?: string;
-          function?: { arguments?: string; name?: string };
-          functionName?: string;
-        }>;
-      }
-    ).toolCalls;
+      rawAssistant as unknown as
+        | {
+            toolCalls?: Array<{
+              id?: string;
+              callId?: string;
+              argumentsJson?: string;
+              function?: { arguments?: string; name?: string };
+              functionName?: string;
+            }>;
+          }
+        | null
+        | undefined
+    )?.toolCalls;
     if (Array.isArray(rawCalls)) {
       const hit = rawCalls.find((c) => String(c.id || c.callId) === callId);
       if (hit) argsJson = String(hit.argumentsJson || hit.function?.arguments || '');
@@ -555,7 +575,8 @@ export function useTimeline() {
       if (thumbQueue.length > 0) scheduleThumbIdle();
     };
     try {
-      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+        .requestIdleCallback;
       if (typeof ric === 'function') ric.call(window, run, { timeout: 300 });
       else window.setTimeout(run, 0);
     } catch {
@@ -608,7 +629,42 @@ export function useTimeline() {
       const t = turn.activeTurn;
       const idx = (t.toolCardIndex as Record<string, number>)[cid];
       if (idx !== undefined) return t.toolCards[idx] || null;
-      return t.toolCards.find((c) => c.callId === cid) || null;
+      const live = t.toolCards.find((c) => c.callId === cid);
+      if (live) return live;
+      // P02-G2 毕业只换态不搬家：live 索引摘牌后，用已落盘 tool 消息合成终态卡，轮内原位保留。
+      try {
+        const hit = persistedMessages.value.find((x) => {
+          const r = x as unknown as { toolCallId?: string; id?: string };
+          return String(r.toolCallId || '') === cid || String(r.id || '') === cid;
+        });
+        if (hit) {
+          return toCard(hit, {
+            key: `seg-${cid}`,
+            assistantId: '',
+            reasoning: null,
+            content: null,
+            toolCalls: [{ id: cid, name: String((hit as unknown as { name?: string }).name || 'tool') }],
+            toolMessages: [hit],
+            telemetry: null,
+            createdAtUtc: '',
+          });
+        }
+      } catch {
+        /* fallthrough 占位 */
+      }
+      // 真正未知（卡未建、包未落）：占位“参数接收中”，不留空洞。
+      return {
+        callId: cid,
+        functionName: 'tool',
+        argsJson: '',
+        status: 'running',
+        resultText: '',
+        exitCode: null,
+        durationMs: null,
+        iteration: 0,
+        receivedBytes: 0,
+        images: [],
+      };
     } catch (e) {
       console.warn('[timeline] seg card failed:', e);
       return null;
@@ -858,11 +914,20 @@ export function useTimeline() {
     displaySegs,
     /** need02-P2：流态全量（含 persisted，UserTurnBlock 内嵌用；visibleSegs 旧语义保持）。 */
     liveInclusiveSegs,
+    /** P02-P0a：按轮过滤（仅末用户轮返全量，其余空；与 TimelineView 轮过滤同语义）。 */
+    liveSegsFor: (entry: TimelineEntry, segs: DisplaySeg[]): DisplaySeg[] => {
+      try {
+        if (!isLiveOwner(entry, timelineItems.value)) return [];
+        return Array.isArray(segs) ? segs : [];
+      } catch {
+        return [];
+      }
+    },
     /** M2-4：经过逐字平滑的尾段文本（模板/测试可直接读；displaySegs 已包含它）。 */
-    smoothTailText,
     transcriptRunning,
     isTurnExpanded,
     toggleTurn,
+    smoothTailText,
     /** need-01：无正文轮次合并（kill switch + 汇总舱展开态）。 */
     turnRunKillSwitch,
     /** need02-P0：总开关快照 + data-need02 透传串（只读，零行为变更）。 */

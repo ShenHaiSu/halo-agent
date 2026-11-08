@@ -82,25 +82,60 @@ export function need02Attr(flags: Need02Flags): string {
   const on = (v: boolean): string => (v ? 'on' : 'off');
   return `p1:${on(flags.p1)},p2:${on(flags.p2)},p3:${on(flags.p3)},p4:${on(flags.p4)}`;
 }
- 
- /** need02-P4：子开关（`halo-need02-p4-<sub>`，默认 on；master p4=off 时全关）。 */
- export type Need02P4Sub = 'proj' | 'md' | 'reload' | 'window';
- 
- export const NEED02_P4_SUB_KEYS: Record<Need02P4Sub, string> = {
-   proj: 'halo-need02-p4-proj',
-   md: 'halo-need02-p4-md',
-   reload: 'halo-need02-p4-reload',
-   window: 'halo-need02-p4-window',
- };
- 
- /** P4 子项是否生效（纯函数，可注入假 storage；master 关则子项恒关）。 */
- export function isP4SubOn(sub: Need02P4Sub, storage?: Need02StorageLike | null, flags?: Need02Flags): boolean {
-   try {
-     const f = flags || readNeed02Flags(storage);
-     if (!f.p4) return false;
-     const s = resolveStorage(storage);
-     return readFlag(s, NEED02_P4_SUB_KEYS[sub], true);
-   } catch {
-     return true;
-   }
- }
+
+/** need02-P4：子开关（`halo-need02-p4-<sub>`，默认 on；master p4=off 时全关）。 */
+export type Need02P4Sub = 'proj' | 'md' | 'reload' | 'window';
+
+export const NEED02_P4_SUB_KEYS: Record<Need02P4Sub, string> = {
+  proj: 'halo-need02-p4-proj',
+  md: 'halo-need02-p4-md',
+  reload: 'halo-need02-p4-reload',
+  window: 'halo-need02-p4-window',
+};
+
+/** P4 子项是否生效（纯函数，可注入假 storage；master 关则子项恒关）。 */
+export function isP4SubOn(sub: Need02P4Sub, storage?: Need02StorageLike | null, flags?: Need02Flags): boolean {
+  try {
+    const f = flags || readNeed02Flags(storage);
+    if (!f.p4) return false;
+    const s = resolveStorage(storage);
+    return readFlag(s, NEED02_P4_SUB_KEYS[sub], true);
+  } catch {
+    return true;
+  }
+}
+/** P02 会话渲染三开关（默认开；与 halo-need02-p* 正交；读失败降级为旧链关 + 调用方埋点）。 */
+export const P02_FLAG_KEYS = {
+  liveCoalesce: 'halo-live-coalesce',
+  singleProcess: 'halo-single-process',
+  projectionMerge: 'halo-projection-merge',
+} as const;
+export type P02FlagName = keyof typeof P02_FLAG_KEYS;
+export interface P02Flags {
+  liveCoalesce: boolean;
+  singleProcess: boolean;
+  projectionMerge: boolean;
+}
+function readP02Flag(storage: Need02StorageLike | null, key: string): boolean {
+  try {
+    if (!storage || typeof storage.getItem !== 'function') return true;
+    const v = String(storage.getItem(key) || '').toLowerCase();
+    if (!v) return true;
+    return v !== 'off';
+  } catch {
+    return false;
+  }
+}
+/** 纯函数入口：单测可注入假 storage。 */
+export function readP02Flags(storage?: Need02StorageLike | null): P02Flags {
+  const s = resolveStorage(storage);
+  return {
+    liveCoalesce: readP02Flag(s, P02_FLAG_KEYS.liveCoalesce),
+    singleProcess: readP02Flag(s, P02_FLAG_KEYS.singleProcess),
+    projectionMerge: readP02Flag(s, P02_FLAG_KEYS.projectionMerge),
+  };
+}
+/** 组合式入口：运行时一次快照，供 MessageTimeline/useTimeline 消费。 */
+export function useP02Flags(): P02Flags {
+  return readP02Flags();
+}

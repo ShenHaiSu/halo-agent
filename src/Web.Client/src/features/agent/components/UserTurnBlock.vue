@@ -1,9 +1,9 @@
 <!-- need02-P2：用户轮次渲染体（D1=B：user 气泡 + 上折叠行 + 下末段直出；流态全量展开）。
      高度零动画（05 R6）：展开/收起只用 n-collapse-transition；本文件不声明任何 height/max-height transition。 -->
 <template>
-  <div class="turn-body min-w-0 space-y-2" data-testid="user-turn-block" :data-turn-key="turn.key">
+  <div class="turn-body turn-single-container min-w-0" data-testid="user-turn-block" :data-turn-key="turn.key">
     <!-- user 头（含乐观 pending 态；图片槽位复用 96px 恒定槽，零高度跳变） -->
-    <div v-if="turn.userMsg" class="flex justify-end">
+    <div v-if="turn.userMsg" class="flex justify-end turn-user-slot">
       <div
         class="max-w-[85%] rounded-lg bg-elevated border px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
         :class="pendingStatus === 'failed' ? 'border-red-400' : 'border-subtle'"
@@ -53,7 +53,7 @@
          readingWindow 期 running 置 false（暂停交接动画，直接切终态，05 R11）。 -->
     <UserTurnTransition :running="turn.isRunning && !readingWindow" :completing="completingEffective" :anim-on="handoffAnimOn">
       <template #live>
-        <div class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0" data-testid="user-turn-live">
+        <div class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0" data-testid="user-turn-live">
           <div v-for="(seg, i) in liveSegs" :key="seg.key" :data-testid="`user-turn-live-seg-${i}`">
             <StreamSegItem
               :seg="seg"
@@ -86,13 +86,26 @@
         </div>
 
         <!-- 稳态多步：上折叠行 + 下末段直出 -->
-        <div v-else-if="showSteady" class="min-w-0 space-y-2">
-          <UserTurnSummary :turn="turn" :expanded="expanded" :reading-window="!!readingWindow" @toggle="emit('toggle', $event)" />
-          <n-collapse-transition :show="expanded">
+        <div v-else-if="showSteady" class="turn-body turn-steady-stack min-w-0">
+          <UserTurnSummary
+            class="turn-process-slot"
+            :turn="turn"
+            :expanded="expanded"
+            :reading-window="!!readingWindow"
+            @toggle="emit('toggle', $event)"
+          />
+          <n-collapse-transition class="turn-earlier-slot" :show="expanded">
             <div
-              class="px-3 pb-2 space-y-2 max-h-72 overflow-y-auto min-w-0 rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70"
+              class="turn-body process-body px-3 pb-2 max-h-72 overflow-y-auto min-w-0 rounded-r-md bg-[var(--reasoning-bg)] border-l-2 border-indigo-500/70"
+              data-testid="process-body"
             >
-              <div v-for="(st, i) in earlier" :key="st.assistantId || `step-${i}`" class="min-w-0" :data-testid="`user-turn-step-${i + 1}`">
+              <div
+                v-for="(st, i) in earlier"
+                :key="st.assistantId || `step-${i}`"
+                class="min-w-0"
+                :data-testid="`user-turn-step-${i + 1}`"
+                :data-anchor-key="stepAnchor(st)"
+              >
                 <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
                   <span class="font-mono shrink-0 opacity-70">{{ st.iteration }}</span>
                   <span class="truncate">第 {{ st.iteration }} 步</span>
@@ -113,7 +126,7 @@
                 >
                   {{ st.reasoning }}
                 </div>
-                <div v-if="(st.toolMessages?.length || 0) > 0" class="mt-1 space-y-1.5 min-w-0">
+                <div v-if="(st.toolMessages?.length || 0) > 0" class="turn-body mt-1 min-w-0">
                   <ToolCallCard
                     v-for="t in st.toolMessages"
                     :key="toolKeyFn(t)"
@@ -122,11 +135,25 @@
                   />
                 </div>
               </div>
+              <!-- 单容器流式尾槽：未归属的 live 段在同一 process-body 内追加，毕业只换态不搬家 -->
+              <div v-if="singleProcessOn && tailSegs.length" class="turn-body min-w-0" data-testid="pending-tail">
+                <div v-for="(seg, i) in tailSegs" :key="seg.key" :data-testid="`pending-tail-seg-${i}`">
+                  <StreamSegItem
+                    :seg="seg"
+                    :stream-md-kill-switch="!!streamMdKillSwitch"
+                    :render-stream="renderStreamFn"
+                    :is-tail="i === tailSegs.length - 1"
+                    :is-generating="!!isGenerating"
+                    @link-click="emit('link-click', $event)"
+                  />
+                </div>
+              </div>
             </div>
           </n-collapse-transition>
           <div
             v-if="lastContent"
-            class="app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+            class="turn-final-slot app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+            data-testid="turn-final"
             @click="emit('link-click', $event)"
             @contextmenu.prevent="emit('assistant-menu', $event)"
             v-html="renderHtmlFn(lastContent)"
@@ -145,6 +172,7 @@ import type { DisplaySeg } from '@features/agent/composables/useTimeline';
 import type { TurnGroup } from '@features/session/utils/turnGroup';
 import type { UserTurn, UserTurnStep } from '@features/session/utils/userTurn';
 import { earlierSteps, isSingleFlatTurn, lastStepContent } from '@features/session/utils/userTurn';
+import { buildTurnRenderView, pendingTailSlot, turnStepAnchorKey } from '@features/session/utils/turnRender';
 import { userParts } from '@features/agent/utils/userParts';
 import SkillPillChip from './SkillPillChip.vue';
 import ToolCallCard from './ToolCallCard.vue';
@@ -172,6 +200,8 @@ const props = defineProps<{
   liveCompleting?: boolean;
   /** need02-P3：交接动画总开关（p3；false = P2 硬切，直接切换）。 */
   handoffAnim?: boolean;
+  /** P02-P1：单容器三段模板开关；false 回旧链（无尾槽、无 order 保底类影响，见 off 白名单）。 */
+  singleProcess?: boolean;
 }>();
 const emit = defineEmits<{
   toggle: [key: string];
@@ -191,6 +221,34 @@ const showSteady = computed(() => !props.turn.isRunning || completingEffective.v
 const lastContent = computed(() => lastStepContent(props.turn));
 const earlier = computed<UserTurnStep[]>(() => earlierSteps(props.turn));
 const liveSegs = computed<DisplaySeg[]>(() => (Array.isArray(props.liveSegs) ? props.liveSegs : []));
+/** P02-P1：单容器开关（默认开；off 回旧链渲染）。 */
+const singleProcessOn = computed(() => props.singleProcess !== false);
+/** P02-P1：适配器渲染视图（与 earlier/last 同源一致性影子校验用）。 */
+const renderView = computed(() => buildTurnRenderView(props.turn));
+/** P02-P1：轮内流式尾槽（已归属稳态的段被过滤，毕业不重复）。 */
+const tailSegs = computed<DisplaySeg[]>(() => {
+  if (!singleProcessOn.value) return [];
+  return pendingTailSlot(liveSegs.value, props.turn).map((s) => ({
+    kind: String(s.kind || 'text'),
+    key: String(s.key || ''),
+    text: String((s as { text?: unknown }).text || ''),
+    card: (s.card ?? null) as DisplaySeg['card'],
+  }));
+});
+function stepAnchor(st: UserTurnStep): string {
+  return turnStepAnchorKey(props.turn.key, st.iteration);
+}
+if (import.meta.env.DEV) {
+  try {
+    const shadowSteps = renderView.value.steps.length;
+    const steadyCount = earlier.value.length + (lastContent.value ? 1 : 0);
+    if (shadowSteps > 1 && steadyCount !== shadowSteps && !props.turn.isRunning) {
+      console.debug('[p02-shadow] turn steps mismatch', { key: props.turn.key, shadowSteps, steadyCount });
+    }
+  } catch {
+    /* shadow never blocks render */
+  }
+}
 // P0-1：streamingText（纯文本拼接串）不再渲染，liveSegs（Markdown）为唯一真相源；prop 保留兼容调用方透传。
 const renderHtmlFn = (t: string): string => {
   try {
@@ -309,5 +367,31 @@ const pendingStatus = computed(() => String(props.pendingStatus || ''));
   color: #ef4444;
   background: transparent;
   cursor: pointer;
+}
+/* P02 单轮单容器三段：user 上 / 过程中 / 末段下恒定，流稳同槽，毕业不搬家。 */
+.turn-single-container {
+  display: flex;
+  flex-direction: column;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+.turn-user-slot {
+  order: 1;
+}
+.uturn-handoff {
+  order: 2;
+}
+.turn-steady-stack {
+  display: flex;
+  flex-direction: column;
+}
+.turn-process-slot {
+  order: 1;
+}
+.turn-earlier-slot {
+  order: 2;
+}
+.turn-final-slot {
+  order: 3;
 }
 </style>

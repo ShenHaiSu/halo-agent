@@ -11,7 +11,7 @@
     <!-- P1：参数/结果尚未到达时卡片正文是空的，不再渲染可展开的空折叠，先占位明示接收中 -->
     <div
       v-else
-      class="rounded-md border border-subtle bg-surface px-2.5 py-1.5 text-[11px] text-secondary flex items-center gap-2 min-w-0"
+      class="rounded-md border border-subtle bg-surface px-2.5 py-1.5 text-[11px] text-secondary flex items-center gap-2 min-w-0 tool-pending-slot"
       data-testid="tool-card-pending"
     >
       <span class="tool-pending-dot" aria-hidden="true" />
@@ -67,7 +67,10 @@ const hasToolContent = computed(() => {
   scrollbar-gutter: stable;
   overflow-anchor: auto;
 }
-/* P1：空工具卡占位圆点（参数接收中呼吸态；终态卡片不受影响） */
+/* P02-P0a：空工具卡占位与终态卡片同高，毕业切换只换内容不改父高度。 */
+.tool-pending-slot {
+  min-height: 44px;
+}
 .tool-pending-dot {
   width: 7px;
   height: 7px;

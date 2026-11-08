@@ -32,6 +32,7 @@ function mountTimeline(segs: unknown[]) {
       protocolOf: () => '',
       cacheLineOf: () => '',
       hasActiveTurn: true,
+      liveCoalesce: false,
       thinkingLine: '',
       isGenerating: true,
       segs: segs as never,
@@ -94,5 +95,18 @@ describe('M3 过渡动画', () => {
   it('流式光标只在尾段显示', () => {
     expect(cursorOf(true).find('.smooth-cursor').exists()).toBe(true);
     expect(cursorOf(false).find('.smooth-cursor').exists()).toBe(false);
+  });
+
+  it('P02-P0b：收敛开（默认）时轴尾容器隐藏，单 Live 只剩轮内', () => {
+    const hidden = mount(TimelineView, {
+      props: { ...mountTimeline([seg('s1', 'x')]).props(), liveCoalesce: undefined } as never,
+      global: { plugins: [naive] },
+    });
+    expect(hidden.find('[data-testid="active-turn-container"]').exists()).toBe(false);
+    const shown = mount(TimelineView, {
+      props: { ...mountTimeline([seg('s1', 'x')]).props(), liveCoalesce: false } as never,
+      global: { plugins: [naive] },
+    });
+    expect(shown.find('[data-testid="active-turn-container"]').exists()).toBe(true);
   });
 });

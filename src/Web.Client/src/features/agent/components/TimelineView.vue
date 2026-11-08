@@ -44,6 +44,7 @@
             :is-last="false"
             :live-completing="false"
             :handoff-anim="handoffAnim !== false"
+            :single-process="singleProcess !== false"
             @toggle="emit('toggle', $event)"
             @user-menu="(e, item) => emit('user-menu', e, item)"
             @assistant-menu="(e, item) => emit('assistant-menu', e, item)"
@@ -84,6 +85,7 @@
             :is-last="!!isLast"
             :live-completing="!!liveCompleting"
             :handoff-anim="handoffAnim !== false"
+            :single-process="singleProcess !== false"
             :notice-in-turn="!!noticeInTurn"
             :turn-notice="turnNotice"
             :last-error="lastError"
@@ -102,9 +104,9 @@
                （聊天流只增不减，高度动画会与 overflow-anchor / 平滑跟随互相拉扯）。 -->
           <Transition name="live-turn">
             <div
-              v-if="hasActiveTurn"
+              v-if="showAxisTail"
               data-testid="active-turn-container"
-              class="rounded-lg border border-subtle bg-surface/40 px-3 py-2 space-y-2 min-w-0"
+              class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0"
             >
               <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
                 <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -113,7 +115,7 @@
               </div>
               <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
                    注意 CLAUDE 红线：`.seg-leave-active` 必须 position:absolute 脱流，否则「下移再上移」。 -->
-              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="seg-list space-y-2">
+              <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="turn-body seg-list">
                 <StreamSegItem
                   v-for="(seg, i) in segs"
                   :key="seg.key"
@@ -131,7 +133,7 @@
                   v-if="fallbackCards.length"
                   name="seg"
                   tag="div"
-                  class="space-y-1.5 seg-list"
+                  class="turn-body seg-list"
                   data-testid="active-turn-tools"
                 >
                   <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
@@ -276,6 +278,10 @@ const props = defineProps<{
   handoffAnim?: boolean;
   /** need02-P4（P4b#6）：轮内 notice（p4&&p2；true 时全局 alert 隐藏，notice 收进末轮底部）。 */
   noticeInTurn?: boolean;
+  /** P02-P0b：轴尾 Live 容器去留；默认开=收敛进轮内，轴尾隐藏（off 回旧链双容器）。 */
+  liveCoalesce?: boolean;
+  /** P02-P1：单容器三段模板开关；默认开（off 回旧链）。 */
+  singleProcess?: boolean;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
@@ -328,6 +334,8 @@ function liveSegsFor(entry: TimelineEntry): LiveSeg[] {
 }
 // 显示条件 (showJump||readingWindow)&&!veilCovering
 const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
+/** P02-P0b：轴尾容器可见性——默认收敛进轮内（开=隐藏）；off 回旧链双容器。 */
+const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce === false);
 </script>
 <style scoped>
 /* M1-6 滚动锚定与滚动条槽位：配合 M2 的渐进跟随才真正生效——

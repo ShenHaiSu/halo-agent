@@ -35,7 +35,7 @@
       </div>
       <!-- 高度绝不做动画：展开/收起统一走 n-collapse-transition（05 陷阱 6） -->
       <n-collapse-transition :show="expanded">
-        <div class="px-3 pb-2 max-h-72 overflow-y-auto min-w-0">
+        <div class="process-body px-3 pb-2 max-h-72 overflow-y-auto min-w-0" data-testid="process-body">
           <RunStepList :groups="run.groups" :card-for="cardFor" :tool-key="toolKey" />
         </div>
       </n-collapse-transition>

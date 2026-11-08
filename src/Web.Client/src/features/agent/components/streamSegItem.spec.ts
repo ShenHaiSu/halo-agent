@@ -45,3 +45,12 @@ describe('StreamSegItem 空工具卡占位（P1）', () => {
     expect(wrapper.find('[data-testid="tool-card-pending"]').exists()).toBe(false);
   });
 });
+
+describe('StreamSegItem 空占位定高（P02-P0a）', () => {
+  it('占位具 tool-pending-slot 定高类，毕业切换不改父高度', () => {
+    const wrapper = mountSeg(toolSeg({ callId: 'c1', functionName: 'exec_command', argsJson: '', status: 'running', resultText: '' }));
+    const slot = wrapper.find('[data-testid="tool-card-pending"]');
+    expect(slot.exists()).toBe(true);
+    expect(slot.classes()).toContain('tool-pending-slot');
+  });
+});
