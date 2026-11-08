@@ -1,0 +1,45 @@
+{
+  "contractVersion": "0.1.1",
+  "station": "history-authority",
+  "title": "Frame/legacy parity checklist — history station landed, remaining areas stay open for later stations",
+  "verifiedBy": [
+    "tests/HaloAgent.Engine.Tests/HistoryAuthorityTests.cs (13 facts)",
+    "tests/HaloAgent.Engine.Tests/SessionOwnershipTests.cs",
+    "tests/HaloAgent.Engine.Tests/PersistenceAndLedgerTests.cs",
+    "dotnet test HaloAgent.sln — 650 passed, 0 failed"
+  ],
+  "areas": {
+    "history": [
+      { "id": "history-list-page", "checked": true, "note": "session.list/get paged read matches legacy; workspace-scoped, no silent full scan; WorkspaceScopeNeverSweepsAll" },
+      { "id": "history-item-shape", "checked": true, "note": "history rows carry id, tool calls, tokens and reasoning; HistoryItemsCarryParityColumns" },
+      { "id": "history-delete-cascade", "checked": false, "note": "session.delete removes child sessions too — scheduled with the cutover station (A-batch delete级联对拍)" },
+      { "id": "history-workspace-scope", "checked": true, "note": "list/get filter by workspace, no silent full scan; default scope plus audit" }
+    ],
+    "turn": [
+      { "id": "turn-prompt-retry", "checked": false, "note": "later station" },
+      { "id": "turn-cancel-tree", "checked": false, "note": "later station" },
+      { "id": "turn-failure-copy", "checked": false, "note": "later station" }
+    ],
+    "tool": [
+      { "id": "tool-card-lifecycle", "checked": false, "note": "later station" },
+      { "id": "tool-confirm-questions", "checked": false, "note": "later station" }
+    ],
+    "usage": [
+      { "id": "usage-budget-bar", "checked": false, "note": "later station" }
+    ],
+    "settings": [
+      { "id": "settings-roundtrip", "checked": false, "note": "later station" }
+    ]
+  },
+  "acceptance": {
+    "dualIdShape": "new sess_yyyyMMdd_xxxxxxxx ids; previous-generation N32 files restore and seed a directory twin plus alias; PreviousGenerationFileSeedsDirectoryTwin",
+    "dualCursor": "session.history accepts index and msg_id cursors with identical windows; HistoryCursorAcceptsIndexAndMessageId",
+    "workspaceIsolation": "session.new carries the real workspace (default fallback is audited); list/get never sweep all scopes",
+    "shadowVerification": "in-memory reply plus write-gate serialized flush; tmp-move with backup; LoadSessionsWithReport counts restored sessions, messages, skipped lines and healed aliases; ReloadKeepsHistoryAndCountsBadLines",
+    "cwdIsNotificationOnly": "session.setCwd only forwards the event, never writes the ledger; restart cannot resurrect a stale directory; WorkingDirectoryChangeNeverReachesTheLedger",
+    "rollbackIsTurnScoped": "tool.undoRollback removes the newest turn as a whole and returns removedMessageIds plus removedCount; UndoRollbackRemovesWholeTurnWithMessageIds",
+    "explicitTitle": "session.title writes the title and the lock flag in one call; locked sessions reject rename; ExplicitTitleWriteLocksOnDemand",
+    "performance": "limit clamps to 1..200, page carries total; 500-row store pages 50 rows with correct total inside the harness budget; HistoryLimitClampsAndReportsTotal, PagedHistoryStaysFastWithCorrectTotal",
+    "routingProbe": "system.info echoes enabledBatches from HALO_ENGINE_ROUTING plus the frame default; SystemInfoExposesRoutingProbe"
+  }
+}

@@ -120,7 +120,22 @@ public static class ServiceRegistration
     /// </summary>
     public static void AddEngine(HaloServiceProvider p)
     {
-        p.AddSingleton(sp => new HaloAgent.Engine.FrameServer());
+        // Startup backfill: reload persisted ledgers into the engine before the
+        // first frame arrives. Corrupt lines are skipped inside the loader, and
+        // a backfill failure must never block the shell.
+        p.AddSingleton(sp =>
+        {
+            var server = new HaloAgent.Engine.FrameServer();
+            try
+            {
+                string root = sp.GetRequiredService<StoragePathManager>().CurrentDataRoot;
+                server.LoadSessions(root);
+            }
+            catch
+            { /* backfill is best effort; startup continues without history */
+            }
+            return server;
+        });
         p.AddSingleton(sp => new EventRingBuffer());
         p.AddSingleton(sp => EngineRouting.FromEnvironment());
         p.AddSingleton(sp => new InProcChannel(

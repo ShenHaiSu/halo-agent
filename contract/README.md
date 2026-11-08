@@ -14,6 +14,7 @@ method names, event names and error codes. The backend catalog
 | `scripts/check-contract-additive.mjs` | Additive-only gate: version bump, no removals, envelope fixed, rejected names absent |
 | `contract/freeze-review.md` | Per-row review: supplier / default / replay for every frozen optional field |
 | `contract/parity-template.json` | Empty parity checklist (all unchecked); stations tick items as they land |
+| `contract/parity-s2-history.json` | History-station parity record: history subset checked, rest left for later stations |
 | `src/Web.Client/src/contract/agent.d.ts` | Machine output (header says `generated`, hand edits forbidden) |
 | `src/HaloAgent.Bridge.Contracts/AgentContract.cs` | C# mirror plus `TryClassifyFrame` envelope check (lists synced by the generator) |
 | `src/HaloAgent.Engine.Abstractions/ContractCatalog.cs` | Engine-side C# mirror (lists synced by the generator) |

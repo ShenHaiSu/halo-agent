@@ -142,43 +142,51 @@ public sealed class FrameServer : IAsyncDisposable
     /// <summary>
     /// Persists every known session ledger to the directory with atomic
     /// rewrite plus backup, so a failed compaction or rewrite can be rolled back.
+    /// Each entry carries its descriptor, so workspace scope and provider
+    /// selection survive a restart. Replies stay in memory; the write gate
+    /// serializes persistence behind normal traffic.
     /// </summary>
     public void SaveSessions(string directory)
     {
-        foreach (var entry in _sessions.List())
+        foreach (var descriptor in _sessions.ListPairs())
         {
-            JsonlHistoryFile.Save(
-                directory,
-                entry.SessionId,
-                entry.Title,
-                _sessions.Snapshot(entry.SessionId)
-            );
+            if (!_sessions.TryGetDescriptor(descriptor.SessionId, out var full) || full is null)
+            {
+                JsonlHistoryFile.Save(
+                    directory,
+                    descriptor.SessionId,
+                    descriptor.Title,
+                    _sessions.Snapshot(descriptor.SessionId)
+                );
+                continue;
+            }
+            JsonlHistoryFile.Save(directory, full, _sessions.Snapshot(descriptor.SessionId));
         }
     }
 
     /// <summary>Reloads persisted ledgers back into memory; corrupt lines are skipped.</summary>
     public void LoadSessions(string directory)
     {
-        foreach (var entry in _sessions.List().ToList())
+        LoadSessionsWithReport(directory);
+    }
+
+    /// <summary>
+    /// Reloads persisted ledgers and reports what the sweep found:
+    /// restored sessions and messages, skipped corrupt lines and healed aliases.
+    /// Reads both engine flat files and the desktop workspace tree so the two
+    /// generations stay mutually readable during the shadow period.
+    /// </summary>
+    public JsonlHistoryFile.ScanReport LoadSessionsWithReport(string directory)
+    {
+        foreach (var entry in _sessions.ListPairs().ToList())
         {
             _sessions.Delete(entry.SessionId);
         }
-        if (!Directory.Exists(directory))
+        if (!Directory.Exists(directory) && !Directory.Exists(Path.Combine(directory, "sessions")))
         {
-            return;
+            return new JsonlHistoryFile.ScanReport(0, 0, 0, 0);
         }
-        foreach (string metaPath in Directory.EnumerateFiles(directory, "*.meta.json"))
-        {
-            string sessionId = Path.GetFileNameWithoutExtension(metaPath);
-            if (sessionId.EndsWith(".meta", StringComparison.Ordinal))
-            {
-                sessionId = sessionId.Substring(0, sessionId.Length - ".meta".Length);
-            }
-            if (JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages))
-            {
-                _sessions.Restore(sessionId, title, messages);
-            }
-        }
+        return JsonlHistoryFile.ScanAndRestore(directory, _sessions);
     }
 
     /// <summary>Restores one session from its backup file after a bad rewrite.</summary>
@@ -187,10 +195,26 @@ public sealed class FrameServer : IAsyncDisposable
         bool restored = JsonlHistoryFile.TryRollback(directory, sessionId);
         if (
             restored
-            && JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages)
+            && JsonlHistoryFile.TryLoad(
+                directory,
+                sessionId,
+                out _,
+                out var messages,
+                out var descriptor
+            )
+                is { Found: true }
         )
         {
-            _sessions.Restore(sessionId, title, messages);
+            _sessions.Restore(
+                sessionId,
+                descriptor
+                    ?? new Abstractions.SessionDescriptor(
+                        sessionId,
+                        string.Empty,
+                        SessionIdentity.DefaultWorkspace
+                    ),
+                messages
+            );
         }
         return restored;
     }

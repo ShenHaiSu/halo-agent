@@ -31,8 +31,14 @@ internal static class EngineRoutes
                     new
                     {
                         version = ContractCatalog.ContractVersion,
+                        contractVersion = ContractCatalog.ContractVersion,
                         queueBound = FrameServer.QueueBound,
                         journalCapacity = events.Capacity,
+                        routing = new
+                        {
+                            enabledBatches = ReadEnabledBatches(),
+                            defaultFrame = false,
+                        },
                     }
                 )
             );
@@ -98,25 +104,52 @@ internal static class EngineRoutes
         routes["session.new"] = (request, context, token) =>
         {
             string title = FrameServer.ReadString(request.Payload, "title");
-            string sessionId = Guid.NewGuid().ToString("N");
+            string workspaceId =
+                ReadOptionalString(request.Payload, "workspaceId")
+                ?? SessionIdentity.DefaultWorkspace;
+            string? parentSessionId = ReadOptionalString(request.Payload, "parentSessionId");
+            string? providerId = ReadOptionalString(request.Payload, "providerId");
+            string? modelId = ReadOptionalString(request.Payload, "modelId");
+            string agentRole = ReadOptionalString(request.Payload, "agentRole") ?? "main";
+            string sessionId = SessionIdentity.NewSessionId();
             sessions.EnsureSession(
                 sessionId,
-                string.IsNullOrWhiteSpace(title) ? "New session" : title
+                string.IsNullOrWhiteSpace(title) ? "New session" : title,
+                workspaceId,
+                parentSessionId,
+                providerId,
+                modelId,
+                agentRole
             );
             state.TryRememberSession(
                 sessionId,
                 string.IsNullOrWhiteSpace(title) ? "New session" : title
             );
             state.ActiveSessionId = sessionId;
-            events.Append("session.updated", new { sessionId, reason = "created" });
-            return Task.FromResult(ResponseFrame.Success(request.Id, new { sessionId }));
+            events.Append(
+                "session.updated",
+                new
+                {
+                    sessionId,
+                    reason = "created",
+                    workspaceId = sessions.ResolveWorkspace(workspaceId)
+                }
+            );
+            sessions.TryGetDescriptor(sessionId, out var created);
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    DescribeSession(sessionId, created, sessions.Count(sessionId))
+                )
+            );
         };
 
         routes["session.list"] = (request, context, token) =>
         {
+            string? workspaceId = ReadOptionalString(request.Payload, "workspaceId");
             var items = sessions
-                .List()
-                .Select(e => new { sessionId = e.SessionId, title = e.Title })
+                .List(workspaceId)
+                .Select(d => DescribeSession(d.SessionId, d, sessions.Count(d.SessionId)))
                 .ToList();
             return Task.FromResult(ResponseFrame.Success(request.Id, new { sessions = items }));
         };
@@ -124,21 +157,30 @@ internal static class EngineRoutes
         routes["session.get"] = (request, context, token) =>
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
-            if (!sessions.TryGetTitle(sessionId, out string? title))
+            string? workspaceId = ReadOptionalString(request.Payload, "workspaceId");
+            if (!sessions.TryGetDescriptor(sessionId, out var descriptor) || descriptor is null)
             {
                 return Task.FromResult(
                     ResponseFrame.Fail(request.Id, "NOT_FOUND", "Session is unknown.")
                 );
             }
+            if (
+                !string.IsNullOrWhiteSpace(workspaceId)
+                && !string.Equals(descriptor.WorkspaceId, workspaceId, StringComparison.Ordinal)
+            )
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "NOT_FOUND",
+                        "Session is unknown in this workspace."
+                    )
+                );
+            }
             return Task.FromResult(
                 ResponseFrame.Success(
                     request.Id,
-                    new
-                    {
-                        sessionId,
-                        title,
-                        messageCount = sessions.Count(sessionId),
-                    }
+                    DescribeSession(sessionId, descriptor, sessions.Count(sessionId))
                 )
             );
         };
@@ -181,6 +223,64 @@ internal static class EngineRoutes
             return Task.FromResult(ResponseFrame.Success(request.Id, new { sessionId, title }));
         };
 
+        // Explicit title write from the frozen contract: sets the title and
+        // records the lock flag in one call. Automatic renames never happen;
+        // only this entry flips the lock.
+        routes["session.title"] = (request, context, token) =>
+        {
+            string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
+            string title = FrameServer.ReadString(request.Payload, "title");
+            if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(title))
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "INVALID_PARAMS",
+                        "sessionId and title are required."
+                    )
+                );
+            }
+            if (!sessions.TryGetDescriptor(sessionId, out var descriptor) || descriptor is null)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "NOT_FOUND", "Session is unknown.")
+                );
+            }
+            if (descriptor.TitleLocked)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(
+                        request.Id,
+                        "INVALID_PARAMS",
+                        "Title is locked for this session."
+                    )
+                );
+            }
+            sessions.Rename(sessionId, title);
+            bool locked = TryReadBool(request.Payload, "titleLocked", descriptor.TitleLocked);
+            sessions.SetTitleLocked(sessionId, locked);
+            events.Append(
+                "session.updated",
+                new
+                {
+                    sessionId,
+                    reason = "title",
+                    title
+                }
+            );
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        sessionId,
+                        title,
+                        titleLocked = locked
+                    }
+                )
+            );
+        };
+
         routes["session.delete"] = (request, context, token) =>
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
@@ -206,17 +306,8 @@ internal static class EngineRoutes
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
             string cursor = FrameServer.ReadString(request.Payload, "cursor");
             int limit = TryReadInt(request.Payload, "limit", out int parsed) ? parsed : 50;
-            var page = sessions.ReadPage(sessionId, cursor, limit);
-            var items = page
-                .Items.Select(m => new
-                {
-                    index = m.Index,
-                    role = m.Role,
-                    text = TruncateForDisplay(m.Text),
-                    truncated = m.Text.Length > TruncatePreviewLimit,
-                    turnId = m.TurnId,
-                })
-                .ToList();
+            var page = sessions.ReadPage(sessionId, cursor, limit, out long total);
+            var items = page.Items.Select(DescribeMessage).ToList();
             return Task.FromResult(
                 ResponseFrame.Success(
                     request.Id,
@@ -226,6 +317,8 @@ internal static class EngineRoutes
                         items,
                         nextCursor = page.NextCursor,
                         hasMore = page.HasMore,
+                        total,
+                        messageCount = total,
                     }
                 )
             );
@@ -252,6 +345,9 @@ internal static class EngineRoutes
             return Task.FromResult(ResponseFrame.Success(request.Id, new { sessionId, summary }));
         };
 
+        // The working directory is a host-shell concern: this entry only forwards
+        // the notification to event subscribers and never writes the ledger,
+        // so a restart does not resurrect a stale directory.
         routes["session.setCwd"] = (request, context, token) =>
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
@@ -496,7 +592,7 @@ internal static class EngineRoutes
         routes["tool.undoRollback"] = (request, context, token) =>
         {
             string sessionId = FrameServer.ReadString(request.Payload, "sessionId");
-            if (!sessions.TryRollbackLast(sessionId, out var removed))
+            if (!sessions.TryRollbackTurn(sessionId, out var removedMessages, out var lastRemoved))
             {
                 return Task.FromResult(
                     ResponseFrame.Fail(request.Id, "NOT_FOUND", "Nothing to roll back.")
@@ -508,11 +604,22 @@ internal static class EngineRoutes
                 {
                     sessionId,
                     reason = "rollback",
-                    removedTurnId = removed!.TurnId
+                    removedTurnId = lastRemoved!.TurnId,
+                    removedMessageIds = removedMessages.Select(m => m.Id).ToArray(),
+                    removedCount = removedMessages.Count,
                 }
             );
             return Task.FromResult(
-                ResponseFrame.Success(request.Id, new { sessionId, rolledBack = true })
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        sessionId,
+                        rolledBack = true,
+                        removedMessageIds = removedMessages.Select(m => m.Id).ToArray(),
+                        removedCount = removedMessages.Count,
+                    }
+                )
             );
         };
 
@@ -666,23 +773,139 @@ internal static class EngineRoutes
             {
                 continue;
             }
-            string digest = entry.TryGetProperty("digest", out var digestNode)
-                ? digestNode.GetString() ?? string.Empty
-                : string.Empty;
-            string fileName = entry.TryGetProperty("fileName", out var nameNode)
-                ? nameNode.GetString() ?? "attachment.bin"
-                : "attachment.bin";
-            long byteSize =
-                entry.TryGetProperty("byteSize", out var sizeNode)
-                && sizeNode.TryGetInt64(out long parsed)
-                    ? parsed
-                    : 0;
-            if (string.IsNullOrWhiteSpace(digest))
+            string digest = ReadEntryString(entry, "digest") ?? string.Empty;
+            string relPath = ReadEntryString(entry, "relPath") ?? string.Empty;
+            string fileName = ReadEntryString(entry, "fileName") ?? "attachment.bin";
+            string mime = ReadEntryString(entry, "mime") ?? string.Empty;
+            long byteSize = ReadEntrySize(entry);
+            if (string.IsNullOrWhiteSpace(digest) && string.IsNullOrWhiteSpace(relPath))
             {
                 continue;
             }
-            registered.Add(attachments.Register(digest, sessionId, fileName, byteSize));
+            registered.Add(
+                attachments.Register(digest, sessionId, fileName, byteSize, mime, relPath)
+            );
         }
         return registered;
+    }
+
+    internal static object DescribeSession(
+        string sessionId,
+        SessionDescriptor? descriptor,
+        long messageCount
+    )
+    {
+        if (descriptor is null)
+        {
+            return new { sessionId, messageCount };
+        }
+        return new
+        {
+            sessionId,
+            title = descriptor.Title,
+            workspaceId = descriptor.WorkspaceId,
+            parentSessionId = descriptor.ParentSessionId,
+            providerId = descriptor.ProviderId,
+            modelId = descriptor.ModelId,
+            agentRole = descriptor.AgentRole,
+            isPinned = descriptor.IsPinned,
+            titleLocked = descriptor.TitleLocked,
+            messageCount,
+            total = messageCount,
+            createdAtUtc = descriptor.CreatedAtUtc,
+            updatedAtUtc = descriptor.UpdatedAtUtc,
+        };
+    }
+
+    internal static object DescribeMessage(StoredMessage message)
+    {
+        return new
+        {
+            id = message.Id,
+            index = message.Index,
+            role = message.Role,
+            text = TruncateForDisplay(message.Text),
+            truncated = message.Text.Length > TruncatePreviewLimit,
+            turnId = message.TurnId,
+            toolCallId = message.ToolCallId,
+            name = message.Name,
+            toolCalls = message.ToolCalls,
+            images = message.Images,
+            inputTokens = message.InputTokens,
+            outputTokens = message.OutputTokens,
+            cachedTokens = message.CachedTokens,
+            reasoningContent = message.ReasoningContent,
+            validatedWarnings = message.ValidatedWarnings,
+            errorCode = message.ErrorCode,
+            createdAtUtc = message.CreatedAt ?? message.StoredAt,
+        };
+    }
+
+    internal static string? ReadOptionalString(JsonElement payload, string name)
+    {
+        if (
+            payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty(name, out var node)
+            || node.ValueKind != JsonValueKind.String
+        )
+        {
+            return null;
+        }
+        return node.GetString();
+    }
+
+    internal static string[] ReadEnabledBatches()
+    {
+        string? raw;
+        try
+        {
+            raw = Environment.GetEnvironmentVariable("HALO_ENGINE_ROUTING");
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Array.Empty<string>();
+        }
+        string normalized = raw.Trim().ToUpperInvariant();
+        if (normalized == "ALL")
+        {
+            return new[] { "A", "B", "C" };
+        }
+        return normalized
+            .Split(new[] { ',', ';', ' ', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(p => p == "A" || p == "B" || p == "C")
+            .Distinct()
+            .ToArray();
+    }
+
+    private static string? ReadEntryString(JsonElement entry, string name)
+    {
+        return entry.TryGetProperty(name, out var node) && node.ValueKind == JsonValueKind.String
+            ? node.GetString()
+            : null;
+    }
+
+    private static long ReadEntrySize(JsonElement entry)
+    {
+        if (
+            entry.TryGetProperty("sizeBytes", out var sized)
+            && sized.ValueKind == JsonValueKind.Number
+            && sized.TryGetInt64(out long sizedValue)
+        )
+        {
+            return sizedValue;
+        }
+        if (
+            entry.TryGetProperty("byteSize", out var legacy)
+            && legacy.ValueKind == JsonValueKind.Number
+            && legacy.TryGetInt64(out long legacyValue)
+        )
+        {
+            return legacyValue;
+        }
+        return 0;
     }
 }

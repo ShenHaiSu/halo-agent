@@ -101,7 +101,7 @@ public sealed class MainForm : Form
         _frameChannel =
             injectedChannel
             ?? new Host.Desktop.Engine.InProcChannel(
-                new HaloAgent.Engine.FrameServer(),
+                CreateBackfilledFrameServer(),
                 new Host.Desktop.Engine.EventRingBuffer()
             );
         _hostFrameBridge =
@@ -159,6 +159,20 @@ public sealed class MainForm : Form
             _orphanScanCts.Token
         );
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
+    }
+
+    private HaloAgent.Engine.FrameServer CreateBackfilledFrameServer()
+    {
+        var server = new HaloAgent.Engine.FrameServer();
+        try
+        {
+            server.LoadSessions(_storageManager.CurrentDataRoot);
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("Frame history backfill failed.", ex);
+        }
+        return server;
     }
 
     private string ResolveInitialUrl()

@@ -5,26 +5,89 @@ namespace HaloAgent.Engine;
 /// <summary>
 /// Session truth owned by the engine: titles, history, compaction guard.
 /// Inner repository lock; always acquired inside the frame write gate, never the reverse.
-/// History paging uses an index cursor so the display layer can lazily fetch windows.
+/// History paging uses an index cursor so the display layer can lazily fetch windows;
+/// message ids are accepted as cursors too for parity with the desktop store.
+/// Paging cursors are per session so parallel sessions never scramble each other.
 /// </summary>
 public sealed class SessionLedger
 {
+    public const int PreviewTextLimit = 2048;
+
     private readonly object _gate = new();
-    private readonly Dictionary<string, string> _titles = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _workspaces = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SessionDescriptor> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<StoredMessage>> _history = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _nextIndex = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _aliases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _compacting = new(StringComparer.Ordinal);
-    private long _messageIndex;
+    private readonly List<string> _workspaceFallbackAudit = new();
 
     public bool EnsureSession(string sessionId, string title, string workspaceId = "default")
     {
+        return EnsureSession(
+            sessionId,
+            title,
+            workspaceId,
+            parentSessionId: null,
+            providerId: null,
+            modelId: null
+        );
+    }
+
+    public bool EnsureSession(
+        string sessionId,
+        string title,
+        string? workspaceId,
+        string? parentSessionId,
+        string? providerId,
+        string? modelId,
+        string agentRole = "main",
+        bool isPinned = false,
+        bool titleLocked = false
+    )
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return false;
+        }
+        string workspace = ResolveWorkspace(workspaceId);
+        var now = DateTimeOffset.UtcNow;
         lock (_gate)
         {
-            _titles[sessionId] = title;
-            _workspaces[sessionId] = string.IsNullOrWhiteSpace(workspaceId)
-                ? "default"
-                : workspaceId;
+            if (_sessions.TryGetValue(sessionId, out var existing))
+            {
+                _sessions[sessionId] = existing with
+                {
+                    Title = string.IsNullOrWhiteSpace(title) ? existing.Title : title,
+                    WorkspaceId = workspace,
+                    ParentSessionId = parentSessionId ?? existing.ParentSessionId,
+                    ProviderId = providerId ?? existing.ProviderId,
+                    ModelId = modelId ?? existing.ModelId,
+                    AgentRole = string.IsNullOrWhiteSpace(agentRole)
+                        ? existing.AgentRole
+                        : agentRole,
+                    IsPinned = isPinned || existing.IsPinned,
+                    TitleLocked = titleLocked || existing.TitleLocked,
+                    UpdatedAtUtc = now,
+                };
+            }
+            else
+            {
+                _sessions[sessionId] = new SessionDescriptor(
+                    sessionId,
+                    string.IsNullOrWhiteSpace(title) ? "New session" : title,
+                    workspace,
+                    parentSessionId,
+                    providerId,
+                    modelId,
+                    string.IsNullOrWhiteSpace(agentRole) ? "main" : agentRole,
+                    isPinned,
+                    titleLocked,
+                    now,
+                    now
+                );
+            }
             _history.TryAdd(sessionId, new List<StoredMessage>());
+            _nextIndex.TryAdd(sessionId, 0);
             return true;
         }
     }
@@ -33,7 +96,58 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            return _titles.TryGetValue(sessionId, out title!);
+            if (_sessions.TryGetValue(ResolveAlias(sessionId), out var descriptor))
+            {
+                title = descriptor.Title;
+                return true;
+            }
+            title = string.Empty;
+            return false;
+        }
+    }
+
+    public bool TryGetDescriptor(string sessionId, out SessionDescriptor? descriptor)
+    {
+        lock (_gate)
+        {
+            return _sessions.TryGetValue(ResolveAlias(sessionId), out descriptor);
+        }
+    }
+
+    public string ResolveWorkspace(string? workspaceId)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceId))
+        {
+            return workspaceId;
+        }
+        lock (_gate)
+        {
+            _workspaceFallbackAudit.Add(
+                $"{DateTimeOffset.UtcNow:O} workspace missing, routed to '{SessionIdentity.DefaultWorkspace}'."
+            );
+        }
+        return SessionIdentity.DefaultWorkspace;
+    }
+
+    public int WorkspaceFallbackCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _workspaceFallbackAudit.Count;
+            }
+        }
+    }
+
+    public IReadOnlyList<string> WorkspaceFallbackAudit
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _workspaceFallbackAudit.ToList();
+            }
         }
     }
 
@@ -41,11 +155,125 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            if (!_titles.ContainsKey(sessionId))
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
             {
                 return false;
             }
-            _titles[sessionId] = title;
+            if (descriptor.TitleLocked)
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                Title = title,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            return true;
+        }
+    }
+
+    public bool SetProvider(string sessionId, string? providerId, string? modelId)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                ProviderId = providerId ?? descriptor.ProviderId,
+                ModelId = modelId ?? descriptor.ModelId,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            return true;
+        }
+    }
+
+    public bool SetTitleLocked(string sessionId, bool titleLocked)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                TitleLocked = titleLocked,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            return true;
+        }
+    }
+
+    public bool SetPinned(string sessionId, bool isPinned)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                IsPinned = isPinned,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            return true;
+        }
+    }
+
+    public bool SetAgentRole(string sessionId, string agentRole)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                AgentRole = string.IsNullOrWhiteSpace(agentRole) ? descriptor.AgentRole : agentRole,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            return true;
+        }
+    }
+
+    public bool SetParent(string sessionId, string? parentSessionId)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with
+            {
+                ParentSessionId = parentSessionId ?? descriptor.ParentSessionId,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            return true;
+        }
+    }
+
+    public bool Touch(string sessionId)
+    {
+        lock (_gate)
+        {
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.TryGetValue(key, out var descriptor))
+            {
+                return false;
+            }
+            _sessions[key] = descriptor with { UpdatedAtUtc = DateTimeOffset.UtcNow };
             return true;
         }
     }
@@ -54,67 +282,176 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            _titles.Remove(sessionId);
-            _workspaces.Remove(sessionId);
-            _history.Remove(sessionId);
-            _compacting.Remove(sessionId);
-            return true;
+            string key = ResolveAlias(sessionId);
+            bool removed = _sessions.Remove(key);
+            _history.Remove(key);
+            _nextIndex.Remove(key);
+            _compacting.Remove(key);
+            var stale = _aliases
+                .Where(e => string.Equals(e.Value, key, StringComparison.Ordinal))
+                .Select(e => e.Key)
+                .ToList();
+            foreach (string alias in stale)
+            {
+                _aliases.Remove(alias);
+            }
+            return removed;
         }
+    }
+
+    /// <summary>All known session ids with titles, default scope only (startup sweep helper).</summary>
+    public IReadOnlyList<(string SessionId, string Title)> ListPairs()
+    {
+        return List(SessionIdentity.DefaultWorkspace).Select(d => (d.SessionId, d.Title)).ToList();
     }
 
     public void Clear(string sessionId)
     {
         lock (_gate)
         {
-            if (_history.TryGetValue(sessionId, out var list))
+            string key = ResolveAlias(sessionId);
+            if (_history.TryGetValue(key, out var list))
             {
                 list.Clear();
+            }
+            if (_sessions.TryGetValue(key, out var descriptor))
+            {
+                _sessions[key] = descriptor with { UpdatedAtUtc = DateTimeOffset.UtcNow };
             }
         }
     }
 
     public bool TryRollbackLast(string sessionId, out StoredMessage? removed)
     {
-        lock (_gate)
-        {
-            removed = null;
-            if (!_history.TryGetValue(sessionId, out var list) || list.Count == 0)
-            {
-                return false;
-            }
-            removed = list[^1];
-            list.RemoveAt(list.Count - 1);
-            return true;
-        }
+        return TryRollbackTurn(sessionId, out _, out removed);
     }
 
-    public IReadOnlyList<(string SessionId, string Title)> List()
+    /// <summary>
+    /// Rolls back the newest turn as a whole: every message that carries the
+    /// newest turn id is removed together, matching desktop rewrite semantics.
+    /// Single-message callers keep working through <see cref="TryRollbackLast"/>.
+    /// </summary>
+    public bool TryRollbackTurn(
+        string sessionId,
+        out IReadOnlyList<StoredMessage> removedMessages,
+        out StoredMessage? lastRemoved
+    )
     {
         lock (_gate)
         {
-            return _titles.Select(e => (e.Key, e.Value)).ToList();
+            removedMessages = Array.Empty<StoredMessage>();
+            lastRemoved = null;
+            string key = ResolveAlias(sessionId);
+            if (!_history.TryGetValue(key, out var list) || list.Count == 0)
+            {
+                return false;
+            }
+            string newestTurn = list[^1].TurnId;
+            var removed = string.IsNullOrWhiteSpace(newestTurn)
+                ? new List<StoredMessage> { list[^1] }
+                : list.Where(m => string.Equals(m.TurnId, newestTurn, StringComparison.Ordinal))
+                    .ToList();
+            foreach (var item in removed)
+            {
+                list.Remove(item);
+            }
+            lastRemoved = removed.Count > 0 ? removed[^1] : null;
+            removedMessages = removed;
+            if (_sessions.TryGetValue(key, out var descriptor))
+            {
+                _sessions[key] = descriptor with { UpdatedAtUtc = DateTimeOffset.UtcNow };
+            }
+            return removed.Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// Workspace-scoped listing ordered by most recently updated first.
+    /// A missing workspace falls back to the default scope and is audited,
+    /// so reads never silently sweep every workspace.
+    /// </summary>
+    public IReadOnlyList<SessionDescriptor> List(string? workspaceId = null)
+    {
+        string workspace = ResolveWorkspace(workspaceId);
+        lock (_gate)
+        {
+            return _sessions
+                .Values.Where(d =>
+                    string.Equals(d.WorkspaceId, workspace, StringComparison.Ordinal)
+                )
+                .OrderByDescending(d => d.UpdatedAtUtc ?? DateTimeOffset.MinValue)
+                .ThenBy(d => d.SessionId, StringComparer.Ordinal)
+                .ToList();
         }
     }
 
     public StoredMessage Append(string sessionId, string role, string text, string turnId)
     {
+        return Append(sessionId, role, text, turnId, messageId: null);
+    }
+
+    public StoredMessage Append(
+        string sessionId,
+        string role,
+        string text,
+        string turnId,
+        string? messageId,
+        string? toolCallId = null,
+        string? name = null,
+        IReadOnlyList<SessionToolCall>? toolCalls = null,
+        IReadOnlyList<SessionImageReference>? images = null,
+        long? inputTokens = null,
+        long? outputTokens = null,
+        long? cachedTokens = null,
+        string? reasoningContent = null,
+        string? validatedWarnings = null,
+        string? errorCode = null
+    )
+    {
         lock (_gate)
         {
-            if (!_history.TryGetValue(sessionId, out var list))
+            string key = ResolveAlias(sessionId);
+            if (!_history.TryGetValue(key, out var list))
             {
                 list = new List<StoredMessage>();
-                _history[sessionId] = list;
-                _titles.TryAdd(sessionId, "New session");
+                _history[key] = list;
+                _sessions.TryAdd(
+                    key,
+                    new SessionDescriptor(key, "New session", SessionIdentity.DefaultWorkspace)
+                    {
+                        CreatedAtUtc = DateTimeOffset.UtcNow,
+                        UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    }
+                );
+                _nextIndex.TryAdd(key, 0);
             }
-            _messageIndex += 1;
+            long index = (_nextIndex.TryGetValue(key, out long next) ? next : 0) + 1;
+            _nextIndex[key] = index;
+            var now = DateTimeOffset.UtcNow;
             var stored = new StoredMessage(
-                _messageIndex,
+                index,
                 role,
                 text,
                 turnId,
-                DateTimeOffset.UtcNow
+                now,
+                string.IsNullOrWhiteSpace(messageId) ? SessionIdentity.NewMessageId() : messageId,
+                toolCallId,
+                name,
+                toolCalls,
+                images,
+                inputTokens,
+                outputTokens,
+                cachedTokens,
+                reasoningContent,
+                validatedWarnings,
+                errorCode,
+                now
             );
             list.Add(stored);
+            if (_sessions.TryGetValue(key, out var descriptor))
+            {
+                _sessions[key] = descriptor with { UpdatedAtUtc = now };
+            }
             return stored;
         }
     }
@@ -125,18 +462,28 @@ public sealed class SessionLedger
         int limit
     )
     {
+        var page = ReadPage(sessionId, cursor, limit, out _);
+        return page;
+    }
+
+    public (IReadOnlyList<StoredMessage> Items, string NextCursor, bool HasMore) ReadPage(
+        string sessionId,
+        string cursor,
+        int limit,
+        out long total
+    )
+    {
         int take = Math.Clamp(limit <= 0 ? 50 : limit, 1, 200);
         lock (_gate)
         {
-            if (!_history.TryGetValue(sessionId, out var list) || list.Count == 0)
+            string key = ResolveAlias(sessionId);
+            if (!_history.TryGetValue(key, out var list) || list.Count == 0)
             {
+                total = 0;
                 return (Array.Empty<StoredMessage>(), "0", false);
             }
-            long since = 0;
-            if (!string.IsNullOrWhiteSpace(cursor))
-            {
-                long.TryParse(cursor, out since);
-            }
+            total = list.Count;
+            long since = ResolveCursor(list, cursor);
             var window = list.Where(m => m.Index > since).Take(take).ToList();
             string next = window.Count > 0 ? window[^1].Index.ToString() : since.ToString();
             bool hasMore = window.Count > 0 && window[^1].Index < list[^1].Index;
@@ -144,23 +491,42 @@ public sealed class SessionLedger
         }
     }
 
+    private static long ResolveCursor(IReadOnlyList<StoredMessage> list, string? cursor)
+    {
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            return 0;
+        }
+        string trimmed = cursor.Trim();
+        var byId = list.FirstOrDefault(m => string.Equals(m.Id, trimmed, StringComparison.Ordinal));
+        if (byId is not null)
+        {
+            return byId.Index;
+        }
+        return long.TryParse(trimmed, out long since) ? since : 0;
+    }
+
     public int Count(string sessionId)
     {
         lock (_gate)
         {
-            return _history.TryGetValue(sessionId, out var list) ? list.Count : 0;
+            string key = ResolveAlias(sessionId);
+            return _history.TryGetValue(key, out var list) ? list.Count : 0;
         }
     }
+
+    public long Total(string sessionId) => Count(sessionId);
 
     public bool TryBeginCompaction(string sessionId)
     {
         lock (_gate)
         {
-            if (!_titles.ContainsKey(sessionId) || _compacting.Contains(sessionId))
+            string key = ResolveAlias(sessionId);
+            if (!_sessions.ContainsKey(key) || _compacting.Contains(key))
             {
                 return false;
             }
-            _compacting.Add(sessionId);
+            _compacting.Add(key);
             return true;
         }
     }
@@ -169,20 +535,29 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            _compacting.Remove(sessionId);
-            if (_history.TryGetValue(sessionId, out var list))
+            string key = ResolveAlias(sessionId);
+            _compacting.Remove(key);
+            if (_history.TryGetValue(key, out var list))
             {
                 list.Clear();
-                _messageIndex += 1;
+                long index = (_nextIndex.TryGetValue(key, out long next) ? next : 0) + 1;
+                _nextIndex[key] = index;
+                var now = DateTimeOffset.UtcNow;
                 list.Add(
                     new StoredMessage(
-                        _messageIndex,
+                        index,
                         "system",
                         summary,
                         string.Empty,
-                        DateTimeOffset.UtcNow
+                        now,
+                        SessionIdentity.NewMessageId(),
+                        CreatedAt: now
                     )
                 );
+            }
+            if (_sessions.TryGetValue(key, out var descriptor))
+            {
+                _sessions[key] = descriptor with { UpdatedAtUtc = DateTimeOffset.UtcNow };
             }
         }
     }
@@ -191,7 +566,7 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            return _compacting.Contains(sessionId);
+            return _compacting.Contains(ResolveAlias(sessionId));
         }
     }
 
@@ -199,7 +574,8 @@ public sealed class SessionLedger
     {
         lock (_gate)
         {
-            return _history.TryGetValue(sessionId, out var list)
+            string key = ResolveAlias(sessionId);
+            return _history.TryGetValue(key, out var list)
                 ? list.ToList()
                 : new List<StoredMessage>();
         }
@@ -207,18 +583,99 @@ public sealed class SessionLedger
 
     public void Restore(string sessionId, string title, IEnumerable<StoredMessage> messages)
     {
+        Restore(
+            sessionId,
+            new SessionDescriptor(sessionId, title, SessionIdentity.DefaultWorkspace),
+            messages
+        );
+    }
+
+    public void Restore(
+        string sessionId,
+        SessionDescriptor descriptor,
+        IEnumerable<StoredMessage> messages
+    )
+    {
         lock (_gate)
         {
-            _titles[sessionId] = title;
             var list = new List<StoredMessage>(messages);
-            _history[sessionId] = list;
             foreach (var item in list)
             {
-                if (item.Index > _messageIndex)
+                if (string.IsNullOrWhiteSpace(item.Id))
                 {
-                    _messageIndex = item.Index;
+                    list[list.IndexOf(item)] = item with { Id = SessionIdentity.NewMessageId() };
                 }
             }
+            _sessions[sessionId] = descriptor with { SessionId = sessionId };
+            _history[sessionId] = list;
+            long high = 0;
+            foreach (var item in list)
+            {
+                if (item.Index > high)
+                {
+                    high = item.Index;
+                }
+            }
+            _nextIndex[sessionId] = high;
+        }
+    }
+
+    public void RegisterAlias(string previousId, string currentId)
+    {
+        if (string.IsNullOrWhiteSpace(previousId) || string.IsNullOrWhiteSpace(currentId))
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            _aliases[previousId] = currentId;
+        }
+    }
+
+    public string ResolveAlias(string sessionId)
+    {
+        lock (_gate)
+        {
+            return ResolveAliasLocked(sessionId);
+        }
+    }
+
+    private string ResolveAliasLocked(string sessionId)
+    {
+        string current = sessionId;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (
+            !string.IsNullOrEmpty(current)
+            && _aliases.TryGetValue(current, out string? next)
+            && seen.Add(current)
+        )
+        {
+            current = next;
+        }
+        return current;
+    }
+
+    /// <summary>
+    /// Startup healing: links previous-generation ids to directory-shaped ids
+    /// and links every stored row back to a descriptor so reloads never drop.
+    /// </summary>
+    public int HealAliases()
+    {
+        lock (_gate)
+        {
+            int healed = 0;
+            foreach (var id in _history.Keys.ToList())
+            {
+                if (
+                    !_sessions.ContainsKey(id)
+                    && ResolveAliasLocked(id) != id
+                    && _sessions.ContainsKey(ResolveAliasLocked(id))
+                )
+                {
+                    healed++;
+                }
+            }
+            return healed;
         }
     }
 }
