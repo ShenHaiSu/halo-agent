@@ -18,7 +18,7 @@
     "contract:gen": "node ../../scripts/gen-contract-types.mjs",
     "contract:check": "node ../../scripts/gen-contract-types.mjs --check",
     "contract:freeze": "node ../../scripts/check-contract-additive.mjs",
-    "postbuild": "node scripts/assert-no-mock.mjs",
+    "postbuild": "node scripts/assert-no-mock.mjs && node scripts/assert-no-surface-override.mjs",
     "lint:components": "node scripts/assert-no-unresolved-components.mjs",
     "build": "npm run typecheck && npm run selfcheck && npm run lint:components && vite build",
     "preview": "vite preview",
