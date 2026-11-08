@@ -1,11 +1,6 @@
 <template>
   <KeepAlive :max="3">
-    <div
-      v-show="paneActive"
-      :aria-hidden="paneActive ? undefined : 'true'"
-      class="flex-1 min-h-0 min-w-0 flex flex-col"
-      :class="motionOn ? 'veil-motion-on' : ''"
-    >
+    <div v-show="paneActive" :aria-hidden="paneActive ? undefined : 'true'" class="flex-1 min-h-0 min-w-0 flex flex-col">
       <TimelineView
         :is-empty="t.persistedMessages.length === 0 && !t.stream.hasActiveTurn"
         :items="t.timelineItems"
@@ -13,10 +8,6 @@
         :tail-items="t.tailEntries"
         :show-jump-btn="!!t.showJump"
         :reading-window="!!t.readingWindow"
-        :veil-covering="veilCovering"
-        :veil-leaving="veilLeaving"
-        :veil-pre-enter="veilPreEnter"
-        :motion-on="motionOn"
         :chat-width-mode="t.chatWidthMode"
         :is-expanded="t.isTurnExpanded"
         :is-run-expanded="t.isRunExpanded"
@@ -79,16 +70,14 @@
   </KeepAlive>
 </template>
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import TimelineView from './TimelineView.vue';
 import { useTimeline } from '../composables/useTimeline';
 import { renderMarkdown, renderMarkdownCached, renderStreamingText } from '@features/session/utils/markdownRender';
 import { isP4SubOn, useP02Flags } from '@features/need02/utils/need02Flags';
 import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
 import type { UserTurn } from '@features/session/utils/userTurn';
-import { createSettleController, type SettleController } from '@features/session/utils/transcriptSettle';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 /** need02-P4（p4-md）：稳态渲染走 LRU 缓存；子开关 off 时回直跑（开关即时生效，无需重载，供 G6 矩阵验证）。 */
 function renderHtml(s: string): string {
@@ -112,179 +101,8 @@ if (import.meta.env.DEV) {
 }
 const paneActive = ref(true);
 t.setPaneVisible(true);
-// Hidden pane never follows/pages/samples; 显隐保留滚动（v-show 不重建 DOM）。
-
-/**
- * M4-§2：settle veil（骨架遮罩）**只用于会话切换 / 历史大量加载**。
- *
- * 红线（docs/99 §7）：**绝不用在轮末**——`turnEvents` 已实现「先 reloadNow 后清容器」，
- * 轮末内容不会真空，此时叠遮罩等于人为制造一次白闪。
- *
- * 施工陷阱（docs/05 §2.4）：`createSettleController` 的 `sample()` 只能由外部喂，
- * 内部没有采样循环；不喂 sample 就只能靠 600ms 超时兜底 → **固定遮挡 600ms**，比白闪更糟。
- * 所以这里必须挂一个 rAF 采样循环，并在遮罩结束后立刻停掉。
- */
-const veilCovering = ref(false);
-const VEIL_MIN_MESSAGES = 5;
-const VEIL_MOTION_KEY = 'halo-veil-motion';
-const workspaceStore = useWorkspaceStore();
-let settleCtrl: SettleController | null = null;
-let sampleEl: HTMLElement | null = null;
-let sampleRaf = 0;
-let postLeaveFrames = 0;
-let leavingHeight = 0;
-let skipImgQuery = false;
-function readVeilMotionFlag(): boolean {
-  try {
-    const raw = localStorage.getItem(VEIL_MOTION_KEY);
-    if (raw === null) return true;
-    return raw !== 'off' && raw !== '0' && raw !== 'false';
-  } catch {
-    if (import.meta.env.DEV) {
-      try {
-        console.debug('[veil-motion] flag read failed, degrade to off');
-      } catch {
-        /* ignore */
-      }
-    }
-    return false;
-  }
-}
-const veilMotionOn = ref(readVeilMotionFlag());
-const veilReduced = ref(false);
-try {
-  veilReduced.value = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-} catch {
-  veilReduced.value = false;
-}
-const motionOn = computed(() => veilMotionOn.value && !veilReduced.value);
-const veilLeaving = ref(false);
-const veilPreEnter = ref(false);
-function stopSampling(): void {
-  if (sampleRaf) cancelAnimationFrame(sampleRaf);
-  sampleRaf = 0;
-}
-function readLeaveMs(): number | undefined {
-  try {
-    if (!sampleEl) return undefined;
-    const raw = getComputedStyle(sampleEl).getPropertyValue('--veil-leave-ms').trim();
-    if (!raw) return undefined;
-    if (raw.endsWith('ms')) {
-      const v = parseFloat(raw);
-      return Number.isFinite(v) ? v : undefined;
-    }
-    if (raw.endsWith('s')) {
-      const v = parseFloat(raw) * 1000;
-      return Number.isFinite(v) ? v : undefined;
-    }
-    const v = parseFloat(raw);
-    return Number.isFinite(v) ? v : undefined;
-  } catch {
-    return undefined;
-  }
-}
-function countImgPending(): number {
-  if (!sampleEl) return 0;
-  try {
-    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-    const n = sampleEl.querySelectorAll('img:not([data-loaded])').length;
-    if (typeof performance !== 'undefined' && performance.now() - t0 > 1) skipImgQuery = true;
-    return n;
-  } catch {
-    return 0;
-  }
-}
-function startSampling(): void {
-  stopSampling();
-  let frame = 0;
-  const loop = (): void => {
-    sampleRaf = 0;
-    if (!settleCtrl || !sampleEl) return;
-    if (settleCtrl.phase === 'off') return;
-    frame++;
-    let imgPending = 0;
-    if (motionOn.value && !(skipImgQuery && frame % 2 === 0)) imgPending = countImgPending();
-    const s = { scrollHeight: sampleEl.scrollHeight, clientHeight: sampleEl.clientHeight, imgPending };
-    if (settleCtrl.phase === 'leaving') {
-      postLeaveFrames++;
-      if (postLeaveFrames >= 2 && Math.abs(s.scrollHeight - leavingHeight) > 8) {
-        settleCtrl.revertToCovering();
-        postLeaveFrames = 0;
-        leavingHeight = s.scrollHeight;
-      }
-      if ((settleCtrl.phase as string) !== 'off') sampleRaf = requestAnimationFrame(loop);
-      return;
-    }
-    settleCtrl.sample(s);
-    if ((settleCtrl.phase as string) === 'off') return;
-    sampleRaf = requestAnimationFrame(loop);
-  };
-  sampleRaf = requestAnimationFrame(loop);
-}
-function beginSettle(): void {
-  settleCtrl?.dispose();
-  stopSampling();
-  postLeaveFrames = 0;
-  if (sampleEl) {
-    try {
-      sampleEl.scrollTop = 0;
-    } catch {
-      /* ignore */
-    }
-  }
-  const shortSession = (t.persistedMessages?.length || 0) < VEIL_MIN_MESSAGES;
-  if (!motionOn.value) {
-    settleCtrl = createSettleController({ shortSession });
-  } else {
-    const leaveMs = readLeaveMs();
-    settleCtrl = createSettleController({ shortSession, leaveMs, minCoverMs: 120 });
-  }
-  veilCovering.value = settleCtrl.veilCovering;
-  veilLeaving.value = motionOn.value && settleCtrl.veilLeaving;
-  if (veilCovering.value && motionOn.value) {
-    veilPreEnter.value = true;
-    requestAnimationFrame(() => {
-      veilPreEnter.value = false;
-    });
-  } else {
-    veilPreEnter.value = false;
-  }
-  settleCtrl.onPhase = (p) => {
-    if (!settleCtrl) return;
-    if (p === 'leaving') {
-      veilCovering.value = true;
-      veilLeaving.value = motionOn.value;
-      if (sampleEl) leavingHeight = sampleEl.scrollHeight;
-      postLeaveFrames = 0;
-    } else if (p === 'covering') {
-      veilCovering.value = true;
-      veilLeaving.value = false;
-      postLeaveFrames = 0;
-      if (sampleEl) leavingHeight = sampleEl.scrollHeight;
-    } else {
-      veilCovering.value = false;
-      veilLeaving.value = false;
-      veilPreEnter.value = false;
-      stopSampling();
-    }
-  };
-  if (veilCovering.value) startSampling();
-}
-watch(
-  () => workspaceStore.activeSessionId,
-  (newId, oldId) => {
-    if (newId === oldId) return;
-    beginSettle();
-  }
-);
-onUnmounted(() => {
-  stopSampling();
-  settleCtrl?.dispose();
-  settleCtrl = null;
-});
-
+// 硬切：会话切换直接替换 timelineItems，不挂骨架遮罩 / rAF 采样 / 淡出。
 function onReady(el: HTMLElement | null): void {
-  sampleEl = el;
   t.attachContainer(el);
 }
 const liveTelemetry = computed(() =>

@@ -3,14 +3,9 @@
     ref="scroll"
     class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden relative transcript-scroll"
     data-testid="message-timeline"
-    :data-transcript-settling="veilCovering ? 'true' : undefined"
     :data-need02="need02Attr"
   >
-    <div
-      :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'"
-      :inert="veilCovering && motionOn !== false ? true : undefined"
-      :aria-busy="veilCovering ? 'true' : undefined"
-    >
+    <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
       <div v-if="isEmpty" class="py-10 text-center space-y-2">
         <div class="flex justify-center">
           <Bot class="w-8 h-8 text-accent" />
@@ -190,16 +185,6 @@
         @delete="emit('menu-delete')"
       />
     </div>
-    <div
-      v-if="veilCovering"
-      class="transcript-veil"
-      :class="{ 'is-pre-enter': veilPreEnter, 'is-leaving': veilLeaving }"
-      aria-hidden="true"
-    >
-      <div class="transcript-skeleton" />
-      <div class="transcript-skeleton short" />
-      <div class="transcript-skeleton" />
-    </div>
     <Transition name="show-jump">
       <button
         v-if="showJumpVisible"
@@ -277,10 +262,6 @@ const props = defineProps<{
   tailItems?: TimelineEntry[] | null;
   showJumpBtn?: boolean;
   readingWindow?: boolean;
-  veilCovering?: boolean;
-  veilLeaving?: boolean;
-  veilPreEnter?: boolean;
-  motionOn?: boolean;
   /** need02-P0：开关透传串（data-need02），缺省 undefined 时不渲染该属性，零视觉变更。 */
   need02Attr?: string;
   /** need02-P1：pending 判定/状态（可选，缺省时 TimelineRow 回落到 id 前缀）。 */
@@ -346,8 +327,8 @@ function liveSegsFor(entry: TimelineEntry): LiveSeg[] {
   if (!key || key !== liveOwnerKey.value) return [];
   return (props.liveSegs || []) as LiveSeg[];
 }
-// 显示条件 (showJump||readingWindow)&&!veilCovering
-const showJumpVisible = computed(() => (props.showJumpBtn || props.readingWindow) && !props.veilCovering);
+// 硬切：回到底部按钮直接显隐，无遮罩互斥。
+const showJumpVisible = computed(() => props.showJumpBtn || props.readingWindow);
 /** P02-P0b：轴尾容器可见性——默认收敛进轮内（开=隐藏）；off 回旧链双容器。 */
 const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce === false);
 </script>
@@ -407,32 +388,7 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
     transition: none;
   }
 }
-/* M1-3 注意：思考段的 `.reasoning-seg` 样式随 seg 渲染一起搬到 `StreamSegItem.vue` 的
-   scoped 样式里（scoped 规则不跨组件 DOM 生效，留在这里是死样式）。
-   M4-§2：settle veil 的骨架遮罩 —— 只在会话切换时由 MessageTimeline 驱动。 */
-.transcript-veil {
-  inset: 0;
-  position: absolute;
-  background: var(--n-body-color, #fff);
-  pointer-events: auto;
-  z-index: 5;
-}
-.transcript-skeleton {
-  height: 56px;
-  border-radius: 8px;
-  margin: 12px 16px;
-  background: linear-gradient(90deg, #8881 25%, #8883 50%, #8881 75%);
-  background-size: 200% 100%;
-  animation: veil-shimmer 1.2s linear infinite;
-}
-.transcript-skeleton.short {
-  width: 60%;
-}
-@keyframes veil-shimmer {
-  to {
-    background-position: -200% 0;
-  }
-}
+/* 硬切：会话切换无骨架遮罩 / 无内容微淡入，直接替换 timelineItems。 */
 .show-jump-pill {
   position: sticky;
   bottom: 12px;
@@ -448,42 +404,8 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
   border: none;
   cursor: pointer;
   z-index: 6;
-  z-index: 6;
 }
-/* P03 veil-motion：变量声明在 scroll 层（veil 子树外可读，MessageTimeline 从 sampleEl 读取） */
-.transcript-scroll {
-  --veil-enter-ms: 120ms;
-  --veil-leave-ms: 180ms;
-  --veil-ease-enter: ease-out;
-  --veil-ease-leave: ease-in;
-}
-/* P03：veil 类名淡出（背景色由文件尾全局 style 块按 html.dark/light 直连，scoped 内禁写主题选择器） */
-.transcript-veil {
-  transition: opacity var(--veil-enter-ms) var(--veil-ease-enter);
-  opacity: 1;
-  pointer-events: none;
-}
-.transcript-veil.is-pre-enter {
-  opacity: 0;
-}
-.transcript-veil.is-leaving {
-  opacity: 0;
-  transition: opacity var(--veil-leave-ms) var(--veil-ease-leave);
-}
-/* P03：内容微淡入（仅 veil-motion-on 门控内生效，关开关零副作用） */
-.veil-motion-on .chat-timeline-centered,
-.veil-motion-on .chat-timeline-full {
-  transition: opacity 120ms ease-out;
-}
-.transcript-scroll[data-transcript-settling] .chat-timeline-centered,
-.transcript-scroll[data-transcript-settling] .chat-timeline-full {
-  opacity: 0.97;
-}
-.transcript-scroll:not([data-transcript-settling]) .chat-timeline-centered,
-.transcript-scroll:not([data-transcript-settling]) .chat-timeline-full {
-  opacity: 1;
-}
-/* P03：pill 淡入（与 veil 类名体系不同名，避免串扰） */
+/* P03：pill 淡入（与会话切换无关，保留） */
 .show-jump-pill {
   transition: opacity 120ms ease-out;
 }
@@ -493,40 +415,10 @@ const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce ==
 .show-jump-enter-from {
   opacity: 0;
 }
-/* P03：reduced-motion 下零动画（含存量缺失的 veil-shimmer，本期补） */
 @media (prefers-reduced-motion: reduce) {
-  .transcript-veil,
-  .transcript-veil.is-leaving,
-  .transcript-skeleton {
-    transition: none;
-    animation: none;
-  }
-  .veil-motion-on .chat-timeline-centered,
-  .veil-motion-on .chat-timeline-full {
-    transition: none;
-  }
   .show-jump-pill,
   .show-jump-enter-active {
     transition: none;
   }
-}
-</style>
-<style>
-/* P03 主题接线（全局块，不经 scoped 编译）。
- * 原因：scoped 内 global 函数式写法（html.dark + 后代 veil/skeleton）会被编译器丢弃后代选择器、
- * 输出为光秃 html.dark（实测输出为证），导致暗黑兜底挂错元素、veil 回退亮色。 */
-html.dark .transcript-veil {
-  background: var(--n-body-color, #0d1117);
-}
-html.light .transcript-veil {
-  background: var(--n-body-color, #f8fafc);
-}
-html.light .transcript-skeleton {
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
-  background-size: 200% 100%;
-}
-html.dark .transcript-skeleton {
-  background: linear-gradient(90deg, #1b2430 25%, #2a3646 50%, #1b2430 75%);
-  background-size: 200% 100%;
 }
 </style>
