@@ -72,6 +72,16 @@ export const useFrameSessionStore = defineStore('frameSession', () => {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
+  /** Rebuild the visible window after reload, reconnect or a sequence gap. */
+  async function rebuildVisibleWindow(): Promise<boolean> {
+    if (!(await refreshFromSnapshot())) return false;
+    if (!(await loadList())) return false;
+    if (activeSessionId.value !== '') {
+      return await openSession(activeSessionId.value);
+    }
+    return true;
+  }
+
   /** Rebuild the visible window after reload or reconnect. */
   async function refreshFromSnapshot(): Promise<boolean> {
     const channel = transport.value;
@@ -187,6 +197,7 @@ export const useFrameSessionStore = defineStore('frameSession', () => {
   }
 
   return {
+    rebuildVisibleWindow,
     activeSessionId,
     latestSequence,
     sessions,
