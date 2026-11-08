@@ -8,6 +8,9 @@ import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useAgentCards } from '@features/agent/stores/useAgentCards';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { toSendPayload, validateAttachments, DROP_REASON_TEXT } from '@shared/utils/composerModel';
+import { useFrameSessionStore } from '@/stores/frameSessionStore';
+import { resolveSendBranch } from '@/stores/historySourceGuard';
+import { readOverride, resolveMode } from '@/stores/surfaceRouter';
 import type { ComposerApi } from './useComposer';
 
 export function useSendTurn(c: ComposerApi) {
@@ -41,6 +44,30 @@ export function useSendTurn(c: ComposerApi) {
     if (!sid) return;
     workspaceStore.touchSessionTime(sid);
     await workspaceStore.compactSession(sid);
+  }
+  // Frame send branch for plain-text prompts: echo at once, issue agent.prompt
+  // with a unique request key, wait for the matching turn event, then settle.
+  // Returns null when the legacy chain should handle the send instead; any
+  // failure before the prompt goes out also falls back to legacy, while a
+  // failure after the prompt keeps the draft and never resends.
+  async function sendThroughFrame(text: string, attachmentCount: number): Promise<boolean | null> {
+    try {
+      const frame = useFrameSessionStore();
+      const branch = resolveSendBranch({
+        attachmentCount,
+        historyMode: resolveMode('history', readOverride()),
+        frameBound: frame.isBound,
+      });
+      if (branch !== 'frame') return null;
+      const sid = workspaceStore.activeSessionId || workspaceStore.activeSession?.id || '';
+      if (!sid) return null;
+      if (frame.activeSessionId !== sid && !(await frame.openSession(sid))) return null;
+      const done = await frame.promptAndConverge(text);
+      if (!done) message.warning('帧链发送未确认，草稿已保留');
+      return done;
+    } catch {
+      return null;
+    }
   }
   async function handleSend(): Promise<void> {
     if (stream.isGenerating || c.askMasked.value) return;
@@ -119,6 +146,11 @@ export function useSendTurn(c: ComposerApi) {
       } catch {
         /* 确认框异常则继续发送 */
       }
+    }
+    const framed = await sendThroughFrame(text, attachments.length);
+    if (framed !== null) {
+      if (framed) c.clearDraft();
+      return;
     }
     if (await turn.sendPrompt(text, attachments)) c.clearDraft();
   }
