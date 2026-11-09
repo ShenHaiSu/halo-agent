@@ -2,10 +2,11 @@ namespace Host.Desktop.Engine;
 
 /// <summary>
 /// Cutover batches for the frame boundary. Each batch flips independently
-/// between the legacy direct-call chain (default, safe to roll back) and the
+/// between the legacy direct-call chain (safe to roll back) and the
 /// engine-owned path, so a risky batch can be reverted without touching the
-/// others. The frontend whole-chain switch stays the outer gate: when it is
-/// off, none of these batches receive traffic regardless of the values here.
+/// others. The frame chain is the default: without explicit configuration
+/// every batch rides the engine, and the legacy chain only serves methods
+/// under an explicit legacy request or for host-only capabilities.
 /// </summary>
 public sealed class EngineRouting
 {
@@ -132,8 +133,12 @@ public sealed class EngineRouting
 
     /// <summary>
     /// Reads the process configuration. Accepted values are comma-separated
-    /// batch letters (for example "A,C"), "all", or anything else for the
-    /// legacy default. Missing or unreadable configuration means all legacy.
+    /// batch letters (for example "A,C") or "all" for the engine chain.
+    /// An explicit legacy keyword ("legacy", "none", "off", "disabled")
+    /// keeps every batch on the legacy chain for rollback. Missing,
+    /// empty, or unreadable configuration means the frame default: all
+    /// batches ride the engine. Unknown tokens are ignored, so a batch
+    /// only leaves the engine when its letter is absent from an explicit list.
     /// </summary>
     public static EngineRouting FromEnvironment()
     {
@@ -144,23 +149,35 @@ public sealed class EngineRouting
         }
         catch
         {
-            return new EngineRouting();
+            return AllBatches();
         }
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return new EngineRouting();
+            return AllBatches();
         }
         string normalized = raw.Trim().ToUpperInvariant();
         if (normalized == "ALL")
         {
-            return new EngineRouting(
-                new[] { BatchSessionTurns, BatchConfigUsage, BatchToolAssets }
-            );
+            return AllBatches();
+        }
+        if (
+            normalized == "LEGACY"
+            || normalized == "NONE"
+            || normalized == "OFF"
+            || normalized == "DISABLED"
+        )
+        {
+            return new EngineRouting();
         }
         string[] parts = normalized.Split(
             new[] { ',', ';', ' ', '|' },
             StringSplitOptions.RemoveEmptyEntries
         );
         return new EngineRouting(parts);
+    }
+
+    private static EngineRouting AllBatches()
+    {
+        return new EngineRouting(new[] { BatchSessionTurns, BatchConfigUsage, BatchToolAssets });
     }
 }

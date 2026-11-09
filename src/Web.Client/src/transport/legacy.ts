@@ -3,19 +3,19 @@ import type { FrameTransport, InvokeResult } from './types';
 import { BridgeTransport } from './bridgeTransport';
 import { MockTransport } from './mockTransport';
 
-/** Whole-chain switch keys: new frame chain is opt-in, old direct calls stay default. */
+/** Whole-chain switch keys: the frame chain is the default, the legacy chain stays one explicit flip away. */
 export const NEW_ENGINE_KEY = 'useNewEngine';
 export const DISABLE_PUMP_KEY = 'disableEventPump';
 
 /** Which backing the frame surface should use. */
 export type TransportKind = 'mock' | 'bridge';
 
-/** Read the persisted whole-chain switch (default off: stay on the old chain). */
+/** Read the persisted whole-chain switch (default on: only an explicit 'false' parks the legacy chain). */
 export function isNewEngineEnabled(): boolean {
   try {
-    return localStorage.getItem(NEW_ENGINE_KEY) === 'true';
+    return localStorage.getItem(NEW_ENGINE_KEY) !== 'false';
   } catch {
-    return false;
+    return true;
   }
 }
 

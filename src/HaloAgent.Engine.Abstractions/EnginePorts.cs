@@ -22,6 +22,21 @@ public interface IEngineContext
     IEngineLog Log { get; }
     CancellationToken TurnToken(string turnId);
     bool TryCancelTurn(string turnId);
+
+    /// <summary>Language gateway handle; null keeps the synchronous echo fallback.</summary>
+    IEngineGateway? Gateway { get; }
+
+    /// <summary>Token budget handle; null skips the pre-round budget guard.</summary>
+    IEngineBudget? Budget { get; }
+
+    /// <summary>Planner loop tuning; never null.</summary>
+    EngineTurnOptions TurnOptions { get; }
+
+    /// <summary>Host storage root handed to later tool execution.</summary>
+    string DataRoot { get; }
+
+    /// <summary>Tool execution seam; null keeps the deferred placeholder.</summary>
+    IEngineToolRunner? ToolRunner { get; }
 }
 
 /// <summary>Monotonic event journal with bounded memory and gap reporting.</summary>

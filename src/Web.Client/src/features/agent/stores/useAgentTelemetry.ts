@@ -58,7 +58,7 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     get: () => activeTurnRef.value.telemetry,
     set: (v) => {
       activeTurnRef.value.telemetry = v;
-    },
+   },
   });
 
   // ---- need22-P2 F1：单真相源归并（turns 瞬态 + persistedMessages 持久投影；Timeline 与目录共享） ----
@@ -131,7 +131,7 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
       if (String((m as unknown as { role?: unknown }).role || '').toLowerCase() === 'assistant') {
         activeAssistantId = String((m as unknown as { id?: unknown }).id || '');
         break;
-      }
+    }
     }
     let isGenerating = false;
     let liveTotalMs: number | null = null;
@@ -157,6 +157,20 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     bindTelemetryListeners();
   }
 
+  /** Main-pump counters land on the active session telemetry (poll/batch/gap/resync). */
+  function recordPumpStats(stats: { polls: number; batches: number; gaps: number; resyncs: number }): void {
+    try {
+      const t = ensureTurn(activeSessionId.value);
+      t.telemetry.pumpPolls = stats.polls;
+      t.telemetry.pumpBatches = stats.batches;
+      t.telemetry.pumpGaps = stats.gaps;
+      t.telemetry.pumpResyncs = stats.resyncs;
+      touch(t);
+    } catch {
+      /* stats must never break rendering */
+    }
+  }
+
   return {
     telemetry,
     activeTurnGroups,
@@ -165,5 +179,6 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     activeUserTurnEntries,
     hiddenToolCallIds,
     bindTelemetry,
+    recordPumpStats,
   };
 });

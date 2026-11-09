@@ -9,20 +9,29 @@ method names, event names and error codes. The backend catalog
 
 | File | Role |
 |---|---|
-| `contract/agent.schema.json` | Source of truth: version, name lists, envelope shapes |
-| `scripts/gen-contract-types.mjs` | Generates `agent.d.ts` from the schema |
+| `contract/agent.schema.json` | Source of truth: version, name lists, envelope shapes, frozen `freeze` appendix (0.1.1: +`session.title`) |
+| `scripts/gen-contract-types.mjs` | Generates `agent.d.ts` plus both C# mirrors from the schema (CRLF output, `--check` is newline-insensitive) |
+| `scripts/check-contract-additive.mjs` | Additive-only gate: version bump, no removals, envelope fixed, rejected names absent |
+| `contract/freeze-review.md` | Per-row review: supplier / default / replay for every frozen optional field |
+| `contract/parity-template.json` | Empty parity checklist (all unchecked); stations tick items as they land |
+| `contract/parity-s2-history.json` | History-station parity record: history subset checked, rest left for later stations |
+| `contract/parity-s4-llm.json` | True-loop-station parity record: prompt/retry loop plus failure reasons checked, tool and budget bars stay open |
 | `src/Web.Client/src/contract/agent.d.ts` | Machine output (header says `generated`, hand edits forbidden) |
-| `src/HaloAgent.Bridge.Contracts/AgentContract.cs` | C# mirror plus `TryClassifyFrame` envelope check |
-| `tests/Contract.Tests/` | Three-way consistency + envelope behavior tests |
+| `src/HaloAgent.Bridge.Contracts/AgentContract.cs` | C# mirror plus `TryClassifyFrame` envelope check (lists synced by the generator) |
+| `src/HaloAgent.Engine.Abstractions/ContractCatalog.cs` | Engine-side C# mirror (lists synced by the generator) |
+| `tests/Contract.Tests/` | Three-way consistency + envelope behavior + additive-only freeze guard |
 
 ## Workflow
 
 ```bash
-# regenerate after editing the schema
+# regenerate after editing the schema (updates agent.d.ts and both C# mirrors)
 node scripts/gen-contract-types.mjs
 
-# fail when the generated file is stale (CI gate)
+# fail when any generated mirror is stale (CI gate)
 node scripts/gen-contract-types.mjs --check
+
+# fail when the schema breaks the additive-only freeze rule (CI gate)
+node scripts/check-contract-additive.mjs
 ```
 
 `tests/Contract.Tests` fails on any drift between the three sides, so the

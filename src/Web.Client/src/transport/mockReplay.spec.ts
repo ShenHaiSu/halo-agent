@@ -58,7 +58,7 @@ describe('mock main flow replay', () => {
     let resynced = 0;
     bridge.onResync(() => (resynced += 1));
     const forged = {
-      invoke: () => Promise.resolve({ ok: true, result: {} }),
+      invoke: () => Promise.resolve({ ok: true, result: { latestSequence: 4 } }),
       pollBatch: () => Promise.resolve({ frames: [], nextSeq: 0, hasGap: true, droppedEstimate: 3 }),
     };
     const stale = new EventBridge(forged as unknown as typeof transport);

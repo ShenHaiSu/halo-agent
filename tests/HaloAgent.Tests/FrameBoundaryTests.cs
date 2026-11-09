@@ -252,6 +252,27 @@ public sealed class FrameBoundaryTests
     }
 
     [Fact]
+    public async Task SystemInfoEchoesRoutingWithoutBatch()
+    {
+        HostBridge bridge = CreateBridge(null, out InProcChannel channel);
+        await using var lifetime = channel;
+
+        string raw = await bridge.invoke(
+            "{\"t\":\"req\",\"id\":21,\"m\":\"system.info\",\"p\":{}}"
+        );
+
+        using JsonDocument document = Parse(raw);
+        JsonElement root = document.RootElement;
+        Assert.True(root.GetProperty("ok").GetBoolean());
+        JsonElement result = root.GetProperty("r");
+        Assert.True(result.TryGetProperty("routing", out JsonElement routing));
+        Assert.True(routing.TryGetProperty("enabledBatches", out JsonElement batches));
+        Assert.Equal(0, batches.GetArrayLength());
+        Assert.True(result.TryGetProperty("queueBound", out _));
+        Assert.True(result.TryGetProperty("journalCapacity", out _));
+    }
+
+    [Fact]
     public async Task HostPickDirectoryWithoutFormCancelsCleanly()
     {
         HostBridge bridge = CreateBridge(null, out InProcChannel channel);

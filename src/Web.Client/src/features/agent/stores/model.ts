@@ -62,6 +62,11 @@ export interface AgentTelemetry {
   billedCompletion: number;
   occupancyState: string;
   liveEst: number;
+  /** Main-pump counters (poll/batch/gap/resync); absent until the first pump report. */
+  pumpPolls?: number;
+  pumpBatches?: number;
+  pumpGaps?: number;
+  pumpResyncs?: number;
 }
 
 /** 单会话瞬态（TurnStore 统一模型：持久态归 workspaceStore，瞬态归这里） */

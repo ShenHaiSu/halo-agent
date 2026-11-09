@@ -1,0 +1,122 @@
+{
+  "acceptance": {
+    "cwdIsNotificationOnly": "session.setCwd only forwards the event, never writes the ledger; restart cannot resurrect a stale directory; WorkingDirectoryChangeNeverReachesTheLedger",
+    "dualCursor": "session.history accepts index and msg_id cursors with identical windows; HistoryCursorAcceptsIndexAndMessageId",
+    "dualIdShape": "new sess_yyyyMMdd_xxxxxxxx ids; previous-generation N32 files restore and seed a directory twin plus alias; PreviousGenerationFileSeedsDirectoryTwin",
+    "explicitTitle": "session.title writes the title and the lock flag in one call; locked sessions reject rename; ExplicitTitleWriteLocksOnDemand",
+    "frontendConvergentRead": "prompt echo paints synchronously, matching turn.done settles, incremental page follows; unknown sessions read as empty pages; promptAndConverge plus refreshActive covered by the history convergent read suite",
+    "frontendMap": "frame rows map to render messages with stable msg_index_turnId keys, shared tool cards by call id, reasoning passthrough, triple tokens, missing-image flags and explicit full-text targets; unreadable rows skip with counts; covered by the history row mapping suite",
+    "frontendRouting": "history face resolves to frame only under the development override with production default unchanged; every other face stays legacy in mixed states; writes keep the legacy route with the corner badge; title entries stay legacy with explicit session.title plus TitleLocked reserved for the later cutover without automatic triggers",
+    "performance": "limit clamps to 1..200, page carries total; 500-row store pages 50 rows with correct total inside the harness budget; HistoryLimitClampsAndReportsTotal, PagedHistoryStaysFastWithCorrectTotal",
+    "rollbackIsTurnScoped": "tool.undoRollback removes the newest turn as a whole and returns removedMessageIds plus removedCount; UndoRollbackRemovesWholeTurnWithMessageIds",
+    "routingProbe": "system.info echoes enabledBatches from HALO_ENGINE_ROUTING plus the frame default; SystemInfoExposesRoutingProbe",
+    "shadowVerification": "in-memory reply plus write-gate serialized flush; tmp-move with backup; LoadSessionsWithReport counts restored sessions, messages, skipped lines and healed aliases; ReloadKeepsHistoryAndCountsBadLines",
+    "workspaceIsolation": "session.new carries the real workspace (default fallback is audited); list/get never sweep all scopes"
+  },
+  "areas": {
+    "history": [
+      {
+        "checked": true,
+        "id": "history-list-page",
+        "note": "session.list/get paged read matches legacy; workspace-scoped, no silent full scan; WorkspaceScopeNeverSweepsAll"
+      },
+      {
+        "checked": true,
+        "id": "history-item-shape",
+        "note": "history rows carry id, tool calls, tokens and reasoning; HistoryItemsCarryParityColumns"
+      },
+      {
+        "checked": false,
+        "id": "history-delete-cascade",
+        "note": "session.delete removes child sessions too — scheduled with the cutover station (A-batch delete级联对拍)"
+      },
+      {
+        "checked": true,
+        "id": "history-workspace-scope",
+        "note": "list/get filter by workspace, no silent full scan; default scope plus audit"
+      },
+      {
+        "checked": true,
+        "id": "history-frontend-map",
+        "note": "frame page maps to render messages: stable keys, shared tool cards, reasoning, triple tokens, missing-image flags, explicit full-text targets; bad rows skip with counts"
+      },
+      {
+        "checked": true,
+        "id": "history-convergent-read",
+        "note": "prompt echo, matching turn.done settle and incremental catch-up; unknown sessions read as empty pages with no error"
+      },
+      {
+        "checked": true,
+        "id": "history-image-placeholder",
+        "note": "missing images counted for the placeholder path; thumbnails reuse the shared image reference shape"
+      },
+      {
+        "checked": true,
+        "id": "history-surgery-legacy-route",
+        "note": "surgery, export, pinning, workspace, sub-session and title writes keep the legacy route with the corner badge; title cutover reserved as explicit session.title plus TitleLocked without automatic triggers"
+      },
+      {
+        "checked": true,
+        "id": "history-view-source",
+        "note": "history face resolves to frame only under the development override; remaining faces stay legacy; production default unchanged"
+      }
+    ],
+    "settings": [
+      {
+        "checked": false,
+        "id": "settings-roundtrip",
+        "note": "later station"
+      }
+    ],
+    "tool": [
+      {
+        "checked": false,
+        "id": "tool-card-lifecycle",
+        "note": "later station"
+      },
+      {
+        "checked": false,
+        "id": "tool-confirm-questions",
+        "note": "later station"
+      }
+    ],
+    "turn": [
+      {
+        "checked": false,
+        "id": "turn-prompt-retry",
+        "note": "later station"
+      },
+      {
+        "checked": false,
+        "id": "turn-cancel-tree",
+        "note": "later station"
+      },
+      {
+        "checked": false,
+        "id": "turn-failure-copy",
+        "note": "later station"
+      }
+    ],
+    "usage": [
+      {
+        "checked": false,
+        "id": "usage-budget-bar",
+        "note": "later station"
+      }
+    ]
+  },
+  "contractVersion": "0.1.1",
+  "station": "history-authority",
+  "title": "Frame/legacy parity checklist — history station landed, remaining areas stay open for later stations",
+  "verifiedBy": [
+    "tests/HaloAgent.Engine.Tests/HistoryAuthorityTests.cs (13 facts)",
+    "tests/HaloAgent.Engine.Tests/SessionOwnershipTests.cs",
+    "tests/HaloAgent.Engine.Tests/PersistenceAndLedgerTests.cs",
+    "dotnet test HaloAgent.sln — 650 passed, 0 failed",
+    "src/Web.Client/src/stores/frameHistoryMap.spec.ts (8 facts)",
+    "src/Web.Client/src/stores/frameHistoryConverge.spec.ts (8 facts)",
+    "src/Web.Client/src/stores/frameHistoryView.spec.ts (6 facts)",
+    "src/Web.Client/src/stores/historySourceGuard.spec.ts (4 facts)",
+    "src/Web.Client: vitest run — 62 files, 439 tests passed; vue-tsc clean; eslint clean"
+  ]
+}

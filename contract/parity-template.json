@@ -1,0 +1,27 @@
+{
+  "contractVersion": "0.1.1",
+  "title": "Frame/legacy parity checklist (empty template; stations tick items as they land)",
+  "areas": {
+    "history": [
+      { "id": "history-list-page", "checked": false, "note": "session.list/get paged read matches legacy" },
+      { "id": "history-item-shape", "checked": false, "note": "history rows carry tool calls, tokens and reasoning" },
+      { "id": "history-delete-cascade", "checked": false, "note": "session.delete removes child sessions too" },
+      { "id": "history-workspace-scope", "checked": false, "note": "list/get filter by workspace, no silent full scan" }
+    ],
+    "turn": [
+      { "id": "turn-prompt-retry", "checked": false, "note": "agent.prompt/retry round trip with live deltas" },
+      { "id": "turn-cancel-tree", "checked": false, "note": "agent.cancel stops the whole turn tree" },
+      { "id": "turn-failure-copy", "checked": false, "note": "terminal failure states render the frozen reason" }
+    ],
+    "tool": [
+      { "id": "tool-card-lifecycle", "checked": false, "note": "tool.start/delta/end/confirm cards match legacy" },
+      { "id": "tool-confirm-questions", "checked": false, "note": "confirm carries questions and ticket reference" }
+    ],
+    "usage": [
+      { "id": "usage-budget-bar", "checked": false, "note": "usage.tick/query drives the budget bar from real tokens" }
+    ],
+    "settings": [
+      { "id": "settings-roundtrip", "checked": false, "note": "settings save/load matches legacy behavior" }
+    ]
+  }
+}

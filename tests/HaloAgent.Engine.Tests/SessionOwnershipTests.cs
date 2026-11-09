@@ -110,7 +110,10 @@ public sealed class SessionOwnershipTests
             RequestFrame.WithPayload(331, "tool.undoRollback", new { sessionId })
         );
         Assert.True(rolled.Ok);
-        Assert.Equal(before - 1, server.Sessions.Count(sessionId));
+        // Rollback removes the newest turn as a whole (user plus assistant row).
+        Assert.Equal(before - 2, server.Sessions.Count(sessionId));
+        Assert.Equal(2, rolled.Result!.Value.GetProperty("removedCount").GetInt32());
+        Assert.Equal(2, rolled.Result!.Value.GetProperty("removedMessageIds").GetArrayLength());
         var batch = server.ReadEvents(0, 500);
         Assert.Contains(batch.Frames, f => f.Kind == "session.updated");
     }

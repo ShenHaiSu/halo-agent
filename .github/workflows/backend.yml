@@ -28,6 +28,10 @@ jobs:
       - name: Clean (build/clean.cmd)
         shell: cmd
         run: build\clean.cmd
+      - name: Contract freeze gates (additive-only + mirrors fresh)
+        run: |
+          node scripts/gen-contract-types.mjs --check
+          node scripts/check-contract-additive.mjs
 
       - name: Restore
         run: dotnet restore HaloAgent.sln -r win-x64

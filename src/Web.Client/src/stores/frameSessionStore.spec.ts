@@ -91,9 +91,9 @@ describe('frame session store', () => {
     const store = useFrameSessionStore();
     store.bind(pagedStub());
     await store.openSession('session-a');
-    const prefix = store.history.map((entry) => entry.text);
+    const prefix = store.history.map((entry) => entry.content);
     expect(await store.loadMore()).toBe(true);
-    expect(store.history.map((entry) => entry.text)).toEqual([...prefix, 'first']);
+    expect(store.history.map((entry) => entry.content)).toEqual([...prefix, 'first']);
     expect(store.hasMore).toBe(false);
     expect(await store.loadMore()).toBe(false);
   });

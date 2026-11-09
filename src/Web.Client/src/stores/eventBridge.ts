@@ -4,36 +4,78 @@ import { MAX_BATCH, SEQ_STORAGE_KEY } from '../transport/types';
 
 export type EventHandler = (frame: ContractEventFrame) => void;
 export type ResyncHandler = (info: { hasGap: boolean; droppedEstimate: number }) => void;
+export type PumpStatsHandler = (stats: PumpStats) => void;
+export type PumpNoticeHandler = (notice: { kind: 'degraded'; consecutiveFailures: number }) => void;
+
+export interface PumpStats {
+  polls: number;
+  batches: number;
+  gaps: number;
+  resyncs: number;
+}
 
 /**
  * Single owner of the read cursor and batch fan-out. It polls the transport
  * on an adaptive timer (busy pulls fast, idle backs off), persists the
  * cursor after every batch, and routes frames to subscribers. A reported
- * gap triggers a snapshot-backed resync before polling continues.
+ * gap rebuilds from a snapshot-backed resync before polling continues.
+ *
+ * Production main pump: 30ms busy / 200ms idle / 2s backoff cap.
+ * The rAF frame pump stays a test-only pump; business code subscribes here.
  */
 export class EventBridge {
   private seq = 0;
   private readonly handlers = new Map<string, Set<EventHandler>>();
   private readonly resyncHandlers = new Set<ResyncHandler>();
+  private readonly streamHandlers = new Map<string, Set<EventHandler>>();
+  private streamQueue: ContractEventFrame[] = [];
+  private streamFlushScheduled = false;
+  private noticeSent = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private failures = 0;
   private readonly idleMs: number;
   private readonly busyMs: number;
   private readonly backoffCapMs: number;
+  private readonly storageKey: string;
+  private polls = 0;
+  private batches = 0;
+  private gaps = 0;
+  private resyncs = 0;
+  private readonly statsSink: PumpStatsHandler | null;
+  private readonly noticeSink: PumpNoticeHandler | null;
 
   constructor(
     private readonly transport: FrameTransport,
-    options: { storageKey?: string; idleMs?: number; busyMs?: number; backoffCapMs?: number } = {}
+    options: {
+      storageKey?: string;
+      idleMs?: number;
+      busyMs?: number;
+      backoffCapMs?: number;
+      onStats?: PumpStatsHandler;
+      onNotice?: PumpNoticeHandler;
+    } = {},
   ) {
     this.idleMs = options.idleMs ?? 200;
     this.busyMs = options.busyMs ?? 30;
     this.backoffCapMs = options.backoffCapMs ?? 2000;
-    this.seq = loadSeq(options.storageKey ?? SEQ_STORAGE_KEY);
+    this.storageKey = options.storageKey ?? SEQ_STORAGE_KEY;
+    this.statsSink = options.onStats ?? null;
+    this.noticeSink = options.onNotice ?? null;
+    this.seq = loadSeq(this.storageKey);
   }
 
   get lastSeq(): number {
     return this.seq;
+  }
+
+  get stats(): PumpStats {
+    return { polls: this.polls, batches: this.batches, gaps: this.gaps, resyncs: this.resyncs };
+  }
+
+  /** Beat contract asserted by specs: 30ms busy / 200ms idle / 2s backoff cap. */
+  get beat(): { busyMs: number; idleMs: number; backoffCapMs: number } {
+    return { busyMs: this.busyMs, idleMs: this.idleMs, backoffCapMs: this.backoffCapMs };
   }
 
   on(kind: string, handler: EventHandler): () => void {
@@ -41,6 +83,17 @@ export class EventBridge {
     if (!bucket) {
       bucket = new Set();
       this.handlers.set(kind, bucket);
+    }
+    bucket.add(handler);
+    return () => bucket?.delete(handler);
+  }
+
+  /** Stream lane: delta frames flush on an animation frame so bursts stay smooth. */
+  onStream(kind: string, handler: EventHandler): () => void {
+    let bucket = this.streamHandlers.get(kind);
+    if (!bucket) {
+      bucket = new Set();
+      this.streamHandlers.set(kind, bucket);
     }
     bucket.add(handler);
     return () => bucket?.delete(handler);
@@ -79,22 +132,40 @@ export class EventBridge {
   /** Single poll step, also used directly by tests. */
   async pollOnce(): Promise<void> {
     let batch;
+    this.polls += 1;
     try {
       batch = await this.transport.pollBatch(this.seq, MAX_BATCH);
       this.failures = 0;
+      this.noticeSent = false;
     } catch {
       this.failures += 1;
+      this.emitDegraded();
+      this.emitStats();
       return;
     }
     if (batch.hasGap) {
+      this.gaps += 1;
       await this.resync(batch.hasGap, batch.droppedEstimate);
+      this.emitStats();
       return;
     }
-    if (batch.frames.length > 0) {
-      this.dispatch(batch.frames);
+    const fresh = (batch.frames || []).filter((frame) => {
+      if (!frame || frame.t !== 'evt') return false;
+      // Cursor dedup: never re-emit frames at or below the cursor.
+      return typeof frame.seq === 'number' && frame.seq > this.seq;
+    });
+    if (fresh.length > 0) {
+      this.dispatch(fresh);
+      const tail = fresh[fresh.length - 1];
+      const highest = tail && typeof tail.seq === 'number' ? tail.seq : this.seq;
+      this.seq = Math.max(this.seq, Math.max(batch.nextSeq, highest));
+      this.persist();
+      this.batches += 1;
+    } else if (typeof batch.nextSeq === 'number' && batch.nextSeq > this.seq) {
       this.seq = batch.nextSeq;
       this.persist();
     }
+    this.emitStats();
   }
 
   private schedule(delayMs: number): void {
@@ -113,13 +184,41 @@ export class EventBridge {
 
   private dispatch(frames: ContractEventFrame[]): void {
     for (const frame of frames) {
-      this.emitKind(frame.k, frame);
-      this.emitKind('*', frame);
+      this.emitKind(this.handlers, frame.k, frame);
+      this.emitKind(this.handlers, '*', frame);
+      if (this.streamHandlers.has(frame.k) || this.streamHandlers.has('*')) {
+        this.streamQueue.push(frame);
+      }
     }
+    this.scheduleStreamFlush();
   }
 
-  private emitKind(kind: string, frame: ContractEventFrame): void {
-    const bucket = this.handlers.get(kind);
+  private scheduleStreamFlush(): void {
+    if (this.streamFlushScheduled || this.streamQueue.length === 0) return;
+    this.streamFlushScheduled = true;
+    const flush = (): void => {
+      this.streamFlushScheduled = false;
+      const batch = this.streamQueue;
+      this.streamQueue = [];
+      for (const frame of batch) {
+        this.emitKind(this.streamHandlers, frame.k, frame);
+        this.emitKind(this.streamHandlers, '*', frame);
+      }
+    };
+    try {
+      const raf = (globalThis as unknown as { requestAnimationFrame?: (cb: () => void) => number }).requestAnimationFrame;
+      if (typeof raf === 'function') {
+        raf.call(globalThis, flush);
+        return;
+      }
+    } catch {
+      /* fall through to the timer fallback */
+    }
+    setTimeout(flush, 16);
+  }
+
+  private emitKind(subscribers: Map<string, Set<EventHandler>>, kind: string, frame: ContractEventFrame): void {
+    const bucket = subscribers.get(kind);
     if (!bucket) return;
     for (const handler of [...bucket]) {
       try {
@@ -131,14 +230,21 @@ export class EventBridge {
   }
 
   private async resync(hasGap: boolean, droppedEstimate: number): Promise<void> {
+    let latest = Number.NaN;
     try {
-      await this.transport.invoke('state.snapshot', {});
+      const snapshot = await this.transport.invoke('state.snapshot', {});
+      const value = snapshot.result?.['latestSequence'];
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        latest = Math.floor(value);
+      }
     } catch {
       /* snapshot failure: keep the cursor and retry on the next tick */
       return;
     }
-    this.seq = 0;
+    if (!Number.isFinite(latest)) return;
+    this.seq = latest;
     this.persist();
+    this.resyncs += 1;
     for (const handler of [...this.resyncHandlers]) {
       try {
         handler({ hasGap, droppedEstimate });
@@ -148,8 +254,27 @@ export class EventBridge {
     }
   }
 
+  private emitDegraded(): void {
+    if (this.noticeSent || this.failures < 3 || !this.noticeSink) return;
+    this.noticeSent = true;
+    try {
+      this.noticeSink({ kind: 'degraded', consecutiveFailures: this.failures });
+    } catch {
+      /* notices must never break the pump */
+    }
+  }
+
+  private emitStats(): void {
+    if (!this.statsSink) return;
+    try {
+      this.statsSink(this.stats);
+    } catch {
+      /* stats must never break the pump */
+    }
+  }
+
   private persist(): void {
-    saveSeq(SEQ_STORAGE_KEY, this.seq);
+    saveSeq(this.storageKey, this.seq);
   }
 }
 

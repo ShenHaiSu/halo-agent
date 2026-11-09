@@ -1,0 +1,105 @@
+{
+  "contractVersion": "0.1.1",
+  "station": "llm-loop",
+  "title": "Frame/legacy parity checklist — true loop station landed, tool and budget bars stay open for later stations",
+  "acceptance": {
+    "detachedLoop": "agent.prompt answers immediately with turnId, then streams outside the write gate; TrueLoopEmitsMultipleSlicesAndDone",
+    "multiSlice": "three gateway slices arrive as three text.delta events with one text.done carrying the full length; TrueLoopEmitsMultipleSlicesAndDone",
+    "retryEcho": "same caller requestId replays the same turnId with a single turn.started; SameCallerKeyReplaysSameTurn",
+    "reentryGuard": "second prompt on a running session fails TURN_IN_PROGRESS with a non-empty hint; SecondPromptWhileActiveReportsInProgress",
+    "providerAuth": "gateway 401 maps to turn.failed with reason PROVIDER_AUTH; ProviderAuthFailureMapsToFrozenReason",
+    "networkFail": "transport failure maps to turn.failed with reason NETWORK_FAIL; TransportFailureMapsToNetworkFail",
+    "singleTimeout": "single-call stall maps to turn.failed with reason TOOL_TIMEOUT, isolated from the whole turn; SingleCallTimeoutMapsToToolTimeout",
+    "backpressure": "backpressure failure maps to turn.failed with reason RATE_LIMITED; BackpressureMapsToRateLimited",
+    "budgetGuard": "denied budget ends the turn with RATE_LIMITED before any gateway traffic; BudgetExceededStopsBeforeGateway",
+    "noWholeTurnCap": "a slow turn completes with turn.done and no failure branch; SlowTurnCompletesWithoutWholeTurnCap",
+    "historyTailLatency": "twenty history reads beside a running turn stay under 200ms at the tail; HistoryReadsStayFastBesideARunningTurn",
+    "cancelFastest": "agent.cancel answers fast with signaled true while the loop emits turn.cancelled; CancelStaysOnTheFastestPath",
+    "emissionCodes": "PROVIDER_AUTH, NETWORK_FAIL, TOOL_TIMEOUT and RATE_LIMITED each fire at least once across the loop suite",
+    "repairHints": "tool repair hints keep business shape for the planner loop; RepairHintsStayBusinessShaped",
+    "rollback": "gateway handle off keeps the synchronous echo path; all echo-path suites stay green with no gateway configured"
+  },
+  "areas": {
+    "history": [
+      {
+        "checked": true,
+        "id": "history-list-page",
+        "note": "session.list/get paged read matches legacy; workspace-scoped, no silent full scan (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-item-shape",
+        "note": "history rows carry id, tool calls, tokens and reasoning; loop persists assistant rows with usage tokens"
+      },
+      {
+        "checked": false,
+        "id": "history-delete-cascade",
+        "note": "session.delete removes child sessions too — scheduled with the cutover station"
+      },
+      {
+        "checked": true,
+        "id": "history-workspace-scope",
+        "note": "list/get filter by workspace, no silent full scan; loop resolves the workspace per descriptor"
+      },
+      {
+        "checked": true,
+        "id": "history-frontend-map",
+        "note": "frame page maps to render messages (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-convergent-read",
+        "note": "prompt echo plus matching turn.done settle and incremental catch-up (inherited, still green)"
+      }
+    ],
+    "settings": [
+      {
+        "checked": false,
+        "id": "settings-roundtrip",
+        "note": "later station"
+      }
+    ],
+    "tool": [
+      {
+        "checked": false,
+        "id": "tool-card-lifecycle",
+        "note": "loop emits deferred tool.start/tool.end placeholders with role=tool rows; real dispatch lands with the tool station"
+      },
+      {
+        "checked": false,
+        "id": "tool-confirm-questions",
+        "note": "later station"
+      }
+    ],
+    "turn": [
+      {
+        "checked": true,
+        "id": "turn-prompt-retry",
+        "note": "agent.prompt and agent.retry both run the detached loop with live deltas when the gateway handle is set; echo path unchanged when it is off"
+      },
+      {
+        "checked": false,
+        "id": "turn-cancel-tree",
+        "note": "single-turn cancel stays on the fastest path; tree cancel lands with the cancel station"
+      },
+      {
+        "checked": true,
+        "id": "turn-failure-copy",
+        "note": "turn.failed carries the frozen reason set: PROVIDER_AUTH, NETWORK_FAIL, TOOL_TIMEOUT, RATE_LIMITED"
+      }
+    ],
+    "usage": [
+      {
+        "checked": false,
+        "id": "usage-budget-bar",
+        "note": "loop records real input/output tokens per round; budget bar wiring lands with the settings station"
+      }
+    ]
+  },
+  "verifiedBy": [
+    "tests/HaloAgent.Engine.Tests/EngineReplayTests.cs (13 facts)",
+    "tests/HaloAgent.Engine.Tests/TurnLifecycleTests.cs",
+    "tests/HaloAgent.Engine.Tests/JournalAndCancelTests.cs",
+    "dotnet test HaloAgent.sln — 663 passed, 0 failed"
+  ]
+}

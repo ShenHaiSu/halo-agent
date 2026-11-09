@@ -30,9 +30,14 @@ describe('frame queue store', () => {
   it('routes queue calls through the bound transport', async () => {
     const store = useFrameQueueStore();
     expect(await store.enqueue({})).toBe(false);
-    store.bind(new MockTransport());
+    const transport = new MockTransport();
+    store.bind(transport);
     expect(await store.enqueue({})).toBe(true);
-    expect(await store.cancelTurn('turn-7')).toBe(true);
+    const created = await transport.invoke('session.new', { title: 'demo' });
+    const sessionId = created.result?.['sessionId'] as string;
+    const prompted = await transport.invoke('agent.prompt', { sessionId, text: 'hi', needsConfirm: true });
+    const turnId = prompted.result?.['turnId'] as string;
+    expect(await store.cancelTurn(turnId)).toBe(true);
     expect(await store.answer(true)).toBe(false);
     expect(store.lastError).not.toBe('');
   });
@@ -49,6 +54,25 @@ describe('frame usage store', () => {
     store.observe(frame('usage.tick', { inputTokens: 2, outputTokens: 8, retryCount: 1 }));
     expect(store.totalTokens).toBe(24);
     expect(store.retryCount).toBe(1);
+  });
+
+  it('drops replayed sequences and per-turn duplicates', () => {
+    const store = useFrameUsageStore();
+    const first: ContractEventFrame = { t: 'evt', seq: 501, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    const replay: ContractEventFrame = { t: 'evt', seq: 501, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    const stale: ContractEventFrame = { t: 'evt', seq: 500, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    expect(store.observe(first)).toBe(true);
+    expect(store.totalTokens).toBe(14);
+    expect(store.observe(replay)).toBe(false);
+    expect(store.observe(stale)).toBe(false);
+    expect(store.totalTokens).toBe(14);
+    expect(store.lastSeq).toBe(501);
+  });
+
+  it('keeps the budget bar on the legacy source with a degraded flag', () => {
+    const store = useFrameUsageStore();
+    expect(store.budgetSource).toBe('legacy');
+    expect(store.degraded).toBe(false);
   });
 
   it('refreshes totals from the bound transport and clears them', async () => {

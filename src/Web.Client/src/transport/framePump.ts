@@ -6,11 +6,12 @@ export type FrameHandler = (frame: ContractEventFrame) => void;
 export type GapHandler = (info: { droppedEstimate: number }) => void;
 
 /**
- * Frame-driven poll loop for the streaming path. It pulls one batch per
+ * Frame-driven poll loop for spec and storybook scenarios. It pulls one batch per
  * animation frame so bursts arrive without stacking callbacks, while slow
  * consumers naturally widen the batch instead of queuing work. The persisted
  * cursor survives reloads; a reported gap pauses polling until the owner
  * finishes snapshot-backed resync and resumes from the new cursor.
+ * Production traffic uses EventBridge (timer based); this class stays test-only.
  */
 export class FramePump {
   private seq: number;
@@ -73,9 +74,11 @@ export class FramePump {
       this.pauseForGap(batch.droppedEstimate);
       return batch;
     }
-    if (batch.frames.length > 0) {
-      for (const frame of batch.frames) {
-        if (!frame || frame.t !== 'evt') continue;
+    const fresh = (batch.frames || []).filter(
+      (frame) => frame && frame.t === 'evt' && typeof frame.seq === 'number' && frame.seq > this.seq,
+    );
+    if (fresh.length > 0) {
+      for (const frame of fresh) {
         for (const handler of [...this.frameHandlers]) {
           try {
             handler(frame);
@@ -84,7 +87,9 @@ export class FramePump {
           }
         }
       }
-      this.seq = batch.nextSeq;
+      const tail = fresh[fresh.length - 1];
+      const highest = tail && typeof tail.seq === 'number' ? tail.seq : this.seq;
+      this.seq = Math.max(batch.nextSeq, highest);
       this.persist();
     }
     return batch;

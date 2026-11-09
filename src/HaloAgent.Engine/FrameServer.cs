@@ -29,7 +29,9 @@ public sealed class FrameServer : IAsyncDisposable
     private readonly SessionLedger _sessions = new();
     private readonly TurnCoordinator _turns;
     private readonly UsageLedger _usage = new();
+    private readonly TurnQueue _turnQueue = new();
     private readonly AttachmentIndex _attachments = new();
+    private readonly ConfigAssetLedger _assets = new();
     private static readonly HashSet<string> ReadOnlyMethods =
         new(StringComparer.Ordinal)
         {
@@ -40,6 +42,11 @@ public sealed class FrameServer : IAsyncDisposable
             "session.history",
             "state.snapshot",
             "usage.query",
+            "asset.skills.list",
+            "asset.skills.get",
+            "asset.memory.list",
+            "asset.personas.list",
+            "asset.personas.get",
         };
     private CancellationTokenSource? _loopScope;
     private Task? _loopTask;
@@ -66,7 +73,9 @@ public sealed class FrameServer : IAsyncDisposable
             _turns,
             _usage,
             _attachments,
-            _events
+            _events,
+            _turnQueue,
+            _assets
         );
     }
 
@@ -75,7 +84,45 @@ public sealed class FrameServer : IAsyncDisposable
     public SessionLedger Sessions => _sessions;
     public TurnCoordinator Turns => _turns;
     public UsageLedger Usage => _usage;
+    public TurnQueue TurnQueue => _turnQueue;
     public AttachmentIndex Attachments => _attachments;
+    public ConfigAssetLedger ConfigAssets => _assets;
+    public IEngineContext Context => _context;
+
+    public void ConfigureGateway(IEngineGateway? gateway)
+    {
+        _context.Gateway = gateway;
+    }
+
+    public void ConfigureBudget(IEngineBudget? budget)
+    {
+        _context.Budget = budget;
+    }
+
+    public void ConfigureTurnOptions(EngineTurnOptions? options)
+    {
+        _context.TurnOptions = options ?? new EngineTurnOptions();
+        try
+        {
+            _usage.SetMaxTokens(_context.TurnOptions.BudgetMaxTokens);
+        }
+        catch { }
+    }
+
+    public void ConfigureDataRoot(string dataRoot)
+    {
+        _context.DataRoot = dataRoot ?? string.Empty;
+        try
+        {
+            _assets.Load(_context.DataRoot);
+        }
+        catch { }
+    }
+
+    public void ConfigureToolRunner(IEngineToolRunner? runner)
+    {
+        _context.ToolRunner = runner;
+    }
 
     public void Register(string method, FrameHandler handler)
     {
@@ -142,43 +189,60 @@ public sealed class FrameServer : IAsyncDisposable
     /// <summary>
     /// Persists every known session ledger to the directory with atomic
     /// rewrite plus backup, so a failed compaction or rewrite can be rolled back.
+    /// Each entry carries its descriptor, so workspace scope and provider
+    /// selection survive a restart. Replies stay in memory; the write gate
+    /// serializes persistence behind normal traffic.
     /// </summary>
     public void SaveSessions(string directory)
     {
-        foreach (var entry in _sessions.List())
+        foreach (var descriptor in _sessions.ListPairs())
         {
-            JsonlHistoryFile.Save(
-                directory,
-                entry.SessionId,
-                entry.Title,
-                _sessions.Snapshot(entry.SessionId)
-            );
+            if (!_sessions.TryGetDescriptor(descriptor.SessionId, out var full) || full is null)
+            {
+                JsonlHistoryFile.Save(
+                    directory,
+                    descriptor.SessionId,
+                    descriptor.Title,
+                    _sessions.Snapshot(descriptor.SessionId)
+                );
+                continue;
+            }
+            JsonlHistoryFile.Save(directory, full, _sessions.Snapshot(descriptor.SessionId));
         }
+        try
+        {
+            _assets.Save(directory);
+        }
+        catch { }
     }
 
     /// <summary>Reloads persisted ledgers back into memory; corrupt lines are skipped.</summary>
     public void LoadSessions(string directory)
     {
-        foreach (var entry in _sessions.List().ToList())
+        LoadSessionsWithReport(directory);
+    }
+
+    /// <summary>
+    /// Reloads persisted ledgers and reports what the sweep found:
+    /// restored sessions and messages, skipped corrupt lines and healed aliases.
+    /// Reads both engine flat files and the desktop workspace tree so the two
+    /// generations stay mutually readable during the shadow period.
+    public JsonlHistoryFile.ScanReport LoadSessionsWithReport(string directory)
+    {
+        foreach (var entry in _sessions.ListPairs().ToList())
         {
             _sessions.Delete(entry.SessionId);
         }
-        if (!Directory.Exists(directory))
+        try
         {
-            return;
+            _assets.Load(directory);
         }
-        foreach (string metaPath in Directory.EnumerateFiles(directory, "*.meta.json"))
+        catch { }
+        if (!Directory.Exists(directory) && !Directory.Exists(Path.Combine(directory, "sessions")))
         {
-            string sessionId = Path.GetFileNameWithoutExtension(metaPath);
-            if (sessionId.EndsWith(".meta", StringComparison.Ordinal))
-            {
-                sessionId = sessionId.Substring(0, sessionId.Length - ".meta".Length);
-            }
-            if (JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages))
-            {
-                _sessions.Restore(sessionId, title, messages);
-            }
+            return new JsonlHistoryFile.ScanReport(0, 0, 0, 0);
         }
+        return JsonlHistoryFile.ScanAndRestore(directory, _sessions);
     }
 
     /// <summary>Restores one session from its backup file after a bad rewrite.</summary>
@@ -187,10 +251,26 @@ public sealed class FrameServer : IAsyncDisposable
         bool restored = JsonlHistoryFile.TryRollback(directory, sessionId);
         if (
             restored
-            && JsonlHistoryFile.TryLoad(directory, sessionId, out string title, out var messages)
+            && JsonlHistoryFile.TryLoad(
+                directory,
+                sessionId,
+                out _,
+                out var messages,
+                out var descriptor
+            )
+                is { Found: true }
         )
         {
-            _sessions.Restore(sessionId, title, messages);
+            _sessions.Restore(
+                sessionId,
+                descriptor
+                    ?? new Abstractions.SessionDescriptor(
+                        sessionId,
+                        string.Empty,
+                        SessionIdentity.DefaultWorkspace
+                    ),
+                messages
+            );
         }
         return restored;
     }
@@ -201,7 +281,8 @@ public sealed class FrameServer : IAsyncDisposable
     )
     {
         string turnId = ReadString(request.Payload, "turnId");
-        if (string.IsNullOrWhiteSpace(turnId))
+        string sessionIdArg = ReadString(request.Payload, "sessionId");
+        if (string.IsNullOrWhiteSpace(turnId) && string.IsNullOrWhiteSpace(sessionIdArg))
         {
             return ResponseFrame.Fail(
                 request.Id,
@@ -210,35 +291,99 @@ public sealed class FrameServer : IAsyncDisposable
             );
         }
 
-        bool signaled = _turns.MarkCancelled(turnId);
-        string? sessionId = _turns.TrySessionOf(turnId, out string? found) ? found : null;
-        if (
-            !_turns.TrySessionOf(turnId, out _)
-            && _state.TryTakeTurnSession(turnId, out string? legacySession)
-        )
+        if (!string.IsNullOrWhiteSpace(turnId))
         {
-            sessionId = legacySession;
-        }
-        _events.Append(
-            "turn.cancelled",
-            new
+            bool signaled = _turns.MarkCancelled(turnId);
+            string? sessionId = _turns.TrySessionOf(turnId, out string? found) ? found : null;
+            if (
+                !_turns.TrySessionOf(turnId, out _)
+                && _state.TryTakeTurnSession(turnId, out string? legacySession)
+            )
             {
-                turnId,
-                sessionId,
-                signaled
+                sessionId = legacySession;
             }
-        );
-        var response = signaled
-            ? ResponseFrame.Success(request.Id, new { turnId, signaled })
-            : ResponseFrame.Fail(
-                request.Id,
-                "NOT_FOUND",
-                "Turn is unknown or already finished.",
-                turnId
+            _turns.RemoveTimeout(turnId);
+            _events.Append(
+                "turn.cancelled",
+                new
+                {
+                    turnId,
+                    sessionId,
+                    signaled
+                }
             );
-        _state.StoreEcho(request.Id, response);
+            var response = signaled
+                ? ResponseFrame.Success(request.Id, new { turnId, signaled })
+                : ResponseFrame.Fail(
+                    request.Id,
+                    "NOT_FOUND",
+                    "Turn is unknown or already finished.",
+                    turnId
+                );
+            _state.StoreEcho(request.Id, response);
+            await Task.CompletedTask;
+            return response;
+        }
+
+        string rootSession = sessionIdArg.Trim();
+        IReadOnlyList<string> tree = _sessions.ListTreeSessions(rootSession);
+        if (tree.Count == 0)
+        {
+            var missing = ResponseFrame.Fail(request.Id, "NOT_FOUND", "Session is unknown.");
+            _state.StoreEcho(request.Id, missing);
+            return missing;
+        }
+        var treeSet = new HashSet<string>(tree, StringComparer.Ordinal);
+        IReadOnlyList<string> cancelled = _turns.CancelTreeBySessions(treeSet.Contains);
+        foreach (string cancelledTurn in cancelled)
+        {
+            _turns.RemoveTimeout(cancelledTurn);
+            string? turnSession = _turns.TrySessionOf(cancelledTurn, out string? located)
+                ? located
+                : rootSession;
+            _events.Append(
+                "turn.cancelled",
+                new
+                {
+                    turnId = cancelledTurn,
+                    sessionId = turnSession,
+                    signaled = true,
+                    reason = "cancelled",
+                }
+            );
+        }
+        int compactCancelled = 0;
+        foreach (string member in tree)
+        {
+            if (_sessions.TryCancelCompaction(member))
+            {
+                compactCancelled++;
+                _events.Append(
+                    "session.updated",
+                    new { sessionId = member, reason = "compactCancelled" }
+                );
+            }
+            _turnQueue.Clear(member);
+        }
+        var treeResponse =
+            cancelled.Count > 0 || compactCancelled > 0
+                ? ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        sessionId = rootSession,
+                        cancelledTurns = cancelled,
+                        compactCancelled
+                    }
+                )
+                : ResponseFrame.Fail(
+                    request.Id,
+                    "NOT_FOUND",
+                    "No running turn in this session tree."
+                );
+        _state.StoreEcho(request.Id, treeResponse);
         await Task.CompletedTask;
-        return response;
+        return treeResponse;
     }
 
     private async Task ReadLoopAsync(CancellationToken token)

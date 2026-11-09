@@ -3,7 +3,7 @@
   "$id": "https://halo-agent.local/contract/agent.schema.json",
   "title": "Agent frame contract (frozen subset, single source of truth)",
   "description": "Backend owns session context, turn scheduling, tool calls and the event sequence; the web client only renders lazily and pulls batches on a timer. This file is the only source of truth for frame envelopes, method names, event names and error codes. After the freeze only optional fields may be added; field semantics and types must not change.",
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.1.1",
   "contractDate": "2026-11-08",
   "methods": [
     "system.ping",
@@ -11,6 +11,7 @@
     "session.new",
     "session.resume",
     "session.rename",
+    "session.title",
     "session.delete",
     "session.clear",
     "session.list",
@@ -74,6 +75,56 @@
     "CANCELLED",
     "INTERNAL"
   ],
+  "freeze": {
+    "basis": "0.1.0",
+    "rule": "additive-only: new members must be optional payload fields or new methods; existing names, required envelope fields and semantics never change",
+    "addedMethods": ["session.title"],
+    "envelope": {
+      "requestRequired": ["t", "id", "m"],
+      "responseRequired": ["t", "id", "ok"],
+      "eventRequired": ["t", "seq", "k"]
+    },
+    "rejectedNames": ["argsDelta", "argsJson", "BACKPRESSURE", "UNKNOWN_TOOL"],
+    "routing": {
+      "unknownTool": "TOOL_DENIED with detail UNKNOWN_TOOL",
+      "backpressure": "RATE_LIMITED with hint backpressure",
+      "truncation": "turn.done with truncated true; never turn.failed",
+      "emptyPrompt": "INVALID_PARAMS with detail EMPTY_PROMPT",
+      "unknownSession": "NOT_FOUND with detail",
+      "budget": "RATE_LIMITED is the only budget code",
+      "workspaceDefault": "default",
+      "deprecationSampling": "first 3 fully logged then once per day"
+    },
+    "limits": {
+      "historyTextTruncate": 2048,
+      "attachmentStageBytes": 8192,
+      "toolResultBytes": 65536,
+      "questionYamlBytes": 4096,
+      "attachmentPath": "relative only"
+    },
+    "reasoning": {
+      "deltaKind": ["text", "reasoning"],
+      "doneLengthExcludesReasoning": true
+    },
+    "optionals": [
+      {"location": "session.new p", "field": "workspaceId", "supplier": "frontend", "default": "default", "replay": "persisted with session"},
+      {"location": "session.list r", "field": "workspaceId/messageCount/providerId/modelId/titleLocked/parentSessionId/agentRole/isPinned/createdAtUtc/updatedAtUtc", "supplier": "backend", "default": "absent means unknown", "replay": "filter by workspace, default scope only"},
+      {"location": "session.get r", "field": "workspaceId/messageCount/providerId/modelId/titleLocked/parentSessionId/agentRole/isPinned/createdAtUtc/updatedAtUtc", "supplier": "backend", "default": "absent means unknown", "replay": "single session read"},
+      {"location": "session.history items", "field": "id/toolCalls {id,name,arguments}/toolCallId/name/images/createdAtUtc/inputTokens/outputTokens/cachedTokens/reasoningContent/validatedWarnings/errorCode plus page total", "supplier": "backend", "default": "absent means plain text row", "replay": "paged read, cursor stable"},
+      {"location": "agent.prompt p", "field": "providerId/modelId/requestId/timeoutSec/needsConfirm/workspaceId/attachments {fileName,mime,sizeBytes,digest or relPath}", "supplier": "frontend", "default": "absent means backend choice", "replay": "requestId de-duplicates retries"},
+      {"location": "agent.answer p", "field": "toolCallId", "supplier": "frontend", "default": "absent means single pending confirm", "replay": "keyed by turn plus toolCallId when present"},
+      {"location": "tool.start p", "field": "argsPreview/policy", "supplier": "backend", "default": "absent means no preview", "replay": "card preview only"},
+      {"location": "tool.end p", "field": "success/output/exitCode/durationMs/fileBytes/errorCode/errorPayload/spilledFile/images/validatedWarnings", "supplier": "backend", "default": "absent means unknown outcome", "replay": "truncated output with spilledFile for full text"},
+      {"location": "tool.confirm p", "field": "argsPreview/policy/timeoutSec/questions/questionYaml/ticketId/sessionId", "supplier": "backend", "default": "absent means simple approve/reject", "replay": "question form drives answer"},
+      {"location": "tool.delta p", "field": "turnId/toolCallId/delta", "supplier": "backend", "default": "none", "replay": "progress only, throttled"},
+      {"location": "text.delta p", "field": "kind text or reasoning", "supplier": "backend", "default": "text", "replay": "reasoning streams separately; done length counts text only"},
+      {"location": "usage.tick/query p", "field": "cachedTokens/maxTokens/usagePercentage/occupancyState/usedIsEstimated", "supplier": "backend", "default": "absent means unmeasured", "replay": "budget bar reads max series"},
+      {"location": "turn.failed p", "field": "reason/hint", "supplier": "backend", "default": "absent means plain failure", "replay": "terminal state"},
+      {"location": "turn.cancelled p", "field": "reason rejected/timeout/cancelled plus signaled", "supplier": "backend", "default": "cancelled with signaled true", "replay": "reason plus signaled drives copy"},
+      {"location": "system.info r", "field": "routing {enabledBatches/defaultFrame}/bridgeVersion/contractVersion", "supplier": "backend", "default": "absent means legacy chain", "replay": "capability probe"},
+      {"location": "session.title p/r", "field": "sessionId/title plus titleLocked", "supplier": "frontend asks, backend stores", "default": "explicit call only, never auto rename", "replay": "title update event"}
+    ]
+  },
   "definitions": {
     "requestFrame": {
       "type": "object",
@@ -117,6 +168,7 @@
         "session.new",
         "session.resume",
         "session.rename",
+        "session.title",
         "session.delete",
         "session.clear",
         "session.list",

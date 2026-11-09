@@ -6,6 +6,7 @@ import { assertBridgeVersion, BRIDGE_VERSION } from './protocol/version';
 import { MOCK_BANNER_TEXT, reportBridgeError, toBridgeError } from './protocol/errors';
 import { dispatchIncomingEvents, haloEventBus } from './events';
 import { CefTransport } from './transport/cef';
+import { cacheNativeFrame, ensureNativeFrame } from './nativeFrame';
 import { MockTransport } from './transport/mock';
 import type { BridgeTransport } from './transport/transport';
 import { createHostBridgeApi } from './api';
@@ -104,12 +105,15 @@ export async function initHostBridge(): Promise<HostBridgeApi> {
     return resolvedBridge;
   }
 
-  if (window.CefSharp && !getNativeRaw()) {
-    try {
-      await window.CefSharp.BindObjectAsync('hostBridge');
-    } catch (err) {
-      console.error('[hostBridge] BindObjectAsync failed:', err);
-    }
+  try {
+    await ensureNativeFrame();
+  } catch (err) {
+    console.error('[hostBridge] ensureNativeFrame failed:', err);
+  }
+  try {
+    cacheNativeFrame(getNativeRaw());
+  } catch {
+    /* cache is best effort */
   }
 
   const nativeRaw = getNativeRaw();

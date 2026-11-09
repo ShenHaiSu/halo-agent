@@ -1,0 +1,109 @@
+{
+  "contractVersion": "0.1.1",
+  "station": "tool-execution",
+  "title": "Frame/legacy parity checklist — true tool station landed, planner loop now dispatches real tools with write approval and ask_user relay",
+  "acceptance": {
+    "fifteenTools": "fourteen executor calls plus the ask_user relay cover the fifteen legacy tools with output and success always present; FifteenToolsDispatchWithFullCardFields",
+    "unknownIsolation": "unknown tool names stay inside tool.end errorCode UNKNOWN_TOOL with a TOOL_DENIED contract envelope and never touch NOT_FOUND; UnknownToolStaysInsideToolDenied",
+    "safetyMapping": "PATH_DENIED and PATH_OUTSIDE_WORKSPACE both map onto the TOOL_DENIED contract code; SafetyViolationsShareOneDeniedMapping",
+    "spillShaping": "outputs past 64k spill to a session-temp relative path with truncated counts on card and history; OversizedOutputSpillsWithObservableTruncation",
+    "execTimeout": "timeout_ms accepts 1..300000 ms, rejects out-of-range as INVALID_TIMEOUT, and slow calls surface as isolated TOOL_TIMEOUT; ExecTimeoutBoundariesAndIsolation",
+    "writeApproval": "write tools raise tool.confirm with argsPreview/policy/timeoutSec and resume after a keyed approval; WriteToolsPauseForApprovalAndResume",
+    "rejectEndsChain": "rejected write approval ends the tool chain with tool.end TOOL_DENIED and turn.cancelled reason rejected; RejectedWriteEndsTheChainAsRejected",
+    "keyedAnswers": "answers without or with a wrong toolCallId fail NOT_FOUND while the exact key resolves; AnswersVerifyThePendingCallKey",
+    "askRelay": "ask_user confirm carries questions, questionYaml, ticketId and sessionId, and the answer ticket is verified; AskUserCarriesQuestionsAndTicket",
+    "askYaml": "questionsYaml passes through with the ticket intact; AskUserYamlPassthroughKeepsTheTicket",
+    "subDenial": "nested spawn and ask_user from a sub role are denied inside TOOL_DENIED without reaching the backend; SubRoleDeniesNestedSpawnAndAsk",
+    "emissionCodes": "TOOL_DENIED and TOOL_TIMEOUT each fire at least once across the tool suite (tool.end errorCode plus contract envelope)",
+    "rollback": "clearing the runner falls back to the deferred tool.start/tool.end placeholder; echo-path suites stay green with no runner configured"
+  },
+  "areas": {
+    "history": [
+      {
+        "checked": true,
+        "id": "history-list-page",
+        "note": "session.list/get paged read matches legacy; workspace-scoped, no silent full scan (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-item-shape",
+        "note": "role=tool rows now carry toolCallId, name, 8k-capped persisted text, images, validated warnings and errorCode"
+      },
+      {
+        "checked": false,
+        "id": "history-delete-cascade",
+        "note": "session.delete removes child sessions too — scheduled with the cutover station"
+      },
+      {
+        "checked": true,
+        "id": "history-workspace-scope",
+        "note": "list/get filter by workspace, no silent full scan; tool station resolves workspace, role and parent per descriptor"
+      },
+      {
+        "checked": true,
+        "id": "history-frontend-map",
+        "note": "frame page maps to render messages (inherited, still green)"
+      },
+      {
+        "checked": true,
+        "id": "history-convergent-read",
+        "note": "prompt echo plus matching turn.done settle and incremental catch-up (inherited, still green)"
+      }
+    ],
+    "settings": [
+      {
+        "checked": false,
+        "id": "settings-roundtrip",
+        "note": "later station"
+      }
+    ],
+    "tool": [
+      {
+        "checked": true,
+        "id": "tool-card-lifecycle",
+        "note": "tool.start carries argsPreview/policy, tool.delta fires at most once per oversized call, tool.end carries success/output/exitCode/durationMs/fileBytes/errorCode/errorPayload/spilledFile/images/validatedWarnings/truncated"
+      },
+      {
+        "checked": true,
+        "id": "tool-confirm-questions",
+        "note": "write approval and ask_user confirm carry argsPreview/policy/timeoutSec/sessionId; ask_user additionally carries questions/questionYaml/ticketId"
+      },
+      {
+        "checked": false,
+        "id": "tool-spawn-fanout",
+        "note": "engine returns the [SUBAGENT_INTERNAL] marker shape with parent linkage; sub-session Barrier fan-out and CancelTree stay on the legacy chain until the cancel station"
+      }
+    ],
+    "turn": [
+      {
+        "checked": true,
+        "id": "turn-prompt-retry",
+        "note": "agent.prompt and agent.retry both run the detached loop with live deltas and real tool dispatch when the gateway and runner handles are set"
+      },
+      {
+        "checked": false,
+        "id": "turn-cancel-tree",
+        "note": "single-turn cancel stays on the fastest path; tree cancel lands with the cancel station"
+      },
+      {
+        "checked": true,
+        "id": "turn-failure-copy",
+        "note": "turn.failed keeps the frozen reason set; tool misses and safety violations stay on tool.end and never leak into NOT_FOUND"
+      }
+    ],
+    "usage": [
+      {
+        "checked": false,
+        "id": "usage-budget-bar",
+        "note": "loop records real input/output tokens per round; budget bar wiring lands with the settings station"
+      }
+    ]
+  },
+  "verifiedBy": [
+    "tests/HaloAgent.Engine.Tests/ToolExecutionTests.cs (11 facts)",
+    "tests/HaloAgent.Engine.Tests/EngineReplayTests.cs",
+    "tests/HaloAgent.Engine.Tests/TurnLifecycleTests.cs",
+    "tests/HaloAgent.Engine.Tests/JournalAndCancelTests.cs",
+    "dotnet test tests/HaloAgent.Engine.Tests — 67 passed, 0 failed"
+  ]
+}

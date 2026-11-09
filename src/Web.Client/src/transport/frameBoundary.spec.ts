@@ -31,8 +31,16 @@ function frameHostStubs() {
 describe('frame boundary selection and fallback', () => {
   beforeEach(() => {
     localStorage.clear();
-    delete (globalThis as unknown as Record<string, unknown>)['hostFrame'];
-    delete (globalThis as unknown as Record<string, unknown>)['hostBridge'];
+    try {
+      sessionStorage.clear();
+    } catch {
+      /* ignore */
+    }
+    const scope = globalThis as unknown as Record<string, unknown>;
+    delete scope['hostFrame'];
+    delete scope['hostBridge'];
+    delete scope['__nativeHostFrame'];
+    delete scope['CefSharp'];
   });
 
   it('prefers the frame object and falls back to the legacy facade object', async () => {
@@ -44,7 +52,10 @@ describe('frame boundary selection and fallback', () => {
     expect(viaFallback.result?.['method']).toBe('system.ping');
 
     scope['hostFrame'] = {
-      invoke: async () => JSON.stringify({ t: 'res', id: 7, ok: true, r: { frame: true } }),
+      invoke: async (body: string) => {
+        const request = JSON.parse(body) as { id: number };
+        return JSON.stringify({ t: 'res', id: request.id, ok: true, r: { frame: true } });
+      },
       getEventBatch: async () => JSON.stringify({ frames: [], nextSeq: 0, hasGap: false, droppedEstimate: 0 }),
     };
     const preferred = new BridgeTransport();
@@ -62,13 +73,13 @@ describe('frame boundary selection and fallback', () => {
     expect(batch.hasGap).toBe(false);
   });
 
-  it('keeps the whole-chain switch off by default and round-trips it', () => {
-    expect(isNewEngineEnabled()).toBe(false);
-    setNewEngineEnabled(true);
-    expect(localStorage.getItem(NEW_ENGINE_KEY)).toBe('true');
+  it('keeps the whole-chain switch on by default and round-trips it', () => {
     expect(isNewEngineEnabled()).toBe(true);
     setNewEngineEnabled(false);
+    expect(localStorage.getItem(NEW_ENGINE_KEY)).toBe('false');
     expect(isNewEngineEnabled()).toBe(false);
+    setNewEngineEnabled(true);
+    expect(isNewEngineEnabled()).toBe(true);
     expect(isEventPumpDisabled()).toBe(false);
     localStorage.setItem(DISABLE_PUMP_KEY, 'true');
     expect(isEventPumpDisabled()).toBe(true);
