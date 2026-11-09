@@ -19,8 +19,8 @@ export const SURFACE_TABLE: Record<Surface, SurfaceEntry> = {
   history: { mode: 'legacy', implemented: true, owner: 'S3' },
   turn: { mode: 'legacy', implemented: true, owner: 'S6' },
   tool: { mode: 'legacy', implemented: true, owner: 'S6' },
-  usage: { mode: 'legacy', implemented: false, owner: 'S7b' },
-  settings: { mode: 'legacy', implemented: false, owner: 'S7b' },
+  usage: { mode: 'legacy', implemented: true, owner: 'S7b' },
+  settings: { mode: 'legacy', implemented: true, owner: 'S7b' },
 };
 
 export const SURFACE_OVERRIDE_KEY = 'halo-surface-modes';

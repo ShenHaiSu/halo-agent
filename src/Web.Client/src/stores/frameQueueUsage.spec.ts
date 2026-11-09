@@ -56,6 +56,25 @@ describe('frame usage store', () => {
     expect(store.retryCount).toBe(1);
   });
 
+  it('drops replayed sequences and per-turn duplicates', () => {
+    const store = useFrameUsageStore();
+    const first: ContractEventFrame = { t: 'evt', seq: 501, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    const replay: ContractEventFrame = { t: 'evt', seq: 501, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    const stale: ContractEventFrame = { t: 'evt', seq: 500, k: 'usage.tick', p: { turnId: 'turn-1', inputTokens: 10, outputTokens: 4 } };
+    expect(store.observe(first)).toBe(true);
+    expect(store.totalTokens).toBe(14);
+    expect(store.observe(replay)).toBe(false);
+    expect(store.observe(stale)).toBe(false);
+    expect(store.totalTokens).toBe(14);
+    expect(store.lastSeq).toBe(501);
+  });
+
+  it('keeps the budget bar on the legacy source with a degraded flag', () => {
+    const store = useFrameUsageStore();
+    expect(store.budgetSource).toBe('legacy');
+    expect(store.degraded).toBe(false);
+  });
+
   it('refreshes totals from the bound transport and clears them', async () => {
     const store = useFrameUsageStore();
     expect(await store.refresh()).toBe(false);

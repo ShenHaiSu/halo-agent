@@ -22,8 +22,16 @@ describe('surface capability routing', () => {
     expect(resolveMode('history', ['history'])).toBe(SURFACE_TABLE.history.implemented ? 'frame' : 'legacy');
     expect(resolveMode('turn', ['turn'])).toBe('frame');
     expect(resolveMode('tool', ['tool'])).toBe('frame');
-    expect(resolveMode('usage', ['usage'])).toBe('legacy');
-    expect(resolveMode('settings', ['settings'])).toBe('legacy');
+    expect(resolveMode('usage', ['usage'])).toBe('frame');
+    expect(resolveMode('settings', ['settings'])).toBe('frame');
+  });
+
+  it('usage and settings stay legacy by default and isolate from other faces', () => {
+    expect(resolveMode('usage')).toBe('legacy');
+    expect(resolveMode('settings')).toBe('legacy');
+    expect(resolveMode('usage', ['history', 'turn', 'tool'])).toBe('legacy');
+    expect(resolveMode('settings', ['history', 'turn', 'tool'])).toBe('legacy');
+    expect(resolveMode('history', ['usage', 'settings'])).toBe('legacy');
   });
 
   it('override reader stays silent outside development builds', () => {
@@ -62,10 +70,10 @@ describe('surface capability routing', () => {
     }
   });
 
-  it('marks the turn and tool faces implemented while keeping the legacy default', () => {
-    expect(SURFACE_TABLE.turn.implemented).toBe(true);
-    expect(SURFACE_TABLE.tool.implemented).toBe(true);
-    expect(SURFACE_TABLE.turn.mode).toBe('legacy');
-    expect(SURFACE_TABLE.tool.mode).toBe('legacy');
+  it('marks the usage and settings faces implemented while keeping the legacy default', () => {
+    expect(SURFACE_TABLE.usage.implemented).toBe(true);
+    expect(SURFACE_TABLE.settings.implemented).toBe(true);
+    expect(SURFACE_TABLE.usage.mode).toBe('legacy');
+    expect(SURFACE_TABLE.settings.mode).toBe('legacy');
   });
 });

@@ -68,8 +68,8 @@ describe('frame history view source', () => {
     expect(resolveMode('history', [...override])).toBe('frame');
     expect(resolveMode('turn', [...override])).toBe('frame');
     expect(resolveMode('tool', [...override])).toBe('frame');
-    expect(resolveMode('usage', [...override])).toBe('legacy');
-    expect(resolveMode('settings', [...override])).toBe('legacy');
+    expect(resolveMode('usage', [...override])).toBe('frame');
+    expect(resolveMode('settings', [...override])).toBe('frame');
   });
 
   it('picks the backing list by resolved mode', () => {
