@@ -31,6 +31,7 @@ public sealed class FrameServer : IAsyncDisposable
     private readonly UsageLedger _usage = new();
     private readonly TurnQueue _turnQueue = new();
     private readonly AttachmentIndex _attachments = new();
+    private readonly ConfigAssetLedger _assets = new();
     private static readonly HashSet<string> ReadOnlyMethods =
         new(StringComparer.Ordinal)
         {
@@ -41,6 +42,11 @@ public sealed class FrameServer : IAsyncDisposable
             "session.history",
             "state.snapshot",
             "usage.query",
+            "asset.skills.list",
+            "asset.skills.get",
+            "asset.memory.list",
+            "asset.personas.list",
+            "asset.personas.get",
         };
     private CancellationTokenSource? _loopScope;
     private Task? _loopTask;
@@ -68,7 +74,8 @@ public sealed class FrameServer : IAsyncDisposable
             _usage,
             _attachments,
             _events,
-            _turnQueue
+            _turnQueue,
+            _assets
         );
     }
 
@@ -79,6 +86,7 @@ public sealed class FrameServer : IAsyncDisposable
     public UsageLedger Usage => _usage;
     public TurnQueue TurnQueue => _turnQueue;
     public AttachmentIndex Attachments => _attachments;
+    public ConfigAssetLedger ConfigAssets => _assets;
     public IEngineContext Context => _context;
 
     public void ConfigureGateway(IEngineGateway? gateway)
@@ -104,6 +112,11 @@ public sealed class FrameServer : IAsyncDisposable
     public void ConfigureDataRoot(string dataRoot)
     {
         _context.DataRoot = dataRoot ?? string.Empty;
+        try
+        {
+            _assets.Load(_context.DataRoot);
+        }
+        catch { }
     }
 
     public void ConfigureToolRunner(IEngineToolRunner? runner)
@@ -196,6 +209,11 @@ public sealed class FrameServer : IAsyncDisposable
             }
             JsonlHistoryFile.Save(directory, full, _sessions.Snapshot(descriptor.SessionId));
         }
+        try
+        {
+            _assets.Save(directory);
+        }
+        catch { }
     }
 
     /// <summary>Reloads persisted ledgers back into memory; corrupt lines are skipped.</summary>
@@ -209,13 +227,17 @@ public sealed class FrameServer : IAsyncDisposable
     /// restored sessions and messages, skipped corrupt lines and healed aliases.
     /// Reads both engine flat files and the desktop workspace tree so the two
     /// generations stay mutually readable during the shadow period.
-    /// </summary>
     public JsonlHistoryFile.ScanReport LoadSessionsWithReport(string directory)
     {
         foreach (var entry in _sessions.ListPairs().ToList())
         {
             _sessions.Delete(entry.SessionId);
         }
+        try
+        {
+            _assets.Load(directory);
+        }
+        catch { }
         if (!Directory.Exists(directory) && !Directory.Exists(Path.Combine(directory, "sessions")))
         {
             return new JsonlHistoryFile.ScanReport(0, 0, 0, 0);

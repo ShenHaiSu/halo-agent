@@ -19,9 +19,11 @@ internal static class EngineRoutes
         UsageLedger usage,
         AttachmentIndex attachments,
         IEventJournal events,
-        TurnQueue? turnQueue = null
+        TurnQueue? turnQueue = null,
+        ConfigAssetLedger? assets = null
     )
     {
+        ConfigAssetLedger store = assets ?? new ConfigAssetLedger();
         routes["system.ping"] = (request, context, token) =>
             Task.FromResult(ResponseFrame.Success(request.Id, new { pong = true }));
 
@@ -37,12 +39,13 @@ internal static class EngineRoutes
                     {
                         version = ContractCatalog.ContractVersion,
                         contractVersion = ContractCatalog.ContractVersion,
+                        bridgeVersion = ContractCatalog.BridgeProtocolVersion,
                         queueBound = FrameServer.QueueBound,
                         journalCapacity = events.Capacity,
                         routing = new
                         {
                             enabledBatches = ReadEnabledBatches(),
-                            defaultFrame = false,
+                            defaultFrame = store.FrameDefault,
                         },
                         cancel = new
                         {
@@ -1319,32 +1322,7 @@ internal static class EngineRoutes
             return Task.FromResult(ResponseFrame.Success(request.Id, new { cleared = true }));
         };
 
-        foreach (
-            string name in new[]
-            {
-                "settings.saveProviders",
-                "settings.setActive",
-                "settings.saveNetwork",
-                "settings.saveBehavior",
-                "asset.skills.list",
-                "asset.skills.get",
-                "asset.memory.list",
-                "asset.memory.save",
-                "asset.personas.list",
-                "asset.personas.get",
-            }
-        )
-        {
-            string captured = name;
-            if (routes.ContainsKey(captured))
-            {
-                continue;
-            }
-            routes[captured] = (request, context, token) =>
-                Task.FromResult(
-                    ResponseFrame.Success(request.Id, new { saved = true, method = captured })
-                );
-        }
+        RegisterConfigAssetRoutes(routes, store);
 
         foreach (string hostOnly in new[] { "host.pickDirectory", "host.openPath" })
         {
@@ -1359,6 +1337,353 @@ internal static class EngineRoutes
         }
 
         _ = attachments;
+    }
+
+    /// <summary>
+    /// Configuration batch (providers, network, behavior with the default-frame
+    /// switch, read-only personas) plus asset reads (skills, memory). Each side
+    /// has its own rollback switch so one risky batch reverts to the safe stub
+    /// without touching the other. Memory writes intentionally stay on the
+    /// desktop chain; the stub reply documents that instead of faking a save.
+    /// </summary>
+    private static void RegisterConfigAssetRoutes(
+        Dictionary<string, FrameHandler> routes,
+        ConfigAssetLedger store
+    )
+    {
+        routes["settings.saveProviders"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "settings.saveProviders" }
+                    )
+                );
+            }
+            try
+            {
+                string saved = store.SaveProviders(request.Payload);
+                PersistAssets(context, store);
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new
+                        {
+                            saved = true,
+                            method = "settings.saveProviders",
+                            providers = JsonDocument.Parse(saved).RootElement
+                        }
+                    )
+                );
+            }
+            catch (LedgerValidationException ex)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "INVALID_PARAMS", ex.Message)
+                );
+            }
+        };
+        routes["settings.setActive"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "settings.setActive" }
+                    )
+                );
+            }
+            try
+            {
+                var picked = store.SaveActive(request.Payload);
+                PersistAssets(context, store);
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new
+                        {
+                            saved = true,
+                            providerId = picked.ProviderId,
+                            modelId = picked.ModelId
+                        }
+                    )
+                );
+            }
+            catch (LedgerValidationException ex)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "INVALID_PARAMS", ex.Message)
+                );
+            }
+        };
+        routes["settings.saveNetwork"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "settings.saveNetwork" }
+                    )
+                );
+            }
+            try
+            {
+                string saved = store.SaveNetwork(request.Payload);
+                PersistAssets(context, store);
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new
+                        {
+                            saved = true,
+                            method = "settings.saveNetwork",
+                            network = JsonDocument.Parse(saved).RootElement
+                        }
+                    )
+                );
+            }
+            catch (LedgerValidationException ex)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "INVALID_PARAMS", ex.Message)
+                );
+            }
+        };
+        routes["settings.saveBehavior"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "settings.saveBehavior" }
+                    )
+                );
+            }
+            try
+            {
+                string saved = store.SaveBehavior(request.Payload);
+                PersistAssets(context, store);
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new
+                        {
+                            saved = true,
+                            method = "settings.saveBehavior",
+                            frameDefault = store.FrameDefault,
+                            behavior = JsonDocument.Parse(saved).RootElement
+                        }
+                    )
+                );
+            }
+            catch (LedgerValidationException ex)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "INVALID_PARAMS", ex.Message)
+                );
+            }
+        };
+        routes["asset.personas.list"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "asset.personas.list" }
+                    )
+                );
+            }
+            var items = store.ListPersonas();
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        items = items.Select(e => new
+                        {
+                            name = e.Name,
+                            title = e.Title,
+                            summary = e.Summary,
+                            scope = e.Scope
+                        })
+                    }
+                )
+            );
+        };
+        routes["asset.personas.get"] = (request, context, token) =>
+        {
+            if (!ConfigBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "asset.personas.get" }
+                    )
+                );
+            }
+            string name = FrameServer.ReadString(request.Payload, "name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = FrameServer.ReadString(request.Payload, "personaId");
+            }
+            var found = string.IsNullOrWhiteSpace(name) ? null : store.GetPersona(name);
+            if (found is null)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "NOT_FOUND", "Persona is unknown.")
+                );
+            }
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        name = found.Name,
+                        title = found.Title,
+                        summary = found.Summary,
+                        scope = found.Scope
+                    }
+                )
+            );
+        };
+        routes["asset.skills.list"] = (request, context, token) =>
+        {
+            if (!AssetBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "asset.skills.list" }
+                    )
+                );
+            }
+            var items = store.ListSkills();
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        items = items.Select(e => new
+                        {
+                            name = e.Name,
+                            title = e.Title,
+                            summary = e.Summary,
+                            scope = e.Scope
+                        })
+                    }
+                )
+            );
+        };
+        routes["asset.skills.get"] = (request, context, token) =>
+        {
+            if (!AssetBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "asset.skills.get" }
+                    )
+                );
+            }
+            string name = FrameServer.ReadString(request.Payload, "name");
+            var found = string.IsNullOrWhiteSpace(name) ? null : store.GetSkill(name);
+            if (found is null)
+            {
+                return Task.FromResult(
+                    ResponseFrame.Fail(request.Id, "NOT_FOUND", "Skill is unknown.")
+                );
+            }
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        name = found.Name,
+                        title = found.Title,
+                        summary = found.Summary,
+                        scope = found.Scope
+                    }
+                )
+            );
+        };
+        routes["asset.memory.list"] = (request, context, token) =>
+        {
+            if (!AssetBatchOn())
+            {
+                return Task.FromResult(
+                    ResponseFrame.Success(
+                        request.Id,
+                        new { saved = true, method = "asset.memory.list" }
+                    )
+                );
+            }
+            var items = store.ListMemory();
+            return Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        items = items.Select(e => new
+                        {
+                            name = e.Name,
+                            title = e.Title,
+                            summary = e.Summary,
+                            scope = e.Scope
+                        })
+                    }
+                )
+            );
+        };
+        routes["asset.memory.save"] = (request, context, token) =>
+            Task.FromResult(
+                ResponseFrame.Success(
+                    request.Id,
+                    new
+                    {
+                        saved = true,
+                        method = "asset.memory.save",
+                        note = "Memory writes stay on the desktop chain."
+                    }
+                )
+            );
+    }
+
+    private static bool BatchWanted(string batch)
+    {
+        string[] enabled = ReadEnabledBatches();
+        if (enabled.Length == 0)
+        {
+            return true;
+        }
+        return enabled.Contains(batch, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool ConfigBatchOn()
+    {
+        return BatchWanted("B") && !EnvSwitchOff("HALO_ENGINE_CONFIG");
+    }
+
+    private static bool AssetBatchOn()
+    {
+        return BatchWanted("C") && !EnvSwitchOff("HALO_ENGINE_ASSETS");
+    }
+
+    private static void PersistAssets(IEngineContext context, ConfigAssetLedger store)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(context.DataRoot))
+            {
+                store.Save(context.DataRoot);
+            }
+        }
+        catch { }
     }
 
     internal static bool TryReadInt(JsonElement payload, string name, out int value)

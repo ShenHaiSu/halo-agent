@@ -10,6 +10,9 @@ public static class ContractCatalog
 {
     public const string ContractVersion = "0.1.1";
 
+    /// <summary>Mirrors the desktop shell bridge protocol version so system probes stay comparable.</summary>
+    public const int BridgeProtocolVersion = 2;
+
     public static readonly IReadOnlyList<string> Methods = new[]
     {
         "system.ping",
