@@ -6,32 +6,57 @@ function allCombinations<T>(items: readonly T[]): T[][] {
 }
 
 describe('surface capability routing', () => {
-  it('unimplemented surfaces always resolve to legacy across the full combination matrix', () => {
+  it('serves every face from the frame chain by default', () => {
+    for (const surface of SURFACES) {
+      expect(SURFACE_TABLE[surface].implemented).toBe(true);
+      expect(SURFACE_TABLE[surface].mode).toBe('frame');
+      expect(resolveMode(surface)).toBe('frame');
+    }
+  });
+
+  it('keeps the full combination matrix on the frame chain with no pending faces', () => {
     const combos = allCombinations([...SURFACES]);
     expect(combos.length).toBe(32);
     for (const subset of combos) {
       for (const surface of SURFACES) {
-        if (!SURFACE_TABLE[surface].implemented) {
-          expect(resolveMode(surface, subset)).toBe('legacy');
-        }
+        expect(resolveMode(surface, subset)).toBe('frame');
       }
+    }
+    expect(SURFACES.every((surface) => SURFACE_TABLE[surface].implemented)).toBe(true);
+  });
+
+  it('still parks a face on legacy while it is flagged unimplemented', () => {
+    const previous = SURFACE_TABLE.usage.implemented;
+    SURFACE_TABLE.usage.implemented = false;
+    try {
+      const combos = allCombinations([...SURFACES]);
+      for (const subset of combos) {
+        expect(resolveMode('usage', subset)).toBe('legacy');
+      }
+      expect(resolveMode('history', ['history'])).toBe('frame');
+    } finally {
+      SURFACE_TABLE.usage.implemented = previous;
     }
   });
 
-  it('mixed states stay receivable: frame where implemented, legacy elsewhere', () => {
-    expect(resolveMode('history', ['history'])).toBe(SURFACE_TABLE.history.implemented ? 'frame' : 'legacy');
+  it('rolls a face back with a single table row', () => {
+    const previous = SURFACE_TABLE.tool.mode;
+    SURFACE_TABLE.tool.mode = 'legacy';
+    try {
+      expect(resolveMode('tool')).toBe('legacy');
+      expect(resolveMode('tool', ['tool'])).toBe('frame');
+      expect(resolveMode('turn')).toBe('frame');
+    } finally {
+      SURFACE_TABLE.tool.mode = previous;
+    }
+  });
+
+  it('mixed states stay receivable: frame where enabled, legacy where parked', () => {
+    expect(resolveMode('history', ['history'])).toBe('frame');
     expect(resolveMode('turn', ['turn'])).toBe('frame');
     expect(resolveMode('tool', ['tool'])).toBe('frame');
     expect(resolveMode('usage', ['usage'])).toBe('frame');
     expect(resolveMode('settings', ['settings'])).toBe('frame');
-  });
-
-  it('usage and settings stay legacy by default and isolate from other faces', () => {
-    expect(resolveMode('usage')).toBe('legacy');
-    expect(resolveMode('settings')).toBe('legacy');
-    expect(resolveMode('usage', ['history', 'turn', 'tool'])).toBe('legacy');
-    expect(resolveMode('settings', ['history', 'turn', 'tool'])).toBe('legacy');
-    expect(resolveMode('history', ['usage', 'settings'])).toBe('legacy');
   });
 
   it('override reader stays silent outside development builds', () => {
@@ -66,14 +91,14 @@ describe('surface capability routing', () => {
     };
     for (const surface of SURFACES) {
       expect(SURFACE_TABLE[surface].owner).toBe(owners[surface]);
-      expect(SURFACE_TABLE[surface].mode).toBe('legacy');
+      expect(SURFACE_TABLE[surface].mode).toBe('frame');
     }
   });
 
-  it('marks the usage and settings faces implemented while keeping the legacy default', () => {
+  it('marks the usage and settings faces served while keeping face isolation', () => {
     expect(SURFACE_TABLE.usage.implemented).toBe(true);
     expect(SURFACE_TABLE.settings.implemented).toBe(true);
-    expect(SURFACE_TABLE.usage.mode).toBe('legacy');
-    expect(SURFACE_TABLE.settings.mode).toBe('legacy');
+    expect(SURFACE_TABLE.usage.mode).toBe('frame');
+    expect(SURFACE_TABLE.settings.mode).toBe('frame');
   });
 });

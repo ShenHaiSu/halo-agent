@@ -1656,6 +1656,10 @@ internal static class EngineRoutes
 
     private static bool BatchWanted(string batch)
     {
+        if (LegacyPinned())
+        {
+            return false;
+        }
         string[] enabled = ReadEnabledBatches();
         if (enabled.Length == 0)
         {
@@ -1939,6 +1943,10 @@ internal static class EngineRoutes
 
     internal static string[] ReadEnabledBatches()
     {
+        if (LegacyPinned())
+        {
+            return Array.Empty<string>();
+        }
         string? raw;
         try
         {
@@ -1946,22 +1954,49 @@ internal static class EngineRoutes
         }
         catch
         {
-            return Array.Empty<string>();
+            return AllBatchNames();
         }
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return Array.Empty<string>();
+            return AllBatchNames();
         }
         string normalized = raw.Trim().ToUpperInvariant();
         if (normalized == "ALL")
         {
-            return new[] { "A", "B", "C" };
+            return AllBatchNames();
         }
         return normalized
             .Split(new[] { ',', ';', ' ', '|' }, StringSplitOptions.RemoveEmptyEntries)
             .Where(p => p == "A" || p == "B" || p == "C")
             .Distinct()
             .ToArray();
+    }
+
+    internal static bool LegacyPinned()
+    {
+        string? raw;
+        try
+        {
+            raw = Environment.GetEnvironmentVariable("HALO_ENGINE_ROUTING");
+        }
+        catch
+        {
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+        string normalized = raw.Trim().ToUpperInvariant();
+        return normalized == "LEGACY"
+            || normalized == "NONE"
+            || normalized == "OFF"
+            || normalized == "DISABLED";
+    }
+
+    private static string[] AllBatchNames()
+    {
+        return new[] { "A", "B", "C" };
     }
 
     private static string? ReadEntryString(JsonElement entry, string name)

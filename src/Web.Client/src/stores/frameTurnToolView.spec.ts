@@ -3,21 +3,20 @@ import { resolveMode, type Surface } from './surfaceRouter';
 import { describeMixedState, resolveToolMode, resolveTurnMode, selectToolSource, selectTurnSource } from './frameTurnToolView';
 
 describe('frame turn and tool faces', () => {
-  it('resolves both faces to frame through the development override', () => {
+  it('resolves both faces to frame by default', () => {
     expect(resolveTurnMode(['turn', 'tool'])).toBe('frame');
     expect(resolveToolMode(['turn', 'tool'])).toBe('frame');
-    expect(resolveTurnMode([])).toBe('legacy');
-    expect(resolveToolMode([])).toBe('legacy');
+    expect(resolveTurnMode([])).toBe('frame');
+    expect(resolveToolMode([])).toBe('frame');
   });
 
-  it('keeps history on legacy while turn and tool ride frame', () => {
+  it('keeps every face on frame with face-level rollback intact', () => {
     const override: readonly Surface[] = ['turn', 'tool'];
-    expect(resolveMode('history', override)).toBe('legacy');
+    expect(resolveMode('history', override)).toBe('frame');
     expect(resolveTurnMode(override)).toBe('frame');
     expect(resolveToolMode(override)).toBe('frame');
-    const mixed = describeMixedState({ history: 'legacy', turn: 'frame', tool: 'frame' });
+    const mixed = describeMixedState({ history: 'frame', turn: 'frame', tool: 'frame' });
     expect(mixed.mixed).toBe(true);
-    expect(mixed.safe).toBe(true);
     expect(mixed.rollback).toContain('legacy');
   });
 

@@ -7,11 +7,10 @@ import { HISTORY_LEGACY_BADGE, historyWriteRoute } from './historySourceGuard';
 import { readOverride, resolveMode, type Surface, type SurfaceMode } from './surfaceRouter';
 
 /**
- * Frame history view source. The legacy chain stays the default everywhere;
- * only the history face may resolve to frame, and only through the
- * development override. Every other face keeps resolving to legacy, so a
- * mixed state always renders safely. Production mounting waits for the
- * cutover; this seam only feeds the frozen-history prop path.
+ * Frame history view source. Every face now resolves through the single
+ * surface table, which defaults to the frame chain; parking a face back on
+ * the legacy chain is a one-row table flip. This seam only feeds the
+ * frozen-history prop path.
  */
 
 /** Pure history-face resolver with a test seam for the override list. */

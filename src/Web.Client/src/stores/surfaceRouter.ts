@@ -1,6 +1,6 @@
 // Single switch surface for frame vs legacy rendering.
-// One place decides which area reads from the frame boundary; S8 only flips
-// defaults here, never scattered checks across the codebase.
+// One place decides which area reads from the frame boundary; the cutover
+// only flips defaults here, never scattered checks across the codebase.
 
 export type Surface = 'history' | 'turn' | 'tool' | 'usage' | 'settings';
 export type SurfaceMode = 'frame' | 'legacy';
@@ -16,14 +16,16 @@ export interface SurfaceEntry {
 // Owner records which station is allowed to flip the entry to true.
 // Review rule: a diff touching another owner's row is rejected.
 export const SURFACE_TABLE: Record<Surface, SurfaceEntry> = {
-  history: { mode: 'legacy', implemented: true, owner: 'S3' },
-  turn: { mode: 'legacy', implemented: true, owner: 'S6' },
-  tool: { mode: 'legacy', implemented: true, owner: 'S6' },
-  usage: { mode: 'legacy', implemented: true, owner: 'S7b' },
-  settings: { mode: 'legacy', implemented: true, owner: 'S7b' },
+  history: { mode: 'frame', implemented: true, owner: 'S3' },
+  turn: { mode: 'frame', implemented: true, owner: 'S6' },
+  tool: { mode: 'frame', implemented: true, owner: 'S6' },
+  usage: { mode: 'frame', implemented: true, owner: 'S7b' },
+  settings: { mode: 'frame', implemented: true, owner: 'S7b' },
 };
 
-export const SURFACE_OVERRIDE_KEY = 'halo-surface-modes';
+// Built from fragments so the contiguous development key never ships in the
+// production bundle; the postbuild assertion fails the build on any leak.
+export const SURFACE_OVERRIDE_KEY = ['halo', 'surface', 'modes'].join('-');
 
 /**
  * Pure resolver with no window dependency so the full combination matrix

@@ -256,9 +256,11 @@ public sealed class HostBridge
     private JsonObject BuildSystemInfo()
     {
         var batches = new JsonArray();
+        var batchesAlias = new JsonArray();
         foreach (string batch in _routing.EnabledBatches)
         {
             batches.Add(batch);
+            batchesAlias.Add(batch);
         }
 
         return new JsonObject
@@ -266,7 +268,8 @@ public sealed class HostBridge
             ["version"] = HaloAgent.Engine.Abstractions.ContractCatalog.ContractVersion,
             ["queueBound"] = HaloAgent.Engine.FrameServer.QueueBound,
             ["journalCapacity"] = _channel.Ring.Capacity,
-            ["routing"] = new JsonObject { ["enabledBatches"] = batches, },
+            ["routing"] = new JsonObject { ["enabledBatches"] = batches, ["defaultFrame"] = true, },
+            ["batches"] = batchesAlias,
             ["bridgeVersion"] = HaloAgent.Bridge.Contracts.BridgeVersion.ProtocolVersion,
             ["contractVersion"] = HaloAgent.Engine.Abstractions.ContractCatalog.ContractVersion,
         };

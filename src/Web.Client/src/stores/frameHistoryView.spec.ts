@@ -57,13 +57,13 @@ describe('frame history view source', () => {
     setActivePinia(createPinia());
   });
 
-  it('resolves the history face to frame under the development override', () => {
+  it('resolves the history face to frame by default', () => {
     expect(resolveHistoryMode(['history'])).toBe('frame');
-    expect(resolveHistoryMode([])).toBe('legacy');
-    expect(resolveHistoryMode(['turn'])).toBe('legacy');
+    expect(resolveHistoryMode([])).toBe('frame');
+    expect(resolveHistoryMode(['turn'])).toBe('frame');
   });
 
-  it('lets the owned faces ride frame while unowned faces stay legacy', () => {
+  it('keeps every face on frame with no pending face', () => {
     const override = ['history', 'turn', 'tool', 'usage', 'settings'] as const;
     expect(resolveMode('history', [...override])).toBe('frame');
     expect(resolveMode('turn', [...override])).toBe('frame');
@@ -110,13 +110,13 @@ describe('frame history view source', () => {
     });
   });
 
-  it('stays on the legacy chain by default', () => {
+  it('serves the frame chain by default', () => {
     const view = useFrameHistoryView([]);
-    expect(view.mode.value).toBe('legacy');
-    expect(view.active.value).toBe(false);
+    expect(view.mode.value).toBe('frame');
+    expect(view.active.value).toBe(true);
     expect(view.messages.value).toEqual([]);
     expect(view.entries.value).toEqual([]);
-    expect(view.writeBadge.value).toBe('');
+    expect(view.writeBadge.value).toBe(HISTORY_LEGACY_BADGE);
   });
 
   it('serves frame entries with the legacy badge under the override', async () => {

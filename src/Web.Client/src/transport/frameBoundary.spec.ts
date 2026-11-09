@@ -65,13 +65,13 @@ describe('frame boundary selection and fallback', () => {
     expect(batch.hasGap).toBe(false);
   });
 
-  it('keeps the whole-chain switch off by default and round-trips it', () => {
-    expect(isNewEngineEnabled()).toBe(false);
-    setNewEngineEnabled(true);
-    expect(localStorage.getItem(NEW_ENGINE_KEY)).toBe('true');
+  it('keeps the whole-chain switch on by default and round-trips it', () => {
     expect(isNewEngineEnabled()).toBe(true);
     setNewEngineEnabled(false);
+    expect(localStorage.getItem(NEW_ENGINE_KEY)).toBe('false');
     expect(isNewEngineEnabled()).toBe(false);
+    setNewEngineEnabled(true);
+    expect(isNewEngineEnabled()).toBe(true);
     expect(isEventPumpDisabled()).toBe(false);
     localStorage.setItem(DISABLE_PUMP_KEY, 'true');
     expect(isEventPumpDisabled()).toBe(true);

@@ -2,11 +2,9 @@ import { computed } from 'vue';
 import { readOverride, resolveMode, type Surface, type SurfaceMode } from './surfaceRouter';
 
 /**
- * Turn/tool face view source. The history, usage and settings faces keep
- * resolving to legacy while this station owns only turn and tool; every
- * face resolves through the single surface table, so a mixed state always
- * renders safely. Production mounting waits for the cutover; until then the
- * development override decides per face.
+ * Turn/tool face view source. Every face resolves through the single
+ * surface table, which defaults to the frame chain; the development
+ * override can still probe a single face after a table-level rollback.
  */
 
 /** Pure turn-face resolver with a test seam for the override list. */
