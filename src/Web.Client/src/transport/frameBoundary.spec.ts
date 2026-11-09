@@ -31,8 +31,16 @@ function frameHostStubs() {
 describe('frame boundary selection and fallback', () => {
   beforeEach(() => {
     localStorage.clear();
-    delete (globalThis as unknown as Record<string, unknown>)['hostFrame'];
-    delete (globalThis as unknown as Record<string, unknown>)['hostBridge'];
+    try {
+      sessionStorage.clear();
+    } catch {
+      /* ignore */
+    }
+    const scope = globalThis as unknown as Record<string, unknown>;
+    delete scope['hostFrame'];
+    delete scope['hostBridge'];
+    delete scope['__nativeHostFrame'];
+    delete scope['CefSharp'];
   });
 
   it('prefers the frame object and falls back to the legacy facade object', async () => {

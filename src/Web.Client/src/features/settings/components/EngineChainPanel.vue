@@ -60,6 +60,7 @@
 import { onMounted, ref } from 'vue';
 import { BridgeTransport } from '@/transport/bridgeTransport';
 import { isNewEngineEnabled } from '@/transport/legacy';
+import { ensureNativeFrame } from '@/shared/bridge/nativeFrame';
 import {
   ENGINE_BATCHES,
   describeChainProbe,
@@ -111,7 +112,21 @@ async function refreshProbe(): Promise<void> {
   probing.value = true;
   probeError.value = '';
   try {
-    const reply = await new BridgeTransport().invoke('system.info', {});
+    try {
+      await ensureNativeFrame();
+    } catch {
+      /* binding failure surfaces as the probe error below */
+    }
+    let reply = await new BridgeTransport().invoke('system.info', {});
+    if (!reply.ok && reply.error?.code === 'NETWORK_FAIL') {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      try {
+        await ensureNativeFrame();
+      } catch {
+        /* ignore */
+      }
+      reply = await new BridgeTransport().invoke('system.info', {});
+    }
     if (!reply.ok) {
       probeError.value = `探针不可用（${reply.error?.code || 'UNKNOWN'}）：仍可按开关默认值运行。`;
       return;

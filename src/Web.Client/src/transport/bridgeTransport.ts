@@ -12,6 +12,7 @@ function isRetryableError(code: ContractErrorCode): boolean {
 }
 import type { EventBatch, FrameTransport, InvokeResult } from './types';
 import { MAX_BATCH } from './types';
+import { getNativeFrame } from '../shared/bridge/nativeFrame';
 
 /**
  * Production frame transport over the thin host boundary.
@@ -106,11 +107,7 @@ export class BridgeTransport implements FrameTransport {
     return first;
   }
 
-  private async invokeOnce(
-    method: ContractMethod,
-    params: Record<string, unknown>,
-    limitMs: number,
-  ): Promise<InvokeResult> {
+  private async invokeOnce(method: ContractMethod, params: Record<string, unknown>, limitMs: number): Promise<InvokeResult> {
     const host = this.rawHost();
     const target = host?.['invoke'];
     if (typeof target !== 'function') return this.missingHostError(method);
@@ -118,10 +115,7 @@ export class BridgeTransport implements FrameTransport {
     const payload = JSON.stringify({ t: 'req', id, m: method, p: params });
     let raw: string;
     try {
-      raw = await withTimeout(
-        (target as (body: string) => Promise<string>).call(host, payload),
-        limitMs,
-      );
+      raw = await withTimeout((target as (body: string) => Promise<string>).call(host, payload), limitMs);
     } catch {
       return timeoutError(method);
     }
@@ -136,10 +130,7 @@ export class BridgeTransport implements FrameTransport {
     }
     const take = Math.min(Math.max(max, 1), MAX_BATCH);
     try {
-      const raw = await withTimeout(
-        (target as (since: number, count: number) => Promise<string>).call(host, sinceSeq, take),
-        this.pollMs,
-      );
+      const raw = await withTimeout((target as (since: number, count: number) => Promise<string>).call(host, sinceSeq, take), this.pollMs);
       return parseEventBatch(raw, sinceSeq);
     } catch {
       // Poll timeouts are transport failures, not exceptions: the pump
@@ -149,10 +140,18 @@ export class BridgeTransport implements FrameTransport {
   }
 
   private rawHost(): Record<string, unknown> | null {
+    // Prefer the cached native frame so a wrapped legacy facade never masks it.
+    try {
+      const native = getNativeFrame();
+      if (native) return native;
+    } catch {
+      /* fall through to the direct scope read */
+    }
     try {
       const scope = globalThis as unknown as { hostFrame?: unknown; hostBridge?: unknown };
       const host = scope.hostFrame ?? scope.hostBridge;
       if (!host || typeof host !== 'object') return null;
+      if ((host as Record<string, unknown>).__haloWrappedApi === true) return null;
       return host as Record<string, unknown>;
     } catch {
       return null;
