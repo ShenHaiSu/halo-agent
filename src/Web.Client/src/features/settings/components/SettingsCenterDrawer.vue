@@ -56,12 +56,6 @@
               <UsageAnalyticsView v-if="activeTab === 'usage'" ref="usageViewRef" />
             </div>
           </n-tab-pane>
-
-          <n-tab-pane name="engine" tab="引擎链路">
-            <div class="settings-tab-content min-w-0 max-w-full overflow-x-hidden">
-              <EngineChainPanel v-if="activeTab === 'engine'" />
-            </div>
-          </n-tab-pane>
         </n-tabs>
       </div>
     </n-drawer-content>
@@ -78,12 +72,11 @@ import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue';
 import PromptSettingsView from './PromptSettingsView.vue';
 import AgentBehaviorView from './AgentBehaviorView.vue';
 import SkillMemoryView from './SkillMemoryView.vue';
-import EngineChainPanel from './EngineChainPanel.vue';
 import { provideSettingsDrawer } from '../composables/useSettingsDrawer';
 import { defineAsyncComponent } from 'vue';
 const UsageAnalyticsView = defineAsyncComponent(() => import('./UsageAnalyticsView.vue'));
 export type SettingsCenterTab =
-  'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory' | 'usage' | 'engine';
+  'appearance' | 'providers' | 'network' | 'storage' | 'runtime' | 'prompt' | 'agent' | 'skill-memory' | 'usage';
 
 const props = defineProps<{
   show: boolean;

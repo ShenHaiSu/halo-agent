@@ -24,9 +24,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-     <!-- Frame boundary: shell links the engine in-process; web clients reach it via HostBridge. -->
-     <ProjectReference Include="..\HaloAgent.Engine.Abstractions\HaloAgent.Engine.Abstractions.csproj" />
-     <ProjectReference Include="..\HaloAgent.Engine\HaloAgent.Engine.csproj" />
      <!-- need21-B01: 程序集依赖方向 Desktop → Services/Tools/LlmGateway/Infrastructure/Core + Bridge.Contracts -->
      <ProjectReference Include="..\HaloAgent.Core\HaloAgent.Core.csproj" />
      <ProjectReference Include="..\HaloAgent.Infrastructure\HaloAgent.Infrastructure.csproj" />

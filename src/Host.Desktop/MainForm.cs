@@ -20,8 +20,6 @@ public sealed class MainForm : Form
     private readonly bool _isDevelopment;
     private readonly ChromiumWebBrowser _chromeBrowser;
     private readonly HostBridgeFacade _hostBridgeFacade;
-    private readonly Host.Desktop.Bridge.HostBridge _hostFrameBridge;
-    private readonly Host.Desktop.Engine.InProcChannel _frameChannel;
     private readonly CancellationTokenSource _orphanScanCts = new();
     private int _autoVerifyTriggered;
 
@@ -35,11 +33,7 @@ public sealed class MainForm : Form
             storageManager,
             gpuDisabled,
             provider?.GetService(typeof(Host.Desktop.Bridge.HostBridgeFacade))
-                as Host.Desktop.Bridge.HostBridgeFacade,
-            provider?.GetService(typeof(Host.Desktop.Bridge.HostBridge))
-                as Host.Desktop.Bridge.HostBridge,
-            provider?.GetService(typeof(Host.Desktop.Engine.InProcChannel))
-                as Host.Desktop.Engine.InProcChannel
+                as Host.Desktop.Bridge.HostBridgeFacade
         ) { }
 
     public MainForm(StoragePathManager storageManager, bool gpuDisabled = false)
@@ -48,9 +42,7 @@ public sealed class MainForm : Form
     private MainForm(
         StoragePathManager storageManager,
         bool gpuDisabled,
-        HostBridgeFacade? injectedBridge,
-        Host.Desktop.Bridge.HostBridge? injectedFrame = null,
-        Host.Desktop.Engine.InProcChannel? injectedChannel = null
+        HostBridgeFacade? injectedBridge
     )
     {
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
@@ -98,31 +90,12 @@ public sealed class MainForm : Form
         _hostBridgeFacade =
             injectedBridge ?? new HostBridgeFacade(this, _storageManager, _gpuDisabled);
         _hostBridgeFacade.AttachForm(this);
-        _frameChannel =
-            injectedChannel
-            ?? new Host.Desktop.Engine.InProcChannel(
-                CreateBackfilledFrameServer(),
-                new Host.Desktop.Engine.EventRingBuffer()
-            );
-        _hostFrameBridge =
-            injectedFrame
-            ?? new Host.Desktop.Bridge.HostBridge(
-                _frameChannel,
-                Host.Desktop.Engine.EngineRouting.FromEnvironment(),
-                this
-            );
-        _hostFrameBridge.AttachForm(this);
 
         // 注册异步 JS Bridge 对象至 window.hostBridge
         _chromeBrowser.JavascriptObjectRepository.Settings.LegacyBindingEnabled = false;
         _chromeBrowser.JavascriptObjectRepository.Register(
             "hostBridge",
             _hostBridgeFacade,
-            options: BindingOptions.DefaultBinder
-        );
-        _chromeBrowser.JavascriptObjectRepository.Register(
-            "hostFrame",
-            _hostFrameBridge,
             options: BindingOptions.DefaultBinder
         );
 
@@ -159,21 +132,6 @@ public sealed class MainForm : Form
             _orphanScanCts.Token
         );
         JsEventDispatcher.AttachBrowser(_chromeBrowser);
-    }
-
-    private HaloAgent.Engine.FrameServer CreateBackfilledFrameServer()
-    {
-        var server = new HaloAgent.Engine.FrameServer();
-        try
-        {
-            server.ConfigureDataRoot(_storageManager.CurrentDataRoot);
-            server.LoadSessions(_storageManager.CurrentDataRoot);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Error("Frame history backfill failed.", ex);
-        }
-        return server;
     }
 
     private string ResolveInitialUrl()
@@ -388,13 +346,6 @@ public sealed class MainForm : Form
         _orphanScanCts.Dispose();
         JsEventDispatcher.Shutdown();
         _hostBridgeFacade.HttpClientFactoryInternal.Dispose();
-        try
-        {
-            _frameChannel.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-        catch
-        { /* 关闭期忽略 */
-        }
         if (!_chromeBrowser.IsDisposed)
         {
             _chromeBrowser.Dispose();

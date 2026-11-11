@@ -78,8 +78,6 @@ declare global {
       BindObjectAsync: (name: string) => Promise<void>;
     };
     hostBridge?: unknown;
-    hostFrame?: unknown;
-    __nativeHostFrame?: unknown;
     __haloReceiveHostEvents?: (events: Array<HostEventEnvelope>) => void;
     __haloEventBus?: {
       on: <T = unknown>(eventType: string, handler: (payload: T, timestamp: number) => void) => () => void;
