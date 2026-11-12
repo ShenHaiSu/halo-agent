@@ -34,6 +34,18 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
     private readonly HttpClient? _customHttpClient;
     private static readonly ConcurrentDictionary<string, bool> RejectUsageFeatureProviders = new();
     private static readonly object LogFileLock = new();
+    private static long _timelineSequence;
+
+    internal static long PeekTimelineSequenceForTests() => Interlocked.Read(ref _timelineSequence);
+
+    internal static void ResetTimelineSequenceForTests() =>
+        Interlocked.Exchange(ref _timelineSequence, 0);
+
+    private static UnifiedStreamEvent WithTimelineOrder(UnifiedStreamEvent evt, string? epoch)
+    {
+        long seq = Interlocked.Increment(ref _timelineSequence);
+        return evt with { Sequence = seq, Epoch = epoch ?? string.Empty };
+    }
 
     public LlmGatewayClient(
         StoragePathManager storageManager,
@@ -107,6 +119,7 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
         CancellationToken ct
     )
     {
+        string timelineEpoch = request.RequestId;
         if (!_adapters.TryGetValue(request.Model.Protocol, out var adapter))
         {
             adapter = _adapters[LlmProtocolType.Chat];
@@ -284,7 +297,10 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
                 if (!ct.IsCancellationRequested)
                     await writer
                         .WriteAsync(
-                            UnifiedStreamEvent.Error($"HTTP_{finalStatusCode}", formattedError),
+                            WithTimelineOrder(
+                                UnifiedStreamEvent.Error($"HTTP_{finalStatusCode}", formattedError),
+                                timelineEpoch
+                            ),
                             ct
                         )
                         .ConfigureAwait(false);
@@ -327,7 +343,9 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
                 }
 
                 if (!ct.IsCancellationRequested)
-                    await writer.WriteAsync(evt, ct).ConfigureAwait(false);
+                    await writer
+                        .WriteAsync(WithTimelineOrder(evt, timelineEpoch), ct)
+                        .ConfigureAwait(false);
             }
 
             RecordPredictionActual(request, inTokens, cachedTokens);
@@ -385,7 +403,13 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
             string code = IsTimeoutException(ex) ? "TIMEOUT" : "GATEWAY_EXCEPTION";
             if (!ct.IsCancellationRequested)
                 await writer
-                    .WriteAsync(UnifiedStreamEvent.Error(code, ex.Message), ct)
+                    .WriteAsync(
+                        WithTimelineOrder(
+                            UnifiedStreamEvent.Error(code, ex.Message),
+                            timelineEpoch
+                        ),
+                        ct
+                    )
                     .ConfigureAwait(false);
         }
         finally

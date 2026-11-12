@@ -144,6 +144,8 @@ public sealed partial class AgentOrchestrator
         string? streamErrorMessage = null;
         long ttftMark = Environment.TickCount64;
         bool ttftSent = false;
+        var timelineTracker = new TimelineBlockTracker(request.RequestId, iteration);
+        ctx.TimelineLog.Clear();
 
         PublishTurnEvent(
             sessionId,
@@ -175,6 +177,7 @@ public sealed partial class AgentOrchestrator
                             reasoningAcc.Append(evt.TextDelta);
                             PublishStreamDelta(sessionId, "ReasoningDelta", evt.TextDelta);
                         }
+                        timelineTracker.RecordReasoning(evt);
                         break;
                     case UnifiedStreamEventKind.TextDelta:
                         if (!string.IsNullOrEmpty(evt.TextDelta))
@@ -191,6 +194,7 @@ public sealed partial class AgentOrchestrator
                             textAcc.Append(evt.TextDelta);
                             PublishStreamDelta(sessionId, "TextDelta", evt.TextDelta);
                         }
+                        timelineTracker.RecordText(evt);
                         break;
                     case UnifiedStreamEventKind.ToolCallStarted:
                         if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
@@ -223,6 +227,7 @@ public sealed partial class AgentOrchestrator
                                 }
                             );
                         }
+                        timelineTracker.RecordToolStarted(evt);
                         break;
                     case UnifiedStreamEventKind.ToolCallArgsDelta:
                         if (
@@ -269,6 +274,7 @@ public sealed partial class AgentOrchestrator
                                 }
                             }
                         }
+                        timelineTracker.RecordToolArgs(evt);
                         break;
                     case UnifiedStreamEventKind.ToolCallCompleted:
                         if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
@@ -315,6 +321,7 @@ public sealed partial class AgentOrchestrator
                                 }
                             );
                         }
+                        timelineTracker.RecordToolDone(evt);
                         break;
                     case UnifiedStreamEventKind.UsageUpdated:
                         usage = evt.Usage;
@@ -327,15 +334,19 @@ public sealed partial class AgentOrchestrator
                         break;
                     case UnifiedStreamEventKind.StreamCancelled:
                         streamCancelled = true;
+                        timelineTracker.CloseCurrent();
                         break;
-                    case UnifiedStreamEventKind.StreamTruncated: // NEED17-06 §6.4
+                    case UnifiedStreamEventKind.StreamTruncated:
                         streamTruncated = true;
+                        timelineTracker.CloseCurrent();
                         break;
                     case UnifiedStreamEventKind.StreamError:
                         streamErrorCode = evt.ErrorCode ?? "STREAM_ERROR";
                         streamErrorMessage = evt.ErrorMessage ?? "流式推理失败";
+                        timelineTracker.CloseCurrent();
                         break;
                     case UnifiedStreamEventKind.StreamCompleted:
+                        timelineTracker.CloseCurrent();
                         break;
                 }
 
@@ -371,8 +382,7 @@ public sealed partial class AgentOrchestrator
 
         if (cancellationToken.IsCancellationRequested || streamCancelled)
         {
-            // 持久化已有部分输出，避免前端空白
-            if (textAcc.Length > 0 || reasoningAcc.Length > 0)
+            if ((textAcc.Length > 0 || reasoningAcc.Length > 0) && ctx.Session?.HistoryVersion != 2)
             {
                 try
                 {
@@ -476,6 +486,8 @@ public sealed partial class AgentOrchestrator
         ctx.LlmReasoning = reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null;
         ctx.CurrentUsage = usage;
         ctx.StreamTruncated = streamTruncated;
+        ctx.TimelineLog.Clear();
+        ctx.TimelineLog.AddRange(timelineTracker.Drafts);
         var state = new LlmStreamState
         {
             Request = request,

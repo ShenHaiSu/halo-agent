@@ -765,7 +765,11 @@ public sealed record UnifiedStreamEvent(
     UnifiedToolCall? ToolCall = null,
     UnifiedTokenUsage? Usage = null,
     string? ErrorCode = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    long Sequence = 0,
+    string Epoch = "",
+    string? BlockId = null,
+    string? Tag = null
 )
 {
     public static UnifiedStreamEvent Started() => new(UnifiedStreamEventKind.StreamStarted);
@@ -853,9 +857,6 @@ public sealed record UnifiedTokenUsage(
         InputTokens > 0 ? Math.Clamp((double)CachedInputTokens / InputTokens, 0.0, 1.0) : 0.0;
 }
 
-/// <summary>
-/// 投递至前端的会话流式事件 DTO，支持 16ms 节流消费周期的增量文本合并优化 (Delta Coalescing)
-/// </summary>
 public sealed class SessionStreamEventDto
 {
     public string SessionId { get; set; } = string.Empty;
@@ -865,6 +866,9 @@ public sealed class SessionStreamEventDto
     public UnifiedTokenUsage? Usage { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
+    public string? BlockId { get; set; }
+    public long Seq { get; set; }
+    public string? Tag { get; set; }
 
     public static SessionStreamEventDto FromUnifiedEvent(
         string sessionId,
@@ -878,6 +882,9 @@ public sealed class SessionStreamEventDto
             ToolCall = evt.ToolCall,
             Usage = evt.Usage,
             ErrorCode = evt.ErrorCode,
-            ErrorMessage = evt.ErrorMessage
+            ErrorMessage = evt.ErrorMessage,
+            BlockId = evt.BlockId,
+            Seq = evt.Sequence,
+            Tag = evt.Tag
         };
 }
