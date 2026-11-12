@@ -32,7 +32,6 @@
               :is-pending="isPending"
               :pending-status="pendingStatus"
               :live-segs="[]"
-              :streaming-text="''"
               :is-generating="isGenerating"
               :stream-md-kill-switch="!!streamMdKillSwitch"
               :render-stream="renderStream"
@@ -73,7 +72,6 @@
               :is-pending="isPending"
               :pending-status="pendingStatus"
               :live-segs="liveSegsFor(entry as TimelineEntry)"
-              :streaming-text="''"
               :is-generating="isGenerating"
               :stream-md-kill-switch="!!streamMdKillSwitch"
               :render-stream="renderStream"
@@ -93,60 +91,6 @@
               @retry="emit('retry')"
               @dismiss="emit('dismiss')"
             />
-          </template>
-          <template #live>
-            <!-- M3-1：活动容器整块进出过渡。只做 opacity + 极小位移，**不碰 height/max-height**
-               （聊天流只增不减，高度动画会与 overflow-anchor / 平滑跟随互相拉扯）。 -->
-            <Transition name="live-turn">
-              <div
-                v-if="showAxisTail"
-                data-testid="active-turn-container"
-                class="turn-body rounded-lg border border-subtle bg-surface/40 px-3 py-2 min-w-0"
-              >
-                <div class="flex items-center gap-1.5 text-[11px] text-[var(--reasoning-text)] select-none">
-                  <BrainCircuit class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span>{{ thinkingLine }}</span>
-                  <Loader2 v-if="isGenerating" class="w-3 h-3 text-indigo-400 animate-spin shrink-0" />
-                </div>
-                <!-- M3-2：seg 列表用 TransitionGroup，单段渲染收进 StreamSegItem（TransitionGroup 要求单根子节点）。
-                   注意 CLAUDE 红线：`.seg-leave-active` 必须 position:absolute 脱流，否则「下移再上移」。 -->
-                <TransitionGroup v-if="!segKillSwitch && segs.length" name="seg" tag="div" class="turn-body seg-list">
-                  <StreamSegItem
-                    v-for="(seg, i) in segs"
-                    :key="seg.key"
-                    :seg="seg"
-                    :stream-md-kill-switch="!!streamMdKillSwitch"
-                    :render-stream="renderStream"
-                    :is-tail="i === segs.length - 1"
-                    :is-generating="isGenerating"
-                    @link-click="emit('link-click', $event)"
-                  />
-                </TransitionGroup>
-                <template v-else-if="segKillSwitch">
-                  <!-- M3-3：逃生分支（segKillSwitch）里的工具卡同样逐个淡入 -->
-                  <TransitionGroup
-                    v-if="fallbackCards.length"
-                    name="seg"
-                    tag="div"
-                    class="turn-body seg-list"
-                    data-testid="active-turn-tools"
-                  >
-                    <ToolCallCard v-for="card in fallbackCards" :key="card.callId" :card="card" :default-collapsed="true" />
-                  </TransitionGroup>
-                  <div
-                    v-if="streamingText"
-                    class="app-text-body leading-relaxed text-primary break-words select-text min-w-0"
-                    style="white-space: pre-wrap"
-                    @click="emit('link-click', $event)"
-                    v-html="renderStream(streamingText)"
-                  />
-                </template>
-                <div v-if="showThinking" class="flex items-center gap-2 text-xs text-secondary">
-                  <Loader2 class="w-3.5 h-3.5 animate-spin" />
-                  <span>Agent 推理中...</span>
-                </div>
-              </div>
-            </Transition>
           </template>
         </TranscriptTail>
         <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
@@ -198,19 +142,17 @@
 </template>
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, useTemplateRef, type ComponentPublicInstance } from 'vue';
-import { Bot, BrainCircuit, Loader2 } from 'lucide-vue-next';
+import { Bot } from 'lucide-vue-next';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
-import type { DisplaySeg } from '../composables/useTimeline';
-import ToolCallCard from './ToolCallCard.vue';
-import StreamSegItem from './StreamSegItem.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import TimelineRow from './TimelineRow.vue';
 import TranscriptHistory from './TranscriptHistory.vue';
 import TranscriptTail from './TranscriptTail.vue';
 
-const TAIL_FALLBACK = 8;
+// 尾部分片长度：调用方恒传 historyItems/tailItems 时直接使用，否则按 8 切分。
+const TAIL_SIZE = 8;
 
 const props = defineProps<{
   isEmpty: boolean;
@@ -234,18 +176,12 @@ const props = defineProps<{
   showTelemetry: (g: TurnGroup) => boolean;
   protocolOf: (g: TurnGroup) => string;
   cacheLineOf: (g: TurnGroup) => string;
-  hasActiveTurn: boolean;
   thinkingLine: string;
   isGenerating: boolean;
-  segs: DisplaySeg[];
-  segKillSwitch: boolean;
   /** need23-R5：流式 Markdown 逃生开关（true=回落纯文本）。 */
   streamMdKillSwitch?: boolean;
   /** need02-P2: inner live body for UserTurnBlock (empty = steady render). */
   liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
-  fallbackCards: AgentToolCard[];
-  streamingText: string;
-  showThinking: boolean;
   turnNotice: string;
   lastError: string;
   showRetry: boolean;
@@ -268,11 +204,9 @@ const props = defineProps<{
   liveCompleting?: boolean;
   /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省开（老调用方行为不变）。 */
   handoffAnim?: boolean;
-  /** need02-P4（P4b#6）：轮内 notice（p4&&p2；true 时全局 alert 隐藏，notice 收进末轮底部）。 */
+  /** 轮内 notice（true 时全局 alert 隐藏，notice 收进末轮底部）。 */
   noticeInTurn?: boolean;
-  /** P02-P0b：轴尾 Live 容器去留；默认开=收敛进轮内，轴尾隐藏（off 回旧链双容器）。 */
-  liveCoalesce?: boolean;
-  /** P02-P1：单容器三段模板开关；默认开（off 回旧链）。 */
+  /** 单容器三段模板开关；默认开。 */
   singleProcess?: boolean;
 }>();
 const emit = defineEmits<{
@@ -295,12 +229,12 @@ onMounted(() => emit('ready', scroll.value));
 onUnmounted(() => emit('ready', null));
 const historyList = computed<TimelineEntry[]>(() => {
   if (props.historyItems) return props.historyItems;
-  return props.items.slice(0, Math.max(0, props.items.length - TAIL_FALLBACK));
+  return props.items.slice(0, Math.max(0, props.items.length - TAIL_SIZE));
 });
 const tailList = computed<TimelineEntry[]>(() => {
   if (props.tailItems) return props.tailItems;
   if (props.historyItems) return [];
-  return props.items.slice(Math.max(0, props.items.length - TAIL_FALLBACK));
+  return props.items.slice(Math.max(0, props.items.length - TAIL_SIZE));
 });
 /**
  * live 归属键：最后一个 user-turn 条目（全量 items，不看 tail 切片）。
@@ -326,8 +260,6 @@ function liveSegsFor(entry: TimelineEntry): LiveSeg[] {
 }
 // 硬切：回到底部按钮直接显隐，无遮罩互斥。
 const showJumpVisible = computed(() => props.showJumpBtn || props.readingWindow);
-/** P02-P0b：轴尾容器可见性——默认收敛进轮内（开=隐藏）；off 回旧链双容器。 */
-const showAxisTail = computed(() => props.hasActiveTurn && props.liveCoalesce === false);
 </script>
 <style scoped>
 /* M1-6 滚动锚定与滚动条槽位：配合 M2 的渐进跟随才真正生效——

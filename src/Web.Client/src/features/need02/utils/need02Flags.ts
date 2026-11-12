@@ -1,18 +1,16 @@
-// need02-P0：总开关矩阵统一读取。
-// 四个开关全部走 localStorage，默认值 on；只有显式 'off'（大小写不敏感）才关闭。
-// 写法照 useAgentStream.streamMdKillSwitch / useTimeline.turnRunKillSwitch：
+// 渲染开关矩阵统一读取。
+// 主开关全部走 localStorage，默认值 on；只有显式 'off'（大小写不敏感）才关闭。
+// 写法照 useAgentStream.streamMdKillSwitch：
 // 隐私模式下 localStorage 抛错时回落默认值（全开），绝不因开关读取炸掉时间轴。
 
 export interface Need02Flags {
   p1: boolean;
-  p2: boolean;
   p3: boolean;
   p4: boolean;
 }
 
 export const NEED02_FLAG_KEYS = {
   p1: 'halo-need02-p1',
-  p2: 'halo-need02-p2',
   p3: 'halo-need02-p3',
   p4: 'halo-need02-p4',
 } as const;
@@ -53,7 +51,6 @@ export function readNeed02Flags(storage?: Need02StorageLike | null): Need02Flags
   const s = resolveStorage(storage);
   return {
     p1: readFlag(s, NEED02_FLAG_KEYS.p1, true),
-    p2: readFlag(s, NEED02_FLAG_KEYS.p2, true),
     p3: readFlag(s, NEED02_FLAG_KEYS.p3, true),
     p4: readFlag(s, NEED02_FLAG_KEYS.p4, true),
   };
@@ -64,26 +61,13 @@ export function useNeed02Flags(): Need02Flags {
   return readNeed02Flags();
 }
 
-/**
- * P2 投影分支选择（P0 只定契约，真正切链在 P2 实现）：
- * - p2 on → 走新链 UserTurnBlock（自动旁路 need-01 的 halo-turn-run 开关，无需用户手动关）；
- * - p2 off → 回落旧链（是否再做 turn-run 合并，看 halo-turn-run 旧开关）。
- */
-export type Need02TimelineMode = 'user-turn' | 'legacy-turn-run' | 'legacy-turn';
-
-export function resolveTimelineMode(flags: Need02Flags, turnRunKillSwitchOff: boolean): Need02TimelineMode {
-  if (flags.p2) return 'user-turn';
-  if (turnRunKillSwitchOff) return 'legacy-turn';
-  return 'legacy-turn-run';
-}
-
-/** 模板透传串：`data-need02="p1:on,p2:off,..."`，P0 验收截图对比用。 */
+/** 模板透传串：`data-need02="p1:on,p3:off,..."`，截图对比用。 */
 export function need02Attr(flags: Need02Flags): string {
   const on = (v: boolean): string => (v ? 'on' : 'off');
-  return `p1:${on(flags.p1)},p2:${on(flags.p2)},p3:${on(flags.p3)},p4:${on(flags.p4)}`;
+  return `p1:${on(flags.p1)},p3:${on(flags.p3)},p4:${on(flags.p4)}`;
 }
 
-/** need02-P4：子开关（`halo-need02-p4-<sub>`，默认 on；master p4=off 时全关）。 */
+/** 子开关（`halo-need02-p4-<sub>`，默认 on；master p4=off 时全关）。 */
 export type Need02P4Sub = 'proj' | 'md' | 'reload' | 'window';
 
 export const NEED02_P4_SUB_KEYS: Record<Need02P4Sub, string> = {
@@ -104,17 +88,13 @@ export function isP4SubOn(sub: Need02P4Sub, storage?: Need02StorageLike | null, 
     return true;
   }
 }
-/** P02 会话渲染三开关（默认开；与 halo-need02-p* 正交；读失败降级为旧链关 + 调用方埋点）。 */
+/** 单容器尾槽逃生开关（默认开；读失败降级为关）。 */
 export const P02_FLAG_KEYS = {
-  liveCoalesce: 'halo-live-coalesce',
   singleProcess: 'halo-single-process',
-  projectionMerge: 'halo-projection-merge',
 } as const;
 export type P02FlagName = keyof typeof P02_FLAG_KEYS;
 export interface P02Flags {
-  liveCoalesce: boolean;
   singleProcess: boolean;
-  projectionMerge: boolean;
 }
 function readP02Flag(storage: Need02StorageLike | null, key: string): boolean {
   try {
@@ -130,12 +110,10 @@ function readP02Flag(storage: Need02StorageLike | null, key: string): boolean {
 export function readP02Flags(storage?: Need02StorageLike | null): P02Flags {
   const s = resolveStorage(storage);
   return {
-    liveCoalesce: readP02Flag(s, P02_FLAG_KEYS.liveCoalesce),
     singleProcess: readP02Flag(s, P02_FLAG_KEYS.singleProcess),
-    projectionMerge: readP02Flag(s, P02_FLAG_KEYS.projectionMerge),
   };
 }
-/** 组合式入口：运行时一次快照，供 MessageTimeline/useTimeline 消费。 */
+/** 组合式入口：运行时一次快照，供 MessageTimeline 消费。 */
 export function useP02Flags(): P02Flags {
   return readP02Flags();
 }

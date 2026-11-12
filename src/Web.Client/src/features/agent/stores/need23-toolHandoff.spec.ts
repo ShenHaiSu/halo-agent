@@ -88,6 +88,19 @@ async function settle(): Promise<void> {
   await new Promise((r) => setTimeout(r, 40));
 }
 
+/** 稳态工具：新投影按用户轮聚合，汇总各轮 steps 的 toolMessages。 */
+function steadyTools(telemetry: ReturnType<typeof useAgentTelemetry>): Array<{ toolCallId?: string }> {
+  const out: Array<{ toolCallId?: string }> = [];
+  for (const e of telemetry.activeUserTurnEntries) {
+    const turn = (e as unknown as { turn?: { steps?: Array<{ toolMessages?: Array<{ toolCallId?: string }> }> } }).turn;
+    if (!turn || !Array.isArray(turn.steps)) continue;
+    for (const st of turn.steps) {
+      for (const m of st.toolMessages || []) out.push(m as { toolCallId?: string });
+    }
+  }
+  return out;
+}
+
 describe('工具生命周期交接（need23-R7）', () => {
   it('工具落盘后：稳态折叠栏保留工具，活动容器让位（不再"收起来"）', async () => {
     const stream = useAgentStream();
@@ -103,8 +116,8 @@ describe('工具生命周期交接（need23-R7）', () => {
     turn('ToolCallStarted', { iteration: 1, callId: 'c1', functionName: 'list_dir', receivedBytes: 0 });
     await settle();
     expect(stream.visibleSegs.filter((s) => s.kind === 'tool')).toHaveLength(1);
-    // 稳态此刻没有该 tool 消息，所以折叠栏也就没有工具
-    expect(telemetry.visibleTurnGroups[0]?.toolMessages ?? []).toHaveLength(0);
+    // 稳态此刻没有该 tool 消息，所以轮内过程区也就没有工具
+    expect(steadyTools(telemetry)).toHaveLength(0);
 
     // 3) 工具回包落盘 → 应立刻移交稳态
     turn('ToolMessagePersisted', {
@@ -121,9 +134,9 @@ describe('工具生命周期交接（need23-R7）', () => {
     // 活动容器：工具段已毕业
     expect(stream.visibleSegs.filter((s) => s.kind === 'tool')).toHaveLength(0);
     // 稳态：折叠栏拿到该工具（修复前这里恒为 0 → 整条折叠栏消失）
-    const g = telemetry.visibleTurnGroups[0];
-    expect(g?.toolMessages).toHaveLength(1);
-    expect(String((g?.toolMessages[0] as unknown as { toolCallId?: string })?.toolCallId)).toBe('c1');
+    const tools = steadyTools(telemetry);
+    expect(tools).toHaveLength(1);
+    expect(String(tools[0]?.toolCallId)).toBe('c1');
   });
 
   it('多轮：第 2 轮开始时不再把第 1 轮已落盘工具反复闪烁', async () => {
@@ -136,28 +149,28 @@ describe('工具生命周期交接（need23-R7）', () => {
     turn('ToolCallStarted', { iteration: 1, callId: 'c1', functionName: 'list_dir', receivedBytes: 0 });
     turn('ToolMessagePersisted', { iteration: 1, messageId: 't1', callId: 'c1', toolCallId: 'c1', content: 'out' });
     await settle();
-    expect(telemetry.visibleTurnGroups[0]?.toolMessages).toHaveLength(1);
+    expect(steadyTools(telemetry)).toHaveLength(1);
 
     // 第 2 轮开始：已落盘卡片应被清出 toolCards
     turn('IterationStarted', { iteration: 2 });
     await settle();
     expect(turns.value['s1']?.toolCards ?? []).toHaveLength(0);
     // 稳态仍保留第 1 轮工具
-    expect(telemetry.visibleTurnGroups[0]?.toolMessages).toHaveLength(1);
+    expect(steadyTools(telemetry)).toHaveLength(1);
 
     // 第 2 轮新工具出现 → 活动容器可见，且不影响第 1 轮稳态
     turn('ToolCallStarted', { iteration: 2, callId: 'c2', functionName: 'read_file', receivedBytes: 0 });
     await settle();
     expect(stream.visibleSegs.filter((s) => s.kind === 'tool')).toHaveLength(1);
-    expect(telemetry.visibleTurnGroups[0]?.toolMessages).toHaveLength(1);
+    expect(steadyTools(telemetry)).toHaveLength(1);
   });
 
-  it('执行中（未落盘）的工具不应出现在稳态，避免与活动容器重复', async () => {
+  it('稳态以落盘内容为准：已落盘工具即展示', async () => {
     const stream = useAgentStream();
     const telemetry = useAgentTelemetry();
 
     merged.push(assistantMsg('a1', '正文', ['c1']));
-    merged.push(toolMsg('t1', 'c1')); // 假设后端已把 tool 写进 jsonl 但前端还没收到事件
+    merged.push(toolMsg('t1', 'c1')); // 回包已落盘（随 ToolMessagePersisted 事件一并入库）
     setPersistedMessages([...merged]);
     turn('AssistantMessagePersisted', { iteration: 1 });
     turn('ToolCallStarted', { iteration: 1, callId: 'c1', functionName: 'list_dir', receivedBytes: 0 });
@@ -165,9 +178,10 @@ describe('工具生命周期交接（need23-R7）', () => {
 
     // 活动容器有卡
     expect(stream.visibleSegs.filter((s) => s.kind === 'tool')).toHaveLength(1);
-    // 稳态去重隐藏（防止双份）
-    const g = telemetry.visibleTurnGroups[0];
-    expect(g?.toolMessages ?? []).toHaveLength(0);
+    // 稳态展示已落盘工具（落盘即真相来源，不再按旧投影隐藏）
+    const tools = steadyTools(telemetry);
+    expect(tools).toHaveLength(1);
+    expect(String(tools[0]?.toolCallId)).toBe('c1');
   });
 
   it('正文流式段随 AssistantMessagePersisted 毕业，工具段不受影响', async () => {

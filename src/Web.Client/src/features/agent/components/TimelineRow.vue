@@ -11,7 +11,6 @@
       </template>
       <div v-if="msgImages(item.msg).length" class="mt-1.5 flex flex-wrap gap-1.5" data-testid="msg-images">
         <template v-for="img in msgImages(item.msg)" :key="img.imageId">
-          <!-- 已加载：恒定 96×96 槽位，缩略图到达后原位替换，不改变高度 -->
           <n-image
             v-if="thumbOf(img)"
             :src="thumbOf(img)"
@@ -24,16 +23,13 @@
             @load="markImgLoaded"
             @error="markImgLoaded"
           />
-          <!-- 丢失：保留原有标签语义，但占同一尺寸槽位 -->
           <n-tag v-else-if="isImgLost(img)" size="small" :bordered="true" :title="img.fileName" class="msg-thumb-slot">
             {{ img.fileName }}
           </n-tag>
-          <!-- 加载中：占位骨架，尺寸与 n-image 一致 → 零高度跳变 -->
           <div v-else class="msg-thumb-slot msg-thumb-skeleton" :title="img.fileName" aria-busy="true" />
         </template>
       </div>
       <div v-if="hasLost(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
-      <!-- need02-P1：乐观 user 态（右下小字，不占高度跳变） -->
       <div
         v-if="pendingState === 'sending'"
         data-testid="pending-sending"
@@ -57,19 +53,6 @@
   <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
     {{ item.msg?.content }}
   </div>
-  <!-- need-01：无正文轮次合并舱（独立 kind，显式分支；不影响任何 item.group 断言） -->
-  <div v-else-if="item.kind === 'turn-run'" :ref="anchorRef(item.key)">
-    <TurnRunItem
-      v-if="item.run"
-      :run="item.run"
-      :expanded="isExpanded(item.run.key || item.key)"
-      :reading-window="!!readingWindow"
-      :card-for="cardFor"
-      :tool-key="toolKey"
-      @toggle="emit('toggle', $event)"
-    />
-  </div>
-  <!-- need02-P2：用户轮次块（D1=B；p2 off 时无此 kind，回旧链）。 -->
   <div v-else-if="item.kind === 'user-turn'" :ref="anchorRef(item.key)">
     <UserTurnBlock
       v-if="item.turn"
@@ -84,7 +67,6 @@
       :thumb-of="thumbOf"
       :img-lost="imgLost"
       :live-segs="liveSegsValue"
-      :streaming-text="streamingTextValue"
       :is-generating="!!isGeneratingValue"
       :stream-md-kill-switch="!!streamMdKillSwitch"
       :pending-status="pendingStatusOfTurn"
@@ -97,7 +79,6 @@
       @link-click="emit('link-click', $event)"
       @retry-pending="emit('retry-pending', item)"
     />
-    <!-- need02-P4（P4b#6）：轮内 notice（仅末条；p4 off 时回 TimelineView 全局 alert，见 noticeInTurn）。 -->
     <div v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError)" class="mt-1.5 space-y-1.5" data-testid="user-turn-notice">
       <n-alert v-if="turnNotice" type="info" :show-icon="false" class="text-xs">{{ turnNotice }}</n-alert>
       <n-alert v-if="lastError" type="error" class="text-xs" data-testid="turn-error-alert">{{ lastError }}</n-alert>
@@ -107,25 +88,6 @@
       </div>
     </div>
   </div>
-  <div v-else :ref="anchorRef(item.key)">
-    <TurnGroupItem
-      v-if="item.group"
-      :group="item.group"
-      :expanded="isExpanded(item.group.key || item.key)"
-      :has-failed="hasFailed(item.group)"
-      :failed-count="failedCount?.(item.group)"
-      :show-telemetry="showTelemetry(item.group)"
-      :protocol="protocolOf(item.group)"
-      :cache-line="cacheLineOf(item.group)"
-      :render-html="renderHtml"
-      :card-for="(m) => cardFor(m, item.group!)"
-      :tool-key="toolKey"
-      @toggle="emit('toggle', $event)"
-      @content-menu="emit('assistant-menu', $event, item)"
-      @link-click="emit('link-click', $event)"
-    />
-  </div>
-  <!-- need02-P4（P4b#6）：轮内 notice 兜底（末条非 user-turn 时，如 system 尾，挂行尾而非丢提示）。 -->
   <div
     v-if="!!isLast && !!noticeInTurn && (turnNotice || lastError) && item.kind !== 'user-turn'"
     class="mt-1.5 space-y-1.5"
@@ -145,12 +107,9 @@ import type { ComponentPublicInstance } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
-import TurnGroupItem from './TurnGroupItem.vue';
-import TurnRunItem from './TurnRunItem.vue';
 import UserTurnBlock from './UserTurnBlock.vue';
 import SkillPillChip from './SkillPillChip.vue';
 import { userParts } from '../utils/userParts';
-
 const props = defineProps<{
   item: TimelineEntry;
   isExpanded: (key: string) => boolean;
@@ -161,45 +120,35 @@ const props = defineProps<{
   renderHtml: (text: string) => string;
   cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
   toolKey: (m: UnifiedChatMessage) => string;
-  hasFailed: (g: TurnGroup) => boolean;
-  /** 该轮失败 tool 条数；缺省时 TurnGroupItem 回落到 hasFailed 的布尔语义（1 个红点）。 */
-  failedCount?: (g: TurnGroup) => number;
-  showTelemetry: (g: TurnGroup) => boolean;
-  protocolOf: (g: TurnGroup) => string;
-  cacheLineOf: (g: TurnGroup) => string;
-  /** M1-4：单图丢失判定（调用方提供精确判定时优先；缺省回落到 img.lost）。 */
   imgLost?: (img: ChatImageRef) => boolean;
-  /** need-01：历史阅读窗口内不点亮合并舱的「运行中」态（与 useTimeline.readingWindow 同源）。 */
   readingWindow?: boolean;
-  /** need02-P1：pending 判定/状态（缺省回落到 id 前缀，保证老调用方不炸）。 */
   isPending?: (msg: UnifiedChatMessage | undefined) => boolean;
   pendingStatus?: (msg: UnifiedChatMessage | undefined) => string;
-  /** need02-P2：内嵌 LiveBody 用（仅运行轮消费；稳态轮忽略）。 */
   liveSegs?: Array<{ kind: string; key: string; text: string; card: unknown }>;
-  streamingText?: string;
   isGenerating?: boolean;
   streamMdKillSwitch?: boolean;
   renderStream?: (text: string) => string;
-  /** need02-P3：末条标记（TranscriptTail 透传；交接窗 liveCompleting 只对末轮生效）。 */
   isLast?: boolean;
-  /** need02-P3：轮末交接窗（model.liveCompleting；TimelineRow 按 isLast 门控后透给 UserTurnBlock）。 */
   liveCompleting?: boolean;
-  /** need02-P3：交接动画开关（p3；false = P2 硬切）。缺省 true（老调用方行为不变）。 */
   handoffAnim?: boolean;
-  /** P02-P1：单容器三段模板开关；缺省 true（老调用方行为不变，off 回旧链）。 */
   singleProcess?: boolean;
-  /** need02-P4（P4b#6）：轮内 notice 开关（p4&&p2；false 时 notice 回 TimelineView 全局区）。 */
   noticeInTurn?: boolean;
   turnNotice?: string;
   lastError?: string;
   showRetry?: boolean;
+  hasFailed?: (g: TurnGroup) => boolean;
+  failedCount?: (g: TurnGroup) => number;
+  showTelemetry?: (g: TurnGroup) => boolean;
+  protocolOf?: (g: TurnGroup) => string;
+  cacheLineOf?: (g: TurnGroup) => string;
+  isRunExpanded?: (key: string) => boolean;
 }>();
-/** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
+
 function isImgLost(img: ChatImageRef): boolean {
   if (props.imgLost) return props.imgLost(img);
   return img.lost === true;
 }
-/** P03-P2：图片解码打点——load/error 后给底层 img 挂 data-loaded，settle 采样据此放行；缺失回退靠 600ms 兜底封顶。 */
+
 function markImgLoaded(e: Event): void {
   try {
     const t = e.target as HTMLElement | null;
@@ -208,7 +157,7 @@ function markImgLoaded(e: Event): void {
     /* ignore */
   }
 }
-/** need02-P1：pending 态（sending/failed/''）。 */
+
 const pendingState = computed<string>(() => {
   try {
     if (props.pendingStatus) return String(props.pendingStatus(props.item.msg) || '');
@@ -218,7 +167,7 @@ const pendingState = computed<string>(() => {
     return '';
   }
 });
-/** need02-P2：user-turn 头的 pending 态（复用 pendingStatus(msg) 于 turn.userMsg）。 */
+
 const pendingStatusOfTurn = computed<string>(() => {
   try {
     const t = (props.item as unknown as { turn?: { userMsg?: UnifiedChatMessage } }).turn;
@@ -238,7 +187,6 @@ const liveSegsValue = computed(() => {
     return [];
   }
 });
-const streamingTextValue = computed(() => String(props.streamingText || ''));
 const isGeneratingValue = computed(() => props.isGenerating === true);
 const renderStreamFn = (t: string): string => {
   try {
@@ -278,8 +226,6 @@ const emit = defineEmits<{
 void emit;
 </script>
 <style scoped>
-/* M1-4：图片槽位恒定 96×96 —— 加载中/已加载/丢失三种状态占同一块空间，
-   缩略图到达时只做原位替换，下方内容完全不移动（治 R6.3 的一次 +72px 跳变）。 */
 .msg-thumb-slot {
   width: 96px;
   height: 96px;
@@ -305,7 +251,6 @@ void emit;
     animation: none;
   }
 }
-/* need02-P1：pending 态只动 opacity，不做高度动画（05 R6）。 */
 .pending-spinner {
   width: 11px;
   height: 11px;

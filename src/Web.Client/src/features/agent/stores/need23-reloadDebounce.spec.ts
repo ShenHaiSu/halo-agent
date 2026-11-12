@@ -111,9 +111,8 @@ describe('全量重拉合并窗口（need23-R4）', () => {
 
 describe('重拉收敛（need02-P4 p4-reload：persisted 只刷预算，全量收敛到轮末）', () => {
   beforeEach(() => {
-    // 本组锁定 p2=on（轮末 defer 交接）+ p4=on（persisted 预算化）；G6 全关矩阵下回旧行为，见全关回归记录。
+    // 本组锁定轮末 defer 交接 + p4=on（persisted 预算化）。
     try {
-      window.localStorage.setItem('halo-need02-p2', 'on');
       window.localStorage.setItem('halo-need02-p4', 'on');
       window.localStorage.removeItem('halo-need02-p4-reload');
     } catch {
@@ -122,7 +121,6 @@ describe('重拉收敛（need02-P4 p4-reload：persisted 只刷预算，全量�
   });
   afterEach(() => {
     try {
-      window.localStorage.removeItem('halo-need02-p2');
       window.localStorage.removeItem('halo-need02-p4');
     } catch {
       /* ignore */

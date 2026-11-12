@@ -1,5 +1,4 @@
 using Host.Desktop.Bridge;
-using Host.Desktop.Engine;
 using Host.Desktop.Infrastructure.Config;
 using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Infrastructure.Storage;
@@ -29,7 +28,6 @@ public static class ServiceRegistration
         AddSession(p);
         AddTools(p);
         AddAgent(p);
-        AddEngine(p);
         AddBridge(p, mainForm, gpuDisabled);
         return p;
     }
@@ -113,124 +111,6 @@ public static class ServiceRegistration
         ));
     }
 
-    /// <summary>
-    /// Frame boundary singletons: router, host-side ring, cutover switches and
-    /// the in-process link. Registered before the bridges so both the legacy
-    /// facade and the converged frame entry resolve from one container.
-    /// </summary>
-    public static void AddEngine(HaloServiceProvider p)
-    {
-        // Startup backfill: reload persisted ledgers into the engine before the
-        // first frame arrives. Corrupt lines are skipped inside the loader, and
-        // a backfill failure must never block the shell. The true tool station
-        // is mounted here; clearing the runner falls back to the deferred
-        // placeholder without touching the loop.
-        p.AddSingleton(sp =>
-        {
-            var server = new HaloAgent.Engine.FrameServer();
-            StoragePathManager storage = sp.GetRequiredService<StoragePathManager>();
-            string root;
-            try
-            {
-                root = storage.CurrentDataRoot;
-                server.LoadSessions(root);
-            }
-            catch
-            { /* backfill is best effort; startup continues without history */
-                root = storage.CurrentDataRoot;
-            }
-            server.ConfigureDataRoot(root);
-            try
-            {
-                var backend = new HostToolBackend(
-                    sp.GetRequiredService<ToolRegistry>(),
-                    sp.GetRequiredService<IWorkspaceSessionService>(),
-                    storage,
-                    sp.GetRequiredService<AgentConfigService>()
-                );
-                server.ConfigureToolRunner(
-                    new HaloAgent.Engine.EngineToolExecutor(
-                        backend,
-                        new HaloAgent.Engine.EngineToolExecutor.Options
-                        {
-                            DataRoot = root,
-                            WorkspaceResolver = sessionId =>
-                                ResolveEngineWorkspace(server, sessionId),
-                            AgentRoleResolver = sessionId => ResolveEngineRole(server, sessionId),
-                            ParentSessionResolver = sessionId =>
-                                ResolveEngineParent(server, sessionId),
-                        }
-                    )
-                );
-            }
-            catch
-            { /* tool station stays optional; the loop keeps its deferred placeholder */
-            }
-            return server;
-        });
-        p.AddSingleton(sp => new EventRingBuffer());
-        p.AddSingleton(sp => EngineRouting.FromEnvironment());
-        p.AddSingleton(sp => new InProcChannel(
-            sp.GetRequiredService<HaloAgent.Engine.FrameServer>(),
-            sp.GetRequiredService<EventRingBuffer>()
-        ));
-    }
-
-    private static string ResolveEngineWorkspace(
-        HaloAgent.Engine.FrameServer server,
-        string sessionId
-    )
-    {
-        try
-        {
-            if (
-                server.Sessions.TryGetDescriptor(sessionId, out var descriptor)
-                && descriptor is not null
-            )
-            {
-                return string.IsNullOrWhiteSpace(descriptor.WorkspaceId)
-                    ? "default"
-                    : descriptor.WorkspaceId;
-            }
-        }
-        catch { }
-        return "default";
-    }
-
-    private static string ResolveEngineRole(HaloAgent.Engine.FrameServer server, string sessionId)
-    {
-        try
-        {
-            if (
-                server.Sessions.TryGetDescriptor(sessionId, out var descriptor)
-                && descriptor is not null
-            )
-            {
-                return string.IsNullOrWhiteSpace(descriptor.AgentRole)
-                    ? "main"
-                    : descriptor.AgentRole;
-            }
-        }
-        catch { }
-        return "main";
-    }
-
-    private static string? ResolveEngineParent(
-        HaloAgent.Engine.FrameServer server,
-        string sessionId
-    )
-    {
-        try
-        {
-            if (server.Sessions.TryGetDescriptor(sessionId, out var descriptor))
-            {
-                return descriptor?.ParentSessionId;
-            }
-        }
-        catch { }
-        return null;
-    }
-
     public static void AddBridge(HaloServiceProvider p, Form? mainForm, bool gpuDisabled)
     {
         SkillWriter.ChangedNotifier = (isSkill, scope, name) =>
@@ -267,11 +147,6 @@ public static class ServiceRegistration
             skillMemoryService: sp.GetRequiredService<SkillMemoryService>(),
             subCoordinator: sp.GetRequiredService<SubAgentCoordinator>(),
             toolRegistry: sp.GetRequiredService<ToolRegistry>()
-        ));
-        p.AddSingleton(sp => new HostBridge(
-            sp.GetRequiredService<InProcChannel>(),
-            sp.GetRequiredService<EngineRouting>(),
-            mainForm
         ));
     }
 }

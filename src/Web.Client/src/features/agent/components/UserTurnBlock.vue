@@ -194,7 +194,6 @@ const props = defineProps<{
   thumbOf?: (img: ChatImageRef) => string;
   imgLost?: (img: ChatImageRef) => boolean;
   liveSegs?: DisplaySeg[];
-  streamingText?: string;
   isGenerating?: boolean;
   streamMdKillSwitch?: boolean;
   pendingStatus?: string;
@@ -251,7 +250,6 @@ if (import.meta.env.DEV) {
     /* shadow never blocks render */
   }
 }
-// P0-1：streamingText（纯文本拼接串）不再渲染，liveSegs（Markdown）为唯一真相源；prop 保留兼容调用方透传。
 const renderHtmlFn = (t: string): string => {
   try {
     return props.renderHtml(t);

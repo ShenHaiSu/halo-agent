@@ -1,7 +1,7 @@
 // P02 会话渲染：单轮单容器三段式的前端适配器（纯函数，不引入后端 TurnView 类型）。
 // 稳态沿用 UserTurn.steps 原序，不再切分双数据源；末段只是末 step 的只读引用。
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import type { TimelineEntry, TurnGroup } from './turnGroup';
+import type { TurnGroup } from './turnGroup';
 import type { UserTurn, UserTurnStep } from './userTurn';
 
 /** 单步渲染视图（UserTurnStep 的只读投影，字段与渲染消费对齐）。 */
@@ -134,23 +134,4 @@ export function isLiveOwner(entry: EntryLike, items: EntryLike[]): boolean {
   }
   const key = String(entry.turn?.key || entry.key || '');
   return !!key && key === owner;
-}
-
-/**
- * 运行态展平（旧 turn-run 入口的渲染侧复用）：把合并舱展开为逐 step 的 turn 条目，
- * 其余 kind 原样透传；只新建 entry 外壳，不改动 group/消息对象。
- */
-export function flattenTurnRunsForRender(entries: TimelineEntry[]): TimelineEntry[] {
-  if (!Array.isArray(entries)) return [];
-  const out: TimelineEntry[] = [];
-  for (const e of entries) {
-    if (e && e.kind === 'turn-run' && e.run && Array.isArray(e.run.groups)) {
-      for (const g of e.run.groups) {
-        out.push({ key: String(g.key || ''), kind: 'turn', group: g });
-      }
-      continue;
-    }
-    out.push(e);
-  }
-  return out;
 }

@@ -5,7 +5,6 @@ import { assertBridgeVersion } from './protocol/version';
 import { MOCK_BANNER_TEXT, reportBridgeError, toBridgeError } from './protocol/errors';
 import type { BridgeError } from './protocol/errors';
 import { CefTransport } from './transport/cef';
-import { ensureNativeFrame } from './nativeFrame';
 import { isMockMode, shouldShowMockBanner } from './hostBridge';
 
 export { MOCK_BANNER_TEXT, shouldShowMockBanner, isMockMode, setMockMode };
@@ -25,10 +24,10 @@ export async function negotiate(): Promise<NegotiateResult> {
     CefSharp?: { BindObjectAsync: (n: string) => Promise<void> };
     hostBridge?: unknown;
   };
-  // 1) Bind both frame objects; one side failing never blocks the other.
-  if (w.CefSharp && (!w.hostBridge || !(w as unknown as { hostFrame?: unknown }).hostFrame)) {
+  // 1) Bind legacy hostBridge; failure degrades to explicit Mock (never silent).
+  if (w.CefSharp && !w.hostBridge) {
     try {
-      await ensureNativeFrame();
+      await w.CefSharp.BindObjectAsync('hostBridge');
     } catch (e) {
       const err = toBridgeError('BRIDGE_NOT_CONNECTED', `BindObjectAsync 失败：${e instanceof Error ? e.message : String(e)}`);
       reportBridgeError(err);

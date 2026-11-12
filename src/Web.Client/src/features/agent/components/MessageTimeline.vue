@@ -28,21 +28,14 @@
         :live-completing="!!t.liveCompleting"
         :handoff-anim="!!t.handoffAnim"
         :notice-in-turn="!!t.noticeInTurn"
-        :has-active-turn="t.stream.hasActiveTurn && !t.need02Flags.p2"
         :thinking-line="`思考中… · 本轮 ${t.curIterToolCount} 个工具 · 第 ${t.curIteration} 轮`"
-        :live-coalesce="p02.liveCoalesce"
         :single-process="p02.singleProcess"
         :is-generating="t.transcriptRunning"
-        :segs="t.displaySegs"
         :live-segs="t.liveInclusiveSegs"
-        :seg-kill-switch="t.stream.segKillSwitch"
         :stream-md-kill-switch="t.stream.streamMdKillSwitch"
         :need02-attr="t.need02Attr"
         :is-pending="t.isPendingMessage"
         :pending-status="t.pendingStatusOf"
-        :fallback-cards="t.cards.toolCards"
-        :streaming-text="t.stream.streamingText"
-        :show-thinking="t.showThinking && t.transcriptRunning"
         :turn-notice="t.turn.turnNotice"
         :last-error="t.turn.lastError"
         :show-retry="!!t.turn.activeTurn.lastErrorInfo?.retry"
@@ -90,7 +83,7 @@ function renderHtml(s: string): string {
 }
 
 const t = reactive(useTimeline());
-/** P02：渲染三开关入口一次快照（后续只读；失败降级旧链，见 readP02Flags）。 */
+/** 渲染开关一次快照（后续只读）。 */
 const p02 = useP02Flags();
 if (import.meta.env.DEV) {
   try {
@@ -175,10 +168,19 @@ function onAssistantMenu(e: MouseEvent, item: TimelineEntry): void {
     });
     return;
   }
+  if ((item as { kind?: string }).kind === 'turn') {
+    // 子会话目录兼容：旧轮次条目仍按轮组信息开菜单。
+    t.menu.openMenu(e, {
+      kind: 'assistant',
+      id: String(item.group?.assistantId || item.group?.key || ''),
+      text: String(item.group?.content || ''),
+    });
+    return;
+  }
   t.menu.openMenu(e, {
     kind: 'assistant',
-    id: String(item.group?.assistantId || item.group?.key || ''),
-    text: String(item.group?.content || ''),
+    id: String(item.msg?.id || ''),
+    text: String(item.msg?.content || ''),
   });
 }
 /** need02-P1：pending 失败重发（新 requestId，带图，旧 failed 不复用）。 */

@@ -208,16 +208,6 @@ html.light {
 .turn-body > * + * {
   margin-top: 8px;
 }
-/* 折叠舱内「按 iteration 分节」的步骤列表（RunStepList）与消息块同一套口径。 */
-.run-steps {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.run-steps > * + * {
-  margin-top: 8px;
-}
-
 /* need19 右侧栏：icon rail */
 .rail-tab { width: 100%; height: 36px; display: flex; align-items: center; justify-content: center;
   position: relative; border-radius: 8px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer;

@@ -16,7 +16,6 @@ beforeEach(() => {
   setActivePinia(createPinia());
   try {
     window.localStorage.removeItem('halo-need02-p1');
-    window.localStorage.removeItem('halo-need02-p2');
     window.localStorage.removeItem('halo-need02-p3');
     window.localStorage.removeItem('halo-need02-p4');
   } catch {
