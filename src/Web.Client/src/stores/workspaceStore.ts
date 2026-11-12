@@ -9,6 +9,7 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
@@ -36,6 +37,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     { flush: 'sync' }
   );
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
+  const timelineSummaries = ref<TurnSummary[]>([]);
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -531,6 +533,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
       // need02-P1：首次回包对账转正（key 不变，只换 id/时间）。
       tryConfirmPending(sid);
+      await loadTimelineSummary(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
         sessionStore.discardStale(`loadSessionMessages-error(${sid.slice(-6)})`);
@@ -540,6 +543,31 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       sessionMessages.value = [];
     } finally {
       loadingMessages.value = false;
+    }
+  }
+
+  async function loadTimelineSummary(sessionId: string): Promise<void> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = (sessionId || '').trim();
+    if (!wid || !sid) {
+      timelineSummaries.value = [];
+      return;
+    }
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as { getTimelineSummary?: (w: string, s: string) => Promise<{ ok: boolean; data?: TurnSummary[] }> };
+      if (typeof api.getTimelineSummary !== 'function') {
+        timelineSummaries.value = [];
+        return;
+      }
+      const res = await api.getTimelineSummary(wid, sid);
+      if (res && res.ok && Array.isArray(res.data)) {
+        timelineSummaries.value = res.data;
+      } else {
+        timelineSummaries.value = [];
+      }
+    } catch {
+      timelineSummaries.value = [];
     }
   }
 
@@ -858,6 +886,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     sessionMessages,
+    timelineSummaries,
     /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */
     pendingOverlayMessages,
     budgetStatus,
@@ -886,6 +915,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     togglePinSession,
     deleteSession,
     loadSessionMessages,
+    loadTimelineSummary,
     healSessionHistory,
     deleteMessage,
     truncateHistory,

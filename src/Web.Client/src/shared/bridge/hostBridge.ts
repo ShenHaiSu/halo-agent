@@ -261,6 +261,8 @@ export type {
   UsageSourceOption,
   UsageTrend,
   UsageTrendSeries,
+  TurnSummary,
+  TimelineBlock,
   WorkspaceInfo,
 } from './protocol/types';
 export type { BridgeError } from './protocol/errors';

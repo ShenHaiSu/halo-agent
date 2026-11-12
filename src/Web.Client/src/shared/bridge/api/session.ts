@@ -12,6 +12,7 @@ import type {
   SessionMetadata,
   SubRuntimeInfo,
   SubSessionDetailDto,
+  TurnSummary,
   UnifiedChatMessage,
   WorkspaceInfo,
 } from '../protocol/types';
@@ -51,6 +52,7 @@ export function createSessionApi(
   | 'branchSession'
   | 'healSessionHistory'
   | 'deleteSessionMessage'
+  | 'getTimelineSummary'
 > {
   return {
     async getWorkspaces() {
@@ -267,6 +269,9 @@ export function createSessionApi(
       return normalizeBridgePayload<BridgeResponse<HistoryDeleteResultDto>>(
         await t.call('deleteSessionMessage', workspaceId ?? '', sessionId ?? '', messageId ?? '')
       );
+    },
+    async getTimelineSummary(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<TurnSummary[]>>(await t.call('getTimelineSummary', workspaceId ?? '', sessionId ?? ''));
     },
   };
 }

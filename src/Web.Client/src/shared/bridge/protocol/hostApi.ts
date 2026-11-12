@@ -31,6 +31,7 @@ import type {
   SubSessionDetailDto,
   UiActiveState,
   UnifiedChatMessage,
+  TurnSummary,
   UsageDbStatus,
   UsageFilter,
   UsageFilterOptions,
@@ -208,7 +209,7 @@ export interface HostBridgeApi {
   getUsageProviderShare: (filter: UsageFilter | string) => Promise<BridgeResponse<UsageProviderShareItem[]>>;
   queryUsagePage: (filter: UsageFilter | string, page: number, pageSize: number) => Promise<BridgeResponse<UsagePage>>;
   getUsageDbStatus: () => Promise<BridgeResponse<UsageDbStatus>>;
-  // UI活跃状态（后端config/ui-state.json，只恢复到main）
+  getTimelineSummary: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<TurnSummary[]>>;
   getLastActive: () => Promise<BridgeResponse<UiActiveState>>;
   setLastActive: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
 }

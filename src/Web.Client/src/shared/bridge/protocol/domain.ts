@@ -41,6 +41,45 @@ export interface SessionMetadata {
   subStatus?: string | null;
   createdByCallId?: string | null;
   taskPrompt?: string | null;
+  historyVersion?: number;
+}
+
+export type TimelineBlockKind = 'reasoning' | 'text' | 'tool_call' | 'tool_result';
+export type TimelineBlockTag = 'process' | 'final' | 'pending';
+export type TimelineTurnStatus = 'completed' | 'truncated' | 'cancelled' | 'error';
+
+export interface TimelineBlock {
+  blockId: string;
+  turnId: string;
+  iteration: number;
+  seq: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  callId?: string | null;
+  charCount: number;
+  preview: string;
+  content: string;
+  contentRef?: string | null;
+  truncated: boolean;
+}
+
+export interface TurnSummary {
+  turnId: string;
+  turnSeq: number;
+  iterEnd: number;
+  userPreview: string;
+  finalBlockId?: string | null;
+  finalPreview: string;
+  blocks: number;
+  tools: number;
+  failed: number;
+  durationMs: number;
+  chars: number;
+  status: TimelineTurnStatus;
+  lastRequestId: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  anchorKey: string;
 }
 
 export interface UnifiedChatMessage {

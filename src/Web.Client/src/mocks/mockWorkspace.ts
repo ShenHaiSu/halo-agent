@@ -430,7 +430,9 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' },
       };
     },
-    // need13 mock 仅示意，联调以真后端为准
+    async getTimelineSummary(_workspaceId: string, _sessionId: string) {
+      return { ok: true, data: [] };
+    },
     async getSubSessions(_ws: string, _parent: string) {
       return { ok: true, data: [] as SessionMetadata[] };
     },
