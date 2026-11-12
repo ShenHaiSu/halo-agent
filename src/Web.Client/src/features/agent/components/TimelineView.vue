@@ -133,9 +133,10 @@
         class="show-jump-pill"
         data-testid="show-jump"
         title="回到底部"
+        aria-label="回到底部"
         @click="emit('jump-latest')"
       >
-        回到底部
+        <ArrowDownIcon :size="18" />
       </button>
     </Transition>
   </div>
@@ -143,6 +144,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, useTemplateRef, type ComponentPublicInstance } from 'vue';
 import { Bot } from 'lucide-vue-next';
+import ArrowDownIcon from '@shared/ui/icons/ArrowDownIcon.vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
@@ -317,27 +319,46 @@ const showJumpVisible = computed(() => props.showJumpBtn || props.readingWindow)
     transition: none;
   }
 }
-/* 硬切：会话切换无骨架遮罩 / 无内容微淡入，直接替换 timelineItems。 */
-/* 回到底部 pill：absolute 悬浮于滚动容器之外，不占 scrollHeight，避免出现又收回的抖动。 */
+/* 回到底部圆钮：absolute 悬浮于滚动容器之外，不占 scrollHeight，避免出现又收回的抖动。 */
 .show-jump-pill {
   position: absolute;
-  bottom: 12px;
+  bottom: 16px;
   right: 16px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 9999px;
-  font-size: 11px;
-  white-space: nowrap;
-  background: var(--n-primary-color, #2080f0);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-primary, #3b82f6);
   color: #fff;
+  opacity: 0.75;
   border: none;
   cursor: pointer;
   z-index: 6;
-  transition: opacity 120ms ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition:
+    opacity 150ms ease-out,
+    background-color 150ms ease-out;
 }
-/* P03：pill 淡入（与会话切换无关，保留） */
+.show-jump-pill:hover {
+  opacity: 1;
+}
+.show-jump-pill:active {
+  opacity: 1;
+}
+.show-jump-pill:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent-primary, #3b82f6);
+  outline-offset: 2px;
+}
+html.light .show-jump-pill {
+  color: #0f172a;
+}
+/* P03：圆钮淡入（与会话切换无关，保留） */
 .show-jump-enter-active {
-  transition: opacity 120ms ease-out;
+  transition: opacity 150ms ease-out;
 }
 .show-jump-enter-from {
   opacity: 0;
