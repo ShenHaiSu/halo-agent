@@ -95,8 +95,30 @@ public sealed partial class StoragePathManager
     /// <summary>need09-01：Global Memory 域根目录（随数据根迁移）。</summary>
     public string GlobalMemoryDirectory => Path.Combine(CurrentDataRoot, "memory");
 
-    /// <summary>need12：用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
+    /// <summary>用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
     public string MetricsDirectory => Path.Combine(CurrentDataRoot, "metrics");
+
+    public string GetHistoryDbPath(string workspaceId, string sessionId) =>
+        Path.Combine(
+            SessionsDirectory,
+            workspaceId ?? string.Empty,
+            sessionId ?? string.Empty,
+            "history.db"
+        );
+
+    public string GetHistoryDbWalPath(string workspaceId, string sessionId) =>
+        GetHistoryDbPath(workspaceId, sessionId) + "-wal";
+
+    public string GetHistoryDbShmPath(string workspaceId, string sessionId) =>
+        GetHistoryDbPath(workspaceId, sessionId) + "-shm";
+
+    public string GetHistoryBackupPath(string workspaceId, string sessionId) =>
+        Path.Combine(
+            SessionsDirectory,
+            workspaceId ?? string.Empty,
+            sessionId ?? string.Empty,
+            "history.db.bak"
+        );
 
     /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
     public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;

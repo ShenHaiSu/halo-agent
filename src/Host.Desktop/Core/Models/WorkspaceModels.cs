@@ -129,8 +129,9 @@ public sealed class SessionMetadata
     /// <summary>need13：由主轮哪次 tool_call 创建（callId，链路追踪）。</summary>
     public string? CreatedByCallId { get; set; }
 
-    /// <summary>need13：task 截断 2000 字（索引用，全文不存 meta）。</summary>
     public string? TaskPrompt { get; set; }
+
+    public int HistoryVersion { get; set; }
 }
 
 /// <summary>
