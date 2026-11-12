@@ -1,4 +1,4 @@
-/** M3 过渡动画：TransitionGroup 结构 + leave 脱流红线 + 流式光标（§3.1）。 */
+/** 过渡动画：轮内 live 渲染 + 流式光标（§3.1）。轴尾容器已收敛进轮内，断言随之更新。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
@@ -10,13 +10,23 @@ import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
 const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: null });
 const TIMELINE_SFC = (): string => readFileSync(resolve(process.cwd(), 'src/features/agent/components/TimelineView.vue'), 'utf8');
 
-function mountTimeline(segs: unknown[]) {
+function mountTimeline(liveSegs: unknown[]) {
+  const turn = {
+    key: 'uturn-u1',
+    userId: 'u1',
+    userMsg: { id: 'u1', role: 'user', content: 'hi', createdAtUtc: '' },
+    steps: [],
+    stepCount: 0,
+    toolCount: 0,
+    isRunning: true,
+  };
+  const item = { key: 'uturn-u1', kind: 'user-turn', turn };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [],
+      items: [item],
       historyItems: [],
-      tailItems: [],
+      tailItems: [item],
       chatWidthMode: 'centered',
       isExpanded: () => false,
       anchorRef: () => () => undefined,
@@ -31,15 +41,10 @@ function mountTimeline(segs: unknown[]) {
       showTelemetry: () => false,
       protocolOf: () => '',
       cacheLineOf: () => '',
-      hasActiveTurn: true,
-      liveCoalesce: false,
       thinkingLine: '',
       isGenerating: true,
-      segs: segs as never,
-      segKillSwitch: false,
-      fallbackCards: [],
-      streamingText: '',
-      showThinking: false,
+      liveSegs: liveSegs as never,
+      streamMdKillSwitch: true,
       turnNotice: '',
       lastError: '',
       showRetry: false,
@@ -49,7 +54,7 @@ function mountTimeline(segs: unknown[]) {
       menuY: 0,
       menuBusy: false,
       menuCanCopy: false,
-    },
+    } as never,
     global: { plugins: [naive] },
   });
 }
@@ -67,12 +72,12 @@ function cursorOf(isTail: boolean) {
   });
 }
 
-describe('M3 过渡动画', () => {
-  it('seg 列表渲染为 TransitionGroup 容器（.seg-list），子段保持 data-seg', () => {
+describe('轮内过渡', () => {
+  it('live 段收敛进轮内渲染（user-turn-live），不再有轴尾容器', () => {
     const wrapper = mountTimeline([seg('s1', '第一段'), seg('s2', '第二段')]);
-    expect(wrapper.find('.seg-list').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="user-turn-live"]').exists()).toBe(true);
     expect(wrapper.findAll('[data-seg]')).toHaveLength(2);
-    expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(false);
   });
 
   it('红线：.seg-leave-active 必须 position:absolute（否则「下移再上移」双重抖动）', () => {
@@ -83,30 +88,15 @@ describe('M3 过渡动画', () => {
     expect(rule![1]).not.toContain('height');
   });
 
-  it('活动容器使用 Transition，且过渡只动 opacity/transform（无 height/max-height）', () => {
+  it('轴尾容器与旧开关无残留', () => {
     const src = TIMELINE_SFC();
-    expect(src).toContain('<Transition name="live-turn">');
-    const rule = /\.live-turn-enter-active\s*\{([^}]*)\}/.exec(src);
-    expect(rule).not.toBeNull();
-    expect(rule![1]).toContain('opacity');
-    expect(rule![1]).not.toContain('max-height');
+    expect(src).not.toContain('active-turn-container');
+    expect(src).not.toContain('showAxis' + 'Tail');
+    expect(src).not.toContain('live' + 'Coalesce');
   });
 
   it('流式光标只在尾段显示', () => {
     expect(cursorOf(true).find('.smooth-cursor').exists()).toBe(true);
     expect(cursorOf(false).find('.smooth-cursor').exists()).toBe(false);
-  });
-
-  it('P02-P0b：收敛开（默认）时轴尾容器隐藏，单 Live 只剩轮内', () => {
-    const hidden = mount(TimelineView, {
-      props: { ...mountTimeline([seg('s1', 'x')]).props(), liveCoalesce: undefined } as never,
-      global: { plugins: [naive] },
-    });
-    expect(hidden.find('[data-testid="active-turn-container"]').exists()).toBe(false);
-    const shown = mount(TimelineView, {
-      props: { ...mountTimeline([seg('s1', 'x')]).props(), liveCoalesce: false } as never,
-      global: { plugins: [naive] },
-    });
-    expect(shown.find('[data-testid="active-turn-container"]').exists()).toBe(true);
   });
 });

@@ -28,16 +28,7 @@ function touchSessionClock(sessionId: string, iso?: string): void {
   }
 }
 
-/** need02-P2：读 p2 开关（turnEvents 不直连 need02Flags 组合式，照 kill switch 写法直读 localStorage）。 */
-function isNeed02P2On(): boolean {
-  try {
-    const v = String(window.localStorage.getItem('halo-need02-p2') || '').toLowerCase();
-    if (!v) return true;
-    return v !== 'off';
-  } catch {
-    return true;
-  }
-}
+// 轮末交接：终态已就位后流容器延迟 300ms 再清，供交接编排做交叉淡入淡出。
 
 /** need02-P4（p4-reload）：persisted 事件只刷预算、全量重拉收敛到轮末。master/子开关任一 off 即回旧链。 */
 function isNeed02P4ReloadOn(): boolean {
@@ -168,10 +159,10 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     touch(t);
     return;
   }
-  // need02-P2：终态已就位（reloadNow 先拉后清），流容器延迟 300ms 再清，供 P3 交接编排做交叉淡入淡出；
-  // p2 off 时保持立即清（旧行为）。Cancel/Error 路径不延迟（调用方只在 Completed/Truncated 传 defer）。
-  // need02-P3：内嵌 LiveBody 在 completing 期继续渲染全量 segs（absolute 脱流淡出），与 FoldedSummary 交叉淡入。
-  // 交接埋点（DEV 限定，供 G3 量化）：handoff {requestId, liveMs, steadyMs}。
+  // 终态已就位（reloadNow 先拉后清），流容器延迟 300ms 再清，供交接编排做交叉淡入淡出；
+  // Cancel/Error 路径不延迟（调用方只在 Completed/Truncated 传 defer）。
+  // 交接窗内 LiveBody 在 completing 期继续渲染全量 segs（absolute 脱流淡出），与稳态交叉淡入。
+  // 交接埋点（DEV 限定，供量化）：handoff {requestId, liveMs, steadyMs}。
   const doClear = (): void => {
     t.toolCards = [];
     t.toolCardIndex = {};
@@ -259,7 +250,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.subAgents.done = t.subAgents.total;
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void finishTurn(sid, isNeed02P2On() ? { deferClearMs: 300 } : undefined);
+      void finishTurn(sid, { deferClearMs: 300 });
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -306,7 +297,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
         t.turnNotice = '已达到单轮迭代上限，已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
       }
       touch(t);
-      void finishTurn(sid, isNeed02P2On() ? { deferClearMs: 300 } : undefined);
+      void finishTurn(sid, { deferClearMs: 300 });
       agentRuntime().generateTitle(sid);
       break;
     }

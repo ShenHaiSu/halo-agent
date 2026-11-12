@@ -9,7 +9,6 @@ import { useAgentCards } from '@features/agent/stores/useAgentCards';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { getHostBridge, type ChatImageRef, type UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { imagesOf, orderedImagesOf, type TimelineEntry, type TurnGroup } from '@features/session/utils/turnGroup';
-import { buildTurnRuns, type TurnRun } from '@features/session/utils/turnRun';
 import { buildUserTurns } from '@features/session/utils/userTurn';
 import { buildUserTurnsIncremental, createUserTurnsCache } from '@features/session/utils/userTurn';
 import { isLiveOwner } from '@features/session/utils/turnRender';
@@ -64,28 +63,10 @@ export function useTimeline() {
   const toggleTurn = (key: string): void => {
     expandedTurns[key] = !isTurnExpanded(key);
   };
-  /**
-   * need-01：无正文轮次合并（kill switch：localStorage['halo-turn-run'] = 'off' → 回到改动前行为）。
-   * 实现方式照 useAgentStream 的 streamMdKillSwitch（隐私模式下 localStorage 抛错时保持默认开启）。
-   */
-  const turnRunKillSwitch = ref(false);
-  try {
-    turnRunKillSwitch.value = String(window.localStorage.getItem('halo-turn-run') || '').toLowerCase() === 'off';
-  } catch {
-    turnRunKillSwitch.value = false;
-  }
-  /**
-   * need02-P0：总开关矩阵快照（只读透传，零行为变更）。
-   * P1–P4 的行为分支在各自阶段实现；本阶段仅把开关快照与 `data-need02` 透传串
-   * 交给模板（TimelineView 根节点 `data-need02`），供截图对比与调试面板使用。
-   */
+  // 用户轮次投影是唯一时间轴数据源。
   const need02Flags = useNeed02Flags();
   const need02Attr = computed<string>(() => buildNeed02Attr(need02Flags));
-  /**
-   * need-01：末组是否仍在「活动轨」。
-   * 条件 = 本轮仍在生成 && 传入的末组 assistantId 就是最后一条已落盘的 assistant
-   * （否则历史里的旧 run 会被误判成运行中，导致它默认展开 + 常亮转圈）。
-   */
+  // 末条已落盘 assistant，供运行态判定与交接锚点使用。
   const lastPersistedAssistantId = computed<string>(() => {
     const msgs = persistedMessages.value;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -94,54 +75,34 @@ export function useTimeline() {
     }
     return '';
   });
-  const runIsActive = (assistantId: string): boolean => {
-    const t = turn.activeTurn;
-    if (!t || t.isGenerating !== true) return false;
-    if (!assistantId) return true;
-    return assistantId === lastPersistedAssistantId.value;
-  };
-  // need02-P2：投影分支（resolveTimelineMode 语义内联：p2 on 自动旁路 need-01 开关，无需用户手动关）。
-  // - p2 on → 走 buildUserTurns（activeUserTurnEntries，用户轮次粒度，D1=B）；
-  // - p2 off → 回落旧链（turnRunKillSwitch 决定是否再做 turn-run 合并）。
-  // need02-P4（p4-proj）：p2 on 且 p4-proj on 时走增量投影（指纹命中返回同一引用，只重建末轮）。
+  // 用户轮次投影（overlay 为唯一真相源；增量与全量由 p4-proj 子开关选择）。
   const userTurnsCache = createUserTurnsCache();
   const timelineItems = computed<TimelineEntry[]>(() => {
-    // need02-P2 + G1: overlay（含乐观 pending）是唯一真相源——发送瞬间本地即现，不等回包/首字/防抖。
-    // 运行态按“本轮含末条 live + 全局 generating”判定（03 §3.2，不猜末 assistant，05 A3）。
-    if (need02Flags.p2) {
-      const msgs = persistedMessages.value;
-      let liveTotalMs: number | null = null;
-      try {
-        const ms = turn.activeTurn?.telemetry?.totalMs;
-        liveTotalMs = typeof ms === 'number' ? ms : null;
-      } catch {
-        /* ignore */
-      }
-      const buildOpts = {
-        activeAssistantId: lastPersistedAssistantId.value,
-        isGenerating: turn.activeTurn?.isGenerating === true,
-        liveTotalMs,
-      };
-      if (isP4SubOn('proj', null, need02Flags)) {
-        return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
-      }
-      return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
+    const msgs = persistedMessages.value;
+    let liveTotalMs: number | null = null;
+    try {
+      const ms = turn.activeTurn?.telemetry?.totalMs;
+      liveTotalMs = typeof ms === 'number' ? ms : null;
+    } catch {
+      /* ignore */
     }
-    const raw = telemetry.activeTimelineEntries;
-    if (turnRunKillSwitch.value) return raw;
-    // P3-A：本轮仍在跑时把「正在执行的最后一步」当作活动锚点，并入同一个舱。
-    const activeStepId = turn.activeTurn?.isGenerating ? lastPersistedAssistantId.value : '';
-    return buildTurnRuns(raw, { isAssistantActive: runIsActive, activeStepId });
+    const buildOpts = {
+      activeAssistantId: lastPersistedAssistantId.value,
+      isGenerating: turn.activeTurn?.isGenerating === true,
+      liveTotalMs,
+    };
+    if (isP4SubOn('proj', null, need02Flags)) {
+      return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
+    }
+    return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
   });
-  /** 合并舱索引（纯派生视图，供展开态默认值与「首次合并补一次跟随」判定使用）。 */
-  const runByKey = computed<Map<string, TurnRun>>(() => {
-    const m = new Map<string, TurnRun>();
+  // 用户轮次展开索引（运行中默认展开、终态默认收起）。
+  const runByKey = computed<Map<string, { key: string; isRunning: boolean }>>(() => {
+    const m = new Map<string, { key: string; isRunning: boolean }>();
     for (const e of timelineItems.value) {
-      if (e.kind === 'turn-run' && e.run) m.set(e.run.key, e.run);
-      // need02-P2：uturn- 与 run- 共用同一套显式展开态（runExplicit），运行中默认展开、终态默认收起。
-      else if (e.kind === 'user-turn' && (e as unknown as { turn?: { key?: unknown; isRunning?: unknown } }).turn) {
+      if (e.kind === 'user-turn' && (e as unknown as { turn?: { key?: unknown; isRunning?: unknown } }).turn) {
         const t = (e as unknown as { turn: { key: string; isRunning: boolean } }).turn;
-        m.set(e.key, { key: String(t.key || e.key), isRunning: t.isRunning === true } as unknown as TurnRun);
+        m.set(e.key, { key: String(t.key || e.key), isRunning: t.isRunning === true });
       }
     }
     return m;
@@ -697,21 +658,7 @@ export function useTimeline() {
     active: computed(() => stream.isGenerating),
     key: tailSegKey,
   });
-  const displaySegs = computed<DisplaySeg[]>(() => {
-    const segs = stream.visibleSegs;
-    const lastIdx = segs.length - 1;
-    return segs.map((s, i) => {
-      const isTailText = i === lastIdx && s.kind === 'text';
-      return {
-        kind: s.kind,
-        key: s.key,
-        text: isTailText ? smoothTailText.value : segTextOf(s),
-        card: s.kind === 'tool' ? segCardOf(s) : null,
-      };
-    });
-  });
-  // need02-P2：流态全量（含已 persisted 段，标灰但仍可见，直到交接；供 UserTurnBlock 内嵌 LiveBody）。
-  // visibleSegs 保持旧语义（毕业即过滤，旧测试不断言变更）；P2 新链读全量 segs 做分区渲染。
+  // 内嵌流态（含已落盘段，供 UserTurnBlock 内嵌使用）。
   const liveInclusiveSegs = computed<DisplaySeg[]>(() => {
     let segs: Array<{ key?: unknown; kind?: unknown; text?: unknown }> = [];
     try {
@@ -740,7 +687,6 @@ export function useTimeline() {
     const it = turn.activeTurn.curIteration || 1;
     return cards.toolCards.filter((c) => (c.iteration || 0) === it).length;
   });
-  const showThinking = computed(() => !stream.visibleSegs.length && !stream.streamingText && stream.streamingActive && stream.isGenerating);
   const showLiveTelemetry = computed(() => {
     const t = telemetry.telemetry;
     return t.ttftMs !== null || t.totalMs !== null || t.inputTokens > 0 || t.outputTokens > 0;
@@ -852,21 +798,6 @@ export function useTimeline() {
       if (prev && !v && paneVisible.value && follow.pinnedRef.value) pin.scheduleToBottom();
     }
   );
-  /**
-   * need-01（05 陷阱 5）：run 首次形成时总高度会一次性变短，与「轮末容器消失」同类，
-   * 补一次跟随即可；复用 pin.scheduleToBottom 的 rAF 双帧 + 200ms 兜底，**不新增定时器**。
-   * 判据用「主时间轴出现第一条 turn-run 的 key」——它从空到有时只会触发一次。
-   */
-  const firstRunKey = computed<string>(() => {
-    for (const e of timelineItems.value) if (e.kind === 'turn-run') return e.key;
-    return '';
-  });
-  watch(firstRunKey, (key, prev) => {
-    if (!key || key === prev) return;
-    if (!paneVisible.value || !follow.pinnedRef.value) return;
-    if (readingWindow.value) return;
-    pin.scheduleToBottom();
-  });
   watch(
     () => timelineItems.value.map((i) => i.key),
     (keys) => {
@@ -922,10 +853,7 @@ export function useTimeline() {
     readingWindow,
     setReadingWindow,
     clearReadingWindow,
-    displaySegs,
-    /** need02-P2：流态全量（含 persisted，UserTurnBlock 内嵌用；visibleSegs 旧语义保持）。 */
     liveInclusiveSegs,
-    /** P02-P0a：按轮过滤（仅末用户轮返全量，其余空；与 TimelineView 轮过滤同语义）。 */
     liveSegsFor: (entry: TimelineEntry, segs: DisplaySeg[]): DisplaySeg[] => {
       try {
         if (!isLiveOwner(entry, timelineItems.value)) return [];
@@ -934,22 +862,15 @@ export function useTimeline() {
         return [];
       }
     },
-    /** M2-4：经过逐字平滑的尾段文本（模板/测试可直接读；displaySegs 已包含它）。 */
     transcriptRunning,
     isTurnExpanded,
     toggleTurn,
     smoothTailText,
-    /** need-01：无正文轮次合并（kill switch + 汇总舱展开态）。 */
-    turnRunKillSwitch,
-    /** need02-P0：总开关快照 + data-need02 透传串（只读，零行为变更）。 */
     need02Flags,
     need02Attr,
-    /** need02-P3：轮末交接窗（model.liveCompleting；TimelineRow 按 isLast 门控后透给末轮 UserTurnBlock）。 */
     liveCompleting: computed(() => turn.activeTurn?.liveCompleting === true),
-    /** need02-P3：交接动画开关（p3；false = P2 硬切，直接切换）。 */
     handoffAnim: computed(() => need02Flags.p3),
-    /** need02-P4（P4b#6）：轮内 notice（p4&&p2；false 时回 TimelineView 全局区）。 */
-    noticeInTurn: computed(() => need02Flags.p4 && need02Flags.p2),
+    noticeInTurn: computed(() => need02Flags.p4),
     isRunExpanded,
     toggleRun,
     runByKey,
@@ -957,7 +878,6 @@ export function useTimeline() {
     toolKeyOf,
     toCard,
     msgImages,
-    /** need02-P1：pending 判定/状态（TimelineRow 右下态用）。 */
     isPendingMessage,
     pendingStatusOf,
     hasLostImage,
@@ -972,7 +892,6 @@ export function useTimeline() {
     toolCount,
     curIteration,
     curIterToolCount,
-    showThinking,
     showLiveTelemetry,
     liveCachePercent,
     onMarkdownLinkClick,

@@ -1,16 +1,8 @@
-// P02 单容器三段适配器单测（6 例：单步/多步原序/tool 原位/live 归槽/key 不变/旧 kind 降级）。
+// 单容器三段适配器单测（单步/多步原序/tool 原位/live 归槽/key 不变/live 归属）。
 import { describe, expect, it } from 'vitest';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { buildUserTurns } from './userTurn';
-import {
-  buildTurnRenderView,
-  flattenTurnRunsForRender,
-  groupOf,
-  isLiveOwner,
-  pendingTailSlot,
-  stepViewOf,
-  turnStepAnchorKey,
-} from './turnRender';
+import { buildTurnRenderView, groupOf, isLiveOwner, pendingTailSlot, stepViewOf, turnStepAnchorKey } from './turnRender';
 
 const u = (id: string, content: string): UnifiedChatMessage =>
   ({ id, role: 'user', content, createdAtUtc: '2026-10-26T11:59:00Z' }) as unknown as UnifiedChatMessage;
@@ -71,29 +63,7 @@ describe('turnRender 适配器', () => {
     expect(turnStepAnchorKey(turn.key, 2)).toBe(`${turn.key}:step-2`);
   });
 
-  it('6. 旧 kind 降级：turn-run 展平为 turn，system/user 原样透传', () => {
-    const g = (id: string) =>
-      ({
-        key: id,
-        assistantId: id,
-        reasoning: null,
-        content: null,
-        toolCalls: [],
-        toolMessages: [],
-        telemetry: null,
-        createdAtUtc: '',
-      }) as never;
-    const runEntry = {
-      key: 'run-g1',
-      kind: 'turn-run',
-      run: { key: 'run-g1', groups: [g('g1'), g('g2')], isRunning: false },
-    } as never;
-    const sysEntry = { key: 's-1', kind: 'system', msg: { id: 's1' } } as never;
-    const flat = flattenTurnRunsForRender([runEntry, sysEntry]);
-    expect(flat.map((e) => `${e.kind}:${e.key}`)).toEqual(['turn:g1', 'turn:g2', 'system:s-1']);
-  });
-
-  it('7. Live 归属：仅末用户轮拥有流式段', () => {
+  it('6. Live 归属：仅末用户轮拥有流式段', () => {
     const items = [
       { kind: 'user-turn', key: 'uturn-u1', turn: { key: 'uturn-u1' } },
       { kind: 'system', key: 's-1' },

@@ -35,13 +35,23 @@ function mountRow(thumb: string, opts?: { lost?: boolean }) {
   });
 }
 
-function mountTimeline(segs: unknown[]) {
+function mountTimeline(liveSegs: unknown[]) {
+  const turn = {
+    key: 'uturn-u1',
+    userId: 'u1',
+    userMsg: { id: 'u1', role: 'user', content: '看图', createdAtUtc: '' },
+    steps: [],
+    stepCount: 0,
+    toolCount: 0,
+    isRunning: true,
+  };
+  const item = { key: 'uturn-u1', kind: 'user-turn', turn };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [],
+      items: [item],
       historyItems: [],
-      tailItems: [],
+      tailItems: [item],
       chatWidthMode: 'centered',
       isExpanded: () => false,
       anchorRef: () => () => undefined,
@@ -56,15 +66,10 @@ function mountTimeline(segs: unknown[]) {
       showTelemetry: () => false,
       protocolOf: () => '',
       cacheLineOf: () => '',
-      hasActiveTurn: true,
-      liveCoalesce: false,
       thinkingLine: '',
-      isGenerating: false,
-      segs: segs as never,
-      segKillSwitch: false,
-      fallbackCards: [],
-      streamingText: '',
-      showThinking: false,
+      isGenerating: true,
+      liveSegs: liveSegs as never,
+      streamMdKillSwitch: true,
       turnNotice: '',
       lastError: '',
       showRetry: false,
@@ -74,7 +79,7 @@ function mountTimeline(segs: unknown[]) {
       menuY: 0,
       menuBusy: false,
       menuCanCopy: false,
-    },
+    } as never,
     global: { plugins: [naive] },
   });
 }
