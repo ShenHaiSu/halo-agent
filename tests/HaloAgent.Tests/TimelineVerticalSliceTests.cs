@@ -105,7 +105,8 @@ public sealed class TimelineVerticalSliceTests : IDisposable
             return v?.ToString() ?? string.Empty;
         }
         Assert.Equal("wal", (await QuerySingle("PRAGMA journal_mode;")).ToLowerInvariant());
-        Assert.Equal("2", await QuerySingle("PRAGMA synchronous;"));
+        // 发货加固分级：默认连接 NORMAL（轮末 T1 内显式 FULL，见 AppendTurnAsync.ApplyFullSynchronous）
+        Assert.Equal("1", await QuerySingle("PRAGMA synchronous;"));
         Assert.Equal("5000", await QuerySingle("PRAGMA busy_timeout;"));
         Assert.Equal("1", await QuerySingle("PRAGMA foreign_keys;"));
 

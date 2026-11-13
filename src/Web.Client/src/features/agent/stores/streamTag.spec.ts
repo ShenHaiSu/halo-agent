@@ -1,3 +1,9 @@
+import { vi } from 'vitest';
+vi.mock('@shared/bridge/hostBridge', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@shared/bridge/hostBridge')>();
+  return { ...orig, getHostBridge: () => ({}) as never, getBridgeTransport: () => ({}) as never };
+});
+import { handleTurnLifecycle } from './turnEvents';
 import { describe, expect, it } from 'vitest';
 import { ensureTurn, pushTextSeg, demotePending, finalizePending, markIterationTextPersisted } from './model';
 import { createPinia, setActivePinia } from 'pinia';
@@ -37,3 +43,30 @@ describe('streaming tag mirror demote/finalize', () => {
   });
 });
 
+describe('BlockTagUpdated flip', () => {
+  it('flips a live final seg back to process on flip reason', () => {
+    setActivePinia(createPinia());
+    const t = ensureTurn('sess-flip');
+    t.curIteration = 1;
+    t.requestId = 'req-flip';
+    t.segs = [];
+    pushTextSeg(t, 'text', 'old final', 'req-flip:b1', 1, 'pending');
+    const finalId = finalizePending(t);
+    expect(finalId).toBe('req-flip:b1');
+    expect(t.segs[0].tag).toBe('final');
+    handleTurnLifecycle('BlockTagUpdated', { blockId: finalId, tag: 'process', reason: 'flip' }, 'sess-flip');
+    expect(t.segs[0].tag).toBe('process');
+  });
+  it('ignores flip for unknown block ids and invalid tags', () => {
+    setActivePinia(createPinia());
+    const t = ensureTurn('sess-flip-unknown');
+    t.curIteration = 1;
+    t.requestId = 'req-flip-u';
+    t.segs = [];
+    pushTextSeg(t, 'text', 'live', 'req-flip-u:b1', 1, 'pending');
+    handleTurnLifecycle('BlockTagUpdated', { blockId: 'req-flip-u:absent', tag: 'process', reason: 'flip' }, 'sess-flip-unknown');
+    expect(t.segs[0].tag).toBe('pending');
+    handleTurnLifecycle('BlockTagUpdated', { blockId: 'req-flip-u:b1', tag: 'pending', reason: 'flip' }, 'sess-flip-unknown');
+    expect(t.segs[0].tag).toBe('pending');
+  });
+});
