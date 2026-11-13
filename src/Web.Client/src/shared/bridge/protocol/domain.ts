@@ -81,6 +81,39 @@ export interface TurnSummary {
   updatedAtUtc: string;
   anchorKey: string;
 }
+export interface TimelineBlockContent {
+  blockId: string;
+  callId?: string | null;
+  seq?: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  markdown: string;
+  preview: string;
+  truncated: boolean;
+  argsJson?: string | null;
+  resultText?: string | null;
+  resultRef?: string | null;
+}
+
+export interface TimelineBlockContentsResponse {
+  items: Record<string, TimelineBlockContent>;
+  missing: string[];
+}
+
+export interface TimelineToolResult {
+  argsJson: string;
+  resultText: string;
+  resultRef?: string | null;
+}
+
+export type TimelineTagReason = 'demote' | 'finalize' | 'flip';
+
+export interface TimelineTagUpdated {
+  blockId: string;
+  tag: TimelineBlockTag;
+  reason: TimelineTagReason;
+}
+
 
 export interface UnifiedChatMessage {
   id: string;

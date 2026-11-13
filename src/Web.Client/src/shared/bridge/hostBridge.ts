@@ -263,6 +263,10 @@ export type {
   UsageTrendSeries,
   TurnSummary,
   TimelineBlock,
+  TimelineBlockContent,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
+  TimelineTagUpdated,
   WorkspaceInfo,
 } from './protocol/types';
 export type { BridgeError } from './protocol/errors';

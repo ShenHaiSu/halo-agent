@@ -32,6 +32,8 @@ import type {
   UiActiveState,
   UnifiedChatMessage,
   TurnSummary,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
   UsageDbStatus,
   UsageFilter,
   UsageFilterOptions,
@@ -210,6 +212,9 @@ export interface HostBridgeApi {
   queryUsagePage: (filter: UsageFilter | string, page: number, pageSize: number) => Promise<BridgeResponse<UsagePage>>;
   getUsageDbStatus: () => Promise<BridgeResponse<UsageDbStatus>>;
   getTimelineSummary: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<TurnSummary[]>>;
+  getBlockContents: (workspaceId: string, sessionId: string, blockIds: string[]) => Promise<BridgeResponse<TimelineBlockContentsResponse>>;
+  getToolResult: (workspaceId: string, sessionId: string, turnId: string, callId: string) => Promise<BridgeResponse<TimelineToolResult>>;
+  getTurnBlockIds: (workspaceId: string, sessionId: string, turnId: string) => Promise<BridgeResponse<string[]>>;
   getLastActive: () => Promise<BridgeResponse<UiActiveState>>;
   setLastActive: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
 }

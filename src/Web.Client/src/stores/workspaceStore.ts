@@ -9,7 +9,7 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
-import type { TurnSummary } from '@shared/bridge/hostBridge';
+import type { TurnSummary, TimelineBlockContent, TimelineBlockContentsResponse, TimelineToolResult } from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
@@ -38,6 +38,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   );
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
   const timelineSummaries = ref<TurnSummary[]>([]);
+  const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
+  const toolResultCache = ref<Record<string, TimelineToolResult>>({});
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -513,6 +515,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       sessionMessages.value = [];
       return;
     }
+    try { clearTimelineCaches(); } catch { /* cache clear never blocks */ }
     // need22-P2 F3：无显式 epoch 时按进入时 epoch 快照；旧 epoch 响应丢弃不覆盖视图
     const sessionStore = useSessionStore();
     const epoch = opts?.epoch ?? sessionStore.epoch;
@@ -569,6 +572,83 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch {
       timelineSummaries.value = [];
     }
+  }
+
+  async function getTurnBlockIds(turnId: string): Promise<string[]> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const tid = (turnId || '').trim();
+    if (!wid || !sid || !tid) return [];
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as { getTurnBlockIds?: (w: string, s: string, t: string) => Promise<{ ok: boolean; data?: string[] }> };
+      if (typeof api.getTurnBlockIds !== 'function') return [];
+      const res = await api.getTurnBlockIds(wid, sid, tid);
+      if (res && res.ok && Array.isArray(res.data)) return res.data;
+    } catch { /* miss -> empty, caller shows placeholder */ }
+    return [];
+  }
+
+  async function getBlockContents(blockIds: string[]): Promise<{ items: Record<string, TimelineBlockContent>; missing: string[] }> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const ids = Array.isArray(blockIds) ? blockIds.filter((s) => s && s.trim()) : [];
+    const items: Record<string, TimelineBlockContent> = {};
+    const uncached: string[] = [];
+    for (const id of ids) {
+      const hit = blockContentsCache.value[id];
+      if (hit) items[id] = hit;
+      else if (!uncached.includes(id)) uncached.push(id);
+    }
+    let missing: string[] = ids.filter((id) => !items[id]);
+    if (uncached.length > 0 && wid && sid) {
+      try {
+        const bridge = getHostBridge();
+        const api = bridge as unknown as { getBlockContents?: (w: string, s: string, b: string[]) => Promise<{ ok: boolean; data?: TimelineBlockContentsResponse }> };
+        if (typeof api.getBlockContents === 'function') {
+          const res = await api.getBlockContents(wid, sid, uncached);
+          if (res && res.ok && res.data) {
+            const fetched = res.data.items || {};
+            for (const [k, v] of Object.entries(fetched)) {
+              items[k] = v as TimelineBlockContent;
+              blockContentsCache.value = { ...blockContentsCache.value, [k]: v as TimelineBlockContent };
+            }
+            missing = [...(res.data.missing || [])];
+            for (const id of uncached) {
+              if (!items[id] && !missing.includes(id)) missing.push(id);
+            }
+          }
+        }
+      } catch { /* fetch fail -> treat uncached as missing */ }
+    }
+    return { items, missing };
+  }
+
+  async function getToolResult(turnId: string, callId: string): Promise<TimelineToolResult | null> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const tid = (turnId || '').trim();
+    const cid = (callId || '').trim();
+    if (!wid || !sid || !tid || !cid) return null;
+    const key = `${tid}::${cid}`;
+    const hit = toolResultCache.value[key];
+    if (hit) return hit;
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as { getToolResult?: (w: string, s: string, t: string, c: string) => Promise<{ ok: boolean; data?: TimelineToolResult }> };
+      if (typeof api.getToolResult !== 'function') return null;
+      const res = await api.getToolResult(wid, sid, tid, cid);
+      if (res && res.ok && res.data) {
+        toolResultCache.value = { ...toolResultCache.value, [key]: res.data };
+        return res.data;
+      }
+    } catch { /* miss -> null */ }
+    return null;
+  }
+
+  function clearTimelineCaches(): void {
+    blockContentsCache.value = {};
+    toolResultCache.value = {};
   }
 
   async function appendMessage(msg: UnifiedChatMessage): Promise<boolean> {
@@ -916,6 +996,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     deleteSession,
     loadSessionMessages,
     loadTimelineSummary,
+    getTurnBlockIds,
+    getBlockContents,
+    getToolResult,
+    clearTimelineCaches,
+    blockContentsCache,
     healSessionHistory,
     deleteMessage,
     truncateHistory,

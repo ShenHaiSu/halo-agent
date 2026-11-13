@@ -28,6 +28,7 @@ function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
 
 describe('TimelineSummarySection', () => {
   it('renders one flattened turn per summary with user, process and final anchors', async () => {
+    const { createPinia } = await import('pinia');
     const wrapper = mount(TimelineSummarySection, {
       props: {
         summaries: [
@@ -35,6 +36,7 @@ describe('TimelineSummarySection', () => {
           makeSummary({ turnId: 'uturn-u2', turnSeq: 2, finalBlockId: null, finalPreview: '', tools: 2 }),
         ],
       },
+      global: { plugins: [createPinia()] },
     });
     await nextTick();
     expect(wrapper.find('[data-testid="timeline-summary-section"]').exists()).toBe(true);
@@ -46,16 +48,19 @@ describe('TimelineSummarySection', () => {
     expect(wrapper.find('[data-testid="timeline-final-empty-uturn-u2"]').text()).toContain('2 个工具');
   });
 
-  it('keeps process boxes collapsed by default and reveals preview on expand', async () => {
+  it('keeps process boxes collapsed by default and lazy-loads on expand', async () => {
     const wrapper = mount(TimelineSummarySection, {
       props: { summaries: [makeSummary()] },
+      global: { plugins: [ (await import('pinia')).createPinia() ] },
     });
     await nextTick();
     expect(wrapper.find('[data-testid="timeline-process-body-uturn-u1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="timeline-process-placeholder-uturn-u1"]').exists()).toBe(true);
     await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
     await nextTick();
+    await new Promise((r) => setTimeout(r, 0));
     const body = wrapper.find('[data-testid="timeline-process-body-uturn-u1"]');
     expect(body.exists()).toBe(true);
-    expect(body.text()).toContain('已经定位到空指针');
+    expect(wrapper.find('[data-testid="timeline-process-placeholder-uturn-u1"]').exists()).toBe(false);
   });
 });

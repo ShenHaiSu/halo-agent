@@ -21,6 +21,7 @@ import { INITIAL_MOUNT, STEP, WINDOW_MIN, hiddenAboveByWeight, isNearTop } from 
 import { useTimelineMenu } from './useTimelineMenu';
 import { need02Attr as buildNeed02Attr, useNeed02Flags } from '@features/need02/utils/need02Flags';
 import { pendingPreviewOf } from '@features/session/utils/pendingUser';
+import { quotaLimit } from '@features/session/utils/timelineExpansion';
 export interface DisplaySeg {
   kind: string;
   key: string;
@@ -182,9 +183,21 @@ export function useTimeline() {
     return e;
   }
   function pruneRefs(live: TimelineEntry[]): void {
-    if (entryRefs.size <= 600) return;
+    const limit = quotaLimit();
+    if (entryRefs.size <= limit) return;
     const keep = new Set(live.map((e) => e.key));
     for (const k of entryRefs.keys()) if (!keep.has(k)) entryRefs.delete(k);
+    if (entryRefs.size <= limit) return;
+    const keys = [...entryRefs.keys()];
+    for (const k of keys) {
+      if (entryRefs.size <= limit) break;
+      if (!keep.has(k)) entryRefs.delete(k);
+    }
+    while (entryRefs.size > limit) {
+      const oldest = entryRefs.keys().next();
+      if (oldest.done) break;
+      entryRefs.delete(oldest.value);
+    }
   }
   const historyEntries = computed<TimelineEntry[]>(() => {
     const all = timelineItems.value;

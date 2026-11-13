@@ -13,6 +13,8 @@ import type {
   SubRuntimeInfo,
   SubSessionDetailDto,
   TurnSummary,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
   UnifiedChatMessage,
   WorkspaceInfo,
 } from '../protocol/types';
@@ -53,6 +55,9 @@ export function createSessionApi(
   | 'healSessionHistory'
   | 'deleteSessionMessage'
   | 'getTimelineSummary'
+  | 'getBlockContents'
+  | 'getToolResult'
+  | 'getTurnBlockIds'
 > {
   return {
     async getWorkspaces() {
@@ -272,6 +277,15 @@ export function createSessionApi(
     },
     async getTimelineSummary(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<TurnSummary[]>>(await t.call('getTimelineSummary', workspaceId ?? '', sessionId ?? ''));
+    },
+    async getBlockContents(workspaceId: string, sessionId: string, blockIds: string[]) {
+      return normalizeBridgePayload<BridgeResponse<TimelineBlockContentsResponse>>(await t.call('getBlockContents', workspaceId ?? '', sessionId ?? '', blockIds ?? []));
+    },
+    async getToolResult(workspaceId: string, sessionId: string, turnId: string, callId: string) {
+      return normalizeBridgePayload<BridgeResponse<TimelineToolResult>>(await t.call('getToolResult', workspaceId ?? '', sessionId ?? '', turnId ?? '', callId ?? ''));
+    },
+    async getTurnBlockIds(workspaceId: string, sessionId: string, turnId: string) {
+      return normalizeBridgePayload<BridgeResponse<string[]>>(await t.call('getTurnBlockIds', workspaceId ?? '', sessionId ?? '', turnId ?? ''));
     },
   };
 }

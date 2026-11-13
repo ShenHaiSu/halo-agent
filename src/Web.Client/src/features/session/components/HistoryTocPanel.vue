@@ -254,8 +254,29 @@ function dismissHint(): void {
   ui.markHintShown();
 }
 
+async function ensureMountedTick(key: string): Promise<boolean> {
+  void key;
+  try {
+    await nextTick();
+  } catch { /* tick never blocks nav */ }
+  return true;
+}
+
+function fallbackToast(usedKey: string, requestedKey: string): void {
+  void usedKey;
+  void requestedKey;
+  try {
+    message.warning('目标已折叠或删除，已跳转到最近的可视位置');
+  } catch { /* toast never blocks */ }
+}
+
 async function onJump(item: TocItem): Promise<void> {
-  const ok = nav.scrollToAnchor(item.anchorKey, { behavior: 'smooth', highlight: true });
+  const ok = await nav.scrollToAnchor(item.anchorKey, {
+    behavior: 'smooth',
+    highlight: true,
+    ensureMounted: ensureMountedTick,
+    onFallback: fallbackToast,
+  });
   if (!ok) {
     message.warning('未找到该消息，可能正在加载或已被压缩');
     return;
@@ -264,10 +285,15 @@ async function onJump(item: TocItem): Promise<void> {
   activeKey.value = item.anchorKey;
 }
 
-function toTop(): void {
+async function toTop(): Promise<void> {
   const first = tocItems.value[0];
   if (!first) return;
-  const ok = nav.scrollToAnchor(first.anchorKey, { behavior: 'smooth', highlight: true });
+  const ok = await nav.scrollToAnchor(first.anchorKey, {
+    behavior: 'smooth',
+    highlight: true,
+    ensureMounted: ensureMountedTick,
+    onFallback: fallbackToast,
+  });
   if (ok) {
     ui.lockJump(1500);
     activeKey.value = first.anchorKey;
@@ -279,8 +305,13 @@ function toBottom(): void {
   const last = tocItems.value[tocItems.value.length - 1];
   if (last) {
     activeKey.value = last.anchorKey;
-    void nextTick(() => {
-      nav.scrollToAnchor(last.anchorKey, { behavior: 'auto', highlight: true });
+    void nextTick(async () => {
+      await nav.scrollToAnchor(last.anchorKey, {
+        behavior: 'auto',
+        highlight: true,
+        ensureMounted: ensureMountedTick,
+        onFallback: fallbackToast,
+      });
     });
   }
 }

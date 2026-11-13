@@ -3,7 +3,7 @@
     <div class="timeline-summary-caption" data-testid="timeline-summary-caption">
       时间轴摘要 · {{ flatTurns.length }} 轮（后端聚合直显）
     </div>
-    <TimelineProcessBox v-for="turn in flatTurns" :key="turn.key" :turn="turn" />
+    <TimelineProcessBox v-for="turn in flatTurns" :key="turn.key" :turn="turn" @expand-change="onExpandChange" />
   </section>
 </template>
 
@@ -12,6 +12,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
 import TimelineProcessBox from './TimelineProcessBox.vue';
+import { setTurnExpanded } from '../utils/timelineExpansion';
 import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
 
 const props = defineProps<{
@@ -22,6 +23,12 @@ const nav = useTimelineNav();
 const rootRef = ref<HTMLElement | null>(null);
 const flatTurns = computed(() => flatBlocks(props.summaries));
 const registered = ref<string[]>([]);
+
+function onExpandChange(turnId: string, expanded: boolean): void {
+  try {
+    setTurnExpanded(turnId, expanded);
+  } catch { /* quota counter never blocks render */ }
+}
 
 function releaseAnchors(): void {
   for (const key of registered.value) {

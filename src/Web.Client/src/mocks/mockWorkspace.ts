@@ -433,6 +433,15 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
     async getTimelineSummary(_workspaceId: string, _sessionId: string) {
       return { ok: true, data: [] };
     },
+    async getBlockContents(_w: string, _s: string, _ids: string[]) {
+      return { ok: true, data: { items: {}, missing: [..._ids] } };
+    },
+    async getToolResult(_w: string, _s: string, _t: string, _c: string) {
+      return { ok: false, code: 'BLOCK_MISSING', message: 'mock: no tool result' };
+    },
+    async getTurnBlockIds(_w: string, _s: string, _t: string) {
+      return { ok: true, data: [] as string[] };
+    },
     async getSubSessions(_ws: string, _parent: string) {
       return { ok: true, data: [] as SessionMetadata[] };
     },
