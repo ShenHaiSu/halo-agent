@@ -297,7 +297,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           } else {
             sessions.value = [];
             sessionMessages.value = [];
+            timelineSummaries.value = [];
             budgetStatus.value = null;
+            budgetError.value = null;
           }
         }
         persistLastActive();
@@ -376,13 +378,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       /* 对账失败只打日志，不阻断 */
     }
   }
-
   async function loadSessions(workspaceId: string): Promise<void> {
     if (!workspaceId) {
       sessions.value = [];
       activeSessionId.value = '';
       sessionMessages.value = [];
+      timelineSummaries.value = [];
       budgetStatus.value = null;
+      budgetError.value = null;
       return;
     }
 
@@ -417,7 +420,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           await refreshBudget();
         } else {
           sessionMessages.value = [];
+          timelineSummaries.value = [];
           budgetStatus.value = null;
+          budgetError.value = null;
         }
       }
     } catch (err) {
@@ -456,9 +461,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           (newSess as unknown as { updatedAtUtc: string }).updatedAtUtc = (newSess as unknown as { createdAtUtc: string }).createdAtUtc;
         sessions.value = [newSess, ...sessions.value];
         touchSessionTime(newSess.id, (newSess as unknown as { createdAtUtc: string }).createdAtUtc);
+        // A全量：新建即换发 epoch，中断旧会话在途回包，旧 epoch 响应全部丢弃不覆盖新会话视图
+        const sessionStore = useSessionStore();
+        const { epoch, signal } = sessionStore.beginSelect(newSess.id);
         activeSessionId.value = newSess.id;
+        // A全量：同步清空历史/摘要/缓存/预算，视图立即进空态，不等异步回包
         sessionMessages.value = [];
-        await refreshBudget();
+        timelineSummaries.value = [];
+        budgetStatus.value = null;
+        budgetError.value = null;
+        try {
+          clearTimelineCaches();
+        } catch {
+          /* cache clear never blocks */
+        }
+        await refreshBudget({ signal, epoch });
         persistLastActive();
         return newSess;
       }
@@ -524,7 +541,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           } else {
             activeSessionId.value = '';
             sessionMessages.value = [];
+            timelineSummaries.value = [];
             budgetStatus.value = null;
+            budgetError.value = null;
             persistLastActive();
           }
         }
@@ -539,6 +558,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function loadSessionMessages(sessionId: string, opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
+      timelineSummaries.value = [];
       return;
     }
     try {
@@ -551,6 +571,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
+    // A全量：await 之前同步清空，视图立即进空态，切会话不闪旧历史
+    sessionMessages.value = [];
+    timelineSummaries.value = [];
+    budgetStatus.value = null;
+    budgetError.value = null;
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
