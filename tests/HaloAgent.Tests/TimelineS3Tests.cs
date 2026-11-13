@@ -286,4 +286,134 @@ public sealed class TimelineS3Tests : IDisposable
         var (ok, _) = await _store.CheckIntegrityAsync(ws, sess);
         Assert.True(ok);
     }
+
+    [Fact]
+    public async Task ExportV2WalksDbWithFinalAndProcessNote()
+    {
+        const string ws = "ws-s3";
+        const string sess = "sess-s3export-v2";
+        var repo = new SessionRepository(_storageManager);
+        var meta = new SessionMetadata
+        {
+            Id = sess,
+            WorkspaceId = ws,
+            SessionHash = "hash-v2",
+            Title = "v2-export",
+            HistoryVersion = 2,
+        };
+        await repo.SaveSessionMetaAsync(ws, meta);
+        await _store.AppendTurnAsync(
+            ws,
+            sess,
+            new List<UnifiedChatMessage> { UnifiedChatMessage.User("hello export") },
+            new List<TimelineBlock>
+            {
+                new()
+                {
+                    BlockId = "e:b1",
+                    TurnId = "uturn-u1",
+                    Iteration = 1,
+                    Sequence = 1,
+                    Kind = TimelineBlockKind.Text,
+                    Tag = TimelineBlockTag.Final,
+                    CharCount = 5,
+                    Preview = "final body",
+                    Content = "final body full text",
+                },
+            },
+            new TurnSummary
+            {
+                TurnId = "uturn-u1",
+                TurnSeq = 0,
+                IterEnd = 1,
+                UserPreview = "hello export",
+                FinalBlockId = "e:b1",
+                FinalPreview = "final body",
+                Blocks = 1,
+                Tools = 0,
+                Status = TimelineTurnStatus.Completed,
+                LastRequestId = "req-export-1",
+                UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
+            }
+        );
+        await _store.AppendTurnAsync(
+            ws,
+            sess,
+            new List<UnifiedChatMessage>(),
+            new List<TimelineBlock>
+            {
+                new()
+                {
+                    BlockId = "e:b2",
+                    TurnId = "uturn-u2",
+                    Iteration = 1,
+                    Sequence = 2,
+                    Kind = TimelineBlockKind.ToolResult,
+                    Tag = TimelineBlockTag.Process,
+                    CharCount = 3,
+                    Preview = "tool out",
+                    Content = "tool out",
+                },
+            },
+            new TurnSummary
+            {
+                TurnId = "uturn-u2",
+                TurnSeq = 1,
+                IterEnd = 1,
+                UserPreview = string.Empty,
+                FinalBlockId = null,
+                FinalPreview = string.Empty,
+                Blocks = 1,
+                Tools = 1,
+                Status = TimelineTurnStatus.Completed,
+                LastRequestId = "req-export-2",
+                UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
+            }
+        );
+        string md = await repo.ExportSessionMarkdownAsync(ws, sess);
+        Assert.Contains("final body full text", md);
+        Assert.Contains("<!-- process:", md);
+        Assert.Contains("Turn Count", md);
+        Assert.Contains("status=completed", md);
+        Assert.Contains("本轮无正文", md);
+    }
+
+    [Fact]
+    public async Task ExportV1KeepsLegacyJsonlPath()
+    {
+        const string ws = "ws-s3";
+        const string sess = "sess-s3export-v1";
+        var repo = new SessionRepository(_storageManager);
+        var meta = new SessionMetadata
+        {
+            Id = sess,
+            WorkspaceId = ws,
+            SessionHash = "hash-v1",
+            Title = "v1-export",
+            HistoryVersion = 1,
+        };
+        await repo.SaveSessionMetaAsync(ws, meta);
+        await repo.RewriteMessagesJsonlAsync(
+            ws,
+            sess,
+            new List<UnifiedChatMessage>
+            {
+                new UnifiedChatMessage
+                {
+                    Id = "m1",
+                    Role = "user",
+                    Content = "legacy hi"
+                },
+                new UnifiedChatMessage
+                {
+                    Id = "m2",
+                    Role = "assistant",
+                    Content = "legacy reply"
+                },
+            }
+        );
+        string md = await repo.ExportSessionMarkdownAsync(ws, sess);
+        Assert.Contains("legacy reply", md);
+        Assert.DoesNotContain("Turn Count", md);
+    }
 }
