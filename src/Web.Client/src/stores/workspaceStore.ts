@@ -15,7 +15,8 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, getTurn, turns } from '@features/agent/stores/model';
-import { isPendingForSession, matchConfirmed, toPendingMessage } from '@features/session/utils/pendingUser';
+import { isPendingForSession, matchConfirmed, matchConfirmedBySummary, toPendingMessage } from '@features/session/utils/pendingUser';
+import type { PendingUser } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { rememberPendingAlias } from '@features/session/utils/userTurn';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
@@ -62,7 +63,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null;
     }
   }
-  /** need02-P1：对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
+  const isV2Timeline = computed<boolean>(() => {
+    const s = activeSession.value as unknown as { historyVersion?: number } | null;
+    if (!s) return false;
+    return (s.historyVersion ?? 0) === 2;
+  });
+  /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
+    try {
+      rememberPendingAlias(String(confirmedId || ''), String(p.key || ''));
+    } catch {
+      /* alias never blocks */
+    }
+    need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
+    dropPendingUser(sid);
+  }
   function tryConfirmPending(sid: string): void {
     try {
       if (!isP1On()) return;
@@ -71,16 +87,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const t = turns.value[id];
       const p = t?.pendingUser;
       if (!p || p.status !== 'sending') return;
+      // jsonl 启发式保持第一优先级（v1 主路径）。
       const hit = matchConfirmed(p, sessionMessages.value);
       if (hit) {
-        // need02-P2: remember alias so UserTurn key stays on the pending key after confirm (05 R3).
-        try {
-          rememberPendingAlias(String((hit as UnifiedChatMessage).id || ''), String(p.key || ''));
-        } catch {
-          /* alias never blocks */
-        }
-        need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId: (hit as UnifiedChatMessage).id });
-        dropPendingUser(id);
+        confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
+        return;
+      }
+      // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
+      const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
+      if (summaryHit) {
+        confirmPendingHit(id, p, String(p.requestId || ''));
       }
     } catch {
       /* 对账永不阻断 */
@@ -101,6 +117,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         // 这里先隐藏 pending，保证无闪烁双条。
         return base;
       }
+      // v2 下 jsonl 为空时走摘要源命中即隐藏，避免 user 双条 + sending 常亮。
+      if (matchConfirmedBySummary(p, timelineSummaries.value)) return base;
     } catch {
       /* fallthrough */
     }
@@ -523,7 +541,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       sessionMessages.value = [];
       return;
     }
-    try { clearTimelineCaches(); } catch { /* cache clear never blocks */ }
+    try {
+      clearTimelineCaches();
+    } catch {
+      /* cache clear never blocks */
+    }
     // need22-P2 F3：无显式 epoch 时按进入时 epoch 快照；旧 epoch 响应丢弃不覆盖视图
     const sessionStore = useSessionStore();
     const epoch = opts?.epoch ?? sessionStore.epoch;
@@ -542,9 +564,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       } else {
         sessionMessages.value = [];
       }
-      // need02-P1：首次回包对账转正（key 不变，只换 id/时间）。
+      // 首次回包对账转正（key 不变，只换 id/时间；v2 摘要源二次对账在摘要回包后）。
       tryConfirmPending(sid);
       await loadTimelineSummary(sid);
+      tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
         sessionStore.discardStale(`loadSessionMessages-error(${sid.slice(-6)})`);
@@ -593,7 +616,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (typeof api.getTurnBlockIds !== 'function') return [];
       const res = await api.getTurnBlockIds(wid, sid, tid);
       if (res && res.ok && Array.isArray(res.data)) return res.data;
-    } catch { /* miss -> empty, caller shows placeholder */ }
+    } catch {
+      /* miss -> empty, caller shows placeholder */
+    }
     return [];
   }
 
@@ -612,7 +637,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (uncached.length > 0 && wid && sid) {
       try {
         const bridge = getHostBridge();
-        const api = bridge as unknown as { getBlockContents?: (w: string, s: string, b: string[]) => Promise<{ ok: boolean; data?: TimelineBlockContentsResponse }> };
+        const api = bridge as unknown as {
+          getBlockContents?: (w: string, s: string, b: string[]) => Promise<{ ok: boolean; data?: TimelineBlockContentsResponse }>;
+        };
         if (typeof api.getBlockContents === 'function') {
           const res = await api.getBlockContents(wid, sid, uncached);
           if (res && res.ok && res.data) {
@@ -627,7 +654,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             }
           }
         }
-      } catch { /* fetch fail -> treat uncached as missing */ }
+      } catch {
+        /* fetch fail -> treat uncached as missing */
+      }
     }
     return { items, missing };
   }
@@ -643,14 +672,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (hit) return hit;
     try {
       const bridge = getHostBridge();
-      const api = bridge as unknown as { getToolResult?: (w: string, s: string, t: string, c: string) => Promise<{ ok: boolean; data?: TimelineToolResult }> };
+      const api = bridge as unknown as {
+        getToolResult?: (w: string, s: string, t: string, c: string) => Promise<{ ok: boolean; data?: TimelineToolResult }>;
+      };
       if (typeof api.getToolResult !== 'function') return null;
       const res = await api.getToolResult(wid, sid, tid, cid);
       if (res && res.ok && res.data) {
         toolResultCache.value = { ...toolResultCache.value, [key]: res.data };
         return res.data;
       }
-    } catch { /* miss -> null */ }
+    } catch {
+      /* miss -> null */
+    }
     return null;
   }
 
@@ -976,6 +1009,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     isHistoryReadonly,
+    isV2Timeline,
     sessionMessages,
     timelineSummaries,
     /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */

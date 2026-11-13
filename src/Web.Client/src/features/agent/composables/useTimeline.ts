@@ -121,6 +121,7 @@ export function useTimeline() {
     expandedTurns[key] = next;
   };
   // bigChange P2-1/P2-3: history memo frozen + tail live. key = message/turn id; reuseRef keeps refs stable.
+  // S3 G-2: weight converged per box (1+steps); count-based chain kept for v1 compat only.
   const TAIL_SIZE = 8;
   const entryRefs = new Map<string, TimelineEntry>();
   let projGeneration = 0;

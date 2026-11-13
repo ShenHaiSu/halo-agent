@@ -1,4 +1,5 @@
-/** bigChange P2-4: conversation minimap model — one marker per user + one merged marker per assistant reply. */
+/** bigChange P2-4: conversation minimap model — one marker per user + one merged marker per assistant reply.
+ * S3 增补 G-2 结论：旧合并口径仅 v1 兼容保留（所属 minimap 组件已无挂载方）；v2 按过程盒显示，不经过本函数。 */
 export interface MinimapMarker {
   key: string;
   kind: 'user' | 'assistant' | 'earlier';

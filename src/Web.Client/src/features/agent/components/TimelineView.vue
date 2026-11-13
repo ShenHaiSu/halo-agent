@@ -213,6 +213,10 @@ const props = defineProps<{
   noticeInTurn?: boolean;
   /** 单容器三段模板开关；默认开。 */
   singleProcess?: boolean;
+  /** S3 增补 F-sup-2：v2 且有摘要时旧链已提交部分不挂载（仅保留 live 段）。 */
+  hideLegacyHistory?: boolean;
+  /** S3 增补 F-sup-2：当前是否有活跃轮（流式态保留容器防真空帧）。 */
+  hasActiveTurn?: boolean;
 }>();
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
@@ -233,13 +237,34 @@ const scroll = useTemplateRef<HTMLElement>('scroll');
 onMounted(() => emit('ready', scroll.value));
 onUnmounted(() => emit('ready', null));
 const historyList = computed<TimelineEntry[]>(() => {
+  // S3 增补 F-sup-2：v2 且有摘要时旧链已提交部分不挂载。
+  if (props.hideLegacyHistory) return [];
   if (props.historyItems) return props.historyItems;
   return props.items.slice(0, Math.max(0, props.items.length - TAIL_SIZE));
 });
 const tailList = computed<TimelineEntry[]>(() => {
-  if (props.tailItems) return props.tailItems;
-  if (props.historyItems) return [];
-  return props.items.slice(Math.max(0, props.items.length - TAIL_SIZE));
+  const raw: TimelineEntry[] = (() => {
+    if (props.tailItems) return props.tailItems;
+    if (props.historyItems) return [];
+    return props.items.slice(Math.max(0, props.items.length - TAIL_SIZE));
+  })();
+  // S3 增补 F-sup-2：v2 下尾部仅保留 live 段（活跃轮或 pending 归属轮），保证发送瞬间与流式态仍有容器。
+  if (!props.hideLegacyHistory) return raw;
+  if (props.hasActiveTurn) return raw;
+  try {
+    const keep = raw.filter((e) => {
+      try {
+        if (props.isPending && (e as TimelineEntry).msg && props.isPending((e as TimelineEntry).msg)) return true;
+      } catch {
+        /* ignore */
+      }
+      const k = String((e as unknown as { key?: string }).key || '');
+      return !!k && k === liveOwnerKey.value && (props.liveSegs || []).length > 0;
+    });
+    return keep;
+  } catch {
+    return [];
+  }
 });
 /**
  * live 归属键：最后一个 user-turn 条目（全量 items，不看 tail 切片）。

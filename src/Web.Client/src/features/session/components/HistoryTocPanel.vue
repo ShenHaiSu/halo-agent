@@ -1,8 +1,6 @@
 <template>
   <div class="toc-root" data-testid="history-toc-panel">
-    <div v-if="isHistoryReadonly" class="toc-readonly" data-testid="toc-readonly-banner">
-      历史版本只读，不可继续对话，可分支
-    </div>
+    <div v-if="isHistoryReadonly" class="toc-readonly" data-testid="toc-readonly-banner">历史版本只读，不可继续对话，可分支</div>
     <div class="toc-head">
       <span class="toc-stat">共 {{ totalCount }} 条</span>
       <n-select
@@ -26,7 +24,7 @@
       点击气泡跳转到对应消息；点击外部不会关闭本栏，请点右上角 ✕ 关闭。
       <n-button size="tiny" quaternary @click="dismissHint">知道了</n-button>
     </div>
-    <div v-if="summaryToc.length > 0" class="toc-summary" data-testid="toc-summary">
+    <div v-if="summaryToc.length > 0 && !isV2Toc" class="toc-summary" data-testid="toc-summary">
       <div class="toc-summary-title">时间轴摘要 · {{ summaryToc.length }} 项</div>
       <div v-for="item in summaryToc" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
         <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
@@ -99,6 +97,12 @@ const isHistoryReadonly = computed(() => {
   if (!s) return false;
   const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
   return v !== 2;
+});
+/** S3 增补 G-1 门控：v2 目录只用摘要源（TurnSummary 直出），旧链计算仅 v1 兼容保留。 */
+const isV2Toc = computed(() => {
+  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
+  if (!s) return false;
+  return (s.historyVersion ?? 0) === 2;
 });
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
@@ -196,7 +200,9 @@ const summaryToc = computed<TocItem[]>(() => {
   });
   return out;
 });
-const totalCount = computed(() => tocItems.value.length);
+/** S3 增补 G-1：v2 目录数据源只用摘要（每轮用户项 + 过程项 + 末轮项），旧链仅 v1 保留。 */
+const displayTocItems = computed<TocItem[]>(() => (isV2Toc.value && !isSub.value ? summaryToc.value : tocItems.value));
+const totalCount = computed(() => displayTocItems.value.length);
 
 const activeKey = ref<string | null>(null);
 const listRef = ref<HTMLElement | null>(null);
@@ -208,7 +214,7 @@ function resetWindow(): void {
   windowSize.value = PAGE;
 }
 watch(
-  [tocItems, activeSessionId],
+  [displayTocItems, activeSessionId],
   () => {
     resetWindow();
     activeKey.value = null;
@@ -216,31 +222,31 @@ watch(
   { immediate: true }
 );
 const visibleItems = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return all;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   const start = Math.max(0, end - windowSize.value);
   return all.slice(start, end);
 });
 const hasMoreBefore = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return false;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return end - windowSize.value > 0;
 });
 const hasMoreAfter = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return false;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return end < all.length;
 });
 const remainingBefore = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return Math.max(0, end - windowSize.value);
 });
 const remainingAfter = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return Math.max(0, all.length - end);
 });
@@ -248,7 +254,7 @@ function showEarlier(): void {
   windowSize.value += PAGE;
 }
 function showLater(): void {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   windowEnd.value = Math.min(all.length, end + PAGE);
   if (windowEnd.value >= all.length) windowEnd.value = 0;
@@ -267,7 +273,9 @@ async function ensureMountedTick(key: string): Promise<boolean> {
   void key;
   try {
     await nextTick();
-  } catch { /* tick never blocks nav */ }
+  } catch {
+    /* tick never blocks nav */
+  }
   return true;
 }
 
@@ -276,7 +284,9 @@ function fallbackToast(usedKey: string, requestedKey: string): void {
   void requestedKey;
   try {
     message.warning('目标已折叠或删除，已跳转到最近的可视位置');
-  } catch { /* toast never blocks */ }
+  } catch {
+    /* toast never blocks */
+  }
 }
 
 async function onJump(item: TocItem): Promise<void> {
@@ -295,7 +305,7 @@ async function onJump(item: TocItem): Promise<void> {
 }
 
 async function toTop(): Promise<void> {
-  const first = tocItems.value[0];
+  const first = displayTocItems.value[0];
   if (!first) return;
   const ok = await nav.scrollToAnchor(first.anchorKey, {
     behavior: 'smooth',
@@ -311,7 +321,7 @@ async function toTop(): Promise<void> {
 function toBottom(): void {
   nav.scrollToBottom();
   ui.lockJump(1500);
-  const last = tocItems.value[tocItems.value.length - 1];
+  const last = displayTocItems.value[displayTocItems.value.length - 1];
   if (last) {
     activeKey.value = last.anchorKey;
     void nextTick(async () => {

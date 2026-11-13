@@ -2,8 +2,10 @@
   <KeepAlive :max="3">
     <div v-show="paneActive" :aria-hidden="paneActive ? undefined : 'true'" class="flex-1 min-h-0 min-w-0 flex flex-col">
       <TimelineView
-        :is-empty="t.persistedMessages.length === 0 && !t.stream.hasActiveTurn"
+        :is-empty="t.persistedMessages.length === 0 && summaryList.length === 0 && !t.stream.hasActiveTurn"
         :summary-list="summaryList"
+        :hide-legacy-history="isV2WithSummary"
+        :has-active-turn="!!t.stream.hasActiveTurn"
         :items="t.timelineItems"
         :history-items="t.visibleHistoryEntries"
         :tail-items="t.tailEntries"
@@ -75,8 +77,10 @@ import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 const workspaceSnapshot = useWorkspaceStore();
-const { timelineSummaries } = storeToRefs(workspaceSnapshot);
+const { timelineSummaries, isV2Timeline } = storeToRefs(workspaceSnapshot);
 const summaryList = computed(() => timelineSummaries.value ?? []);
+/** S3 增补 F-sup-2 门控：v2 且有摘要时旧链已提交部分不挂载（无会话按旧链渲染防白屏）。 */
+const isV2WithSummary = computed(() => isV2Timeline?.value === true && summaryList.value.length > 0);
 
 /** need02-P4（p4-md）：稳态渲染走 LRU 缓存；子开关 off 时回直跑（开关即时生效，无需重载，供 G6 矩阵验证）。 */
 function renderHtml(s: string): string {
