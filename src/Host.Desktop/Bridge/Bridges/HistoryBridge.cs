@@ -183,6 +183,18 @@ public sealed partial class HostBridgeFacade
     )
     {
         int healedSessions = 0;
+        int sessionDirTotal = CountSessionDirectories();
+        if (ShouldDeferStartupScan(sessionDirTotal))
+        {
+            HaloLogger.App.Info(
+                "[History] startup scan deferred: "
+                    + sessionDirTotal
+                    + " session dirs exceed threshold "
+                    + StartupScanLazyThreshold
+                    + ", integrity is checked lazily on open."
+            );
+            return BridgeResponse<int>.Success(0, "scan deferred, lazy check on open");
+        }
         try
         {
             var workspaces = await _workspaceSessionService
@@ -258,6 +270,47 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("ScanAndHealAllSessions failed", ex);
             return BridgeResponse<int>.Fail("SCAN_ERROR", ex.Message);
+        }
+    }
+
+    /// <summary>发货加固：会话目录过多时启动不全量扫，改为打开时懒检。</summary>
+    internal const int StartupScanLazyThreshold = 200;
+
+    internal static bool ShouldDeferStartupScan(int totalSessions) =>
+        totalSessions > StartupScanLazyThreshold;
+
+    private int CountSessionDirectories()
+    {
+        try
+        {
+            string root = _storageManager.SessionsDirectory;
+            if (string.IsNullOrWhiteSpace(root) || !System.IO.Directory.Exists(root))
+            {
+                return 0;
+            }
+            int total = 0;
+            foreach (string wsDir in System.IO.Directory.EnumerateDirectories(root))
+            {
+                try
+                {
+                    foreach (string _ in System.IO.Directory.EnumerateDirectories(wsDir))
+                    {
+                        total++;
+                        if (total > StartupScanLazyThreshold)
+                        {
+                            return total;
+                        }
+                    }
+                }
+                catch
+                { /* 单工作区枚举失败跳过，不阻断计数 */
+                }
+            }
+            return total;
+        }
+        catch
+        {
+            return 0;
         }
     }
 }

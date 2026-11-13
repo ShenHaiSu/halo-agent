@@ -51,13 +51,20 @@ public sealed class SessionHistoryStore
             _db.EnsureDatabase(workspaceId, sessionId);
             ApplyLargeBlockPolicy(workspaceId, sessionId, blocks);
             using var conn = _db.Open(workspaceId, sessionId);
+            ApplyFullSynchronous(conn);
             using var tx = conn.BeginTransaction();
             long turnSeq = ResolveTurnSeq(conn, tx, turn);
+            FlipStaleFinal(conn, tx, turn.TurnId, ResolveNewIter(blocks, turn));
             InsertMessages(conn, tx, messages);
             InsertBlocks(conn, tx, blocks);
             UpsertTurn(conn, tx, turn, turnSeq);
             tx.Commit();
             watch.Stop();
+            try
+            {
+                TimelineObservability.ReportFlush(watch.ElapsedMilliseconds);
+            }
+            catch { }
             try
             {
                 HaloLogger.App.Info(
@@ -80,6 +87,239 @@ public sealed class SessionHistoryStore
         {
             gate.Release();
         }
+    }
+
+    /// <summary>发货加固：同轮新迭代落盘前，把旧迭代残留的 final 翻回 process（单事务，原子）。</summary>
+    /// <returns>被翻转的 blockId（调用方可据此发布翻转事件；无翻转返回空表）。</returns>
+    public async Task<List<string>> FlipFinalToProcessAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        int newIter,
+        CancellationToken ct = default
+    )
+    {
+        var flipped = new List<string>();
+        if (string.IsNullOrWhiteSpace(turnId) || newIter <= 0)
+        {
+            return flipped;
+        }
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var tx = conn.BeginTransaction();
+            CollectStaleFinal(conn, tx, turnId, newIter, flipped);
+            FlipStaleFinal(conn, tx, turnId, newIter);
+            ClearFinalRefIfFlipped(conn, tx, turnId, flipped);
+            tx.Commit();
+            return flipped;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>发货加固：轮次以非完成态终结时落盘终态（截断/取消/错误），并把残留 final 降回 process。</summary>
+    /// <returns>命中已落盘轮次返回 true；轮次尚无落盘行返回 false（调用方无需重试）。</returns>
+    public async Task<bool> MarkTurnEndedAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        string status,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            return false;
+        }
+        string ended = NormalizeStatus(status);
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var tx = conn.BeginTransaction();
+            using var mark = conn.CreateCommand();
+            mark.Transaction = tx;
+            mark.CommandText = "UPDATE turns SET status=$st, updated_at=$now WHERE turn_id=$tid;";
+            mark.Parameters.AddWithValue("$st", ended);
+            mark.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
+            mark.Parameters.AddWithValue("$tid", turnId);
+            if (mark.ExecuteNonQuery() == 0)
+            {
+                tx.Rollback();
+                return false;
+            }
+            if (!string.Equals(ended, TimelineTurnStatus.Completed, StringComparison.Ordinal))
+            {
+                using var demote = conn.CreateCommand();
+                demote.Transaction = tx;
+                demote.CommandText =
+                    "UPDATE blocks SET tag='process' WHERE turn_id=$tid AND tag='final';";
+                demote.Parameters.AddWithValue("$tid", turnId);
+                demote.ExecuteNonQuery();
+                using var clear = conn.CreateCommand();
+                clear.Transaction = tx;
+                clear.CommandText = "UPDATE turns SET final_block_id=NULL WHERE turn_id=$tid;";
+                clear.Parameters.AddWithValue("$tid", turnId);
+                clear.ExecuteNonQuery();
+            }
+            tx.Commit();
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>发货加固：会话打开时懒检（同进程同会话只检一次；永不抛错，不阻断打开）。</summary>
+    public async Task<bool> CheckOnceAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        try
+        {
+            string key = workspaceId.Trim() + "/" + sessionId.Trim();
+            if (!TimelineCheckCache.TryAdd(key, 0))
+            {
+                return true;
+            }
+            var (ok, _) = await CheckIntegrityAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            return ok;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static void ClearCheckCacheForTests() => TimelineCheckCache.Clear();
+
+    private static readonly ConcurrentDictionary<string, byte> TimelineCheckCache = new();
+
+    private static int ResolveNewIter(IReadOnlyList<TimelineBlock>? blocks, TurnSummary? turn)
+    {
+        int newest = turn?.IterEnd ?? 0;
+        if (blocks != null)
+        {
+            foreach (var b in blocks)
+            {
+                if (b != null && b.Iteration > newest)
+                {
+                    newest = b.Iteration;
+                }
+            }
+        }
+        return newest;
+    }
+
+    private static void ApplyFullSynchronous(SqliteConnection conn)
+    {
+        try
+        {
+            using var pragma = conn.CreateCommand();
+            pragma.CommandText = "PRAGMA synchronous=FULL;";
+            pragma.ExecuteNonQuery();
+        }
+        catch { }
+    }
+
+    private static void CollectStaleFinal(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        string turnId,
+        int newIter,
+        List<string> sink
+    )
+    {
+        using var q = conn.CreateCommand();
+        q.Transaction = tx;
+        q.CommandText =
+            "SELECT block_id FROM blocks WHERE turn_id=$tid AND tag='final' AND iter < $iter;";
+        q.Parameters.AddWithValue("$tid", turnId);
+        q.Parameters.AddWithValue("$iter", newIter);
+        using var r = q.ExecuteReader();
+        while (r.Read())
+        {
+            if (!r.IsDBNull(0))
+            {
+                string id = r.GetString(0);
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    sink.Add(id);
+                }
+            }
+        }
+    }
+
+    private static void FlipStaleFinal(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        string? turnId,
+        int newIter
+    )
+    {
+        if (string.IsNullOrWhiteSpace(turnId) || newIter <= 0)
+        {
+            return;
+        }
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "UPDATE blocks SET tag='process' WHERE turn_id=$tid AND tag='final' AND iter < $iter;";
+        cmd.Parameters.AddWithValue("$tid", turnId);
+        cmd.Parameters.AddWithValue("$iter", newIter);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void ClearFinalRefIfFlipped(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        string turnId,
+        List<string> flipped
+    )
+    {
+        if (flipped.Count == 0)
+        {
+            return;
+        }
+        foreach (string id in flipped)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText =
+                "UPDATE turns SET final_block_id=NULL, updated_at=$now WHERE turn_id=$tid AND final_block_id=$bid;";
+            cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
+            cmd.Parameters.AddWithValue("$tid", turnId);
+            cmd.Parameters.AddWithValue("$bid", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    private void ReportWalSize(string workspaceId, string sessionId)
+    {
+        try
+        {
+            string dbPath = _db.GetDbPath(workspaceId, sessionId);
+            string walPath = dbPath + "-wal";
+            if (!File.Exists(walPath))
+            {
+                return;
+            }
+            long bytes = new FileInfo(walPath).Length;
+            TimelineObservability.ReportWalSize(bytes);
+        }
+        catch { }
     }
 
     public async Task AppendToolResultAsync(
@@ -857,6 +1097,11 @@ public sealed class SessionHistoryStore
     {
         try
         {
+            string existingDb = _db.GetDbPath(workspaceId, sessionId);
+            if (!File.Exists(existingDb))
+            {
+                return (true, "no-db");
+            }
             _db.EnsureDatabase(workspaceId, sessionId);
             using var conn = _db.Open(workspaceId, sessionId);
             using var c1 = conn.CreateCommand();
@@ -864,7 +1109,14 @@ public sealed class SessionHistoryStore
             object? v = await c1.ExecuteScalarAsync(ct).ConfigureAwait(false);
             string s = v?.ToString() ?? string.Empty;
             if (!string.Equals(s, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    TimelineObservability.ReportIntegrity(false);
+                }
+                catch { }
                 return (false, "integrity_check:" + s);
+            }
             using var c2 = conn.CreateCommand();
             c2.CommandText =
                 "SELECT turn_id, blocks, (SELECT COUNT(*) FROM blocks b WHERE b.turn_id = turns.turn_id) FROM turns;";
@@ -876,8 +1128,21 @@ public sealed class SessionHistoryStore
                 // 此处允许实际 >= 物化值（只防丢失，不防多余），丢失即损坏。
                 long actual = r.IsDBNull(2) ? 0 : r.GetInt64(2);
                 if (actual < expect)
+                {
+                    try
+                    {
+                        TimelineObservability.ReportIntegrity(false);
+                    }
+                    catch { }
                     return (false, "group-mismatch:" + (r.IsDBNull(0) ? "?" : r.GetString(0)));
+                }
             }
+            ReportWalSize(workspaceId, sessionId);
+            try
+            {
+                TimelineObservability.ReportIntegrity(true);
+            }
+            catch { }
             return (true, "ok");
         }
         catch (Exception ex)

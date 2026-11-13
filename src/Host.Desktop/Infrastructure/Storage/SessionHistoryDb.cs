@@ -129,24 +129,31 @@ public sealed class SessionHistoryDb
     public SqliteConnection Open(string workspaceId, string sessionId) =>
         OpenConnection(GetDbPath(workspaceId, sessionId));
 
-    public void Checkpoint(string workspaceId, string sessionId)
+    public bool Checkpoint(string workspaceId, string sessionId)
     {
         string dbPath = GetDbPath(workspaceId, sessionId);
         if (!File.Exists(dbPath))
         {
-            return;
+            return true;
         }
-
         try
         {
             using var conn = OpenConnection(dbPath);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
             cmd.ExecuteNonQuery();
+            TimelineObservability.ReportCheckpoint(true);
+            return true;
         }
         catch
         {
-            // Checkpoint failures are observed upstream; never break the write path here.
+            // Checkpoint failures are observed via counters; never break the write path here.
+            try
+            {
+                TimelineObservability.ReportCheckpoint(false);
+            }
+            catch { }
+            return false;
         }
     }
 
@@ -165,7 +172,8 @@ public sealed class SessionHistoryDb
         try
         {
             using var pragma = conn.CreateCommand();
-            pragma.CommandText = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
+            pragma.CommandText =
+                "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;";
             pragma.ExecuteNonQuery();
         }
         catch

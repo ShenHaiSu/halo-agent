@@ -48,6 +48,8 @@ public sealed partial class AgentOrchestrator
                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                 // need12-P0：工具执行前被取消，本 iteration 已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                    .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
 
@@ -117,6 +119,8 @@ public sealed partial class AgentOrchestrator
                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                 // need12-P0：工具执行中被取消，本 iteration 已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                    .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
             catch (Exception ex)
@@ -180,6 +184,8 @@ public sealed partial class AgentOrchestrator
                 PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                 // need12-P0：tool 落盘时被取消，本 iteration 已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                    .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
             string toolTurnId =
@@ -317,6 +323,8 @@ public sealed partial class AgentOrchestrator
                         }
                     );
                     FlushUsageRows(ctx.UsageRows, sessionId, workspaceId);
+                    await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated)
+                        .ConfigureAwait(false);
                     return PhaseOutcome.End(
                         AgentTurnResult.Truncated(iteration, ctx.ToolExecutions)
                     );
@@ -448,6 +456,8 @@ public sealed partial class AgentOrchestrator
                     {
                         PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                         UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                        await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                            .ConfigureAwait(false);
                         return PhaseOutcome.End(
                             AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)
                         );

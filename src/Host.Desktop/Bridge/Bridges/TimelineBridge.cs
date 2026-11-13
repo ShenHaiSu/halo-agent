@@ -23,6 +23,11 @@ public sealed partial class HostBridgeFacade
             }
 
             var store = new SessionHistoryStore(_storageManager);
+            try
+            {
+                await store.CheckOnceAsync(workspaceId, sessionId).ConfigureAwait(false);
+            }
+            catch { }
             var summaries = await store
                 .GetTimelineSummaryAsync(workspaceId, sessionId)
                 .ConfigureAwait(false);

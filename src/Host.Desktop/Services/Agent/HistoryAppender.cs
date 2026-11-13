@@ -230,6 +230,8 @@ public sealed partial class AgentOrchestrator
             PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
             // need12-P0：assistant 落盘时被取消，本 iteration 已落袋，保住前面行。
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
         }
         try
@@ -321,6 +323,8 @@ public sealed partial class AgentOrchestrator
                 {
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                     UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                    await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+                        .ConfigureAwait(false);
                     return PhaseOutcome.End(
                         AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)
                     );
@@ -380,6 +384,8 @@ public sealed partial class AgentOrchestrator
                     }
                 );
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Truncated)
+                    .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Truncated(iteration, ctx.ToolExecutions));
             }
         }

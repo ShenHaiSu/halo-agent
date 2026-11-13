@@ -417,6 +417,8 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -463,6 +465,8 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -512,6 +516,7 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Error).ConfigureAwait(false);
             return (
                 PhaseOutcome.End(
                     AgentTurnResult.Failed(
