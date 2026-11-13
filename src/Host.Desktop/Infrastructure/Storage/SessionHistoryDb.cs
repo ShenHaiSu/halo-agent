@@ -123,6 +123,7 @@ public sealed class SessionHistoryDb
                 DataSource = dbPath,
                 Mode = SqliteOpenMode.ReadWriteCreate,
                 Cache = SqliteCacheMode.Shared,
+                Pooling = false,
             }.ToString()
         );
         conn.Open();

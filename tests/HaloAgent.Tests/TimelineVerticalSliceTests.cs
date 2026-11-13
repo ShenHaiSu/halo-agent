@@ -356,6 +356,30 @@ public sealed class TimelineVerticalSliceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveSessionMetaBootstrapsHistoryDatabaseBeforeMetaFile()
+    {
+        var repository = new SessionRepository(_storageManager);
+        string ws = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        string sess = "sess_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var meta = new SessionMetadata
+        {
+            Id = sess,
+            WorkspaceId = ws,
+            HistoryVersion = 2,
+        };
+        await repository.SaveSessionMetaAsync(ws, meta);
+        string dbPath = _storageManager.GetHistoryDbPath(ws, sess);
+        Assert.True(File.Exists(dbPath));
+        using var conn = SessionHistoryDb.OpenConnection(dbPath);
+        using var tableCmd = conn.CreateCommand();
+        tableCmd.CommandText =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('messages','blocks','turns');";
+        long tableCount = (long)(await tableCmd.ExecuteScalarAsync())!;
+        Assert.Equal(3, tableCount);
+        Assert.True(File.Exists(repository.GetSessionMetaPath(ws, sess)));
+    }
+
+    [Fact]
     public void FinalizerTruncationProducesNoFinal()
     {
         var ctx = new TurnContext
@@ -381,5 +405,33 @@ public sealed class TimelineVerticalSliceTests : IDisposable
         Assert.All(blocks, b => Assert.Equal(TimelineBlockTag.Process, b.Tag));
         Assert.Null(turn.FinalBlockId);
         Assert.Equal(TimelineTurnStatus.Truncated, turn.Status);
+    }
+
+    [Fact]
+    public void FinalizerCancelledProducesNoFinal()
+    {
+        var ctx = new TurnContext
+        {
+            WorkspaceId = "ws",
+            SessionId = "sess",
+            UserText = "hello",
+            RequestId = "req-cancel",
+        };
+        ctx.TimelineLog.Add(
+            new TimelineBlockDraft
+            {
+                BlockId = "req-cancel:b1",
+                Sequence = 1,
+                Epoch = "req-cancel",
+                Kind = TimelineBlockKind.Text,
+                Tag = TimelineBlockTag.Pending,
+                Iteration = 1,
+            }
+        );
+        ctx.TimelineLog[0].Text.Append("partial");
+        var (blocks, turn) = TimelineFinalizer.Finalize(ctx, 1, TimelineTurnStatus.Cancelled);
+        Assert.All(blocks, b => Assert.Equal(TimelineBlockTag.Process, b.Tag));
+        Assert.Null(turn.FinalBlockId);
+        Assert.Equal(TimelineTurnStatus.Cancelled, turn.Status);
     }
 }

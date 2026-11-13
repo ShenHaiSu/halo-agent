@@ -4,7 +4,7 @@ namespace Host.Desktop.Services;
 
 /// <summary>
 /// Turn finalization: pending drafts are resolved to process or final in a single transaction.
-/// The last non-empty text becomes final on success; truncation produces process only.
+/// The last non-empty text becomes final on success; other endings produce process only.
 /// </summary>
 public static class TimelineFinalizer
 {
@@ -12,6 +12,17 @@ public static class TimelineFinalizer
         TurnContext ctx,
         int iteration,
         bool truncated
+    ) =>
+        Finalize(
+            ctx,
+            iteration,
+            truncated ? TimelineTurnStatus.Truncated : TimelineTurnStatus.Completed
+        );
+
+    public static (List<TimelineBlock> Blocks, TurnSummary Turn) Finalize(
+        TurnContext ctx,
+        int iteration,
+        string status
     )
     {
         string userId = ctx.UserMessage?.Id ?? ctx.RequestId ?? string.Empty;
@@ -58,10 +69,10 @@ public static class TimelineFinalizer
 
         blocks.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
 
-        string status = truncated ? TimelineTurnStatus.Truncated : TimelineTurnStatus.Completed;
+        string endedStatus = NormalizeEndedStatus(status);
         string? finalBlockId = null;
 
-        if (!truncated)
+        if (string.Equals(endedStatus, TimelineTurnStatus.Completed, StringComparison.Ordinal))
         {
             for (int i = blocks.Count - 1; i >= 0; i--)
             {
@@ -108,7 +119,7 @@ public static class TimelineFinalizer
             Failed = 0,
             DurationMs = 0,
             Chars = chars,
-            Status = status,
+            Status = endedStatus,
             LastRequestId = ctx.RequestId ?? string.Empty,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -116,5 +127,16 @@ public static class TimelineFinalizer
         };
 
         return (blocks, turn);
+    }
+
+    private static string NormalizeEndedStatus(string? status)
+    {
+        if (string.Equals(status, TimelineTurnStatus.Truncated, StringComparison.Ordinal))
+            return TimelineTurnStatus.Truncated;
+        if (string.Equals(status, TimelineTurnStatus.Cancelled, StringComparison.Ordinal))
+            return TimelineTurnStatus.Cancelled;
+        if (string.Equals(status, TimelineTurnStatus.Error, StringComparison.Ordinal))
+            return TimelineTurnStatus.Error;
+        return TimelineTurnStatus.Completed;
     }
 }
