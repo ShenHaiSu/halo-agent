@@ -1,5 +1,8 @@
 <template>
   <div class="toc-root" data-testid="history-toc-panel">
+    <div v-if="isHistoryReadonly" class="toc-readonly" data-testid="toc-readonly-banner">
+      历史版本只读，不可继续对话，可分支
+    </div>
     <div class="toc-head">
       <span class="toc-stat">共 {{ totalCount }} 条</span>
       <n-select
@@ -91,6 +94,12 @@ const nav = useTimelineNav();
 const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
+const isHistoryReadonly = computed(() => {
+  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
+  if (!s) return false;
+  const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
+  return v !== 2;
+});
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
 
@@ -326,6 +335,15 @@ watch(activeSessionId, () => {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+}
+.toc-readonly {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
 }
 .toc-head {
   display: flex;

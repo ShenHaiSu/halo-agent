@@ -207,6 +207,17 @@ export const useAgentTurn = defineStore('agent-turn', () => {
           touch(t);
           return false;
         }
+        if (res.code === 'HISTORY_READONLY') {
+          if (p1On) markPendingFailed(t, 'HISTORY_READONLY');
+          t.lastError = res.message || '历史版本只读，不可继续对话，可分支';
+          t.lastErrorInfo = { code: 'HISTORY_READONLY', message: t.lastError, retry: false };
+          t.isGenerating = false;
+          t.streamingActive = false;
+          t.requestId = '';
+          toast('warning', t.lastError);
+          touch(t);
+          return false;
+        }
         if (res.code === 'COMPACTING') {
           // need02-P1：COMPACTING 发送前即拒，pending 不留（回滚即无痕）。
           if (p1On) t.pendingUser = null;

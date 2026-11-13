@@ -180,6 +180,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
 
+  /** S3 F4：历史版本只读（v1 HistoryVersion !== 2，不可继续/截断/压缩，可分支；v2 全放行）。 */
+  const isHistoryReadonly = computed<boolean>(() => {
+    const s = activeSession.value as unknown as { historyVersion?: number } | null;
+    if (!s) return false;
+    const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
+    return v !== 2;
+  });
+
   const filteredSessions = computed<SessionMetadata[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();
     if (!q) return sessions.value;
@@ -777,6 +785,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // need05-03：/compact 统一入口（取 activeProvider/Model 传参，成功后重拉消息与预算），供命令与按钮共用
   async function compactSession(sessionId: string, keepLastGroups = 6): Promise<boolean> {
     if (!activeWorkspaceId.value || !sessionId) return false;
+    if (isHistoryReadonly.value) return false;
     try {
       const bridge = getHostBridge();
       const pId = configStore.activeProvider?.id || '';
@@ -848,6 +857,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAnchor = true
   ): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+    if (isHistoryReadonly.value) return { ok: false, message: '历史版本只读，不可截断，可分支', code: 'HISTORY_READONLY' };
     // need02-P1：先清本 session pending，避免旧乐观串入新历史。
     try {
       dropPendingUser(activeSessionId.value);
@@ -965,6 +975,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sessions,
     activeSessionId,
     activeSession,
+    isHistoryReadonly,
     sessionMessages,
     timelineSummaries,
     /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */

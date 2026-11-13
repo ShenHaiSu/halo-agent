@@ -8,7 +8,7 @@
       </div>
     </div>
     <div
-      class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 overflow-hidden mt-1"
+      class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 overflow-hidden mt-1 turn-process-slot"
       :class="turn.failed > 0 ? 'border-rose-500' : 'border-indigo-500/70'"
       data-testid="timeline-process-box"
     >
@@ -29,7 +29,7 @@
     </div>
     <div
       v-if="expanded"
-      class="mt-1 rounded-md border border-subtle bg-surface/40 px-3 py-2 min-w-0 timeline-process-body"
+      class="mt-1 rounded-md border border-subtle bg-surface/40 px-3 py-2 min-w-0 timeline-process-body turn-earlier-slot"
       :data-testid="`timeline-process-body-${turn.turnId}`"
     >
       <div v-if="loading" class="text-[11px] text-secondary">过程块加载中…</div>
@@ -70,28 +70,48 @@
     </div>
     <div
       v-if="!expanded"
-      class="timeline-process-placeholder"
+      class="timeline-process-placeholder turn-earlier-slot"
       :data-testid="`timeline-process-placeholder-${turn.turnId}`"
       aria-hidden="true"
     />
     <div
-      v-if="turn.finalPreview"
-      class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0"
+      v-if="hasFinalBlock"
+      class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
+      :data-testid="`timeline-final-${turn.turnId}`"
+    >
+      <div v-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
+        全文加载中…<span v-if="turn.finalPreview" class="opacity-70">{{ turn.finalPreview }}</span>
+      </div>
+      <div v-else-if="finalError" class="text-[11px] text-secondary" :data-testid="`timeline-final-error-${turn.turnId}`">
+        {{ finalError }}
+        <button class="underline ml-1" :data-testid="`timeline-final-retry-${turn.turnId}`" @click.stop="reloadFinal">重试</button>
+      </div>
+      <div v-else-if="finalMissing" class="text-[11px] text-secondary opacity-70" :data-testid="`timeline-final-missing-${turn.turnId}`">
+        正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span><span v-else>（无摘要）</span>
+      </div>
+      <MarkdownStreamBlocks v-else-if="finalMarkdown" :text="finalMarkdown" :cache-key="finalCacheKey" />
+      <div v-else-if="turn.finalPreview" class="whitespace-pre-wrap">{{ turn.finalPreview }}</div>
+      <div v-else class="text-[12px] text-secondary">本轮无正文，{{ turn.tools }} 个工具</div>
+    </div>
+    <div
+      v-else-if="turn.finalPreview"
+      class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
       :data-testid="`timeline-final-${turn.turnId}`"
     >
       {{ turn.finalPreview }}
     </div>
-    <div v-else class="mt-1 text-[12px] text-secondary" :data-testid="`timeline-final-empty-${turn.turnId}`">
+    <div v-else class="mt-1 text-[12px] text-secondary turn-final-slot" :data-testid="`timeline-final-empty-${turn.turnId}`">
       本轮无正文，{{ turn.tools }} 个工具
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { FlatTimelineTurn } from '@features/session/utils/timelineSummary';
 import { processBoxLabel, statusBadge } from '@features/session/utils/timelineSummary';
 import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
+import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
@@ -189,6 +209,12 @@ async function toggle(): Promise<void> {
         markBlockDirty(id);
       } catch { /* dirty mark never blocks collapse */ }
     }
+    const fid = (props.turn.finalBlockId || '').trim();
+    if (fid) {
+      try {
+        markBlockDirty(fid);
+      } catch { /* dirty mark never blocks collapse */ }
+    }
   }
 }
 
@@ -217,6 +243,46 @@ async function reload(): Promise<void> {
   }
 }
 
+// ---- S2 欠账：Final 全文常挂载（展示层，只读 getBlockContents，不改后端） ----
+const hasFinalBlock = computed(() => !!(props.turn.finalBlockId || '').trim());
+const finalCacheKey = computed(() => (props.turn.finalBlockId || '').trim());
+const finalMarkdown = ref('');
+const finalLoading = ref(false);
+const finalError = ref('');
+const finalMissing = ref(false);
+
+function resetFinal(): void {
+  finalMarkdown.value = '';
+  finalError.value = '';
+  finalMissing.value = false;
+}
+
+async function reloadFinal(): Promise<void> {
+  const fid = (props.turn.finalBlockId || '').trim();
+  if (!fid) {
+    resetFinal();
+    return;
+  }
+  finalLoading.value = true;
+  finalError.value = '';
+  finalMissing.value = false;
+  try {
+    const { items } = await ws.getBlockContents([fid]);
+    const hit = items[fid];
+    if (hit) {
+      finalMarkdown.value = String(hit.markdown || '');
+      finalMissing.value = false;
+    } else {
+      finalMarkdown.value = '';
+      finalMissing.value = true;
+    }
+  } catch (e) {
+    finalError.value = '正文加载失败。';
+  } finally {
+    finalLoading.value = false;
+  }
+}
+
 watch(
   () => props.turn.turnId,
   () => {
@@ -224,9 +290,23 @@ watch(
     blockMap.value = {};
     blockOrder.value = [];
     missing.value = [];
+    resetFinal();
     if (expanded.value) void reload();
+    else void reloadFinal();
   },
 );
+
+watch(
+  () => props.turn.finalBlockId,
+  () => {
+    resetFinal();
+    void reloadFinal();
+  },
+);
+
+onMounted(() => {
+  void reloadFinal();
+});
 </script>
 
 <style scoped>
@@ -238,6 +318,15 @@ watch(
 }
 .turn-user-slot {
   order: 1;
+}
+.turn-process-slot {
+  order: 2;
+}
+.turn-earlier-slot {
+  order: 3;
+}
+.turn-final-slot {
+  order: 4;
 }
 .timeline-process-placeholder {
   min-height: 8px;
