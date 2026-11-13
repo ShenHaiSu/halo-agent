@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flatBlocks, processBoxLabel, statusBadge, toFlatTurn } from './timelineSummary';
+import { flatBlocks, processBoxLabel, statusBadge, summaryAnchorKeys, toFlatTurn } from './timelineSummary';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
@@ -52,5 +52,23 @@ describe('timelineSummary flatBlocks', () => {
     expect(processBoxLabel(flat)).toContain('4 块');
     expect(processBoxLabel(flat)).toContain('2 工具');
     expect(processBoxLabel(flat)).toContain('1 失败');
+  });
+});
+
+describe('summaryAnchorKeys', () => {
+  it('maps user, process and final anchors from backend rows', () => {
+    expect(summaryAnchorKeys('uturn-u1', 'b3')).toEqual({
+      user: 'uturn-u1',
+      process: 'uturn-u1:process',
+      final: 'b3',
+    });
+  });
+
+  it('falls back to turn final anchor for pure tool rounds', () => {
+    expect(summaryAnchorKeys('uturn-u9', null)).toEqual({
+      user: 'uturn-u9',
+      process: 'uturn-u9:process',
+      final: 'uturn-u9:final',
+    });
   });
 });

@@ -2,6 +2,7 @@
   <div class="flex-1 min-h-0 min-w-0 max-w-full relative flex flex-col" data-testid="message-timeline" :data-need02="need02Attr">
     <div ref="scroll" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden transcript-scroll">
       <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
+        <TimelineSummarySection v-if="summaryList && summaryList.length > 0" :summaries="summaryList" />
         <div v-if="isEmpty" class="py-10 text-center space-y-2">
           <div class="flex justify-center">
             <Bot class="w-8 h-8 text-accent" />
@@ -145,20 +146,22 @@
 import { computed, onMounted, onUnmounted, useTemplateRef, type ComponentPublicInstance } from 'vue';
 import { Bot } from 'lucide-vue-next';
 import ArrowDownIcon from '@shared/ui/icons/ArrowDownIcon.vue';
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
+import type { ChatImageRef, TurnSummary, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import MessageContextMenu from './MessageContextMenu.vue';
 import TimelineRow from './TimelineRow.vue';
+import TimelineSummarySection from '@features/session/components/TimelineSummarySection.vue';
 import TranscriptHistory from './TranscriptHistory.vue';
 import TranscriptTail from './TranscriptTail.vue';
 
 // 尾部分片长度：调用方恒传 historyItems/tailItems 时直接使用，否则按 8 切分。
 const TAIL_SIZE = 8;
-
 const props = defineProps<{
   isEmpty: boolean;
   items: TimelineEntry[];
+  /** 后端聚合直显：非空时在滚动区顶部渲染拍扁摘要（含过程盒锚点注册）。 */
+  summaryList?: TurnSummary[] | null;
   chatWidthMode: string;
   isExpanded: (key: string) => boolean;
   /** need-01：合并舱展开态（缺省回落到 isExpanded，保证老调用方/测试不炸）。 */

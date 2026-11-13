@@ -3,6 +3,7 @@
     <div v-show="paneActive" :aria-hidden="paneActive ? undefined : 'true'" class="flex-1 min-h-0 min-w-0 flex flex-col">
       <TimelineView
         :is-empty="t.persistedMessages.length === 0 && !t.stream.hasActiveTurn"
+        :summary-list="summaryList"
         :items="t.timelineItems"
         :history-items="t.visibleHistoryEntries"
         :tail-items="t.tailEntries"
@@ -71,6 +72,11 @@ import { isP4SubOn, useP02Flags } from '@features/need02/utils/need02Flags';
 import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
 import type { UserTurn } from '@features/session/utils/userTurn';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
+import { storeToRefs } from 'pinia';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+const workspaceSnapshot = useWorkspaceStore();
+const { timelineSummaries } = storeToRefs(workspaceSnapshot);
+const summaryList = computed(() => timelineSummaries.value ?? []);
 
 /** need02-P4（p4-md）：稳态渲染走 LRU 缓存；子开关 off 时回直跑（开关即时生效，无需重载，供 G6 矩阵验证）。 */
 function renderHtml(s: string): string {

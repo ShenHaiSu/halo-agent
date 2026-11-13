@@ -66,3 +66,19 @@ export function processBoxLabel(turn: FlatTimelineTurn): string {
   if (turn.durationMs > 0) parts.push(`${Math.round(turn.durationMs / 1000)}s`);
   return parts.join(' · ') || '过程';
 }
+
+export interface SummaryAnchors {
+  user: string;
+  process: string;
+  final: string;
+}
+
+export function summaryAnchorKeys(turnId: string, finalBlockId?: string | null): SummaryAnchors {
+  const base = String(turnId || '');
+  const finalKey = String(finalBlockId || '').trim();
+  return {
+    user: base,
+    process: base ? `${base}:process` : ':process',
+    final: finalKey || (base ? `${base}:final` : ':final'),
+  };
+}
