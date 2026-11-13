@@ -84,12 +84,27 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         await _sessionRepository
             .RewriteMessagesJsonlAsync(workspaceId, created.Id, cloned, ct)
             .ConfigureAwait(false);
+        bool srcIsV2 = (srcMeta.HistoryVersion == 2);
+        // S3 v2: v1->v2 合成（09 §9.8）或 v2->v2 文件拷贝后按前缀截断
+        if (!srcIsV2)
+        {
+            try
+            {
+                var synthStore = new SessionHistoryStore(
+                    new SessionHistoryDb(_sessionRepository.Storage)
+                );
+                await synthStore
+                    .SynthesizeV2FromMessagesAsync(workspaceId, created.Id, prefix, ct)
+                    .ConfigureAwait(false);
+            }
+            catch { }
+        }
         try
         {
             string srcDir = _sessionRepository.GetSessionDirectory(workspaceId, sourceSessionId);
             string dstDir = _sessionRepository.GetSessionDirectory(workspaceId, created.Id);
             string srcDb = System.IO.Path.Combine(srcDir, "history.db");
-            if (System.IO.File.Exists(srcDb))
+            if (srcIsV2 && System.IO.File.Exists(srcDb))
             {
                 try
                 {
@@ -180,6 +195,48 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                         string dstFile = System.IO.Path.Combine(dstOutputs, fileName);
                         System.IO.File.Copy(srcFile, dstFile, overwrite: true);
                     }
+                }
+                catch { }
+                // S3 v2->v2: 拷贝后按前缀截断目的库（只留 prefix，删后缀轮 + 同步 messages + GC）
+                try
+                {
+                    var branchStore = new SessionHistoryStore(
+                        new SessionHistoryDb(_sessionRepository.Storage)
+                    );
+                    await branchStore
+                        .RewriteMessagesAsync(workspaceId, created.Id, prefix, ct)
+                        .ConfigureAwait(false);
+                    var keptIds = new HashSet<string>(
+                        prefix.Select(m => m.Id),
+                        StringComparer.Ordinal
+                    );
+                    var dstSummaries = await branchStore
+                        .GetTimelineSummaryAsync(workspaceId, created.Id, ct)
+                        .ConfigureAwait(false);
+                    long minDoomed = long.MaxValue;
+                    foreach (var s in dstSummaries)
+                    {
+                        string tid = s.TurnId ?? string.Empty;
+                        string suffix = tid.StartsWith("uturn-", StringComparison.Ordinal)
+                            ? tid.Substring(6)
+                            : tid;
+                        if (!keptIds.Contains(suffix))
+                        {
+                            if (s.TurnSeq < minDoomed)
+                                minDoomed = s.TurnSeq;
+                        }
+                    }
+                    if (minDoomed != long.MaxValue)
+                        await branchStore
+                            .TruncateFromTurnSeqAsync(workspaceId, created.Id, minDoomed, ct)
+                            .ConfigureAwait(false);
+                    try
+                    {
+                        await branchStore
+                            .CollectOrphanToolOutputsAsync(workspaceId, created.Id, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch { }
                 }
                 catch { }
             }
@@ -409,6 +466,30 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 .GetMessagesAsync(workspaceId, sessionId, ct)
                 .ConfigureAwait(false);
             var (fixed_, synthetic, removed) = RebuildHealedHistory(messages);
+            // S3 v2: DB 完整性校验（integrity_check + 组完整性），损坏仅打点不阻断 jsonl 愈合
+            if (meta.HistoryVersion == 2)
+            {
+                try
+                {
+                    var integrityStore = new SessionHistoryStore(
+                        new SessionHistoryDb(_sessionRepository.Storage)
+                    );
+                    var (ok, detail) = await integrityStore
+                        .CheckIntegrityAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                    if (!ok)
+                    {
+                        try
+                        {
+                            Infrastructure.Logging.HaloLogger.App.Warn(
+                                $"[History] integrity fail ws={workspaceId} sess={sessionId} detail={detail}"
+                            );
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
             if (synthetic == 0 && removed == 0)
                 return HistoryHealResult.Clean(messages.Count);
             string bak = await _sessionRepository
@@ -434,6 +515,19 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
             meta.UpdatedAtUtc = DateTime.UtcNow;
             await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
+            if (meta.HistoryVersion == 2)
+            {
+                try
+                {
+                    var healStore = new SessionHistoryStore(
+                        new SessionHistoryDb(_sessionRepository.Storage)
+                    );
+                    await healStore
+                        .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
+                        .ConfigureAwait(false);
+                }
+                catch { }
+            }
             try
             {
                 Infrastructure.Logging.HaloLogger.App.Info(
@@ -492,6 +586,60 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             catch
             {
                 return HistoryDeleteResult.Fail("REWRITE_ERROR");
+            }
+            // S3 v2: DB 同步（messages 重写；若删的是 user 轮首条则连带删 turn/blocks）
+            if (meta.HistoryVersion == 2)
+            {
+                try
+                {
+                    var store = new SessionHistoryStore(
+                        new SessionHistoryDb(_sessionRepository.Storage)
+                    );
+                    await store
+                        .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
+                        .ConfigureAwait(false);
+                    var doomed = messages[idx];
+                    if (string.Equals(doomed.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var summaries = await store
+                                .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                                .ConfigureAwait(false);
+                            var hit = summaries.FirstOrDefault(s =>
+                                string.Equals(
+                                    s.TurnId,
+                                    "uturn-" + doomed.Id,
+                                    StringComparison.Ordinal
+                                )
+                            );
+                            if (hit != null)
+                                await store
+                                    .TruncateFromTurnSeqAsync(
+                                        workspaceId,
+                                        sessionId,
+                                        hit.TurnSeq,
+                                        ct
+                                    )
+                                    .ConfigureAwait(false);
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        await store
+                            .DeleteMessageRowAsync(workspaceId, sessionId, messageId, ct)
+                            .ConfigureAwait(false);
+                    }
+                    try
+                    {
+                        await store
+                            .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch { }
+                }
+                catch { }
             }
             meta.MessageCount = fixed_.Count;
             var lastSnap = fixed_.LastOrDefault(m =>

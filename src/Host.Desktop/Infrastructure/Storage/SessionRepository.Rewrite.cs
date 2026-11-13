@@ -86,6 +86,33 @@ public sealed partial class SessionRepository : ISessionRepository
     )
     {
         var meta = await LoadSessionMetaAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        // S3: v2 导出走 DB（final 展开、process 折叠注释）
+        try
+        {
+            if (meta != null && meta.HistoryVersion == 2)
+            {
+                string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+                if (File.Exists(dbPath))
+                {
+                    var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+                    var summaries = await store
+                        .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                    if (summaries.Count > 0)
+                        return await ExportTimelineMarkdownAsync(
+                                meta,
+                                sessionId,
+                                summaries,
+                                store,
+                                workspaceId,
+                                sessionId,
+                                ct
+                            )
+                            .ConfigureAwait(false);
+                }
+            }
+        }
+        catch { }
         var messages = await GetMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
 
         var sb = new StringBuilder();
@@ -117,6 +144,106 @@ public sealed partial class SessionRepository : ISessionRepository
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
+
+        async Task<string> ExportTimelineMarkdownAsync(
+            SessionMetadata meta,
+            string sessionId,
+            List<TurnSummary> summaries,
+            SessionHistoryStore store,
+            string workspaceId,
+            string sid,
+            CancellationToken ct
+        )
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"# {meta?.Title ?? "会话记录"}");
+            sb.AppendLine();
+            sb.AppendLine($"- **Session ID**: `{sessionId}`");
+            if (!string.IsNullOrEmpty(meta?.SessionHash))
+                sb.AppendLine($"- **Session Hash**: `{meta.SessionHash}`");
+            if (!string.IsNullOrEmpty(meta?.ProviderId) || !string.IsNullOrEmpty(meta?.ModelId))
+                sb.AppendLine($"- **Model**: `{meta?.ProviderId} / {meta?.ModelId}`");
+            sb.AppendLine($"- **Created At**: `{meta?.CreatedAtUtc:yyyy-MM-dd HH:mm:ss} UTC`");
+            sb.AppendLine($"- **Turn Count**: {summaries.Count}");
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+            var dbMsgs = await store.GetMessagesAsync(workspaceId, sid, ct).ConfigureAwait(false);
+            var users = dbMsgs
+                .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            int ui = 0;
+            foreach (var turn in summaries.OrderBy(s => s.TurnSeq))
+            {
+                ct.ThrowIfCancellationRequested();
+                string userText = turn.UserPreview ?? string.Empty;
+                if (ui < users.Count)
+                {
+                    userText = users[ui].Content ?? userText;
+                    ui++;
+                }
+                else
+                {
+                    var um = dbMsgs.FirstOrDefault(m =>
+                        string.Equals(
+                            m.Id,
+                            (turn.TurnId ?? string.Empty).StartsWith("uturn-")
+                                ? turn.TurnId!.Substring(6)
+                                : turn.TurnId,
+                            StringComparison.Ordinal
+                        )
+                    );
+                    if (um != null && !string.IsNullOrWhiteSpace(um.Content))
+                        userText = um.Content!;
+                }
+                sb.AppendLine($"### [USER] turn_seq={turn.TurnSeq}");
+                sb.AppendLine();
+                sb.AppendLine(string.IsNullOrWhiteSpace(userText) ? "(空)" : userText);
+                sb.AppendLine();
+                sb.AppendLine(
+                    $"<!-- process: blocks={turn.Blocks} tools={turn.Tools} failed={turn.Failed} status={turn.Status} -->"
+                );
+                // final 展开
+                string finalMd = string.Empty;
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(turn.FinalBlockId))
+                    {
+                        var (items, _) = await store
+                            .GetBlockContentsAsync(
+                                workspaceId,
+                                sid,
+                                new[] { turn.FinalBlockId! },
+                                ct
+                            )
+                            .ConfigureAwait(false);
+                        if (items.TryGetValue(turn.FinalBlockId!, out var bc))
+                            finalMd = bc.Markdown ?? string.Empty;
+                    }
+                    if (string.IsNullOrWhiteSpace(finalMd))
+                        finalMd = turn.FinalPreview ?? string.Empty;
+                }
+                catch
+                {
+                    finalMd = turn.FinalPreview ?? string.Empty;
+                }
+                if (!string.IsNullOrWhiteSpace(finalMd))
+                {
+                    sb.AppendLine($"### [FINAL] turn_seq={turn.TurnSeq} status={turn.Status}");
+                    sb.AppendLine();
+                    sb.AppendLine(finalMd);
+                    sb.AppendLine();
+                }
+                else
+                {
+                    sb.AppendLine($"_本轮无正文，{turn.Tools} 个工具 status={turn.Status}_");
+                    sb.AppendLine();
+                }
+                sb.AppendLine("---");
+                sb.AppendLine();
+            }
+            return sb.ToString();
+        }
 
         foreach (var msg in messages)
         {

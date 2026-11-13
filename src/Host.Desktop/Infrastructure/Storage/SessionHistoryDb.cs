@@ -29,6 +29,9 @@ public sealed class SessionHistoryDb
         + "content TEXT,"
         + "reasoning TEXT,"
         + "tool_calls_json TEXT,"
+        + "tool_call_id TEXT,"
+        + "name TEXT,"
+        + "images_json TEXT,"
         + "input_tokens INT,"
         + "output_tokens INT,"
         + "cached_tokens INT,"
@@ -83,13 +86,43 @@ public sealed class SessionHistoryDb
                 "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
             pragma.ExecuteNonQuery();
         }
-
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = BuildCreateSql();
             cmd.ExecuteNonQuery();
         }
-
+        try
+        {
+            using var cols = conn.CreateCommand();
+            cols.CommandText = "PRAGMA table_info(messages);";
+            using var r = cols.ExecuteReader();
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (r.Read())
+            {
+                if (!r.IsDBNull(1))
+                    names.Add(r.GetString(1));
+            }
+            r.Close();
+            if (!names.Contains("tool_call_id"))
+            {
+                using var add = conn.CreateCommand();
+                add.CommandText = "ALTER TABLE messages ADD COLUMN tool_call_id TEXT;";
+                add.ExecuteNonQuery();
+            }
+            if (!names.Contains("name"))
+            {
+                using var add2 = conn.CreateCommand();
+                add2.CommandText = "ALTER TABLE messages ADD COLUMN name TEXT;";
+                add2.ExecuteNonQuery();
+            }
+            if (!names.Contains("images_json"))
+            {
+                using var add3 = conn.CreateCommand();
+                add3.CommandText = "ALTER TABLE messages ADD COLUMN images_json TEXT;";
+                add3.ExecuteNonQuery();
+            }
+        }
+        catch { }
         return dbPath;
     }
 

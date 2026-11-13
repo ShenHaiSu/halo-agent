@@ -30,6 +30,8 @@ public sealed partial class SessionRepository : ISessionRepository
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
     }
 
+    public StoragePathManager Storage => _storageManager;
+
     public string GetWorkspacesIndexPath() =>
         Path.Combine(_storageManager.WorkspacesDirectory, "workspaces-index.json");
 

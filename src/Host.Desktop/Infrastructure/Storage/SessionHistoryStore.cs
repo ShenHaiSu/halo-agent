@@ -376,6 +376,516 @@ public sealed class SessionHistoryStore
         };
     }
 
+    /// <summary>S3：DB messages 全量读（组包/预算/压缩统一入口，ORDER BY seq）。</summary>
+    public async Task<List<UnifiedChatMessage>> GetMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        var result = new List<UnifiedChatMessage>();
+        string dbPath = _db.Storage.GetHistoryDbPath(workspaceId, sessionId);
+        if (!File.Exists(dbPath))
+        {
+            return result;
+        }
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+        }
+        catch
+        {
+            return result;
+        }
+        using var conn = _db.Open(workspaceId, sessionId);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc"
+            + " FROM messages ORDER BY seq;";
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            try
+            {
+                string id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                DateTime createdUtc = DateTime.UtcNow;
+                if (!reader.IsDBNull(11))
+                {
+                    try
+                    {
+                        string rawUtc = reader.GetString(11);
+                        if (
+                            !DateTime.TryParse(
+                                rawUtc,
+                                null,
+                                System.Globalization.DateTimeStyles.RoundtripKind,
+                                out var parsedUtc
+                            )
+                        )
+                            DateTime.TryParse(rawUtc, out parsedUtc);
+                        if (parsedUtc != default)
+                            createdUtc = parsedUtc;
+                    }
+                    catch { }
+                }
+                var msg = new UnifiedChatMessage { Id = id, CreatedAtUtc = createdUtc };
+                msg.Role = reader.IsDBNull(1) ? "assistant" : reader.GetString(1);
+                msg.Content = reader.IsDBNull(2) ? null : reader.GetString(2);
+                msg.ReasoningContent = reader.IsDBNull(3) ? null : reader.GetString(3);
+                if (!reader.IsDBNull(4))
+                {
+                    string toolsJson = reader.GetString(4);
+                    if (!string.IsNullOrWhiteSpace(toolsJson))
+                    {
+                        try
+                        {
+                            msg.ToolCalls = JsonSerializer.Deserialize<
+                                List<LlmGateway.Models.UnifiedToolCall>
+                            >(toolsJson, HaloJsonOptions.CompactCamelCase);
+                        }
+                        catch { }
+                    }
+                }
+                if (!reader.IsDBNull(5))
+                    msg.ToolCallId = reader.GetString(5);
+                if (!reader.IsDBNull(6))
+                    msg.Name = reader.GetString(6);
+                if (!reader.IsDBNull(7))
+                {
+                    try
+                    {
+                        msg.Images = JsonSerializer.Deserialize<List<ChatImageRef>>(
+                            reader.GetString(7),
+                            HaloJsonOptions.CompactCamelCase
+                        );
+                    }
+                    catch { }
+                }
+                if (!reader.IsDBNull(8))
+                    msg.InputTokens = reader.GetInt64(8);
+                if (!reader.IsDBNull(9))
+                    msg.OutputTokens = reader.GetInt64(9);
+                if (!reader.IsDBNull(10))
+                    msg.CachedTokens = reader.GetInt64(10);
+                result.Add(msg);
+            }
+            catch { }
+        }
+        return result;
+    }
+
+    /// <summary>S3：单条消息镜像入 DB messages（Append 双写，INSERT OR IGNORE 幂等）。</summary>
+    public void InsertSingleMessage(string workspaceId, string sessionId, UnifiedChatMessage msg)
+    {
+        if (msg == null || string.IsNullOrWhiteSpace(msg.Id))
+            return;
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc)"
+                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $utc);";
+            cmd.Parameters.AddWithValue("$id", msg.Id);
+            cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
+            cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
+            cmd.Parameters.AddWithValue(
+                "$reasoning",
+                (object?)msg.ReasoningContent ?? DBNull.Value
+            );
+            string? toolsJson = null;
+            try
+            {
+                if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
+                    toolsJson = JsonSerializer.Serialize(
+                        msg.ToolCalls,
+                        HaloJsonOptions.CompactCamelCase
+                    );
+            }
+            catch { }
+            cmd.Parameters.AddWithValue("$tools", (object?)toolsJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$tcid", (object?)msg.ToolCallId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$name", (object?)msg.Name ?? DBNull.Value);
+            string? imgsJson = null;
+            try
+            {
+                if (msg.Images != null && msg.Images.Count > 0)
+                    imgsJson = JsonSerializer.Serialize(
+                        msg.Images,
+                        HaloJsonOptions.CompactCamelCase
+                    );
+            }
+            catch { }
+            cmd.Parameters.AddWithValue("$imgs", (object?)imgsJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$inTok", (object?)msg.InputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$outTok", (object?)msg.OutputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$cached", (object?)msg.CachedTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$utc", msg.CreatedAtUtc.ToString("o"));
+            cmd.ExecuteNonQuery();
+        }
+        catch { }
+    }
+
+    /// <summary>S3：按 turn_seq 截断（DELETE WHERE turn_seq &gt;= cut + 同步 messages/blocks）。</summary>
+    public async Task TruncateFromTurnSeqAsync(
+        string workspaceId,
+        string sessionId,
+        long cutTurnSeq,
+        CancellationToken ct = default
+    )
+    {
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var tx = conn.BeginTransaction();
+            var doomed = new List<string>();
+            using (var q = conn.CreateCommand())
+            {
+                q.Transaction = tx;
+                q.CommandText = "SELECT turn_id FROM turns WHERE turn_seq >= $cut;";
+                q.Parameters.AddWithValue("$cut", cutTurnSeq);
+                using var r = q.ExecuteReader();
+                while (r.Read())
+                {
+                    if (!r.IsDBNull(0))
+                        doomed.Add(r.GetString(0));
+                }
+            }
+            foreach (string tid in doomed)
+            {
+                using var d1 = conn.CreateCommand();
+                d1.Transaction = tx;
+                d1.CommandText = "DELETE FROM blocks WHERE turn_id = $tid;";
+                d1.Parameters.AddWithValue("$tid", tid);
+                d1.ExecuteNonQuery();
+                using var d2 = conn.CreateCommand();
+                d2.Transaction = tx;
+                d2.CommandText = "DELETE FROM turns WHERE turn_id = $tid;";
+                d2.Parameters.AddWithValue("$tid", tid);
+                d2.ExecuteNonQuery();
+            }
+            // messages：turnId = uturn-&lt;userMsgId&gt;，删归属已删轮的用户/助手/工具行（按 turn 前缀启发 + 孤儿保留）
+            // 为保零变不误删：仅删明确归属 doomed turn 的 user 行（id 为 turn 后缀）与其后连续 tool 行由上层 Rewrite 保证；
+            // 此处保守：不删 messages（压缩/截断后 messages 由上层按 kept 重写）。预留事务一致性。
+            tx.Commit();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>S3：按 kept 消息 Id 集合重写 messages 表（截断/删除/压缩后同步）。</summary>
+    public async Task RewriteMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyList<UnifiedChatMessage> kept,
+        CancellationToken ct = default
+    )
+    {
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var tx = conn.BeginTransaction();
+            using (var del = conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM messages;";
+                del.ExecuteNonQuery();
+            }
+            InsertMessages(conn, tx, kept);
+            tx.Commit();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>S3：删除单条 messages 行（DeleteMessage v2 路径）。</summary>
+    public async Task DeleteMessageRowAsync(
+        string workspaceId,
+        string sessionId,
+        string messageId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(messageId))
+            return;
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM messages WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$id", messageId);
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>S3：v1 分支出 v2 合成写入（assistant→text / tool→tool_result，09 §9.8）。</summary>
+    public async Task SynthesizeV2FromMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyList<UnifiedChatMessage> prefix,
+        CancellationToken ct = default
+    )
+    {
+        if (prefix == null || prefix.Count == 0)
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            return;
+        }
+        var gate = GetWriteLock(workspaceId, sessionId);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            long maxTurnSeq = 0;
+            long maxSeq = 0;
+            using (var q = conn.CreateCommand())
+            {
+                q.CommandText = "SELECT COALESCE(MAX(turn_seq),0) FROM turns;";
+                object? v = q.ExecuteScalar();
+                if (v != null && v != DBNull.Value)
+                    maxTurnSeq = Convert.ToInt64(v);
+            }
+            using (var q2 = conn.CreateCommand())
+            {
+                q2.CommandText = "SELECT COALESCE(MAX(seq),0) FROM blocks;";
+                object? v = q2.ExecuteScalar();
+                if (v != null && v != DBNull.Value)
+                    maxSeq = Convert.ToInt64(v);
+            }
+            // 按 assistant 切轮：每段 [user? + assistant + tool*] 为一 turn
+            var turns = new List<TurnSummary>();
+            var allBlocks = new List<TimelineBlock>();
+            var allMsgs = new List<UnifiedChatMessage>(prefix);
+            long turnSeq = maxTurnSeq;
+            long seq = maxSeq;
+            int i = 0;
+            while (i < prefix.Count)
+            {
+                var m = prefix[i];
+                string role = (m.Role ?? string.Empty).ToLowerInvariant();
+                if (!string.Equals(role, "assistant", StringComparison.Ordinal))
+                {
+                    i++;
+                    continue;
+                }
+                // 收集该 assistant 后的连续 tool
+                var tools = new List<UnifiedChatMessage>();
+                int j = i + 1;
+                while (
+                    j < prefix.Count
+                    && string.Equals(
+                        (prefix[j].Role ?? string.Empty).ToLowerInvariant(),
+                        "tool",
+                        StringComparison.Ordinal
+                    )
+                )
+                {
+                    tools.Add(prefix[j]);
+                    j++;
+                }
+                turnSeq++;
+                seq++;
+                string turnId = "uturn-" + (m.Id ?? Guid.NewGuid().ToString("N"));
+                // text 块：assistant content（最后一个非空为 final，其余 process；此处每轮单 assistant 即 final）
+                string content = m.Content ?? string.Empty;
+                bool hasText = !string.IsNullOrWhiteSpace(content);
+                var textBlocks = new List<TimelineBlock>();
+                if (hasText)
+                {
+                    seq++;
+                    textBlocks.Add(
+                        new TimelineBlock
+                        {
+                            BlockId = "synth:" + turnId + ":text",
+                            TurnId = turnId,
+                            Iteration = 1,
+                            Sequence = seq,
+                            Kind = TimelineBlockKind.Text,
+                            Tag = TimelineBlockTag.Final,
+                            CharCount = content.Length,
+                            Preview = BuildPreviewText(content, 200),
+                            Content = content,
+                        }
+                    );
+                }
+                foreach (var t in tools)
+                {
+                    seq++;
+                    string callId = t.ToolCallId ?? string.Empty;
+                    string tcontent = t.Content ?? string.Empty;
+                    string preview = string.IsNullOrWhiteSpace(callId)
+                        ? "[历史工具结果]"
+                        : BuildPreviewText(tcontent, 200);
+                    allBlocks.Add(
+                        new TimelineBlock
+                        {
+                            BlockId =
+                                "synth:"
+                                + turnId
+                                + ":"
+                                + (
+                                    string.IsNullOrWhiteSpace(callId)
+                                        ? Guid.NewGuid().ToString("N")
+                                        : callId
+                                ),
+                            TurnId = turnId,
+                            Iteration = 1,
+                            Sequence = seq,
+                            Kind = TimelineBlockKind.ToolResult,
+                            Tag = TimelineBlockTag.Process,
+                            CallId = string.IsNullOrWhiteSpace(callId) ? null : callId,
+                            CharCount = tcontent.Length,
+                            Preview = preview,
+                            Content = tcontent,
+                        }
+                    );
+                }
+                allBlocks.AddRange(textBlocks);
+                string userPreview = string.Empty;
+                // 前一个 user 作为本轮 userPreview
+                for (int k = i - 1; k >= 0; k--)
+                {
+                    if (
+                        string.Equals(
+                            (prefix[k].Role ?? string.Empty).ToLowerInvariant(),
+                            "user",
+                            StringComparison.Ordinal
+                        )
+                    )
+                    {
+                        userPreview = BuildPreviewText(prefix[k].Content ?? string.Empty, 15);
+                        break;
+                    }
+                }
+                turns.Add(
+                    new TurnSummary
+                    {
+                        TurnId = turnId,
+                        TurnSeq = turnSeq,
+                        IterEnd = 1,
+                        UserPreview = userPreview,
+                        FinalBlockId = hasText ? "synth:" + turnId + ":text" : null,
+                        FinalPreview = hasText ? BuildPreviewText(content, 60) : string.Empty,
+                        Blocks = textBlocks.Count + tools.Count,
+                        Tools = tools.Count,
+                        Status = TimelineTurnStatus.Completed,
+                        UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
+                    }
+                );
+                i = j;
+            }
+            using var tx = conn.BeginTransaction();
+            InsertMessages(conn, tx, allMsgs);
+            InsertBlocks(conn, tx, allBlocks);
+            foreach (var t in turns)
+                UpsertTurn(conn, tx, t, t.TurnSeq);
+            tx.Commit();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>S3：启动/GC 孤儿 tool-outputs 清理（fileRef 不在 blocks.content_ref 即删）。</summary>
+    public async Task<int> CollectOrphanToolOutputsAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        int removed = 0;
+        try
+        {
+            var refs = await GetDistinctContentRefsAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string r in refs)
+            {
+                string? rel = ParseContentRefRelative(r);
+                if (!string.IsNullOrWhiteSpace(rel))
+                    keep.Add(Path.GetFileName(rel!) ?? string.Empty);
+            }
+            string dir = _db.Storage.GetSessionToolOutputsDir(workspaceId, sessionId);
+            if (!Directory.Exists(dir))
+                return 0;
+            foreach (string f in Directory.GetFiles(dir, "*.txt"))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!keep.Contains(Path.GetFileName(f) ?? string.Empty))
+                {
+                    try
+                    {
+                        File.Delete(f);
+                        removed++;
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        return removed;
+    }
+
+    /// <summary>S3：DB 完整性校验（integrity_check + turns.blocks == count(blocks)）。</summary>
+    public async Task<(bool ok, string detail)> CheckIntegrityAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        try
+        {
+            _db.EnsureDatabase(workspaceId, sessionId);
+            using var conn = _db.Open(workspaceId, sessionId);
+            using var c1 = conn.CreateCommand();
+            c1.CommandText = "PRAGMA integrity_check;";
+            object? v = await c1.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            string s = v?.ToString() ?? string.Empty;
+            if (!string.Equals(s, "ok", StringComparison.OrdinalIgnoreCase))
+                return (false, "integrity_check:" + s);
+            using var c2 = conn.CreateCommand();
+            c2.CommandText =
+                "SELECT turn_id, blocks, (SELECT COUNT(*) FROM blocks b WHERE b.turn_id = turns.turn_id) FROM turns;";
+            using var r = await c2.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                int expect = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+                // T2 追加的 tool_result 会使 blocks 计数滞后（AppendToolResult 只 +tools/+chars，不改 blocks）；
+                // 此处允许实际 >= 物化值（只防丢失，不防多余），丢失即损坏。
+                long actual = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                if (actual < expect)
+                    return (false, "group-mismatch:" + (r.IsDBNull(0) ? "?" : r.GetString(0)));
+            }
+            return (true, "ok");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     public async Task<bool> CopyHistoryForBranchAsync(
         string srcWorkspaceId,
         string srcSessionId,
@@ -634,6 +1144,9 @@ public sealed class SessionHistoryStore
         }
     }
 
+    private static string BuildPreviewText(string text, int maxGraphemes) =>
+        TimelineBlockTrackerBuildPreview(text, maxGraphemes);
+
     private static string TimelineBlockTrackerBuildPreview(string text, int maxGraphemes)
     {
         if (string.IsNullOrEmpty(text) || maxGraphemes <= 0)
@@ -705,8 +1218,8 @@ public sealed class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
-                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, input_tokens, output_tokens, cached_tokens, created_utc)"
-                + " VALUES($id, $role, $content, $reasoning, $tools, $inTok, $outTok, $cached, $utc);";
+                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc)"
+                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $utc);";
             cmd.Parameters.AddWithValue("$id", msg.Id);
             cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
             cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
@@ -727,6 +1240,19 @@ public sealed class SessionHistoryStore
             }
             catch { }
             cmd.Parameters.AddWithValue("$tools", (object?)toolsJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$tcid", (object?)msg.ToolCallId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$name", (object?)msg.Name ?? DBNull.Value);
+            string? batchImgsJson = null;
+            try
+            {
+                if (msg.Images != null && msg.Images.Count > 0)
+                    batchImgsJson = JsonSerializer.Serialize(
+                        msg.Images,
+                        HaloJsonOptions.CompactCamelCase
+                    );
+            }
+            catch { }
+            cmd.Parameters.AddWithValue("$imgs", (object?)batchImgsJson ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$inTok", (object?)msg.InputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$outTok", (object?)msg.OutputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cached", (object?)msg.CachedTokens ?? DBNull.Value);

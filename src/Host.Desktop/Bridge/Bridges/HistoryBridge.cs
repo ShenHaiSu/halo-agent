@@ -30,6 +30,24 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    private static bool IsHistoryReadonly(SessionMetadata? meta) =>
+        meta != null && meta.HistoryVersion != 2;
+
+    private async Task<bool> IsHistoryReadonlyAsync(string workspaceId, string sessionId)
+    {
+        try
+        {
+            var meta = await _workspaceSessionService
+                .GetSessionAsync(workspaceId, sessionId)
+                .ConfigureAwait(false);
+            return IsHistoryReadonly(meta);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<BridgeResponse<HistoryTruncateResult>> TruncateSessionHistory(
         string workspaceId,
         string sessionId,
@@ -41,6 +59,11 @@ public sealed partial class HostBridgeFacade
         {
             if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
                 return BridgeResponse<HistoryTruncateResult>.Fail("SUB_READONLY", "子会话历史只读，不可截断");
+            if (await IsHistoryReadonlyAsync(workspaceId, sessionId).ConfigureAwait(false))
+                return BridgeResponse<HistoryTruncateResult>.Fail(
+                    "HISTORY_READONLY",
+                    "历史版本只读，不可截断，可分支"
+                );
             if (IsHistoryBusy(sessionId))
                 return BridgeResponse<HistoryTruncateResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
             var result = await _workspaceSessionService
@@ -193,6 +216,24 @@ public sealed partial class HostBridgeFacade
                             .ConfigureAwait(false);
                         if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0))
                             healedSessions++;
+                        // S3 M9：启动 GC 孤儿 tool-outputs（仅 v2，且失败不计入 healed）
+                        try
+                        {
+                            if (sess.HistoryVersion == 2)
+                            {
+                                var gcStore = new Infrastructure.Storage.SessionHistoryStore(
+                                    new Infrastructure.Storage.SessionHistoryDb(_storageManager)
+                                );
+                                await gcStore
+                                    .CollectOrphanToolOutputsAsync(
+                                        ws.Id,
+                                        sess.Id,
+                                        cancellationToken
+                                    )
+                                    .ConfigureAwait(false);
+                            }
+                        }
+                        catch { }
                     }
                     catch (Exception ex)
                     {

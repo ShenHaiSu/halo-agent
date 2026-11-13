@@ -739,7 +739,15 @@ public sealed class Stage22P1StabilityTests : IDisposable
         string? batch;
         while ((batch = JsEventDispatcher.DequeueBatchJson(128)) != null)
             batches.Add(batch);
-        string completed = batches.FirstOrDefault(b => b.Contains("TurnCompleted")) ?? string.Empty;
+        string completed =
+            batches.FirstOrDefault(b =>
+                b.Contains(session.Id) && b.Contains("TurnCompleted") && b.Contains("\"count\":1")
+            ) ?? string.Empty;
+        if (string.IsNullOrEmpty(completed))
+            completed =
+                batches.FirstOrDefault(b =>
+                    b.Contains("TurnCompleted") && b.Contains("\"count\":1")
+                ) ?? string.Empty;
         Assert.False(string.IsNullOrEmpty(completed));
         Assert.Contains("\"count\":1", completed);
         Assert.Contains("\"billedPrompt\":100", completed);

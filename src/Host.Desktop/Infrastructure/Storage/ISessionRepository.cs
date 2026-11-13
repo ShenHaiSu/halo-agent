@@ -15,6 +15,7 @@ namespace Host.Desktop.Infrastructure.Storage;
 
 public interface ISessionRepository
 {
+    StoragePathManager Storage { get; }
     Task<List<WorkspaceInfo>> LoadWorkspacesIndexAsync(CancellationToken ct = default);
     Task SaveWorkspacesIndexAsync(List<WorkspaceInfo> workspaces, CancellationToken ct = default);
     Task<List<SessionMetadata>> LoadSessionsIndexAsync(
