@@ -200,6 +200,32 @@ public sealed class TimelineBlockTracker
         _current = null;
     }
 
+    public TimelineBlockDraft? Current => _current;
+
+    public bool TryGetBlockId(string? callId, out string blockId, out long seq)
+    {
+        blockId = string.Empty;
+        seq = 0;
+        if (string.IsNullOrWhiteSpace(callId))
+        {
+            return false;
+        }
+        for (int i = Drafts.Count - 1; i >= 0; i--)
+        {
+            var cand = Drafts[i];
+            if (
+                string.Equals(cand.Kind, TimelineBlockKind.ToolCall, StringComparison.Ordinal)
+                && string.Equals(cand.CallId, callId, StringComparison.Ordinal)
+            )
+            {
+                blockId = cand.BlockId;
+                seq = cand.Sequence;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static string BuildPreview(string text, int maxGraphemes)
     {
         if (string.IsNullOrEmpty(text) || maxGraphemes <= 0)

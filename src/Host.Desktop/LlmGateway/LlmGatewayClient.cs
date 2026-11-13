@@ -41,6 +41,8 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
     internal static void ResetTimelineSequenceForTests() =>
         Interlocked.Exchange(ref _timelineSequence, 0);
 
+    public static long AllocateTimelineSequence() => Interlocked.Increment(ref _timelineSequence);
+
     private static UnifiedStreamEvent WithTimelineOrder(UnifiedStreamEvent evt, string? epoch)
     {
         long seq = Interlocked.Increment(ref _timelineSequence);

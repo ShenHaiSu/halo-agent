@@ -16,6 +16,8 @@ public sealed class SessionHistoryDb
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     }
 
+    public StoragePathManager Storage => _storage;
+
     public string GetDbPath(string workspaceId, string sessionId) =>
         _storage.GetHistoryDbPath(workspaceId, sessionId);
 

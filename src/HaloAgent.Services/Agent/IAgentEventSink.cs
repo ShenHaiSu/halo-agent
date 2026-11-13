@@ -7,7 +7,14 @@ namespace HaloAgent.Services.Agent;
 public interface IAgentEventSink
 {
     Task EmitAsync(string sessionId, string kind, object? payload);
-    void EmitStreamDelta(string sessionId, string kind, string textDelta);
+    void EmitStreamDelta(
+        string sessionId,
+        string kind,
+        string textDelta,
+        string? blockId = null,
+        long seq = 0,
+        string? tag = null
+    );
 }
 
 /// <summary>无操作事件槽（纯单测用，避免 UI 依赖）。</summary>
@@ -17,7 +24,14 @@ public sealed class NullAgentEventSink : IAgentEventSink
 
     public Task EmitAsync(string sessionId, string kind, object? payload) => Task.CompletedTask;
 
-    public void EmitStreamDelta(string sessionId, string kind, string textDelta) { }
+    public void EmitStreamDelta(
+        string sessionId,
+        string kind,
+        string textDelta,
+        string? blockId = null,
+        long seq = 0,
+        string? tag = null
+    ) { }
 }
 
 /// <summary>

@@ -182,6 +182,52 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
+            string toolTurnId =
+                "uturn-"
+                + (
+                    (ctx.UserMessage != null ? ctx.UserMessage.Id : null)
+                    ?? ctx.RequestId
+                    ?? string.Empty
+                );
+            string toolBlockId = (ctx.RequestId ?? string.Empty) + ":tool-" + call.CallId;
+            try
+            {
+                if (_storageManager != null)
+                {
+                    var historyStore = new Infrastructure.Storage.SessionHistoryStore(
+                        _storageManager
+                    );
+                    var resultBlock = new Core.Models.TimelineBlock
+                    {
+                        BlockId = toolBlockId,
+                        TurnId = toolTurnId,
+                        Iteration = iteration,
+                        Sequence = LlmGateway.LlmGatewayClient.AllocateTimelineSequence(),
+                        Kind = Core.Models.TimelineBlockKind.ToolResult,
+                        Tag = Core.Models.TimelineBlockTag.Process,
+                        CallId = call.CallId,
+                        CharCount = toolText != null ? toolText.Length : 0,
+                        Preview = Services.TimelineBlockTracker.BuildPreview(
+                            toolText ?? string.Empty,
+                            4096
+                        ),
+                        Content = toolText ?? string.Empty,
+                        ContentRef = null,
+                        Truncated = false,
+                    };
+                    await historyStore
+                        .AppendToolResultAsync(
+                            workspaceId,
+                            sessionId,
+                            toolTurnId,
+                            resultBlock,
+                            !toolResult.Success,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+            }
+            catch { }
             // need23-R1：tool 消息落盘即告知前端（携带完整消息体，前端增量合并，
             // 不必等下一轮 AssistantMessagePersisted 的全量重拉；旧前端 default 分支忽略，零影响）。
             PublishTurnEvent(
@@ -197,13 +243,27 @@ public sealed partial class AgentOrchestrator
                     toolCallId = toolMessage.ToolCallId,
                     content = TruncateForEvent(toolText, 8000),
                     images = toolMessage.Images,
-                    // S6 §2-4 / §4.4：把 view_image 等工具的机器可判错误码透传给前端
-                    // （S3 已在 ToolResult.ErrorCode 落好，此前只进模型上下文，前端拿不到）。
                     errorCode = toolResult.ErrorCode,
                     createdAtUtc = toolMessage.CreatedAtUtc.ToString("o"),
-                    updatedAtUtc = DateTime.UtcNow.ToString("o")
+                    updatedAtUtc = DateTime.UtcNow.ToString("o"),
+                    blockId = toolBlockId,
+                    turnId = toolTurnId
                 }
             );
+            try
+            {
+                PublishTurnEvent(
+                    sessionId,
+                    "BlockTagUpdated",
+                    new
+                    {
+                        blockId = toolBlockId,
+                        tag = Core.Models.TimelineBlockTag.Process,
+                        reason = Core.Models.TimelineTagReason.Demote
+                    }
+                );
+            }
+            catch { }
             PublishTurnEvent(
                 sessionId,
                 "ToolExecutionCompleted",

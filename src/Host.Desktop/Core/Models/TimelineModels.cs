@@ -76,6 +76,8 @@ public sealed class TurnSummary
 public sealed class TimelineBlockContent
 {
     public string BlockId { get; set; } = string.Empty;
+    public string? CallId { get; set; }
+    public long Seq { get; set; }
     public string Kind { get; set; } = TimelineBlockKind.Text;
     public string Tag { get; set; } = TimelineBlockTag.Process;
     public string Markdown { get; set; } = string.Empty;
@@ -92,4 +94,20 @@ public sealed class TimelineTagUpdated
     public string BlockId { get; set; } = string.Empty;
     public string Tag { get; set; } = TimelineBlockTag.Process;
     public string Reason { get; set; } = TimelineTagReason.Demote;
+}
+
+/// <summary>工具结果兼容查：按 turn + call 定位，主路径优先块主键点查。</summary>
+public sealed class TimelineToolResult
+{
+    public string ArgsJson { get; set; } = string.Empty;
+    public string ResultText { get; set; } = string.Empty;
+    public string? ResultRef { get; set; }
+}
+
+/// <summary>批量块内容响应：成功项 + 缺失占位。</summary>
+public sealed class TimelineBlockContentsResponse
+{
+    public Dictionary<string, TimelineBlockContent> Items { get; set; } =
+        new(StringComparer.Ordinal);
+    public List<string> Missing { get; set; } = new();
 }

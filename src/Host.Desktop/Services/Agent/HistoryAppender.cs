@@ -272,6 +272,34 @@ public sealed partial class AgentOrchestrator
                 turnId = timelineTurn.TurnId
             }
         );
+        try
+        {
+            foreach (var b in timelineBlocks)
+            {
+                if (b == null || string.IsNullOrWhiteSpace(b.BlockId))
+                {
+                    continue;
+                }
+                bool isFinal = string.Equals(
+                    b.Tag,
+                    Core.Models.TimelineBlockTag.Final,
+                    StringComparison.Ordinal
+                );
+                PublishTurnEvent(
+                    sessionId,
+                    "BlockTagUpdated",
+                    new
+                    {
+                        blockId = b.BlockId,
+                        tag = b.Tag,
+                        reason = isFinal
+                            ? Core.Models.TimelineTagReason.Finalize
+                            : Core.Models.TimelineTagReason.Demote
+                    }
+                );
+            }
+        }
+        catch { }
         // need22-P1 T3：空 FunctionName 回包（assistant 之后，保证 tool_calls→tool 先后序）+ EMPTY_TOOL_NAME 连续失败终轮。
         if (emptyNameCids.Count > 0)
         {

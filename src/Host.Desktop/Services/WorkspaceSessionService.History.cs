@@ -84,6 +84,107 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         await _sessionRepository
             .RewriteMessagesJsonlAsync(workspaceId, created.Id, cloned, ct)
             .ConfigureAwait(false);
+        try
+        {
+            string srcDir = _sessionRepository.GetSessionDirectory(workspaceId, sourceSessionId);
+            string dstDir = _sessionRepository.GetSessionDirectory(workspaceId, created.Id);
+            string srcDb = System.IO.Path.Combine(srcDir, "history.db");
+            if (System.IO.File.Exists(srcDb))
+            {
+                try
+                {
+                    using var ckConn = new Microsoft.Data.Sqlite.SqliteConnection(
+                        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                        {
+                            DataSource = srcDb,
+                            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
+                            Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
+                            Pooling = false,
+                        }.ToString()
+                    );
+                    ckConn.Open();
+                    using var ckCmd = ckConn.CreateCommand();
+                    ckCmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                    ckCmd.ExecuteNonQuery();
+                }
+                catch { }
+                string dstDb = System.IO.Path.Combine(dstDir, "history.db");
+                System.IO.Directory.CreateDirectory(dstDir);
+                System.IO.File.Copy(srcDb, dstDb, overwrite: true);
+                try
+                {
+                    var refs = new List<string>();
+                    using var qConn = new Microsoft.Data.Sqlite.SqliteConnection(
+                        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                        {
+                            DataSource = dstDb,
+                            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                            Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
+                            Pooling = false,
+                        }.ToString()
+                    );
+                    qConn.Open();
+                    using var qCmd = qConn.CreateCommand();
+                    qCmd.CommandText =
+                        "SELECT DISTINCT content_ref FROM blocks WHERE content_ref IS NOT NULL;";
+                    using var qReader = qCmd.ExecuteReader();
+                    while (qReader.Read())
+                    {
+                        if (!qReader.IsDBNull(0))
+                        {
+                            string v = qReader.GetString(0);
+                            if (!string.IsNullOrWhiteSpace(v))
+                            {
+                                refs.Add(v);
+                            }
+                        }
+                    }
+                    string srcOutputs = System.IO.Path.Combine(srcDir, "tool-outputs");
+                    string dstOutputs = System.IO.Path.Combine(dstDir, "tool-outputs");
+                    foreach (string contentRef in refs)
+                    {
+                        string rel = contentRef.Trim();
+                        const string fileRefPrefix = "fileRef:";
+                        if (rel.StartsWith(fileRefPrefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            rel = rel.Substring(fileRefPrefix.Length).Trim().Trim('"');
+                            int sp = rel.IndexOf(" size=", StringComparison.OrdinalIgnoreCase);
+                            if (sp > 0)
+                            {
+                                rel = rel.Substring(0, sp).Trim().Trim('"');
+                            }
+                        }
+                        rel = rel.Replace('\\', '/').Trim();
+                        string fileName = System.IO.Path.GetFileName(rel);
+                        if (string.IsNullOrWhiteSpace(fileName))
+                        {
+                            continue;
+                        }
+                        string srcFile = System.IO.Path.Combine(srcOutputs, fileName);
+                        if (!System.IO.File.Exists(srcFile))
+                        {
+                            string alt = System.IO.Path.Combine(
+                                srcDir,
+                                rel.Replace('/', System.IO.Path.DirectorySeparatorChar)
+                            );
+                            if (System.IO.File.Exists(alt))
+                            {
+                                srcFile = alt;
+                            }
+                        }
+                        if (!System.IO.File.Exists(srcFile))
+                        {
+                            continue;
+                        }
+                        System.IO.Directory.CreateDirectory(dstOutputs);
+                        string dstFile = System.IO.Path.Combine(dstOutputs, fileName);
+                        System.IO.File.Copy(srcFile, dstFile, overwrite: true);
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
         var newMeta = await _sessionRepository
             .LoadSessionMetaAsync(workspaceId, created.Id, ct)
             .ConfigureAwait(false);

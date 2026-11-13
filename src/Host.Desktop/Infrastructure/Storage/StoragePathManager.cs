@@ -98,6 +98,9 @@ public sealed partial class StoragePathManager
     /// <summary>用量库目录（随数据根迁移，含 usage.db + WAL）。</summary>
     public string MetricsDirectory => Path.Combine(CurrentDataRoot, "metrics");
 
+    public string GetSessionDirectory(string workspaceId, string sessionId) =>
+        Path.Combine(SessionsDirectory, workspaceId ?? string.Empty, sessionId ?? string.Empty);
+
     public string GetHistoryDbPath(string workspaceId, string sessionId) =>
         Path.Combine(
             SessionsDirectory,
@@ -119,6 +122,9 @@ public sealed partial class StoragePathManager
             sessionId ?? string.Empty,
             "history.db.bak"
         );
+
+    public string GetSessionToolOutputsDir(string workspaceId, string sessionId) =>
+        Path.Combine(GetSessionDirectory(workspaceId, sessionId), "tool-outputs");
 
     /// <summary>need09-01：迁移白名单（含 skills/memory，供测试与迁移复用）。</summary>
     public static IReadOnlyList<string> MigratableSubDirectoryNames => MigratableSubDirectories;
