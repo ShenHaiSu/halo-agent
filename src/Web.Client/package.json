@@ -17,6 +17,7 @@
     "test": "vitest run",
     "postbuild": "node scripts/assert-no-mock.mjs",
     "lint:components": "node scripts/assert-no-unresolved-components.mjs",
+    "gate:thresholds": "node scripts/check-frontend-thresholds.mjs",
     "build": "npm run typecheck && npm run selfcheck && npm run lint:components && vite build",
     "preview": "vite preview",
     "prepare": "node scripts/setup-hooks.mjs"
