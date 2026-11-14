@@ -14,6 +14,8 @@ export { haloEventBus };
 export { MOCK_BANNER_TEXT, BRIDGE_VERSION };
 export { CefTransport, MockTransport };
 export type { BridgeTransport };
+export { toolCallsOf } from './toolCalls';
+export type { ToolCallRef } from './toolCalls';
 
 const MOCK_FLAG_KEY = 'halo-bridge-mock';
 const WRAPPED_MARK = '__haloWrappedApi';
