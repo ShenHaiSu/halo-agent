@@ -186,6 +186,7 @@ import { getHostBridge, type ChatImageRef } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSubSessionStore } from '@/stores/subSessionStore';
 import { formatSmartBytes, formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
+import { summarizeToolHead } from '@features/agent/utils/toolHeadSummary';
 
 const props = defineProps<{
   card: AgentToolCard;
@@ -323,11 +324,11 @@ const headRunning = computed(() => {
     case 'grep_search':
       return s(a['pattern'] || a['query']) ? `正在检索 ${s(a['pattern'] || a['query'])}` : '正在检索';
     case 'exec_command':
-      return '正在运行';
+      return execShort.value ? `正在运行 ${execShort.value}` : '正在运行';
     case 'view_image':
       return filePath.value ? `正在查看 ${filePath.value}` : '正在查看图片';
     default:
-      return '正在执行';
+      return summarizeToolHead(a, props.card.argsJson) ? `正在 ${summarizeToolHead(a, props.card.argsJson)}` : '正在执行';
   }
 });
 const headCompleted = computed(() => {
@@ -345,11 +346,11 @@ const headCompleted = computed(() => {
     case 'grep_search':
       return s(a['pattern'] || a['query']) ? `检索 ${s(a['pattern'] || a['query'])}` : '检索';
     case 'exec_command':
-      return '';
+      return execShort.value;
     case 'view_image':
       return filePath.value ? `查看 ${filePath.value}` : '查看图片';
     default:
-      return filePath.value;
+      return summarizeToolHead(a, props.card.argsJson) || filePath.value || '(无参数)';
   }
 });
 const headText = computed(() => (effectiveStatus.value === 'running' ? headRunning.value : headCompleted.value));
@@ -377,6 +378,13 @@ const removedLines = computed(() => diffLines.value.filter((l) => l.kind === 'de
 const execCommand = computed(() => {
   const v = argsObj.value['command'];
   return typeof v === 'string' && v ? v : '(空命令)';
+});
+/** exec 折叠态中间行：命令单行化截断 80ch（模板 truncate 做视觉省略，title 悬停看全文）。 */
+const execShort = computed(() => {
+  const t = String(execCommand.value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t.length > 80 ? t.slice(0, 80) + '…' : t;
 });
 
 const runnerLabel = computed(() => {
