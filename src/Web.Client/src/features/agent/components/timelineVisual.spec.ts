@@ -1,10 +1,11 @@
-/** M1 静态抖动：图片槽位恒定 + 思考段类名（§1.1 (b)(c)）。 */
+/** M1 静态抖动：图片槽位 + 思考段类名（§1.1 (b)(c)）。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
 import TimelineRow from '@features/agent/components/TimelineRow.vue';
 import TimelineView from '@features/agent/components/TimelineView.vue';
 import type { ChatImageRef } from '@shared/bridge/hostBridge';
+import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
 const img = { imageId: 'i1', fileName: 'a.png' } as unknown as ChatImageRef;
 const item = {
@@ -14,24 +15,18 @@ const item = {
 } as never;
 
 function mountRow(thumb: string, opts?: { lost?: boolean }) {
+  const stub = {
+    ...timelineViewFallback(),
+    msgImages: () => [img],
+    thumbOf: () => thumb,
+    imgLost: () => !!opts?.lost,
+  };
   return mount(TimelineRow, {
-    props: {
-      item,
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [img],
-      thumbOf: () => thumb,
-      hasLost: () => !!opts?.lost,
-      imgLost: () => !!opts?.lost,
-      renderHtml: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
+    props: { item },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
     },
-    global: { plugins: [naive] },
   });
 }
 
@@ -45,42 +40,27 @@ function mountTimeline(liveSegs: unknown[]) {
     toolCount: 0,
     isRunning: true,
   };
-  const item = { key: 'uturn-u1', kind: 'user-turn', turn };
+  const row = { key: 'uturn-u1', kind: 'user-turn', turn };
+  const stub = {
+    ...timelineViewFallback(),
+    liveSegsFor: () => liveSegs as never[],
+    renderHtml: (t: string) => t,
+    renderStream: (t: string) => t,
+    isGenerating: true,
+    streamMdKillSwitch: true,
+  };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [item],
+      items: [row] as never[],
       historyItems: [],
-      tailItems: [item],
+      tailItems: [row] as never[],
       chatWidthMode: 'centered',
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      renderStream: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      thinkingLine: '',
-      isGenerating: true,
-      liveSegs: liveSegs as never,
-      streamMdKillSwitch: true,
-      turnNotice: '',
-      lastError: '',
-      showRetry: false,
-      liveTelemetry: null,
-      menuVisible: false,
-      menuX: 0,
-      menuY: 0,
-      menuBusy: false,
-      menuCanCopy: false,
-    } as never,
-    global: { plugins: [naive] },
+    },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
+    },
   });
 }
 

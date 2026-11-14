@@ -1,4 +1,4 @@
-/** need22-F04：历史气泡分段渲染单测（frontend/04 §7 H4）。 */
+/** 历史气泡分段渲染单测。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
@@ -10,31 +10,6 @@ function mountTimeline(items: never[]) {
       isEmpty: false,
       items,
       chatWidthMode: 'centered',
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      renderStream: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      thinkingLine: '',
-      liveSegs: [],
-      isGenerating: false,
-      turnNotice: '',
-      lastError: '',
-      showRetry: false,
-      liveTelemetry: null,
-      menuVisible: false,
-      menuX: 0,
-      menuY: 0,
-      menuBusy: false,
-      menuCanCopy: false,
     },
     global: { plugins: [naive] },
   });

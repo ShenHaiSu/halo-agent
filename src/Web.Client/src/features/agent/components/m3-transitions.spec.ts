@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import TimelineView from '@features/agent/components/TimelineView.vue';
 import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
+import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
 const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: null });
 const TIMELINE_SFC = (): string => readFileSync(resolve(process.cwd(), 'src/features/agent/components/TimelineView.vue'), 'utf8');
@@ -21,41 +22,26 @@ function mountTimeline(liveSegs: unknown[]) {
     isRunning: true,
   };
   const item = { key: 'uturn-u1', kind: 'user-turn', turn };
+  const stub = {
+    ...timelineViewFallback(),
+    liveSegsFor: () => liveSegs as never[],
+    renderHtml: (t: string) => t,
+    renderStream: (t: string) => t,
+    isGenerating: true,
+    streamMdKillSwitch: true,
+  };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [item],
+      items: [item] as never[],
       historyItems: [],
-      tailItems: [item],
+      tailItems: [item] as never[],
       chatWidthMode: 'centered',
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      renderStream: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      thinkingLine: '',
-      isGenerating: true,
-      liveSegs: liveSegs as never,
-      streamMdKillSwitch: true,
-      turnNotice: '',
-      lastError: '',
-      showRetry: false,
-      liveTelemetry: null,
-      menuVisible: false,
-      menuX: 0,
-      menuY: 0,
-      menuBusy: false,
-      menuCanCopy: false,
-    } as never,
-    global: { plugins: [naive] },
+    },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
+    },
   });
 }
 

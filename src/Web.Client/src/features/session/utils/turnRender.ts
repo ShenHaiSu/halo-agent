@@ -135,3 +135,12 @@ export function isLiveOwner(entry: EntryLike, items: EntryLike[]): boolean {
   const key = String(entry.turn?.key || entry.key || '');
   return !!key && key === owner;
 }
+/**
+ * 轮内 step 的工具卡分组键：assistantId 优先，缺失时用轮内锚点键兜底，
+ * 保证同一会话内全局唯一。组件不再手拼该结构，直接复用此处。
+ */
+export function groupOfStep(turnKey: string, step: UserTurnStep): TurnGroup {
+  const g = groupOf({ ...stepViewOf(step), assistantId: String(step.assistantId || '') });
+  if (!step.assistantId) g.key = turnStepAnchorKey(turnKey, step.iteration);
+  return g;
+}
