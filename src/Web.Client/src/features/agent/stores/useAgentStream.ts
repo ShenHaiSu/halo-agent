@@ -8,6 +8,7 @@ import { haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBri
 import { estTokens } from '@shared/utils/tokenEstimate';
 import {
   activeSessionId,
+  demotePending,
   emptyTurnState,
   ensureSessionSync,
   ensureTurn,
@@ -29,12 +30,18 @@ const SEG_DISPLAY_CAP = 20000;
 interface SegBuf {
   text: string;
   reasoning: string;
+  textBlockId?: string | null;
+  textSeq?: number | null;
+  textTag?: string | null;
+  reasoningBlockId?: string | null;
+  reasoningSeq?: number | null;
+  reasoningTag?: string | null;
 }
 const segBufs: Record<string, SegBuf> = {};
 function segBufOf(sid: string): SegBuf {
   let b = segBufs[sid];
   if (!b) {
-    b = { text: '', reasoning: '' };
+    b = { text: '', reasoning: '', textBlockId: null, textSeq: null, textTag: null, reasoningBlockId: null, reasoningSeq: null, reasoningTag: null };
     segBufs[sid] = b;
   }
   return b;
@@ -48,27 +55,44 @@ export function flushSegBuf(sid: string): void {
   if (!hasText && !hasReason) return;
   if (hasText) {
     t.streamingText += buf.text;
-    pushTextSeg(t, 'text', buf.text);
+    pushTextSeg(t, 'text', buf.text, buf.textBlockId ?? null, buf.textSeq ?? null, buf.textTag ?? 'pending');
     t.telemetry.liveEst += estTokens(buf.text);
     buf.text = '';
+    buf.textBlockId = null;
+    buf.textSeq = null;
+    buf.textTag = null;
   }
   if (hasReason) {
     t.streamingReasoning += buf.reasoning;
-    pushTextSeg(t, 'reasoning', buf.reasoning);
+    pushTextSeg(t, 'reasoning', buf.reasoning, buf.reasoningBlockId ?? null, buf.reasoningSeq ?? null, buf.reasoningTag ?? 'process');
     t.telemetry.liveEst += estTokens(buf.reasoning);
     buf.reasoning = '';
+    buf.reasoningBlockId = null;
+    buf.reasoningSeq = null;
+    buf.reasoningTag = null;
   }
   t.streamingActive = true;
   t.isGenerating = true;
   touch(t);
 }
 /** 同 key 合并：流文本 append 非替换；经 frameBatcher rAF 合批进 Pinia。 */
-export function queueSegDelta(sid: string, kind: 'text' | 'reasoning', chunk: string): void {
+export function queueSegDelta(sid: string, kind: 'text' | 'reasoning', chunk: string, blockId?: string | null, seq?: number | null, tag?: string | null): void {
   if (!chunk) return;
   ensureTurn(sid);
   const buf = segBufOf(sid);
-  if (kind === 'text') buf.text += chunk;
-  else buf.reasoning += chunk;
+  if (kind === 'text') {
+    if (blockId && buf.textBlockId && buf.textBlockId !== blockId && buf.text) flushSegBuf(sid);
+    buf.text += chunk;
+    if (blockId) buf.textBlockId = blockId;
+    if (typeof seq === 'number' && seq > 0) buf.textSeq = seq;
+    if (tag) buf.textTag = tag;
+  } else {
+    if (blockId && buf.reasoningBlockId && buf.reasoningBlockId !== blockId && buf.reasoning) flushSegBuf(sid);
+    buf.reasoning += chunk;
+    if (blockId) buf.reasoningBlockId = blockId;
+    if (typeof seq === 'number' && seq > 0) buf.reasoningSeq = seq;
+    if (tag) buf.reasoningTag = tag;
+  }
   enqueueFrame(messageKey(sid, kind), () => {
     try {
       flushSegBuf(sid);
@@ -97,9 +121,9 @@ function bindStreamListeners(): void {
     const sid = resolveTargetSession(evt.sessionId);
     if (!sid) return;
     if (evt.kind === 'TextDelta' && evt.textDelta) {
-      queueSegDelta(sid, 'text', evt.textDelta);
+      queueSegDelta(sid, 'text', evt.textDelta, evt.blockId ?? null, evt.seq ?? null, evt.tag ?? 'pending');
     } else if (evt.kind === 'ReasoningDelta' && evt.textDelta) {
-      queueSegDelta(sid, 'reasoning', evt.textDelta);
+      queueSegDelta(sid, 'reasoning', evt.textDelta, evt.blockId ?? null, evt.seq ?? null, evt.tag ?? 'process');
     }
   });
   haloEventBus.on<TurnEventPayload>('agent:turn-event', (evt) => {
@@ -111,6 +135,7 @@ function bindStreamListeners(): void {
     const p = evt.payload || {};
     const it = typeof p['iteration'] === 'number' ? (p['iteration'] as number) : Number(p['iteration']) || 0;
     flushSegBufSync(sid);
+    try { demotePending(t); } catch { /* optimistic tag demote never blocks */ }
     if (it > 0) t.curIteration = it;
     else if (t.curIteration <= 0) t.curIteration = 1;
     // need23-R7：上一 iteration 中已落盘的工具卡直接移除（内容已在稳态折叠栏里），

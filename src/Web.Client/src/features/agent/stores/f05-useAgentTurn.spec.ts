@@ -75,6 +75,11 @@ describe('useAgentTurn.sendPrompt（mock api）', () => {
     const store = useAgentTurn();
     expect(await store.sendPrompt('hello')).toBe(false);
   });
+  it('历史版本只读拒绝发送且不可重试（HISTORY_READONLY）', async () => {
+    mockedStart.mockResolvedValue({ ok: false, code: 'HISTORY_READONLY', message: '历史版本只读，不可继续对话，可分支' });
+    const store = useAgentTurn();
+    expect(await store.sendPrompt('hello')).toBe(false);
+  });
   it('连点第二发直接忽略（不起新轮）', async () => {
     mockedStart.mockResolvedValue({ ok: true, code: '', message: '', data: 't1' });
     const store = useAgentTurn();

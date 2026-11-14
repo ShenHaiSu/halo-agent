@@ -51,19 +51,34 @@ interface Entry {
   oversizedHtml: string;
 }
 
-// 每 cacheKey 一个条目；上限 64（超出淘汰最早插入的，防 seg 频繁新建时无限增长）
+// 每 cacheKey（稳态传 blockId，直播传 seg.key）一个条目；上限 64，收起标脏不淘汰。
+import { isBlockDirty, markBlockClean } from '@features/session/utils/markdownDirty';
 const CACHE_LIMIT = 64;
 const store = new Map<string, Entry>();
+
+function evictIfNeeded(): void {
+  if (store.size <= CACHE_LIMIT) return;
+  for (const k of store.keys()) {
+    if (!isBlockDirty(k)) {
+      store.delete(k);
+      if (store.size <= CACHE_LIMIT) return;
+    }
+  }
+  if (store.size > CACHE_LIMIT) {
+    const oldest = store.keys().next();
+    if (!oldest.done) {
+      markBlockClean(oldest.value);
+      store.delete(oldest.value);
+    }
+  }
+}
 
 function entryOf(key: string): Entry {
   let e = store.get(key);
   if (!e) {
     e = { blockCache: createBlockCache(), lastSource: '', prepared: [], oversizedFor: '', oversizedHtml: '' };
     store.set(key, e);
-    if (store.size > CACHE_LIMIT) {
-      const oldest = store.keys().next();
-      if (!oldest.done) store.delete(oldest.value);
-    }
+    evictIfNeeded();
   }
   return e;
 }

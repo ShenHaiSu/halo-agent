@@ -7,6 +7,7 @@ import {
   activeSessionId,
   dirtyPersisted,
   ensureTurn,
+  finalizePending,
   getTurn,
   lastTurnSnapshot,
   markIterationTextPersisted,
@@ -131,7 +132,15 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     console.warn('[agent-turn] finish flush failed:', e);
   }
   try {
-    lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
+    finalizePending(t);
+  } catch { /* optimistic tag finalize never blocks turn end */ }
+  try {
+    const tags: Record<string, string> = {};
+    for (const s of t.segs) {
+      if (s.blockId && s.tag) tags[s.blockId] = String(s.tag);
+      else if (s.key && s.tag) tags[s.key] = String(s.tag);
+    }
+    lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now(), tags };
     haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
   } catch (e) {
     console.warn('[agent-turn] snapshot failed:', e);
@@ -329,6 +338,23 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       toast('error', t.lastError);
       void finishTurn(sid, { keepOnFailure: true });
       agentRuntime().generateTitle(sid);
+      break;
+    }
+    case 'BlockTagUpdated': {
+      const bid = str(payload['blockId']);
+      const tag = str(payload['tag']);
+      const reason = str(payload['reason']);
+      if (reason !== 'demote' && reason !== 'finalize' && reason !== 'flip') break;
+      if (tag !== 'process' && tag !== 'final') break;
+      if (!bid) break;
+      let touched = false;
+      for (const s of t.segs) {
+        if (String(s.blockId || '') === bid || String(s.key || '') === bid) {
+          s.tag = tag;
+          touched = true;
+        }
+      }
+      if (touched) touch(t);
       break;
     }
     default:

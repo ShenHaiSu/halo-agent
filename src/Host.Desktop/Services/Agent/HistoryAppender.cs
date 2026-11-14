@@ -211,7 +211,9 @@ public sealed partial class AgentOrchestrator
             workspaceId,
             UsageRecorder.SourceAgent
         );
-
+        var timelineResult = TimelineFinalizer.Finalize(ctx, iteration, ctx.StreamTruncated);
+        var timelineBlocks = timelineResult.Blocks;
+        var timelineTurn = timelineResult.Turn;
         try
         {
             await _sessionService
@@ -228,8 +230,32 @@ public sealed partial class AgentOrchestrator
             PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
             // need12-P0：assistant 落盘时被取消，本 iteration 已落袋，保住前面行。
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
         }
+        try
+        {
+            if (_storageManager != null)
+            {
+                var historyStore = new Infrastructure.Storage.SessionHistoryStore(_storageManager);
+                var messagesForDb = new List<Core.Models.UnifiedChatMessage>();
+                if (ctx.UserMessage != null)
+                    messagesForDb.Add(ctx.UserMessage);
+                messagesForDb.Add(assistantMessage);
+                await historyStore
+                    .AppendTurnAsync(
+                        workspaceId,
+                        sessionId,
+                        messagesForDb,
+                        timelineBlocks,
+                        timelineTurn,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+        }
+        catch { }
         PublishTurnEvent(
             sessionId,
             "AssistantMessagePersisted",
@@ -243,9 +269,39 @@ public sealed partial class AgentOrchestrator
                 cachedTokens = ctx.CurrentUsage?.CachedInputTokens ?? 0,
                 billedPrompt = ctx.TurnBilledIn,
                 billedCompletion = ctx.TurnBilledOut,
-                updatedAtUtc = DateTime.UtcNow.ToString("o")
+                updatedAtUtc = DateTime.UtcNow.ToString("o"),
+                blocks = timelineBlocks,
+                turnId = timelineTurn.TurnId
             }
         );
+        try
+        {
+            foreach (var b in timelineBlocks)
+            {
+                if (b == null || string.IsNullOrWhiteSpace(b.BlockId))
+                {
+                    continue;
+                }
+                bool isFinal = string.Equals(
+                    b.Tag,
+                    Core.Models.TimelineBlockTag.Final,
+                    StringComparison.Ordinal
+                );
+                PublishTurnEvent(
+                    sessionId,
+                    "BlockTagUpdated",
+                    new
+                    {
+                        blockId = b.BlockId,
+                        tag = b.Tag,
+                        reason = isFinal
+                            ? Core.Models.TimelineTagReason.Finalize
+                            : Core.Models.TimelineTagReason.Demote
+                    }
+                );
+            }
+        }
+        catch { }
         // need22-P1 T3：空 FunctionName 回包（assistant 之后，保证 tool_calls→tool 先后序）+ EMPTY_TOOL_NAME 连续失败终轮。
         if (emptyNameCids.Count > 0)
         {
@@ -267,6 +323,8 @@ public sealed partial class AgentOrchestrator
                 {
                     PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                     UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                    await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+                        .ConfigureAwait(false);
                     return PhaseOutcome.End(
                         AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)
                     );
@@ -326,6 +384,8 @@ public sealed partial class AgentOrchestrator
                     }
                 );
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Truncated)
+                    .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Truncated(iteration, ctx.ToolExecutions));
             }
         }

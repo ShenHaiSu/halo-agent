@@ -675,6 +675,8 @@ public sealed partial class AgentOrchestrator
                 }
             );
             FlushUsageRows(ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Truncated(iteration, ctx.ToolExecutions)),
                 false

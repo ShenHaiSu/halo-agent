@@ -9,12 +9,14 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
+import type { TurnSummary, TimelineBlockContent, TimelineBlockContentsResponse, TimelineToolResult } from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, getTurn, turns } from '@features/agent/stores/model';
-import { isPendingForSession, matchConfirmed, toPendingMessage } from '@features/session/utils/pendingUser';
+import { isPendingForSession, matchConfirmed, matchConfirmedBySummary, toPendingMessage } from '@features/session/utils/pendingUser';
+import type { PendingUser } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { rememberPendingAlias } from '@features/session/utils/userTurn';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
@@ -36,6 +38,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     { flush: 'sync' }
   );
   const sessionMessages = ref<UnifiedChatMessage[]>([]);
+  const timelineSummaries = ref<TurnSummary[]>([]);
+  const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
+  const toolResultCache = ref<Record<string, TimelineToolResult>>({});
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -58,7 +63,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null;
     }
   }
-  /** need02-P1：对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
+  const isV2Timeline = computed<boolean>(() => {
+    const s = activeSession.value as unknown as { historyVersion?: number } | null;
+    if (!s) return false;
+    return (s.historyVersion ?? 0) === 2;
+  });
+  /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
+    try {
+      rememberPendingAlias(String(confirmedId || ''), String(p.key || ''));
+    } catch {
+      /* alias never blocks */
+    }
+    need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
+    dropPendingUser(sid);
+  }
   function tryConfirmPending(sid: string): void {
     try {
       if (!isP1On()) return;
@@ -67,16 +87,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const t = turns.value[id];
       const p = t?.pendingUser;
       if (!p || p.status !== 'sending') return;
+      // jsonl 启发式保持第一优先级（v1 主路径）。
       const hit = matchConfirmed(p, sessionMessages.value);
       if (hit) {
-        // need02-P2: remember alias so UserTurn key stays on the pending key after confirm (05 R3).
-        try {
-          rememberPendingAlias(String((hit as UnifiedChatMessage).id || ''), String(p.key || ''));
-        } catch {
-          /* alias never blocks */
-        }
-        need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId: (hit as UnifiedChatMessage).id });
-        dropPendingUser(id);
+        confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
+        return;
+      }
+      // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
+      const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
+      if (summaryHit) {
+        confirmPendingHit(id, p, String(p.requestId || ''));
       }
     } catch {
       /* 对账永不阻断 */
@@ -97,6 +117,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         // 这里先隐藏 pending，保证无闪烁双条。
         return base;
       }
+      // v2 下 jsonl 为空时走摘要源命中即隐藏，避免 user 双条 + sending 常亮。
+      if (matchConfirmedBySummary(p, timelineSummaries.value)) return base;
     } catch {
       /* fallthrough */
     }
@@ -174,6 +196,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const activeSession = computed<SessionMetadata | null>(() => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
+  });
+
+  /** S3 F4：历史版本只读（v1 HistoryVersion !== 2，不可继续/截断/压缩，可分支；v2 全放行）。 */
+  const isHistoryReadonly = computed<boolean>(() => {
+    const s = activeSession.value as unknown as { historyVersion?: number } | null;
+    if (!s) return false;
+    const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
+    return v !== 2;
   });
 
   const filteredSessions = computed<SessionMetadata[]>(() => {
@@ -267,7 +297,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           } else {
             sessions.value = [];
             sessionMessages.value = [];
+            timelineSummaries.value = [];
             budgetStatus.value = null;
+            budgetError.value = null;
           }
         }
         persistLastActive();
@@ -346,13 +378,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       /* 对账失败只打日志，不阻断 */
     }
   }
-
   async function loadSessions(workspaceId: string): Promise<void> {
     if (!workspaceId) {
       sessions.value = [];
       activeSessionId.value = '';
       sessionMessages.value = [];
+      timelineSummaries.value = [];
       budgetStatus.value = null;
+      budgetError.value = null;
       return;
     }
 
@@ -387,7 +420,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           await refreshBudget();
         } else {
           sessionMessages.value = [];
+          timelineSummaries.value = [];
           budgetStatus.value = null;
+          budgetError.value = null;
         }
       }
     } catch (err) {
@@ -426,9 +461,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           (newSess as unknown as { updatedAtUtc: string }).updatedAtUtc = (newSess as unknown as { createdAtUtc: string }).createdAtUtc;
         sessions.value = [newSess, ...sessions.value];
         touchSessionTime(newSess.id, (newSess as unknown as { createdAtUtc: string }).createdAtUtc);
+        // A全量：新建即换发 epoch，中断旧会话在途回包，旧 epoch 响应全部丢弃不覆盖新会话视图
+        const sessionStore = useSessionStore();
+        const { epoch, signal } = sessionStore.beginSelect(newSess.id);
         activeSessionId.value = newSess.id;
+        // A全量：同步清空历史/摘要/缓存/预算，视图立即进空态，不等异步回包
         sessionMessages.value = [];
-        await refreshBudget();
+        timelineSummaries.value = [];
+        budgetStatus.value = null;
+        budgetError.value = null;
+        try {
+          clearTimelineCaches();
+        } catch {
+          /* cache clear never blocks */
+        }
+        await refreshBudget({ signal, epoch });
         persistLastActive();
         return newSess;
       }
@@ -494,7 +541,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           } else {
             activeSessionId.value = '';
             sessionMessages.value = [];
+            timelineSummaries.value = [];
             budgetStatus.value = null;
+            budgetError.value = null;
             persistLastActive();
           }
         }
@@ -509,13 +558,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function loadSessionMessages(sessionId: string, opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
+      timelineSummaries.value = [];
       return;
+    }
+    try {
+      clearTimelineCaches();
+    } catch {
+      /* cache clear never blocks */
     }
     // need22-P2 F3：无显式 epoch 时按进入时 epoch 快照；旧 epoch 响应丢弃不覆盖视图
     const sessionStore = useSessionStore();
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
+    // A全量：await 之前同步清空，视图立即进空态，切会话不闪旧历史
+    sessionMessages.value = [];
+    timelineSummaries.value = [];
+    budgetStatus.value = null;
+    budgetError.value = null;
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
@@ -529,7 +589,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       } else {
         sessionMessages.value = [];
       }
-      // need02-P1：首次回包对账转正（key 不变，只换 id/时间）。
+      // 首次回包对账转正（key 不变，只换 id/时间；v2 摘要源二次对账在摘要回包后）。
+      tryConfirmPending(sid);
+      await loadTimelineSummary(sid);
       tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
@@ -541,6 +603,118 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } finally {
       loadingMessages.value = false;
     }
+  }
+
+  async function loadTimelineSummary(sessionId: string): Promise<void> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = (sessionId || '').trim();
+    if (!wid || !sid) {
+      timelineSummaries.value = [];
+      return;
+    }
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as { getTimelineSummary?: (w: string, s: string) => Promise<{ ok: boolean; data?: TurnSummary[] }> };
+      if (typeof api.getTimelineSummary !== 'function') {
+        timelineSummaries.value = [];
+        return;
+      }
+      const res = await api.getTimelineSummary(wid, sid);
+      if (res && res.ok && Array.isArray(res.data)) {
+        timelineSummaries.value = res.data;
+      } else {
+        timelineSummaries.value = [];
+      }
+    } catch {
+      timelineSummaries.value = [];
+    }
+  }
+
+  async function getTurnBlockIds(turnId: string): Promise<string[]> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const tid = (turnId || '').trim();
+    if (!wid || !sid || !tid) return [];
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as { getTurnBlockIds?: (w: string, s: string, t: string) => Promise<{ ok: boolean; data?: string[] }> };
+      if (typeof api.getTurnBlockIds !== 'function') return [];
+      const res = await api.getTurnBlockIds(wid, sid, tid);
+      if (res && res.ok && Array.isArray(res.data)) return res.data;
+    } catch {
+      /* miss -> empty, caller shows placeholder */
+    }
+    return [];
+  }
+
+  async function getBlockContents(blockIds: string[]): Promise<{ items: Record<string, TimelineBlockContent>; missing: string[] }> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const ids = Array.isArray(blockIds) ? blockIds.filter((s) => s && s.trim()) : [];
+    const items: Record<string, TimelineBlockContent> = {};
+    const uncached: string[] = [];
+    for (const id of ids) {
+      const hit = blockContentsCache.value[id];
+      if (hit) items[id] = hit;
+      else if (!uncached.includes(id)) uncached.push(id);
+    }
+    let missing: string[] = ids.filter((id) => !items[id]);
+    if (uncached.length > 0 && wid && sid) {
+      try {
+        const bridge = getHostBridge();
+        const api = bridge as unknown as {
+          getBlockContents?: (w: string, s: string, b: string[]) => Promise<{ ok: boolean; data?: TimelineBlockContentsResponse }>;
+        };
+        if (typeof api.getBlockContents === 'function') {
+          const res = await api.getBlockContents(wid, sid, uncached);
+          if (res && res.ok && res.data) {
+            const fetched = res.data.items || {};
+            for (const [k, v] of Object.entries(fetched)) {
+              items[k] = v as TimelineBlockContent;
+              blockContentsCache.value = { ...blockContentsCache.value, [k]: v as TimelineBlockContent };
+            }
+            missing = [...(res.data.missing || [])];
+            for (const id of uncached) {
+              if (!items[id] && !missing.includes(id)) missing.push(id);
+            }
+          }
+        }
+      } catch {
+        /* fetch fail -> treat uncached as missing */
+      }
+    }
+    return { items, missing };
+  }
+
+  async function getToolResult(turnId: string, callId: string): Promise<TimelineToolResult | null> {
+    const wid = activeWorkspaceId.value || '';
+    const sid = activeSessionId.value || '';
+    const tid = (turnId || '').trim();
+    const cid = (callId || '').trim();
+    if (!wid || !sid || !tid || !cid) return null;
+    const key = `${tid}::${cid}`;
+    const hit = toolResultCache.value[key];
+    if (hit) return hit;
+    try {
+      const bridge = getHostBridge();
+      const api = bridge as unknown as {
+        getToolResult?: (w: string, s: string, t: string, c: string) => Promise<{ ok: boolean; data?: TimelineToolResult }>;
+      };
+      if (typeof api.getToolResult !== 'function') return null;
+      const res = await api.getToolResult(wid, sid, tid, cid);
+      if (res && res.ok && res.data) {
+        toolResultCache.value = { ...toolResultCache.value, [key]: res.data };
+        return res.data;
+      }
+    } catch {
+      /* miss -> null */
+    }
+    return null;
+  }
+
+  function clearTimelineCaches(): void {
+    blockContentsCache.value = {};
+    toolResultCache.value = {};
   }
 
   async function appendMessage(msg: UnifiedChatMessage): Promise<boolean> {
@@ -669,6 +843,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // need05-03：/compact 统一入口（取 activeProvider/Model 传参，成功后重拉消息与预算），供命令与按钮共用
   async function compactSession(sessionId: string, keepLastGroups = 6): Promise<boolean> {
     if (!activeWorkspaceId.value || !sessionId) return false;
+    if (isHistoryReadonly.value) return false;
     try {
       const bridge = getHostBridge();
       const pId = configStore.activeProvider?.id || '';
@@ -740,6 +915,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeAnchor = true
   ): Promise<{ ok: boolean; replayText?: string; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
+    if (isHistoryReadonly.value) return { ok: false, message: '历史版本只读，不可截断，可分支', code: 'HISTORY_READONLY' };
     // need02-P1：先清本 session pending，避免旧乐观串入新历史。
     try {
       dropPendingUser(activeSessionId.value);
@@ -857,7 +1033,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sessions,
     activeSessionId,
     activeSession,
+    isHistoryReadonly,
+    isV2Timeline,
     sessionMessages,
+    timelineSummaries,
     /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */
     pendingOverlayMessages,
     budgetStatus,
@@ -886,6 +1065,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     togglePinSession,
     deleteSession,
     loadSessionMessages,
+    loadTimelineSummary,
+    getTurnBlockIds,
+    getBlockContents,
+    getToolResult,
+    clearTimelineCaches,
+    blockContentsCache,
     healSessionHistory,
     deleteMessage,
     truncateHistory,

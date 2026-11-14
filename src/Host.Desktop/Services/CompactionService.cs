@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Config;
 using Host.Desktop.Infrastructure.Network;
+using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.LlmGateway;
 using Host.Desktop.LlmGateway.Models;
 
@@ -247,29 +248,84 @@ public sealed class CompactionService : ICompactionService
         if (oldCount == 0)
             return null;
 
-        // 3. body 拼接（tool 参数 ArgumentsJson 同截 2000）
-        var body = new StringBuilder();
-        foreach (var g in oldGroups)
+        // 3. body 拼接（tool 参数 ArgumentsJson 同截 2000；v2 D8=B：process 折计数、final 保留）
+        bool isV2 = false;
+        try
         {
-            foreach (var m in g.Messages)
+            var v2sess = await service
+                .GetSessionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            isV2 = v2sess != null && v2sess.HistoryVersion == 2;
+        }
+        catch
+        {
+            isV2 = false;
+        }
+        var body = new StringBuilder();
+        if (isV2)
+        {
+            foreach (var g in oldGroups)
             {
-                ct.ThrowIfCancellationRequested();
-                body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
-                if (m.ToolCalls != null && m.ToolCalls.Count > 0)
+                foreach (var m in g.Messages)
                 {
-                    foreach (var tc in m.ToolCalls)
-                        body.Append(
-                                Truncate(
-                                    tc.FunctionName + ":" + (tc.ArgumentsJson ?? string.Empty),
-                                    TruncPerMessage
-                                )
-                            )
-                            .Append(' ');
+                    ct.ThrowIfCancellationRequested();
+                    string role = (m.Role ?? string.Empty).ToLowerInvariant();
+                    if (string.Equals(role, "tool", StringComparison.Ordinal))
+                    {
+                        body.AppendLine("[工具结果折叠：1条过程块，计数保留，原文不展开]");
+                    }
+                    else if (string.Equals(role, "assistant", StringComparison.Ordinal))
+                    {
+                        if (m.ToolCalls != null && m.ToolCalls.Count > 0)
+                        {
+                            foreach (var tc in m.ToolCalls)
+                                body.Append(
+                                        Truncate(
+                                            tc.FunctionName
+                                                + ":"
+                                                + (tc.ArgumentsJson ?? string.Empty),
+                                            TruncPerMessage
+                                        )
+                                    )
+                                    .Append(' ');
+                            body.AppendLine();
+                        }
+                        // final 保留：正文全留（截 2000 与旧盘一致）
+                        body.Append("[助手正文保留] ")
+                            .AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
+                    }
+                    else
+                    {
+                        body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
+                        body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
+                    }
                 }
-                body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                // need22-B02：TODO（本期不改，契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.2）：
-                // 压缩摘要里的 [[skill:scope/name]] 标记属于噪音，未来可在此处用
-                // SkillActivationExpander.StripMarkers(m.Content) 去掉；当前 marker 短、语义可接受，保持原样。
+            }
+        }
+        else
+        {
+            foreach (var g in oldGroups)
+            {
+                foreach (var m in g.Messages)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
+                    if (m.ToolCalls != null && m.ToolCalls.Count > 0)
+                    {
+                        foreach (var tc in m.ToolCalls)
+                            body.Append(
+                                    Truncate(
+                                        tc.FunctionName + ":" + (tc.ArgumentsJson ?? string.Empty),
+                                        TruncPerMessage
+                                    )
+                                )
+                                .Append(' ');
+                    }
+                    body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
+                    // need22-B02：TODO（本期不改，契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.2）：
+                    // 压缩摘要里的 [[skill:scope/name]] 标记属于噪音，未来可在此处用
+                    // SkillActivationExpander.StripMarkers(m.Content) 去掉；当前 marker 短、语义可接受，保持原样。
+                }
             }
         }
 
@@ -356,6 +412,49 @@ public sealed class CompactionService : ICompactionService
         string backupFileName = await repository
             .BackupMessagesJsonlAsync(workspaceId, sessionId, ct)
             .ConfigureAwait(false);
+        // S3 M12：v2 压缩前整库 checkpoint 备份 .bak（成功后删，失败回滚）
+        bool isV2 = false;
+        string? dbBakPath = null;
+        SessionHistoryStore? v2store = null;
+        try
+        {
+            var m0 = await service
+                .GetSessionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            isV2 = m0 != null && m0.HistoryVersion == 2;
+            if (isV2)
+            {
+                var storage = repository.Storage;
+                var db = new SessionHistoryDb(storage);
+                try
+                {
+                    db.Checkpoint(workspaceId, sessionId);
+                }
+                catch { }
+                string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
+                dbBakPath = storage.GetHistoryBackupPath(workspaceId, sessionId);
+                if (File.Exists(dbPath))
+                {
+                    try
+                    {
+                        File.Copy(dbPath, dbBakPath, overwrite: true);
+                    }
+                    catch
+                    {
+                        dbBakPath = null;
+                    }
+                }
+                else
+                    dbBakPath = null;
+                v2store = new SessionHistoryStore(db);
+            }
+        }
+        catch
+        {
+            isV2 = false;
+            dbBakPath = null;
+            v2store = null;
+        }
         try
         {
             await repository
@@ -365,6 +464,142 @@ public sealed class CompactionService : ICompactionService
         catch (Exception ex)
         {
             return CompactionResult.Fail("COMPACT_REWRITE_ERROR", "重写失败（备份已保留）：" + ex.Message);
+        }
+        // S3 v2：DB 同步（DELETE old turns/blocks + INSERT summary turn/block + 重写 messages，单事务；失败 .bak 恢复）
+        if (isV2 && v2store != null)
+        {
+            try
+            {
+                await v2store!
+                    .RewriteMessagesAsync(workspaceId, sessionId, newMessages, ct)
+                    .ConfigureAwait(false);
+                // old turns：不在 Anchor/Tail 中的 turn_seq（按 user Id 映射）
+                var summaries = await v2store!
+                    .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                    .ConfigureAwait(false);
+                var keepUserIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var m in snapshot.AnchorMessages)
+                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                        keepUserIds.Add(m.Id);
+                foreach (var m in snapshot.TailMessages)
+                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                        keepUserIds.Add(m.Id);
+                foreach (var m in newMessages)
+                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                        keepUserIds.Add(m.Id);
+                // summaryMsg 本身是 user，加入保持
+                keepUserIds.Add(summaryMsg.Id);
+                long minDoomed = long.MaxValue;
+                foreach (var s in summaries)
+                {
+                    string tid = s.TurnId ?? string.Empty;
+                    string suffix = tid.StartsWith("uturn-", StringComparison.Ordinal)
+                        ? tid.Substring(6)
+                        : tid;
+                    if (
+                        !keepUserIds.Contains(suffix)
+                        && !string.Equals(suffix, summaryMsg.Id, StringComparison.Ordinal)
+                    )
+                    {
+                        if (s.TurnSeq < minDoomed)
+                            minDoomed = s.TurnSeq;
+                    }
+                }
+                if (minDoomed != long.MaxValue)
+                    await v2store!
+                        .TruncateFromTurnSeqAsync(workspaceId, sessionId, minDoomed, ct)
+                        .ConfigureAwait(false);
+                // 插入摘要轮（final 保留：summary 作为 final 文本块）
+                try
+                {
+                    var sumTurnId = "uturn-" + summaryMsg.Id;
+                    long seqBase = 0;
+                    try
+                    {
+                        var cur = await v2store!
+                            .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                            .ConfigureAwait(false);
+                        foreach (var s in cur)
+                            if (s.TurnSeq > seqBase)
+                                seqBase = s.TurnSeq;
+                    }
+                    catch { }
+                    var sumTurn = new Host.Desktop.Core.Models.TurnSummary
+                    {
+                        TurnId = sumTurnId,
+                        TurnSeq = seqBase + 1,
+                        IterEnd = 1,
+                        UserPreview = summary.Length > 15 ? summary.Substring(0, 15) : summary,
+                        UserContent = summary,
+                        FinalBlockId = "compact:" + sumTurnId + ":final",
+                        FinalPreview = summary.Length > 60 ? summary.Substring(0, 60) : summary,
+                        Blocks = 1,
+                        Tools = 0,
+                        Status = Host.Desktop.Core.Models.TimelineTurnStatus.Completed,
+                        UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
+                    };
+                    var sumBlock = new Host.Desktop.Core.Models.TimelineBlock
+                    {
+                        BlockId = sumTurn.FinalBlockId!,
+                        TurnId = sumTurnId,
+                        Iteration = 1,
+                        Sequence = 1,
+                        Kind = Host.Desktop.Core.Models.TimelineBlockKind.Text,
+                        Tag = Host.Desktop.Core.Models.TimelineBlockTag.Final,
+                        CharCount = summary.Length,
+                        Preview = summary.Length > 200 ? summary.Substring(0, 200) : summary,
+                        Content = summary,
+                    };
+                    await v2store!
+                        .AppendTurnAsync(
+                            workspaceId,
+                            sessionId,
+                            new List<Host.Desktop.Core.Models.UnifiedChatMessage> { summaryMsg },
+                            new List<Host.Desktop.Core.Models.TimelineBlock> { sumBlock },
+                            sumTurn,
+                            ct
+                        )
+                        .ConfigureAwait(false);
+                }
+                catch { }
+                try
+                {
+                    await v2store!
+                        .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch { }
+                // 成功后删 .bak
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(dbBakPath) && File.Exists(dbBakPath))
+                        File.Delete(dbBakPath);
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                // 失败回滚 .bak
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(dbBakPath) && File.Exists(dbBakPath))
+                    {
+                        var storage = repository.Storage;
+                        string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
+                        try
+                        {
+                            new SessionHistoryDb(storage).Checkpoint(workspaceId, sessionId);
+                        }
+                        catch { }
+                        File.Copy(dbBakPath, dbPath, overwrite: true);
+                    }
+                }
+                catch { }
+                return CompactionResult.Fail(
+                    "COMPACT_REWRITE_ERROR",
+                    "DB 同步失败已回滚（备份保留）：" + ex.Message
+                );
+            }
         }
         var meta = await service.GetSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
         if (meta != null)

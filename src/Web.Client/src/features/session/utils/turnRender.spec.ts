@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { buildUserTurns } from './userTurn';
-import { buildTurnRenderView, groupOf, isLiveOwner, pendingTailSlot, stepViewOf, turnStepAnchorKey } from './turnRender';
+import { buildTurnRenderView, groupOf, groupOfStep, isLiveOwner, pendingTailSlot, stepViewOf, turnStepAnchorKey } from './turnRender';
+import { renderHtmlSmart } from './markdownRender';
 
 const u = (id: string, content: string): UnifiedChatMessage =>
   ({ id, role: 'user', content, createdAtUtc: '2026-10-26T11:59:00Z' }) as unknown as UnifiedChatMessage;
@@ -72,5 +73,23 @@ describe('turnRender 适配器', () => {
     expect(isLiveOwner(items[0], items)).toBe(false);
     expect(isLiveOwner(items[2], items)).toBe(true);
     expect(isLiveOwner(items[1], items)).toBe(false);
+  });
+});
+
+describe('轮内分组与稳态渲染入口', () => {
+  it('groupOfStep：assistantId 优先作键，缺失时用轮内锚点兜底', () => {
+    const turn = firstTurn([u('u1', 'x'), a('a1', '第一段'), t('t1', 'c1', 'out'), a('a2', '末段')]);
+    const g0 = groupOfStep(turn.key, turn.steps[0]);
+    expect(g0.assistantId).toBe('a1');
+    expect(g0.key).toBe('a1');
+    expect(g0.toolMessages.map((m) => String(m.id))).toEqual(['t1']);
+    const g1 = groupOfStep(turn.key, { ...turn.steps[1], assistantId: '' });
+    expect(g1.key).toBe(`${turn.key}:step-${turn.steps[1].iteration}`);
+  });
+
+  it('renderHtmlSmart：缓存开关只影响路径不影响输出', () => {
+    const src = '# 标题\n\n正文 **加粗**';
+    expect(renderHtmlSmart(src, true)).toBe(renderHtmlSmart(src, false));
+    expect(renderHtmlSmart('', true)).toBe(renderHtmlSmart('', false));
   });
 });

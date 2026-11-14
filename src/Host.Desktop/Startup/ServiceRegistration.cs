@@ -38,6 +38,8 @@ public static class ServiceRegistration
         p.AddSingleton<ISessionRepository>(sp => new SessionRepository(
             sp.GetRequiredService<StoragePathManager>()
         ));
+        p.AddSingleton(sp => new SessionHistoryDb(sp.GetRequiredService<StoragePathManager>()));
+        p.AddSingleton(sp => new SessionHistoryStore(sp.GetRequiredService<SessionHistoryDb>()));
     }
 
     public static void AddConfig(HaloServiceProvider p)

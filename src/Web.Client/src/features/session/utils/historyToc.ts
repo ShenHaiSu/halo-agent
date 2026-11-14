@@ -154,6 +154,7 @@ export function labelOfEntry(e: TimelineEntry): string {
   return '[空回复]';
 }
 
+/** S3 增补 G-1：旧链目录计算仅 v1 兼容保留；v2 会话目录只用摘要源（HistoryTocPanel.displayTocItems），不再调用本函数。 */
 export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): TocItem[] {
   // 预扫描：确定每轮最后一个 assistant 下标（只看每轮末条用）
   const rounds: number[] = [];
@@ -199,14 +200,8 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
     const display = toDisplayText(text);
     const label = labelOfEntry(e);
     const uturn = e.kind === 'user-turn' ? (e as unknown as { turn?: Record<string, unknown> }).turn : null;
-    const toolCount =
-      e.kind === 'turn' ? (e.group?.toolMessages || []).length : uturn ? Number(uturn.toolCount || 0) : 0;
-    const hasReasoning =
-      e.kind === 'turn'
-        ? !!e.group?.reasoning
-        : uturn
-          ? Number(uturn.reasoningChars || 0) > 0
-          : false;
+    const toolCount = e.kind === 'turn' ? (e.group?.toolMessages || []).length : uturn ? Number(uturn.toolCount || 0) : 0;
+    const hasReasoning = e.kind === 'turn' ? !!e.group?.reasoning : uturn ? Number(uturn.reasoningChars || 0) > 0 : false;
     out.push({
       anchorKey: e.key,
       role,

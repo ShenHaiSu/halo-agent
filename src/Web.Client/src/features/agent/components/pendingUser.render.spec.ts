@@ -1,8 +1,9 @@
-/** need02-P1：乐观 user 渲染（06 §6.2 组件断言）。 */
+/** 乐观 user 渲染（组件断言）。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
 import TimelineRow from '@features/agent/components/TimelineRow.vue';
+import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
 function mountUserRow(msgId: string, pendingStatus: string) {
   const item = {
@@ -10,25 +11,17 @@ function mountUserRow(msgId: string, pendingStatus: string) {
     kind: 'user',
     msg: { id: msgId, role: 'user', content: 'hi', createdAtUtc: new Date().toISOString(), images: [] },
   } as never;
+  const stub = {
+    ...timelineViewFallback(),
+    isPending: (m: unknown) => String((m as { id?: string })?.id || '').startsWith('pending-'),
+    pendingStatus: () => pendingStatus,
+  };
   return mount(TimelineRow, {
-    props: {
-      item,
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      isPending: (m: unknown) => String((m as { id?: string })?.id || '').startsWith('pending-'),
-      pendingStatus: () => pendingStatus,
+    props: { item },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
     },
-    global: { plugins: [naive] },
   });
 }
 

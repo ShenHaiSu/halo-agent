@@ -174,6 +174,18 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            try
+            {
+                var meta = await _workspaceSessionService
+                    .GetSessionAsync(workspaceId, sessionId)
+                    .ConfigureAwait(false);
+                if (meta != null && meta.HistoryVersion == 2)
+                    return BridgeResponse<List<UnifiedChatMessage>>.Fail(
+                        "USE_TIMELINE_API",
+                        "请使用 getTimelineSummary/getBlockContents"
+                    );
+            }
+            catch { }
             var messages = await _workspaceSessionService
                 .GetSessionMessagesAsync(workspaceId, sessionId)
                 .ConfigureAwait(false);
@@ -194,6 +206,20 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            try
+            {
+                var meta = await _workspaceSessionService
+                    .GetSessionAsync(workspaceId, sessionId)
+                    .ConfigureAwait(false);
+                if (meta != null && meta.HistoryVersion != 2)
+                    return BridgeResponse<bool>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
+                if (
+                    meta != null
+                    && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
+                )
+                    return BridgeResponse<bool>.Fail("SUB_READONLY", "子会话历史只读");
+            }
+            catch { }
             var msg = JsonSerializer.Deserialize<UnifiedChatMessage>(
                 messageJson,
                 HaloJsonOptions.IndentedCamelCase

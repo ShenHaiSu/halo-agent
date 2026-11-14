@@ -38,7 +38,7 @@
  * （后者要求每个子节点是单一组件），所以把「三种 seg 的分支渲染」收进这里。
  */
 import { computed } from 'vue';
-import type { DisplaySeg } from '../composables/useTimeline';
+import type { DisplaySeg } from '../composables/useTimelineProjection';
 import ToolCallCard from './ToolCallCard.vue';
 import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';
 import '@features/agent/composables/smooth-cursor.css';

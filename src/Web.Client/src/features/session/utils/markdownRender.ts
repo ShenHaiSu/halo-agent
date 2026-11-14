@@ -81,3 +81,12 @@ export function clearMarkdownCache(): void {
   mdCacheHits = 0;
   mdCacheMisses = 0;
 }
+/** 稳态渲染：长轮次同一正文反复计算时走 LRU 缓存，直跑为回退。 */
+export function renderHtmlSmart(content: string, useCache: boolean): string {
+  try {
+    if (useCache) return renderMarkdownCached(content);
+  } catch {
+    /* fallthrough 走直跑 */
+  }
+  return renderMarkdown(content);
+}

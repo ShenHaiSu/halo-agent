@@ -41,6 +41,84 @@ export interface SessionMetadata {
   subStatus?: string | null;
   createdByCallId?: string | null;
   taskPrompt?: string | null;
+  historyVersion?: number;
+}
+
+export type TimelineBlockKind = 'reasoning' | 'text' | 'tool_call' | 'tool_result';
+export type TimelineBlockTag = 'process' | 'final' | 'pending';
+export type TimelineTurnStatus = 'completed' | 'truncated' | 'cancelled' | 'error';
+
+export interface TimelineBlock {
+  blockId: string;
+  turnId: string;
+  iteration: number;
+  seq: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  callId?: string | null;
+  charCount: number;
+  preview: string;
+  content: string;
+  contentRef?: string | null;
+  truncated: boolean;
+}
+
+export interface TurnSummary {
+  turnId: string;
+  turnSeq: number;
+  iterEnd: number;
+  userPreview: string;
+  userContent?: string;
+  finalBlockId?: string | null;
+  finalPreview: string;
+  blocks: number;
+  tools: number;
+  failed: number;
+  durationMs: number;
+  chars: number;
+  status: TimelineTurnStatus;
+  lastRequestId: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  anchorKey: string;
+}
+export interface TimelineBlockContent {
+  blockId: string;
+  callId?: string | null;
+  functionName?: string | null;
+  seq?: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  markdown: string;
+  preview: string;
+  truncated: boolean;
+  /** 逐工具成败位：tool_result 行透出；null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
+  argsJson?: string | null;
+  resultText?: string | null;
+  resultRef?: string | null;
+}
+
+export interface TimelineBlockContentsResponse {
+  items: Record<string, TimelineBlockContent>;
+  missing: string[];
+}
+
+export interface TimelineToolResult {
+  argsJson: string;
+  resultText: string;
+  resultRef?: string | null;
+  functionName?: string | null;
+  /** 逐工具成败位：null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
+}
+
+export type TimelineTagReason = 'demote' | 'finalize' | 'flip';
+
+export interface TimelineTagUpdated {
+  blockId: string;
+  tag: TimelineBlockTag;
+  reason: TimelineTagReason;
 }
 
 export interface UnifiedChatMessage {

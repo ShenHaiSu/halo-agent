@@ -60,11 +60,7 @@ export function isPendingForSession(pending: PendingUser | null | undefined, ses
 }
 
 /** pending 是否超时未确认（30s 兜底：仍显示，标 `?`，下次全量拉再试）。 */
-export function isPendingExpired(
-  pending: PendingUser | null | undefined,
-  nowMs: number = Date.now(),
-  timeoutMs = 30_000,
-): boolean {
+export function isPendingExpired(pending: PendingUser | null | undefined, nowMs: number = Date.now(), timeoutMs = 30_000): boolean {
   if (!pending || pending.status !== 'sending') return false;
   const t = Date.parse(String(pending.createdAtUtc || ''));
   if (!Number.isFinite(t)) return false;
@@ -97,7 +93,7 @@ function withinWindow(aIso: string, bIso: string, ms = 60_000): boolean {
  */
 export function matchConfirmed(
   pending: PendingUser | null | undefined,
-  messages: UnifiedChatMessage[] | null | undefined,
+  messages: UnifiedChatMessage[] | null | undefined
 ): UnifiedChatMessage | null {
   if (!pending) return null;
   // failed/superseded/confirmed 不再参与对账（R4：重发新 requestId，旧 pending 不复用）。
@@ -125,6 +121,23 @@ export function matchConfirmed(
       if (imgs < pending.images.length) continue;
     }
     return m;
+  }
+  return null;
+}
+/** 摘要源精确对账：pending.requestId 与 turn.lastRequestId 一致即命中（v2 下 jsonl 为空时的主对账路径）。 */
+export function matchConfirmedBySummary(
+  pending: PendingUser | null | undefined,
+  summaries: Array<{ lastRequestId?: string | null }> | null | undefined
+): { lastRequestId: string } | null {
+  if (!pending || pending.status !== 'sending') return null;
+  const reqId = String(pending.requestId || '').trim();
+  if (!reqId) return null;
+  const list = Array.isArray(summaries) ? summaries : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i] as { lastRequestId?: unknown } | null | undefined;
+    if (s && String((s as { lastRequestId?: unknown }).lastRequestId || '').trim() === reqId) {
+      return s as { lastRequestId: string };
+    }
   }
   return null;
 }

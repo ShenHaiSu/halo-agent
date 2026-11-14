@@ -11,6 +11,9 @@ export interface StreamSeg {
   key: string;
   kind: StreamSegKind;
   iteration: number;
+  blockId?: string | null;
+  seq?: number | null;
+  tag?: string | null;
   /** need02-P2：续写键 requestId（保留 iteration 做明细分节；05 R4 新 requestId 不复用）。 */
   runId?: string;
   text?: string;
@@ -21,6 +24,8 @@ export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
 export interface AgentToolCard {
   callId: string;
+  blockId?: string | null;
+  seq?: number | null;
   functionName: string;
   argsJson: string;
   status: AgentToolCardStatus;
@@ -112,7 +117,7 @@ export interface TurnEventPayload {
 export const turns = ref<Record<string, AgentTurnState>>({});
 /** need04-03/04：本轮去重与归并快照 */
 export const dirtyPersisted = ref<Record<string, boolean>>({});
-export const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number }>>({});
+export const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number; tags?: Record<string, string> }>>({});
 /** need22-P2 F2：已见 requestId（后端回显去重；有界防涨） */
 export const seenRequestIds = ref<Record<string, number>>({});
 /** 当前会话（旧转发自 sessionStore 同步 + session:switched 事件；store 内只读此 ref）。 */
@@ -260,23 +265,56 @@ function segKeyOf(sid: string, kind: string, iteration: number, n: number): stri
 export function tailSeg(t: AgentTurnState): StreamSeg | null {
   return t.segs.length ? t.segs[t.segs.length - 1] : null;
 }
-export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string): void {
+export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string, blockId?: string | null, seq?: number | null, tag?: string | null): void {
   // need02-P2：续写键放宽到 runId（= requestId，兼容旧 iteration 分节；05 R4 新轮新 requestId）。
   const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId) {
+  const tailBid = String(tail?.blockId || '');
+  const curBid = String(blockId || '');
+  const sameBlock = !tailBid || !curBid || tailBid === curBid;
+  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId && sameBlock) {
     tail.text = (tail.text || '') + chunk;
+    if (blockId && !tail.blockId) tail.blockId = blockId;
+    if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
+    if (tag && !tail.tag) tail.tag = tag;
     return;
   }
   const n = t.segs.length;
-  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk });
+  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk, blockId: blockId ?? null, seq: seq ?? null, tag: tag ?? null });
 }
-export function pushToolSeg(t: AgentTurnState, callId: string): void {
+
+export function demotePending(t: AgentTurnState): void {
+  for (const s of t.segs) {
+    if (s.tag === 'pending') s.tag = 'process';
+  }
+}
+
+export function finalizePending(t: AgentTurnState): string | null {
+  let finalId: string | null = null;
+  for (let i = t.segs.length - 1; i >= 0; i--) {
+    const s = t.segs[i];
+    if (s.kind !== 'text') continue;
+    if (!s.text || !s.text.trim()) continue;
+    s.tag = 'final';
+    finalId = s.blockId || s.key;
+    break;
+  }
+  for (const s of t.segs) {
+    if (s.tag === 'pending') s.tag = 'process';
+  }
+  return finalId;
+}
+export function pushToolSeg(t: AgentTurnState, callId: string, blockId?: string | null, seq?: number | null): void {
   if (!callId) return;
   const runId = String(t.requestId || '');
   const tail = tailSeg(t);
-  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration && String(tail.runId || '') === runId) return;
-  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId });
+  if (tail && tail.kind === 'tool' && tail.callId === callId && tail.iteration === t.curIteration && String(tail.runId || '') === runId) {
+    if (blockId && !tail.blockId) tail.blockId = blockId;
+    if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
+    if (!tail.tag) tail.tag = 'process';
+    return;
+  }
+  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId, blockId: blockId ?? null, seq: seq ?? null, tag: 'process' });
 }
 /**
  * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。

@@ -1,5 +1,6 @@
 <template>
   <div class="toc-root" data-testid="history-toc-panel">
+    <div v-if="isHistoryReadonly" class="toc-readonly" data-testid="toc-readonly-banner">历史版本只读，不可继续对话，可分支</div>
     <div class="toc-head">
       <span class="toc-stat">共 {{ totalCount }} 条</span>
       <n-select
@@ -22,6 +23,12 @@
     <div v-if="hintBar" class="toc-hint" data-testid="toc-hint-bar">
       点击气泡跳转到对应消息；点击外部不会关闭本栏，请点右上角 ✕ 关闭。
       <n-button size="tiny" quaternary @click="dismissHint">知道了</n-button>
+    </div>
+    <div v-if="summaryToc.length > 0 && !isV2Toc" class="toc-summary" data-testid="toc-summary">
+      <div class="toc-summary-title">时间轴摘要 · {{ summaryToc.length }} 项</div>
+      <div v-for="item in summaryToc" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
+        <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
+      </div>
     </div>
     <div v-if="loading" class="toc-list" aria-busy="true">
       <div v-for="i in 5" :key="i" class="toc-skeleton" />
@@ -67,7 +74,9 @@ import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import { buildTimelineItems } from '@features/agent/composables/useTimelineGroups';
+import { flatBlocks, processBoxLabel, summaryAnchorKeys } from '@features/session/utils/timelineSummary';
 import { buildHistoryToc, type TocItem } from '@features/session/utils/historyToc';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
 import HistoryBubble from './HistoryBubble.vue';
 
 const PAGE = 200;
@@ -83,6 +92,18 @@ const nav = useTimelineNav();
 const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
+const isHistoryReadonly = computed(() => {
+  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
+  if (!s) return false;
+  const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
+  return v !== 2;
+});
+/** S3 增补 G-1 门控：v2 目录只用摘要源（TurnSummary 直出），旧链计算仅 v1 兼容保留。 */
+const isV2Toc = computed(() => {
+  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
+  if (!s) return false;
+  return (s.historyVersion ?? 0) === 2;
+});
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
 
@@ -121,7 +142,67 @@ const tocItems = computed<TocItem[]>(() =>
     skipSystem: ui.tocSkipSystem,
   })
 );
-const totalCount = computed(() => tocItems.value.length);
+const summaryToc = computed<TocItem[]>(() => {
+  if (isSub.value) return [];
+  const summaries = ws.timelineSummaries as TurnSummary[];
+  if (!Array.isArray(summaries) || summaries.length === 0) return [];
+  const role = ui.tocRole;
+  const out: TocItem[] = [];
+  flatBlocks(summaries).forEach((turn, order) => {
+    const anchors = summaryAnchorKeys(turn.turnId, turn.finalBlockId);
+    const round = order + 1;
+    if (role === 'all' || role === 'user') {
+      out.push({
+        anchorKey: anchors.user,
+        role: 'user',
+        label: turn.userPreview || '提问',
+        fullText: turn.userContent || turn.userPreview,
+        charCount: Array.from(turn.userContent || turn.userPreview || '').length,
+        index: round,
+        round,
+        toolCount: 0,
+        hasReasoning: false,
+        createdAtUtc: '',
+        isRoundHead: false,
+        isRoundTail: false,
+      });
+    }
+    if (role === 'all' || role === 'assistant') {
+      out.push({
+        anchorKey: anchors.process,
+        role: 'assistant',
+        label: `过程 · ${processBoxLabel(turn)}`,
+        fullText: `过程内容 · ${processBoxLabel(turn)}`,
+        charCount: turn.chars,
+        index: round,
+        round,
+        toolCount: turn.tools,
+        hasReasoning: false,
+        createdAtUtc: '',
+        isRoundHead: true,
+        isRoundTail: false,
+      });
+      out.push({
+        anchorKey: anchors.final,
+        role: 'assistant',
+        label: turn.finalPreview ? Array.from(turn.finalPreview).slice(0, 15).join('') : `本轮无正文 · ${turn.tools} 工具`,
+        fullText: turn.finalPreview,
+        charCount: Array.from(turn.finalPreview || '').length,
+        index: round,
+        round,
+        toolCount: 0,
+        hasReasoning: false,
+        createdAtUtc: '',
+        isRoundHead: false,
+        isRoundTail: true,
+      });
+    }
+  });
+  return out;
+});
+/** S3 增补 G-1：v2 目录数据源只用摘要（每轮用户项 + 过程项 + 末轮项），旧链仅 v1 保留。 */
+const displayTocItems = computed<TocItem[]>(() => (isV2Toc.value && !isSub.value ? summaryToc.value : tocItems.value));
+const totalCount = computed(() => displayTocItems.value.length);
 
 const activeKey = ref<string | null>(null);
 const listRef = ref<HTMLElement | null>(null);
@@ -133,7 +214,7 @@ function resetWindow(): void {
   windowSize.value = PAGE;
 }
 watch(
-  [tocItems, activeSessionId],
+  [displayTocItems, activeSessionId],
   () => {
     resetWindow();
     activeKey.value = null;
@@ -141,31 +222,31 @@ watch(
   { immediate: true }
 );
 const visibleItems = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return all;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   const start = Math.max(0, end - windowSize.value);
   return all.slice(start, end);
 });
 const hasMoreBefore = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return false;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return end - windowSize.value > 0;
 });
 const hasMoreAfter = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   if (all.length <= 400) return false;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return end < all.length;
 });
 const remainingBefore = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return Math.max(0, end - windowSize.value);
 });
 const remainingAfter = computed(() => {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   return Math.max(0, all.length - end);
 });
@@ -173,7 +254,7 @@ function showEarlier(): void {
   windowSize.value += PAGE;
 }
 function showLater(): void {
-  const all = tocItems.value;
+  const all = displayTocItems.value;
   const end = windowEnd.value > 0 ? windowEnd.value : all.length;
   windowEnd.value = Math.min(all.length, end + PAGE);
   if (windowEnd.value >= all.length) windowEnd.value = 0;
@@ -188,8 +269,33 @@ function dismissHint(): void {
   ui.markHintShown();
 }
 
+async function ensureMountedTick(key: string): Promise<boolean> {
+  void key;
+  try {
+    await nextTick();
+  } catch {
+    /* tick never blocks nav */
+  }
+  return true;
+}
+
+function fallbackToast(usedKey: string, requestedKey: string): void {
+  void usedKey;
+  void requestedKey;
+  try {
+    message.warning('目标已折叠或删除，已跳转到最近的可视位置');
+  } catch {
+    /* toast never blocks */
+  }
+}
+
 async function onJump(item: TocItem): Promise<void> {
-  const ok = nav.scrollToAnchor(item.anchorKey, { behavior: 'smooth', highlight: true });
+  const ok = await nav.scrollToAnchor(item.anchorKey, {
+    behavior: 'smooth',
+    highlight: true,
+    ensureMounted: ensureMountedTick,
+    onFallback: fallbackToast,
+  });
   if (!ok) {
     message.warning('未找到该消息，可能正在加载或已被压缩');
     return;
@@ -198,10 +304,15 @@ async function onJump(item: TocItem): Promise<void> {
   activeKey.value = item.anchorKey;
 }
 
-function toTop(): void {
-  const first = tocItems.value[0];
+async function toTop(): Promise<void> {
+  const first = displayTocItems.value[0];
   if (!first) return;
-  const ok = nav.scrollToAnchor(first.anchorKey, { behavior: 'smooth', highlight: true });
+  const ok = await nav.scrollToAnchor(first.anchorKey, {
+    behavior: 'smooth',
+    highlight: true,
+    ensureMounted: ensureMountedTick,
+    onFallback: fallbackToast,
+  });
   if (ok) {
     ui.lockJump(1500);
     activeKey.value = first.anchorKey;
@@ -210,11 +321,16 @@ function toTop(): void {
 function toBottom(): void {
   nav.scrollToBottom();
   ui.lockJump(1500);
-  const last = tocItems.value[tocItems.value.length - 1];
+  const last = displayTocItems.value[displayTocItems.value.length - 1];
   if (last) {
     activeKey.value = last.anchorKey;
-    void nextTick(() => {
-      nav.scrollToAnchor(last.anchorKey, { behavior: 'auto', highlight: true });
+    void nextTick(async () => {
+      await nav.scrollToAnchor(last.anchorKey, {
+        behavior: 'auto',
+        highlight: true,
+        ensureMounted: ensureMountedTick,
+        onFallback: fallbackToast,
+      });
     });
   }
 }
@@ -229,6 +345,15 @@ watch(activeSessionId, () => {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+}
+.toc-readonly {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
 }
 .toc-head {
   display: flex;
@@ -258,6 +383,18 @@ watch(activeSessionId, () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.toc-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 8px;
+  border-bottom: 1px dashed var(--border-subtle);
+  margin-bottom: 4px;
+}
+.toc-summary-title {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 .toc-list {
   flex: 1 1 auto;
