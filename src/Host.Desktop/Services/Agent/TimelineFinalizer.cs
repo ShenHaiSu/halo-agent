@@ -103,6 +103,7 @@ public static class TimelineFinalizer
         }
 
         string userPreview = TimelineBlockTracker.BuildPreview(ctx.UserText ?? string.Empty, 15);
+        string userContent = ctx.UserMessage?.Content ?? ctx.UserText ?? string.Empty;
         string now = DateTime.UtcNow.ToString("o");
         var turn = new TurnSummary
         {
@@ -110,6 +111,7 @@ public static class TimelineFinalizer
             TurnSeq = 0,
             IterEnd = iteration,
             UserPreview = userPreview,
+            UserContent = userContent,
             FinalBlockId = finalBlockId,
             FinalPreview =
                 finalCandidate == null

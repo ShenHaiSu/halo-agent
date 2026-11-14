@@ -72,3 +72,17 @@ describe('summaryAnchorKeys', () => {
     });
   });
 });
+
+describe('toFlatTurn user content', () => {
+  it('passes full user content through for history body', () => {
+    const full = '请帮我分析报错日志并给出修复步骤：' + 'a'.repeat(100);
+    const flat = toFlatTurn(makeSummary({ userPreview: full.slice(0, 15), userContent: full }));
+    expect(flat.userContent).toBe(full);
+    expect(flat.userPreview).toBe(full.slice(0, 15));
+  });
+
+  it('falls back to preview when content is missing from older backend', () => {
+    const flat = toFlatTurn(makeSummary({ userPreview: 'hello' }));
+    expect(flat.userContent).toBe('hello');
+  });
+});

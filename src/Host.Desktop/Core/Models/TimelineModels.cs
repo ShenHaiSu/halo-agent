@@ -62,6 +62,9 @@ public sealed class TurnSummary
     public long TurnSeq { get; set; }
     public int IterEnd { get; set; }
     public string UserPreview { get; set; } = string.Empty;
+
+    /// <summary>用户原文全文：历史正文用；目录标签仍用 UserPreview。</summary>
+    public string UserContent { get; set; } = string.Empty;
     public string? FinalBlockId { get; set; }
     public string FinalPreview { get; set; } = string.Empty;
     public int Blocks { get; set; }

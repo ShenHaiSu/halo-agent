@@ -68,6 +68,7 @@ export interface TurnSummary {
   turnSeq: number;
   iterEnd: number;
   userPreview: string;
+  userContent?: string;
   finalBlockId?: string | null;
   finalPreview: string;
   blocks: number;

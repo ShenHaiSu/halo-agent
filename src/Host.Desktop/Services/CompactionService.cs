@@ -530,6 +530,7 @@ public sealed class CompactionService : ICompactionService
                         TurnSeq = seqBase + 1,
                         IterEnd = 1,
                         UserPreview = summary.Length > 15 ? summary.Substring(0, 15) : summary,
+                        UserContent = summary,
                         FinalBlockId = "compact:" + sumTurnId + ":final",
                         FinalPreview = summary.Length > 60 ? summary.Substring(0, 60) : summary,
                         Blocks = 1,

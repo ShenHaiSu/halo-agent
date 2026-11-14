@@ -390,7 +390,7 @@ public sealed class SessionHistoryStore
         using var conn = _db.Open(workspaceId, sessionId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT turn_id, turn_seq, iter_end, user_preview, final_block_id,"
+            "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id,"
             + " (SELECT preview FROM blocks WHERE block_id = turns.final_block_id) AS final_preview,"
             + " blocks, tools, failed, duration_ms, chars, status, last_request_id, updated_at"
             + " FROM turns ORDER BY turn_seq;";
@@ -404,16 +404,17 @@ public sealed class SessionHistoryStore
                 TurnSeq = reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
                 IterEnd = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
                 UserPreview = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                FinalBlockId = reader.IsDBNull(4) ? null : reader.GetString(4),
-                FinalPreview = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
-                Blocks = reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
-                Tools = reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
-                Failed = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
-                DurationMs = reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
-                Chars = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
-                Status = reader.IsDBNull(11) ? TimelineTurnStatus.Completed : reader.GetString(11),
-                LastRequestId = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
-                UpdatedAtUtc = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+                UserContent = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                FinalBlockId = reader.IsDBNull(5) ? null : reader.GetString(5),
+                FinalPreview = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                Blocks = reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
+                Tools = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+                Failed = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                DurationMs = reader.IsDBNull(10) ? 0 : reader.GetInt64(10),
+                Chars = reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
+                Status = reader.IsDBNull(12) ? TimelineTurnStatus.Completed : reader.GetString(12),
+                LastRequestId = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+                UpdatedAtUtc = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
             };
             summary.CreatedAtUtc = summary.UpdatedAtUtc;
             summary.AnchorKey = turnId;
@@ -1040,7 +1041,7 @@ public sealed class SessionHistoryStore
                 }
                 allBlocks.AddRange(textBlocks);
                 string userPreview = string.Empty;
-                // 前一个 user 作为本轮 userPreview
+                string userContent = string.Empty;
                 for (int k = i - 1; k >= 0; k--)
                 {
                     if (
@@ -1051,7 +1052,8 @@ public sealed class SessionHistoryStore
                         )
                     )
                     {
-                        userPreview = BuildPreviewText(prefix[k].Content ?? string.Empty, 15);
+                        userContent = prefix[k].Content ?? string.Empty;
+                        userPreview = BuildPreviewText(userContent, 15);
                         break;
                     }
                 }
@@ -1062,6 +1064,7 @@ public sealed class SessionHistoryStore
                         TurnSeq = turnSeq,
                         IterEnd = 1,
                         UserPreview = userPreview,
+                        UserContent = userContent,
                         FinalBlockId = hasText ? "synth:" + turnId + ":text" : null,
                         FinalPreview = hasText ? BuildPreviewText(content, 60) : string.Empty,
                         Blocks = textBlocks.Count + tools.Count,
@@ -1626,8 +1629,8 @@ public sealed class SessionHistoryStore
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText =
-            "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, updated_at)"
-            + " VALUES($tid, $seq, $iterEnd, $userPreview, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $updated)"
+            "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, updated_at)"
+            + " VALUES($tid, $seq, $iterEnd, $userPreview, $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $updated)"
             + " ON CONFLICT(turn_id) DO UPDATE SET"
             + " iter_end=excluded.iter_end,"
             + " blocks=turns.blocks+excluded.blocks,"
@@ -1635,6 +1638,7 @@ public sealed class SessionHistoryStore
             + " failed=turns.failed+excluded.failed,"
             + " chars=turns.chars+excluded.chars,"
             + " duration_ms=turns.duration_ms+excluded.duration_ms,"
+            + " user_content=CASE WHEN excluded.user_content <> '' THEN excluded.user_content ELSE turns.user_content END,"
             + " final_block_id=excluded.final_block_id,"
             + " status=excluded.status,"
             + " last_request_id=excluded.last_request_id,"
@@ -1643,6 +1647,7 @@ public sealed class SessionHistoryStore
         cmd.Parameters.AddWithValue("$seq", turnSeq);
         cmd.Parameters.AddWithValue("$iterEnd", turn.IterEnd);
         cmd.Parameters.AddWithValue("$userPreview", turn.UserPreview ?? string.Empty);
+        cmd.Parameters.AddWithValue("$userContent", turn.UserContent ?? string.Empty);
         cmd.Parameters.AddWithValue("$finalBid", (object?)turn.FinalBlockId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$blocks", turn.Blocks);
         cmd.Parameters.AddWithValue("$tools", turn.Tools);

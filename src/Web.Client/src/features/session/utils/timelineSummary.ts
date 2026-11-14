@@ -5,6 +5,7 @@ export interface FlatTimelineTurn {
   turnId: string;
   turnSeq: number;
   userPreview: string;
+  userContent: string;
   finalPreview: string;
   finalBlockId: string | null;
   blocks: number;
@@ -24,6 +25,7 @@ export function toFlatTurn(summary: TurnSummary): FlatTimelineTurn {
     turnId,
     turnSeq: Number(summary.turnSeq || 0),
     userPreview: String(summary.userPreview || ''),
+    userContent: String(summary.userContent || summary.userPreview || ''),
     finalPreview: String(summary.finalPreview || ''),
     finalBlockId: (summary.finalBlockId as string | null | undefined) ?? null,
     blocks: Number(summary.blocks || 0),

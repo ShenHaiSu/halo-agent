@@ -58,6 +58,7 @@ public sealed class SessionHistoryDb
         + "turn_seq INTEGER NOT NULL UNIQUE,"
         + "iter_end INT NOT NULL,"
         + "user_preview TEXT NOT NULL DEFAULT '',"
+        + "user_content TEXT NOT NULL DEFAULT '',"
         + "final_block_id TEXT,"
         + "blocks INT NOT NULL DEFAULT 0,"
         + "tools INT NOT NULL DEFAULT 0,"
@@ -149,6 +150,32 @@ public sealed class SessionHistoryDb
                 addSuccess.CommandText = "ALTER TABLE blocks ADD COLUMN success INTEGER;";
                 addSuccess.ExecuteNonQuery();
             }
+        }
+        catch { }
+        try
+        {
+            using var turnCols = conn.CreateCommand();
+            turnCols.CommandText = "PRAGMA table_info(turns);";
+            using var tr = turnCols.ExecuteReader();
+            var turnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (tr.Read())
+            {
+                if (!tr.IsDBNull(1))
+                    turnNames.Add(tr.GetString(1));
+            }
+            tr.Close();
+            if (!turnNames.Contains("user_content"))
+            {
+                using var addContent = conn.CreateCommand();
+                addContent.CommandText =
+                    "ALTER TABLE turns ADD COLUMN user_content TEXT NOT NULL DEFAULT '';";
+                addContent.ExecuteNonQuery();
+            }
+            using var backfill = conn.CreateCommand();
+            backfill.CommandText =
+                "UPDATE turns SET user_content = COALESCE((SELECT content FROM messages WHERE id = substr(turn_id, 7) AND role = 'user'), '')"
+                + " WHERE (user_content IS NULL OR user_content = '') AND turn_id LIKE 'uturn-%';";
+            backfill.ExecuteNonQuery();
         }
         catch { }
         return dbPath;

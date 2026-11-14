@@ -23,6 +23,7 @@ function makeTurn(over: Partial<FlatTimelineTurn> = {}): FlatTimelineTurn {
     turnId: 'uturn-u1',
     turnSeq: 1,
     userPreview: '',
+    userContent: '',
     finalPreview: '结论：…',
     finalBlockId: 'bfinal1',
     blocks: 2,
@@ -275,5 +276,29 @@ describe('TimelineProcessBox history tool cards', () => {
     await flush();
     expect(getToolResultMock).toHaveBeenCalledWith('uturn-u1', 'call-3');
     expect(wrapper.find('[data-testid="tool-call-card"]').attributes('data-status')).toBe('error');
+  });
+});
+
+describe('TimelineProcessBox user slot', () => {
+  it('renders full user content in history instead of 15-char preview', async () => {
+    const full = '请帮我分析报错日志并给出修复步骤：' + 'a'.repeat(100) + '尾部全文标记-USER-OK';
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ userPreview: full.slice(0, 15), userContent: full, finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    const slot = wrapper.find('.turn-user-slot');
+    expect(slot.exists()).toBe(true);
+    expect(slot.text()).toContain('尾部全文标记-USER-OK');
+    expect(slot.text().length).toBeGreaterThan(100);
+  });
+
+  it('falls back to preview when content is empty', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ userPreview: 'hello', userContent: '', finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    expect(wrapper.find('.turn-user-slot').text()).toContain('hello');
   });
 });

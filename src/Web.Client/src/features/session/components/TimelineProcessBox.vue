@@ -1,10 +1,10 @@
 <template>
   <div class="timeline-turn min-w-0" :data-turn-key="turn.turnId" :data-testid="`timeline-turn-${turn.turnId}`">
-    <div v-if="turn.userPreview" class="flex justify-end turn-user-slot">
+    <div v-if="turn.userContent || turn.userPreview" class="flex justify-end turn-user-slot">
       <div
         class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
       >
-        {{ turn.userPreview }}
+        {{ turn.userContent || turn.userPreview }}
       </div>
     </div>
     <div

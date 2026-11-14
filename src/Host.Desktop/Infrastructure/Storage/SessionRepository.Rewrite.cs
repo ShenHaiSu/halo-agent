@@ -176,25 +176,33 @@ public sealed partial class SessionRepository : ISessionRepository
             foreach (var turn in summaries.OrderBy(s => s.TurnSeq))
             {
                 ct.ThrowIfCancellationRequested();
-                string userText = turn.UserPreview ?? string.Empty;
-                if (ui < users.Count)
+                string userText = turn.UserContent ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(userText))
                 {
-                    userText = users[ui].Content ?? userText;
-                    ui++;
+                    userText = turn.UserPreview ?? string.Empty;
+                    if (ui < users.Count)
+                    {
+                        userText = users[ui].Content ?? userText;
+                        ui++;
+                    }
+                    else
+                    {
+                        var um = dbMsgs.FirstOrDefault(m =>
+                            string.Equals(
+                                m.Id,
+                                (turn.TurnId ?? string.Empty).StartsWith("uturn-")
+                                    ? turn.TurnId!.Substring(6)
+                                    : turn.TurnId,
+                                StringComparison.Ordinal
+                            )
+                        );
+                        if (um != null && !string.IsNullOrWhiteSpace(um.Content))
+                            userText = um.Content!;
+                    }
                 }
-                else
+                else if (ui < users.Count)
                 {
-                    var um = dbMsgs.FirstOrDefault(m =>
-                        string.Equals(
-                            m.Id,
-                            (turn.TurnId ?? string.Empty).StartsWith("uturn-")
-                                ? turn.TurnId!.Substring(6)
-                                : turn.TurnId,
-                            StringComparison.Ordinal
-                        )
-                    );
-                    if (um != null && !string.IsNullOrWhiteSpace(um.Content))
-                        userText = um.Content!;
+                    ui++;
                 }
                 sb.AppendLine($"### [USER] turn_seq={turn.TurnSeq}");
                 sb.AppendLine();
