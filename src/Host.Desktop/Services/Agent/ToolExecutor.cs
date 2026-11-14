@@ -213,6 +213,7 @@ public sealed partial class AgentOrchestrator
                         Tag = Core.Models.TimelineBlockTag.Process,
                         CallId = call.CallId,
                         FunctionName = call.FunctionName,
+                        Success = toolResult.Success,
                         CharCount = toolText != null ? toolText.Length : 0,
                         Preview = Services.TimelineBlockTracker.BuildPreview(
                             toolText ?? string.Empty,
@@ -250,6 +251,7 @@ public sealed partial class AgentOrchestrator
                     toolCallId = toolMessage.ToolCallId,
                     content = TruncateForEvent(toolText, 8000),
                     images = toolMessage.Images,
+                    success = toolResult.Success,
                     errorCode = toolResult.ErrorCode,
                     createdAtUtc = toolMessage.CreatedAtUtc.ToString("o"),
                     updatedAtUtc = DateTime.UtcNow.ToString("o"),

@@ -45,6 +45,9 @@ public sealed class TimelineBlock
     public string Tag { get; set; } = TimelineBlockTag.Process;
     public string? CallId { get; set; }
     public string? FunctionName { get; set; }
+
+    /// <summary>逐工具成败位：仅 tool_result 行有效；true=成功，false=失败，null=未知（老数据）。</summary>
+    public bool? Success { get; set; }
     public int CharCount { get; set; }
     public string Preview { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
@@ -85,6 +88,9 @@ public sealed class TimelineBlockContent
     public string Markdown { get; set; } = string.Empty;
     public string Preview { get; set; } = string.Empty;
     public bool Truncated { get; set; }
+
+    /// <summary>逐工具成败位：仅 tool_result 行透出；null=未知（老数据），与 false 严格区分。</summary>
+    public bool? Success { get; set; }
     public string? ArgsJson { get; set; }
     public string? ResultText { get; set; }
     public string? ResultRef { get; set; }
@@ -105,6 +111,9 @@ public sealed class TimelineToolResult
     public string ResultText { get; set; } = string.Empty;
     public string? FunctionName { get; set; }
     public string? ResultRef { get; set; }
+
+    /// <summary>逐工具成败位：null=未知（老数据），与 false 严格区分。</summary>
+    public bool? Success { get; set; }
 }
 
 /// <summary>批量块内容响应：成功项 + 缺失占位。</summary>

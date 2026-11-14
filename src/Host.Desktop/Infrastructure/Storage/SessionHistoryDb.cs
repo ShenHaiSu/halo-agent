@@ -46,6 +46,7 @@ public sealed class SessionHistoryDb
         + "tag TEXT NOT NULL CHECK(tag IN ('process','final')),"
         + "call_id TEXT,"
         + "function_name TEXT,"
+        + "success INTEGER,"
         + "char_count INT NOT NULL DEFAULT 0,"
         + "preview TEXT NOT NULL DEFAULT '',"
         + "content TEXT NOT NULL DEFAULT '',"
@@ -141,6 +142,12 @@ public sealed class SessionHistoryDb
                 using var addFn = conn.CreateCommand();
                 addFn.CommandText = "ALTER TABLE blocks ADD COLUMN function_name TEXT;";
                 addFn.ExecuteNonQuery();
+            }
+            if (!blockNames.Contains("success"))
+            {
+                using var addSuccess = conn.CreateCommand();
+                addSuccess.CommandText = "ALTER TABLE blocks ADD COLUMN success INTEGER;";
+                addSuccess.ExecuteNonQuery();
             }
         }
         catch { }

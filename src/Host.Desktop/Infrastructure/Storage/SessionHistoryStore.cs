@@ -335,6 +335,10 @@ public sealed class SessionHistoryStore
         {
             return;
         }
+        if (!resultBlock.Success.HasValue)
+        {
+            resultBlock.Success = !isFailed;
+        }
         var gate = GetWriteLock(workspaceId, sessionId);
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -453,7 +457,7 @@ public sealed class SessionHistoryStore
             }
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "SELECT block_id, kind, tag, call_id, function_name, seq, char_count, preview, content, content_ref, truncated"
+                "SELECT block_id, kind, tag, call_id, function_name, seq, char_count, preview, content, content_ref, truncated, success"
                 + " FROM blocks WHERE block_id = $bid LIMIT 1;";
             cmd.Parameters.AddWithValue("$bid", blockId);
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -471,6 +475,7 @@ public sealed class SessionHistoryStore
             string content = reader.IsDBNull(8) ? string.Empty : reader.GetString(8);
             string? contentRef = reader.IsDBNull(9) ? null : reader.GetString(9);
             bool truncated = !reader.IsDBNull(10) && reader.GetInt32(10) != 0;
+            bool? success = reader.IsDBNull(11) ? null : (reader.GetInt32(11) != 0);
             string resolved = content;
             string? resolvedRef = contentRef;
             if (!string.IsNullOrWhiteSpace(contentRef))
@@ -494,6 +499,7 @@ public sealed class SessionHistoryStore
             };
             if (string.Equals(item.Kind, TimelineBlockKind.ToolResult, StringComparison.Ordinal))
             {
+                item.Success = success;
                 item.Markdown = string.Empty;
                 if (!string.IsNullOrWhiteSpace(contentRef))
                 {
@@ -571,7 +577,7 @@ public sealed class SessionHistoryStore
         using var conn = _db.Open(workspaceId, sessionId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT kind, content, content_ref, function_name FROM blocks"
+            "SELECT kind, content, content_ref, function_name, success FROM blocks"
             + " WHERE turn_id = $tid AND call_id = $cid ORDER BY seq DESC LIMIT 1;";
         cmd.Parameters.AddWithValue("$tid", turnId);
         cmd.Parameters.AddWithValue("$cid", callId);
@@ -584,6 +590,7 @@ public sealed class SessionHistoryStore
         string content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
         string? contentRef = reader.IsDBNull(2) ? null : reader.GetString(2);
         string? functionName = reader.IsDBNull(3) ? null : reader.GetString(3);
+        bool? success = reader.IsDBNull(4) ? null : (reader.GetInt32(4) != 0);
         string resolved = content;
         if (!string.IsNullOrWhiteSpace(contentRef))
         {
@@ -632,7 +639,8 @@ public sealed class SessionHistoryStore
                 ArgsJson = string.Empty,
                 ResultText = string.Empty,
                 ResultRef = contentRef,
-                FunctionName = functionName
+                FunctionName = functionName,
+                Success = success
             };
         }
         return new TimelineToolResult
@@ -640,7 +648,8 @@ public sealed class SessionHistoryStore
             ArgsJson = string.Empty,
             ResultText = resolved,
             ResultRef = null,
-            FunctionName = functionName
+            FunctionName = functionName,
+            Success = success
         };
     }
 
@@ -1578,16 +1587,26 @@ public sealed class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
-                + " VALUES($bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $chars, $preview, $content, $ref, $trunc);";
+                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $success, $chars, $preview, $content, $ref, $trunc);";
             cmd.Parameters.AddWithValue("$bid", block.BlockId);
             cmd.Parameters.AddWithValue("$tid", block.TurnId ?? string.Empty);
             cmd.Parameters.AddWithValue("$iter", block.Iteration);
             cmd.Parameters.AddWithValue("$seq", block.Sequence);
-            cmd.Parameters.AddWithValue("$kind", NormalizeKind(block.Kind));
+            string normalizedKind = NormalizeKind(block.Kind);
+            cmd.Parameters.AddWithValue("$kind", normalizedKind);
             cmd.Parameters.AddWithValue("$tag", NormalizeTag(tag));
             cmd.Parameters.AddWithValue("$call", (object?)block.CallId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$fn", (object?)block.FunctionName ?? DBNull.Value);
+            int? successInt =
+                string.Equals(
+                    normalizedKind,
+                    TimelineBlockKind.ToolResult,
+                    StringComparison.Ordinal
+                ) && block.Success.HasValue
+                    ? (block.Success.Value ? 1 : 0)
+                    : null;
+            cmd.Parameters.AddWithValue("$success", (object?)successInt ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$chars", block.CharCount);
             cmd.Parameters.AddWithValue("$preview", block.Preview ?? string.Empty);
             cmd.Parameters.AddWithValue("$content", block.Content ?? string.Empty);
