@@ -65,3 +65,62 @@ export function summarizeToolHead(args: Record<string, unknown>, rawJson?: strin
   }
   return '';
 }
+
+export type ToolCardStatus = 'running' | 'done' | 'error';
+
+function filePathOf(args: Record<string, unknown>): string {
+  const v = args['file_path'] ?? args['path'] ?? '';
+  return typeof v === 'string' ? v : '';
+}
+
+function strOf(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/**
+ * 工具卡头文案：运行态与完成态两套口径，执行类以退出码覆盖调用状态。
+ * 由 ToolCallCard 装配层调用，头组件只做展示。
+ */
+export function toolHeadText(functionName: string, args: Record<string, unknown>, execShort: string, status: ToolCardStatus): string {
+  const filePath = filePathOf(args);
+  if (status === 'running') {
+    switch (functionName) {
+      case 'read_file':
+        return filePath ? `正在读取 ${filePath}` : '正在读取文件';
+      case 'write_file':
+        return filePath ? `正在写入 ${filePath}` : '正在写入文件';
+      case 'edit_file':
+        return filePath ? `正在修改 ${filePath}` : '正在修改文件';
+      case 'list_dir':
+        return strOf(args['path'] ?? args['dir']) ? `正在浏览 ${strOf(args['path'] ?? args['dir'])}` : '正在浏览目录';
+      case 'grep_search':
+        return strOf(args['pattern'] ?? args['query']) ? `正在检索 ${strOf(args['pattern'] ?? args['query'])}` : '正在检索';
+      case 'exec_command':
+        return execShort ? `正在运行 ${execShort}` : '正在运行';
+      case 'view_image':
+        return filePath ? `正在查看 ${filePath}` : '正在查看图片';
+      default: {
+        const sum = summarizeToolHead(args);
+        return sum ? `正在 ${sum}` : '正在执行';
+      }
+    }
+  }
+  switch (functionName) {
+    case 'read_file':
+      return filePath ? `已读取 ${filePath}` : '读取文件';
+    case 'write_file':
+      return filePath ? `写入 ${filePath}` : '写入文件';
+    case 'edit_file':
+      return filePath ? `修改 ${filePath}` : '修改文件';
+    case 'list_dir':
+      return strOf(args['path'] ?? args['dir']) ? `浏览 ${strOf(args['path'] ?? args['dir'])}` : '浏览目录';
+    case 'grep_search':
+      return strOf(args['pattern'] ?? args['query']) ? `检索 ${strOf(args['pattern'] ?? args['query'])}` : '检索';
+    case 'exec_command':
+      return execShort;
+    case 'view_image':
+      return filePath ? `查看 ${filePath}` : '查看图片';
+    default:
+      return summarizeToolHead(args) || filePath || '(无参数)';
+  }
+}
