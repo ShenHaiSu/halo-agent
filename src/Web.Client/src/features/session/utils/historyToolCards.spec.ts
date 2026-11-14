@@ -13,6 +13,7 @@ function makeBlock(over: Partial<TimelineBlockContent> & { blockId: string }): T
     markdown: over.markdown ?? '',
     preview: over.preview ?? '',
     truncated: over.truncated ?? false,
+    success: over.success ?? null,
     argsJson: over.argsJson ?? null,
     resultText: over.resultText ?? null,
     resultRef: over.resultRef ?? null,
@@ -149,5 +150,67 @@ describe('historyToolCards pairing', () => {
     const okCard = toAgentToolCard(tools[0], { failed: 0, status: 'completed' });
     expect(okCard.status).toBe('done');
     expect(okCard.receivedBytes).toBe(okCard.argsJson.length);
+  });
+
+  it('prefers per-tool success bit over turn aggregate', () => {
+    const call = makeBlock({
+      blockId: 'b-call',
+      kind: 'tool_call',
+      callId: 'c-bit',
+      functionName: 'exec_command',
+      seq: 1,
+      argsJson: '{}',
+    });
+    const okResult = makeBlock({
+      blockId: 'b-res-ok',
+      kind: 'tool_result',
+      callId: 'c-bit',
+      seq: 2,
+      resultText: 'ok',
+      success: true,
+    });
+    const failResult = makeBlock({
+      blockId: 'b-res-fail',
+      kind: 'tool_result',
+      callId: 'c-bit',
+      seq: 2,
+      resultText: 'ok',
+      success: false,
+    });
+    const okGroup = pairToolGroupsInOrder([call, okResult]).tools[0];
+    const failGroup = pairToolGroupsInOrder([call, failResult]).tools[0];
+    expect(toAgentToolCard(okGroup, { failed: 1, status: 'completed' }).status).toBe('done');
+    expect(toAgentToolCard(failGroup, { failed: 0, status: 'completed' }).status).toBe('error');
+  });
+
+  it('falls back to error-text heuristic when success bit is unknown', () => {
+    const call = makeBlock({
+      blockId: 'b-call',
+      kind: 'tool_call',
+      callId: 'c-old',
+      functionName: 'read_file',
+      seq: 1,
+      argsJson: '{}',
+    });
+    const errorTextResult = makeBlock({
+      blockId: 'b-res-err',
+      kind: 'tool_result',
+      callId: 'c-old',
+      seq: 2,
+      resultText: '[Tool Error - read_file]: boom',
+      success: null,
+    });
+    const plainResult = makeBlock({
+      blockId: 'b-res-plain',
+      kind: 'tool_result',
+      callId: 'c-old',
+      seq: 2,
+      resultText: 'plain output',
+    });
+    const errGroup = pairToolGroupsInOrder([call, errorTextResult]).tools[0];
+    const plainGroup = pairToolGroupsInOrder([call, plainResult]).tools[0];
+    expect(toAgentToolCard(errGroup, { failed: 0, status: 'completed' }).status).toBe('error');
+    expect(toAgentToolCard(plainGroup, { failed: 1, status: 'completed' }).status).toBe('error');
+    expect(toAgentToolCard(plainGroup, { failed: 0, status: 'completed' }).status).toBe('done');
   });
 });

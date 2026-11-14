@@ -1,5 +1,6 @@
 import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
 import type { AgentToolCard } from '@features/agent/stores/model';
+import { isToolErrorText } from './toolErrorText';
 
 export interface ToolGroup {
   callId: string;
@@ -8,7 +9,6 @@ export interface ToolGroup {
   order: number;
   functionName: string;
 }
-
 function pickFunctionName(callBlock?: TimelineBlockContent, resultBlock?: TimelineBlockContent): string {
   const fromCall = String(callBlock?.functionName || '').trim();
   if (fromCall) return fromCall;
@@ -21,6 +21,17 @@ function normalizeArgsJson(raw: unknown): string {
   const text = String(raw ?? '').trim();
   if (!text) return '{}';
   return String(raw ?? '{}');
+}
+
+/** 历史卡状态裁决：逐工具位 > 存量文本启发 > 轮级回退。 */
+function resolveStatus(group: ToolGroup, turn: { failed: number; status: string }): 'done' | 'error' {
+  const success = group.resultBlock?.success;
+  if (success === true) return 'done';
+  if (success === false) return 'error';
+  if (isToolErrorText(group.resultBlock?.resultText)) return 'error';
+  const failedCount = Number(turn?.failed || 0);
+  const statusText = String(turn?.status || '').toLowerCase();
+  return failedCount > 0 || statusText === 'error' ? 'error' : 'done';
 }
 
 export function pairToolGroupsInOrder(blocks: TimelineBlockContent[]): { tools: ToolGroup[]; others: TimelineBlockContent[] } {
@@ -82,9 +93,7 @@ export function pairToolGroupsInOrder(blocks: TimelineBlockContent[]): { tools: 
 
 export function toAgentToolCard(group: ToolGroup, turn: { failed: number; status: string }): AgentToolCard {
   const argsJson = normalizeArgsJson(group.callBlock?.argsJson);
-  const failedCount = Number(turn?.failed || 0);
-  const statusText = String(turn?.status || '').toLowerCase();
-  const status = failedCount > 0 || statusText === 'error' ? 'error' : 'done';
+  const status = resolveStatus(group, turn);
   const resultText = String(group.resultBlock?.resultText ?? '');
   return {
     callId: group.callId,

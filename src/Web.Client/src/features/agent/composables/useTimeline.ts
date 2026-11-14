@@ -16,8 +16,9 @@ import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode, useTimelineNav } from './useTimelineNav';
 import { useSmoothText } from './useSmoothText';
-import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
 import { INITIAL_MOUNT, STEP, WINDOW_MIN, hiddenAboveByWeight, isNearTop } from '@features/session/utils/transcriptWindow';
+import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
+import { isToolErrorText } from '@features/session/utils/toolErrorText';
 import { useTimelineMenu } from './useTimelineMenu';
 import { need02Attr as buildNeed02Attr, useNeed02Flags } from '@features/need02/utils/need02Flags';
 import { pendingPreviewOf } from '@features/session/utils/pendingUser';
@@ -474,7 +475,7 @@ export function useTimeline() {
       callId,
       functionName: fnName || (m.name as string) || 'tool',
       argsJson,
-      status: content.includes('[Tool Error') ? 'error' : 'done',
+      status: isToolErrorText(content) ? 'error' : 'done',
       resultText: content.length > 6000 ? content.slice(0, 6000) + '\n...（输出过长已截断）' : content,
       exitCode: null,
       durationMs: null,

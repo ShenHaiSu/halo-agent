@@ -91,6 +91,8 @@ export interface TimelineBlockContent {
   markdown: string;
   preview: string;
   truncated: boolean;
+  /** 逐工具成败位：tool_result 行透出；null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
   argsJson?: string | null;
   resultText?: string | null;
   resultRef?: string | null;
@@ -106,6 +108,8 @@ export interface TimelineToolResult {
   resultText: string;
   resultRef?: string | null;
   functionName?: string | null;
+  /** 逐工具成败位：null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
 }
 
 export type TimelineTagReason = 'demote' | 'finalize' | 'flip';

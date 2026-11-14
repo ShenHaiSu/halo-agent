@@ -4,9 +4,10 @@
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TurnGroup } from './turnGroup';
 import { turnPhaseOf, type TurnPhase } from './turnProcess';
+import { TOOL_ERROR_MARK, isToolErrorText } from './toolErrorText';
 
-/** 失败工具判定口径（与 turnRun.TOOL_ERROR_MARK / useTimeline.failedToolCount 同源）。 */
-export const USER_TURN_TOOL_ERROR_MARK = '[Tool Error';
+/** 失败工具判定口径（与 useTimeline 卡片判定同源，见 toolErrorText）。 */
+export const USER_TURN_TOOL_ERROR_MARK = TOOL_ERROR_MARK;
 
 /** 用户轮次内按 assistant 切分的单步（iteration 序）。 */
 export interface UserTurnStep {
@@ -91,7 +92,7 @@ function toolRefsOf(msg: UnifiedChatMessage): Array<{ id: string; name: string }
 }
 
 function failedOfContent(content: string | null | undefined): boolean {
-  return String(content || '').includes(USER_TURN_TOOL_ERROR_MARK);
+  return isToolErrorText(content);
 }
 
 function isPendingUserId(id: string): boolean {

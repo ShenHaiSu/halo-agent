@@ -119,7 +119,7 @@ describe('TimelineProcessBox Final 全文挂载（S2 欠账）', () => {
 describe('TimelineProcessBox history tool cards', () => {
   const toolCardStub = {
     props: ['card'],
-    template: '<div data-testid="tool-call-card" :data-tool="card.functionName">{{ card.functionName }}</div>',
+    template: '<div data-testid="tool-call-card" :data-tool="card.functionName" :data-status="card.status">{{ card.functionName }}</div>',
   };
 
   function mockProcessBlocks() {
@@ -226,5 +226,54 @@ describe('TimelineProcessBox history tool cards', () => {
     await wrapper.find('[data-testid="timeline-tool-call-call-2"]').trigger('click');
     await flush();
     expect(getToolResultMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies lazy getToolResult success bit to card status', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-call-3', 'b-result-3']);
+    getBlockContentsMock.mockImplementation(async (ids: string[]) => {
+      const items: Record<string, unknown> = {};
+      for (const id of ids) {
+        if (id === 'b-call-3') {
+          items[id] = {
+            blockId: id,
+            kind: 'tool_call',
+            tag: 'process',
+            callId: 'call-3',
+            functionName: 'read_file',
+            seq: 1,
+            argsJson: '{"path":"a.txt"}',
+            markdown: '{"path":"a.txt"}',
+            preview: '',
+            truncated: false,
+          };
+        } else if (id === 'b-result-3') {
+          items[id] = {
+            blockId: id,
+            kind: 'tool_result',
+            tag: 'process',
+            callId: 'call-3',
+            functionName: 'read_file',
+            seq: 2,
+            resultText: '',
+            resultRef: 'fileRef:tool-outputs/big.txt',
+            preview: '',
+            truncated: true,
+          };
+        }
+      }
+      return { items, missing: [] };
+    });
+    getToolResultMock.mockResolvedValue({ resultText: 'big-content', resultRef: null, functionName: 'read_file', success: false });
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: toolCardStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+    expect(wrapper.find('[data-testid="tool-call-card"]').attributes('data-status')).toBe('done');
+    await wrapper.find('[data-testid="timeline-tool-call-call-3"]').trigger('click');
+    await flush();
+    expect(getToolResultMock).toHaveBeenCalledWith('uturn-u1', 'call-3');
+    expect(wrapper.find('[data-testid="tool-call-card"]').attributes('data-status')).toBe('error');
   });
 });

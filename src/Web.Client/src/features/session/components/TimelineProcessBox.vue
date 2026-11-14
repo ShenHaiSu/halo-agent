@@ -125,8 +125,9 @@ const blockMap = ref<Record<string, TimelineBlockContent>>({});
 const blockOrder = ref<string[]>([]);
 const missing = ref<string[]>([]);
 const loadedResultText = ref<Record<string, string>>({});
-const pendingToolFetch = ref<Record<string, boolean>>({});
+const loadedResultSuccess = ref<Record<string, boolean>>({});
 let loadedOnce = false;
+const pendingToolFetch = ref<Record<string, boolean>>({});
 
 const ws = useWorkspaceStore();
 
@@ -164,10 +165,12 @@ function resultPreviewOf(b: TimelineBlockContent): string {
 function historyCardFor(group: ToolGroup): AgentToolCard {
   const base = toAgentToolCard(group, props.turn);
   const override = loadedResultText.value[group.callId];
-  if (override !== undefined) {
-    return { ...base, resultText: override };
+  const card = override !== undefined ? { ...base, resultText: override } : base;
+  const lazySuccess = loadedResultSuccess.value[group.callId];
+  if (lazySuccess === true || lazySuccess === false) {
+    return { ...card, status: lazySuccess ? 'done' : 'error' };
   }
-  return base;
+  return card;
 }
 
 async function ensureToolResult(group: ToolGroup): Promise<void> {
@@ -179,14 +182,21 @@ async function ensureToolResult(group: ToolGroup): Promise<void> {
   const hasRef = !!String(resultBlock?.resultRef || '').trim();
   const hasText = !!String(resultBlock?.resultText || '');
   if (!hasRef || hasText) return;
-  const fetcher = (ws as unknown as { getToolResult?: (turnId: string, cId: string) => Promise<{ resultText?: string | null } | null> })
-    .getToolResult;
+  const fetcher = (
+    ws as unknown as {
+      getToolResult?: (turnId: string, cId: string) => Promise<{ resultText?: string | null; success?: boolean | null } | null>;
+    }
+  ).getToolResult;
   if (typeof fetcher !== 'function') return;
   pendingToolFetch.value = { ...pendingToolFetch.value, [callId]: true };
   try {
     const res = await fetcher.call(ws, props.turn.turnId, callId);
     const text = String((res as unknown as { resultText?: string | null })?.resultText ?? '');
     loadedResultText.value = { ...loadedResultText.value, [callId]: text };
+    const lazySuccess = (res as unknown as { success?: boolean | null })?.success;
+    if (lazySuccess === true || lazySuccess === false) {
+      loadedResultSuccess.value = { ...loadedResultSuccess.value, [callId]: lazySuccess };
+    }
   } catch {
     /* keep placeholder, never block card expand */
   } finally {
@@ -298,6 +308,7 @@ watch(
     blockOrder.value = [];
     missing.value = [];
     loadedResultText.value = {};
+    loadedResultSuccess.value = {};
     pendingToolFetch.value = {};
     resetFinal();
     if (expanded.value) void reload();
