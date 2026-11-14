@@ -212,6 +212,7 @@ public sealed partial class AgentOrchestrator
                         Kind = Core.Models.TimelineBlockKind.ToolResult,
                         Tag = Core.Models.TimelineBlockTag.Process,
                         CallId = call.CallId,
+                        FunctionName = call.FunctionName,
                         CharCount = toolText != null ? toolText.Length : 0,
                         Preview = Services.TimelineBlockTracker.BuildPreview(
                             toolText ?? string.Empty,

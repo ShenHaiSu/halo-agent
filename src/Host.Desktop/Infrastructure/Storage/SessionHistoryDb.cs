@@ -45,6 +45,7 @@ public sealed class SessionHistoryDb
         + "kind TEXT NOT NULL CHECK(kind IN ('reasoning','text','tool_call','tool_result')),"
         + "tag TEXT NOT NULL CHECK(tag IN ('process','final')),"
         + "call_id TEXT,"
+        + "function_name TEXT,"
         + "char_count INT NOT NULL DEFAULT 0,"
         + "preview TEXT NOT NULL DEFAULT '',"
         + "content TEXT NOT NULL DEFAULT '',"
@@ -120,6 +121,26 @@ public sealed class SessionHistoryDb
                 using var add3 = conn.CreateCommand();
                 add3.CommandText = "ALTER TABLE messages ADD COLUMN images_json TEXT;";
                 add3.ExecuteNonQuery();
+            }
+        }
+        catch { }
+        try
+        {
+            using var blockCols = conn.CreateCommand();
+            blockCols.CommandText = "PRAGMA table_info(blocks);";
+            using var br = blockCols.ExecuteReader();
+            var blockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (br.Read())
+            {
+                if (!br.IsDBNull(1))
+                    blockNames.Add(br.GetString(1));
+            }
+            br.Close();
+            if (!blockNames.Contains("function_name"))
+            {
+                using var addFn = conn.CreateCommand();
+                addFn.CommandText = "ALTER TABLE blocks ADD COLUMN function_name TEXT;";
+                addFn.ExecuteNonQuery();
             }
         }
         catch { }

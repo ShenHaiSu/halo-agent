@@ -84,6 +84,7 @@ export interface TurnSummary {
 export interface TimelineBlockContent {
   blockId: string;
   callId?: string | null;
+  functionName?: string | null;
   seq?: number;
   kind: TimelineBlockKind;
   tag: TimelineBlockTag;
@@ -104,6 +105,7 @@ export interface TimelineToolResult {
   argsJson: string;
   resultText: string;
   resultRef?: string | null;
+  functionName?: string | null;
 }
 
 export type TimelineTagReason = 'demote' | 'finalize' | 'flip';
@@ -113,7 +115,6 @@ export interface TimelineTagUpdated {
   tag: TimelineBlockTag;
   reason: TimelineTagReason;
 }
-
 
 export interface UnifiedChatMessage {
   id: string;

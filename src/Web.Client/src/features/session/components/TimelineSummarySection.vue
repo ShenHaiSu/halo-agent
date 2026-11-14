@@ -1,8 +1,5 @@
 <template>
   <section v-if="flatTurns.length > 0" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
-    <div class="timeline-summary-caption" data-testid="timeline-summary-caption">
-      时间轴摘要 · {{ flatTurns.length }} 轮（后端聚合直显）
-    </div>
     <TimelineProcessBox v-for="turn in flatTurns" :key="turn.key" :turn="turn" @expand-change="onExpandChange" />
   </section>
 </template>
@@ -27,7 +24,9 @@ const registered = ref<string[]>([]);
 function onExpandChange(turnId: string, expanded: boolean): void {
   try {
     setTurnExpanded(turnId, expanded);
-  } catch { /* quota counter never blocks render */ }
+  } catch {
+    /* quota counter never blocks render */
+  }
 }
 
 function releaseAnchors(): void {
@@ -88,10 +87,7 @@ onUnmounted(releaseAnchors);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px 16px 4px;
+  padding: 0;
 }
-.timeline-summary-caption {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
+/* caption 已下线：摘要区顶部不再展示标题行 */
 </style>

@@ -453,7 +453,7 @@ public sealed class SessionHistoryStore
             }
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "SELECT block_id, kind, tag, call_id, seq, char_count, preview, content, content_ref, truncated"
+                "SELECT block_id, kind, tag, call_id, function_name, seq, char_count, preview, content, content_ref, truncated"
                 + " FROM blocks WHERE block_id = $bid LIMIT 1;";
             cmd.Parameters.AddWithValue("$bid", blockId);
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -465,11 +465,12 @@ public sealed class SessionHistoryStore
             string kind = reader.IsDBNull(1) ? TimelineBlockKind.Text : reader.GetString(1);
             string tag = reader.IsDBNull(2) ? TimelineBlockTag.Process : reader.GetString(2);
             string? callId = reader.IsDBNull(3) ? null : reader.GetString(3);
-            long seq = reader.IsDBNull(4) ? 0 : reader.GetInt64(4);
-            string preview = reader.IsDBNull(6) ? string.Empty : reader.GetString(6);
-            string content = reader.IsDBNull(7) ? string.Empty : reader.GetString(7);
-            string? contentRef = reader.IsDBNull(8) ? null : reader.GetString(8);
-            bool truncated = !reader.IsDBNull(9) && reader.GetInt32(9) != 0;
+            string? functionName = reader.IsDBNull(4) ? null : reader.GetString(4);
+            long seq = reader.IsDBNull(5) ? 0 : reader.GetInt64(5);
+            string preview = reader.IsDBNull(7) ? string.Empty : reader.GetString(7);
+            string content = reader.IsDBNull(8) ? string.Empty : reader.GetString(8);
+            string? contentRef = reader.IsDBNull(9) ? null : reader.GetString(9);
+            bool truncated = !reader.IsDBNull(10) && reader.GetInt32(10) != 0;
             string resolved = content;
             string? resolvedRef = contentRef;
             if (!string.IsNullOrWhiteSpace(contentRef))
@@ -484,6 +485,7 @@ public sealed class SessionHistoryStore
             {
                 BlockId = blockId,
                 CallId = callId,
+                FunctionName = functionName,
                 Seq = seq,
                 Kind = NormalizeKind(kind),
                 Tag = NormalizeTag(tag),
@@ -569,7 +571,7 @@ public sealed class SessionHistoryStore
         using var conn = _db.Open(workspaceId, sessionId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT kind, content, content_ref FROM blocks"
+            "SELECT kind, content, content_ref, function_name FROM blocks"
             + " WHERE turn_id = $tid AND call_id = $cid ORDER BY seq DESC LIMIT 1;";
         cmd.Parameters.AddWithValue("$tid", turnId);
         cmd.Parameters.AddWithValue("$cid", callId);
@@ -581,6 +583,7 @@ public sealed class SessionHistoryStore
         string kind = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
         string content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
         string? contentRef = reader.IsDBNull(2) ? null : reader.GetString(2);
+        string? functionName = reader.IsDBNull(3) ? null : reader.GetString(3);
         string resolved = content;
         if (!string.IsNullOrWhiteSpace(contentRef))
         {
@@ -590,13 +593,36 @@ public sealed class SessionHistoryStore
                 resolved = fromFile;
             }
         }
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            try
+            {
+                using var callCmd = conn.CreateCommand();
+                callCmd.CommandText =
+                    "SELECT function_name FROM blocks WHERE turn_id = $tid AND call_id = $cid"
+                    + " AND kind = 'tool_call' ORDER BY seq LIMIT 1;";
+                callCmd.Parameters.AddWithValue("$tid", turnId);
+                callCmd.Parameters.AddWithValue("$cid", callId);
+                using var callReader = await callCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await callReader.ReadAsync(ct).ConfigureAwait(false) && !callReader.IsDBNull(0))
+                {
+                    string? callFn = callReader.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(callFn))
+                    {
+                        functionName = callFn;
+                    }
+                }
+            }
+            catch { }
+        }
         if (string.Equals(kind, TimelineBlockKind.ToolCall, StringComparison.Ordinal))
         {
             return new TimelineToolResult
             {
                 ArgsJson = resolved,
                 ResultText = string.Empty,
-                ResultRef = null
+                ResultRef = null,
+                FunctionName = functionName
             };
         }
         if (!string.IsNullOrWhiteSpace(contentRef))
@@ -605,14 +631,16 @@ public sealed class SessionHistoryStore
             {
                 ArgsJson = string.Empty,
                 ResultText = string.Empty,
-                ResultRef = contentRef
+                ResultRef = contentRef,
+                FunctionName = functionName
             };
         }
         return new TimelineToolResult
         {
             ArgsJson = string.Empty,
             ResultText = resolved,
-            ResultRef = null
+            ResultRef = null,
+            FunctionName = functionName
         };
     }
 
@@ -1550,8 +1578,8 @@ public sealed class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, char_count, preview, content, content_ref, truncated)"
-                + " VALUES($bid, $tid, $iter, $seq, $kind, $tag, $call, $chars, $preview, $content, $ref, $trunc);";
+                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $chars, $preview, $content, $ref, $trunc);";
             cmd.Parameters.AddWithValue("$bid", block.BlockId);
             cmd.Parameters.AddWithValue("$tid", block.TurnId ?? string.Empty);
             cmd.Parameters.AddWithValue("$iter", block.Iteration);
@@ -1559,6 +1587,7 @@ public sealed class SessionHistoryStore
             cmd.Parameters.AddWithValue("$kind", NormalizeKind(block.Kind));
             cmd.Parameters.AddWithValue("$tag", NormalizeTag(tag));
             cmd.Parameters.AddWithValue("$call", (object?)block.CallId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$fn", (object?)block.FunctionName ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$chars", block.CharCount);
             cmd.Parameters.AddWithValue("$preview", block.Preview ?? string.Empty);
             cmd.Parameters.AddWithValue("$content", block.Content ?? string.Empty);

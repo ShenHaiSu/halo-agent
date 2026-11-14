@@ -44,6 +44,7 @@ public sealed class TimelineBlock
     public string Kind { get; set; } = TimelineBlockKind.Text;
     public string Tag { get; set; } = TimelineBlockTag.Process;
     public string? CallId { get; set; }
+    public string? FunctionName { get; set; }
     public int CharCount { get; set; }
     public string Preview { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
@@ -77,6 +78,7 @@ public sealed class TimelineBlockContent
 {
     public string BlockId { get; set; } = string.Empty;
     public string? CallId { get; set; }
+    public string? FunctionName { get; set; }
     public long Seq { get; set; }
     public string Kind { get; set; } = TimelineBlockKind.Text;
     public string Tag { get; set; } = TimelineBlockTag.Process;
@@ -101,6 +103,7 @@ public sealed class TimelineToolResult
 {
     public string ArgsJson { get; set; } = string.Empty;
     public string ResultText { get; set; } = string.Empty;
+    public string? FunctionName { get; set; }
     public string? ResultRef { get; set; }
 }
 

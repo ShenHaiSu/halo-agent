@@ -41,19 +41,11 @@
         {{ emptyText }}
       </div>
       <div v-else class="flex flex-col gap-1.5">
-        <div v-for="b in orderedBlocks" :key="b.blockId">
-          <div v-if="b.kind === 'tool_call'" class="timeline-tool-pair">
-            <div class="font-mono text-[11px] text-secondary truncate" :data-testid="`timeline-tool-call-${b.blockId}`">
-              🔧 {{ toolNameOf(b) }}
-            </div>
-            <div class="text-[11px] text-secondary whitespace-pre-wrap break-words font-mono">
-              {{ shortArgsOf(b) }}
-            </div>
-            <div v-if="pairedResultOf(b)" class="text-[11px] whitespace-pre-wrap break-words select-text">
-              {{ resultPreviewOf(pairedResultOf(b)!) }}
-            </div>
-          </div>
-          <div v-else-if="b.kind === 'tool_result' && !hasPairedCall(b)" class="text-[11px] whitespace-pre-wrap break-words select-text">
+        <div v-for="g in toolGroups" :key="`tool-${g.callId}`" :data-testid="`timeline-tool-call-${g.callId}`" @click="ensureToolResult(g)">
+          <ToolCallCard :card="historyCardFor(g)" :default-collapsed="true" />
+        </div>
+        <div v-for="b in otherBlocks" :key="b.blockId">
+          <div v-if="b.kind === 'tool_result'" class="text-[11px] whitespace-pre-wrap break-words select-text">
             {{ resultPreviewOf(b) }}
           </div>
           <div v-else-if="b.kind === 'reasoning'" class="text-[11px] text-secondary whitespace-pre-wrap break-words opacity-80">
@@ -63,9 +55,7 @@
             {{ plainTextOf(b) }}
           </div>
         </div>
-        <div v-if="missing.length > 0" class="text-[11px] text-secondary opacity-70">
-          （{{ missing.length }} 个块已删除，仅保留占位）
-        </div>
+        <div v-if="missing.length > 0" class="text-[11px] text-secondary opacity-70">（{{ missing.length }} 个块已删除，仅保留占位）</div>
       </div>
     </div>
     <div
@@ -87,7 +77,8 @@
         <button class="underline ml-1" :data-testid="`timeline-final-retry-${turn.turnId}`" @click.stop="reloadFinal">重试</button>
       </div>
       <div v-else-if="finalMissing" class="text-[11px] text-secondary opacity-70" :data-testid="`timeline-final-missing-${turn.turnId}`">
-        正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span><span v-else>（无摘要）</span>
+        正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span
+        ><span v-else>（无摘要）</span>
       </div>
       <MarkdownStreamBlocks v-else-if="finalMarkdown" :text="finalMarkdown" :cache-key="finalCacheKey" />
       <div v-else-if="turn.finalPreview" class="whitespace-pre-wrap">{{ turn.finalPreview }}</div>
@@ -111,10 +102,13 @@ import { computed, onMounted, ref, watch } from 'vue';
 import type { FlatTimelineTurn } from '@features/session/utils/timelineSummary';
 import { processBoxLabel, statusBadge } from '@features/session/utils/timelineSummary';
 import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
+import type { AgentToolCard } from '@features/agent/stores/model';
 import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
+import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
+import { pairToolGroupsInOrder, toAgentToolCard, type ToolGroup } from '../utils/historyToolCards';
 
 const props = defineProps<{
   turn: FlatTimelineTurn;
@@ -130,6 +124,8 @@ const loadError = ref('');
 const blockMap = ref<Record<string, TimelineBlockContent>>({});
 const blockOrder = ref<string[]>([]);
 const missing = ref<string[]>([]);
+const loadedResultText = ref<Record<string, string>>({});
+const pendingToolFetch = ref<Record<string, boolean>>({});
 let loadedOnce = false;
 
 const ws = useWorkspaceStore();
@@ -150,42 +146,13 @@ const orderedBlocks = computed<TimelineBlockContent[]>(() => {
   return out;
 });
 
+const pairedGroups = computed(() => pairToolGroupsInOrder(orderedBlocks.value));
+const toolGroups = computed<ToolGroup[]>(() => pairedGroups.value.tools);
+const otherBlocks = computed<TimelineBlockContent[]>(() => pairedGroups.value.others);
+
 function plainTextOf(b: TimelineBlockContent): string {
   const s = String(b.markdown || b.preview || '');
   return s.length > 4000 ? s.slice(0, 4000) + '\n…（已截断，展开工具卡查看全文）' : s;
-}
-
-function toolNameOf(b: TimelineBlockContent): string {
-  try {
-    const args = String(b.argsJson || b.markdown || '');
-    if (!args) return 'tool';
-    const obj = JSON.parse(args) as Record<string, unknown>;
-    if (obj && typeof obj === 'object') return 'tool';
-  } catch { /* args may be non-JSON delta */ }
-  return 'tool';
-}
-
-function shortArgsOf(b: TimelineBlockContent): string {
-  const s = String(b.argsJson || b.markdown || '');
-  return s.length > 800 ? s.slice(0, 800) + '\n…（参数过长已截断）' : s;
-}
-
-function pairedResultOf(call: TimelineBlockContent): TimelineBlockContent | null {
-  const cid = String(call.callId || '');
-  if (!cid) return null;
-  for (const b of orderedBlocks.value) {
-    if (b.kind === 'tool_result' && String(b.callId || '') === cid) return b;
-  }
-  return null;
-}
-
-function hasPairedCall(result: TimelineBlockContent): boolean {
-  const cid = String(result.callId || '');
-  if (!cid) return false;
-  for (const b of orderedBlocks.value) {
-    if (b.kind === 'tool_call' && String(b.callId || '') === cid) return true;
-  }
-  return false;
 }
 
 function resultPreviewOf(b: TimelineBlockContent): string {
@@ -194,11 +161,48 @@ function resultPreviewOf(b: TimelineBlockContent): string {
   return s.length > 2000 ? s.slice(0, 2000) + '\n…（结果过长已截断）' : s || '（空结果）';
 }
 
+function historyCardFor(group: ToolGroup): AgentToolCard {
+  const base = toAgentToolCard(group, props.turn);
+  const override = loadedResultText.value[group.callId];
+  if (override !== undefined) {
+    return { ...base, resultText: override };
+  }
+  return base;
+}
+
+async function ensureToolResult(group: ToolGroup): Promise<void> {
+  const callId = String(group?.callId || '').trim();
+  if (!callId) return;
+  if (loadedResultText.value[callId] !== undefined) return;
+  if (pendingToolFetch.value[callId]) return;
+  const resultBlock = group.resultBlock;
+  const hasRef = !!String(resultBlock?.resultRef || '').trim();
+  const hasText = !!String(resultBlock?.resultText || '');
+  if (!hasRef || hasText) return;
+  const fetcher = (ws as unknown as { getToolResult?: (turnId: string, cId: string) => Promise<{ resultText?: string | null } | null> })
+    .getToolResult;
+  if (typeof fetcher !== 'function') return;
+  pendingToolFetch.value = { ...pendingToolFetch.value, [callId]: true };
+  try {
+    const res = await fetcher.call(ws, props.turn.turnId, callId);
+    const text = String((res as unknown as { resultText?: string | null })?.resultText ?? '');
+    loadedResultText.value = { ...loadedResultText.value, [callId]: text };
+  } catch {
+    /* keep placeholder, never block card expand */
+  } finally {
+    const next = { ...pendingToolFetch.value };
+    delete next[callId];
+    pendingToolFetch.value = next;
+  }
+}
+
 async function toggle(): Promise<void> {
   expanded.value = !expanded.value;
   try {
     setTurnExpanded(props.turn.turnId, expanded.value);
-  } catch { /* quota counter never blocks */ }
+  } catch {
+    /* quota counter never blocks */
+  }
   emit('expand-change', props.turn.turnId, expanded.value);
   if (expanded.value && !loadedOnce) {
     await reload();
@@ -207,13 +211,17 @@ async function toggle(): Promise<void> {
     for (const id of blockOrder.value) {
       try {
         markBlockDirty(id);
-      } catch { /* dirty mark never blocks collapse */ }
+      } catch {
+        /* dirty mark never blocks collapse */
+      }
     }
     const fid = (props.turn.finalBlockId || '').trim();
     if (fid) {
       try {
         markBlockDirty(fid);
-      } catch { /* dirty mark never blocks collapse */ }
+      } catch {
+        /* dirty mark never blocks collapse */
+      }
     }
   }
 }
@@ -243,7 +251,6 @@ async function reload(): Promise<void> {
   }
 }
 
-// ---- S2 欠账：Final 全文常挂载（展示层，只读 getBlockContents，不改后端） ----
 const hasFinalBlock = computed(() => !!(props.turn.finalBlockId || '').trim());
 const finalCacheKey = computed(() => (props.turn.finalBlockId || '').trim());
 const finalMarkdown = ref('');
@@ -290,10 +297,12 @@ watch(
     blockMap.value = {};
     blockOrder.value = [];
     missing.value = [];
+    loadedResultText.value = {};
+    pendingToolFetch.value = {};
     resetFinal();
     if (expanded.value) void reload();
     else void reloadFinal();
-  },
+  }
 );
 
 watch(
@@ -301,7 +310,7 @@ watch(
   () => {
     resetFinal();
     void reloadFinal();
-  },
+  }
 );
 
 onMounted(() => {

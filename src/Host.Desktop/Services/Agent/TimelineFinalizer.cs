@@ -58,6 +58,7 @@ public static class TimelineFinalizer
                 Kind = draft.Kind,
                 Tag = TimelineBlockTag.Process,
                 CallId = draft.CallId,
+                FunctionName = draft.FunctionName,
                 CharCount = content.Length,
                 Preview = preview,
                 Content = content,
