@@ -7,6 +7,7 @@
   --code-bg: #090d12; --code-text: #e6edf3; --code-border: #283241;
   --tool-output-bg: #090d12; --tool-output-text: #cbd5e1;
   --reasoning-bg: rgba(15,23,42,.6); --reasoning-text: #cbd5e1;
+  --reasoning-block-bg: rgba(148,163,184,.12);
   --diff-add-text: #a7f3d0; --diff-del-text: #fecdd3; --diff-ctx-text: #94a3b8;
   --stat-add-text: #34d399; --stat-del-text: #fb7185;
   /* Win7 兼容字体栈：优先雅黑 UI/雅黑，等宽优先 Consolas */
@@ -69,6 +70,7 @@ html.light {
   --code-bg: #f1f5f9; --code-text: #0f172a; --code-border: #e2e8f0;
   --tool-output-bg: #f8fafc; --tool-output-text: #334155;
   --reasoning-bg: #f1f5f9; --reasoning-text: #334155;
+  --reasoning-block-bg: rgba(15,23,42,.05);
   --diff-add-text: #047857; --diff-del-text: #be123c; --diff-ctx-text: #64748b;
   --stat-add-text: #059669; --stat-del-text: #e11d48;
 }
