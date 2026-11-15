@@ -37,6 +37,17 @@
       @dismiss="emit('dismiss')"
     />
   </div>
+  <div v-else-if="item.kind === 'compact'" :ref="anchor(item.key)" class="w-full">
+    <CompactDivider
+      :stub-id="String(item.msg?.id || '')"
+      :label="stubLabel(metaOf(item.msg).removedCount)"
+      :summary="summaryBodyOf(item.msg)"
+      :summary-html="compactHtml(item.msg)"
+      :backup-file="metaOf(item.msg).backupFile ?? null"
+      :expanded="compactOpen(item.key)"
+      @toggle="emit('toggle', item.key)"
+    />
+  </div>
   <TimelineAlerts
     v-if="isLast && noticeOn && (noticeText || lastErrorText) && item.kind !== 'user-turn'"
     :notice="noticeText"
@@ -52,8 +63,10 @@ import { computed } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import UserBubble from './userturn/UserBubble.vue';
 import UserTurnBlock from './UserTurnBlock.vue';
+import CompactDivider from '@features/session/components/CompactDivider.vue';
 import TimelineAlerts from './timeline/TimelineAlerts.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
+import { metaOf, stubLabel, summaryBodyOf } from '@features/session/utils/compactStub';
 
 /** 行路由：user / system 直出，用户轮转装配器；派生一律经视图模型取用。 */
 const props = defineProps<{ item: TimelineEntry; isLast?: boolean }>();
@@ -111,6 +124,21 @@ const turnPending = computed(() => {
 });
 
 const turnExpanded = computed(() => view.value.isExpanded(turnKey.value));
+/** P007：桩摘要 HTML 走场景渲染器，不直引 markdown 渲染器；展开态复用视图展开仓库。 */
+function compactHtml(m: TimelineEntry['msg']): string {
+  try {
+    return view.value.renderHtml(summaryBodyOf(m));
+  } catch {
+    return '';
+  }
+}
+function compactOpen(key: string): boolean {
+  try {
+    return view.value.isExpanded(key);
+  } catch {
+    return false;
+  }
+}
 const liveSegs = computed(() => view.value.liveSegsFor(props.item));
 const generating = computed(() => view.value.isGenerating);
 const completing = computed(() => view.value.liveCompleting && !!props.isLast);

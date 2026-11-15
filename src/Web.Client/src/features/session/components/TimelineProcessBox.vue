@@ -1,5 +1,16 @@
 <template>
-  <div class="timeline-turn min-w-0" :data-turn-key="turn.turnId" :data-testid="`timeline-turn-${turn.turnId}`">
+  <!-- P007：桩不走过程内容盒，直接渲染通栏分隔线 -->
+  <CompactDivider
+    v-if="turn.kind === 'compact'"
+    :stub-id="turn.turnId"
+    :label="compactLabel"
+    :summary="compactSummary"
+    :summary-html="compactSummaryHtml"
+    :backup-file="null"
+    :expanded="compactExpanded"
+    @toggle="onCompactToggle"
+  />
+  <div v-else class="timeline-turn min-w-0" :data-turn-key="turn.turnId" :data-testid="`timeline-turn-${turn.turnId}`">
     <div v-if="turn.userContent || turn.userPreview" class="flex justify-end turn-user-slot">
       <div
         class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
@@ -105,9 +116,12 @@ import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
 import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
+import CompactDivider from './CompactDivider.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
+import { stubLabel } from '../utils/compactStub';
+import { renderHtmlSmart } from '../utils/markdownRender';
 import { pairToolGroupsInOrder, toAgentToolCard, type ToolGroup } from '../utils/historyToolCards';
 
 const props = defineProps<{
@@ -133,6 +147,19 @@ const ws = useWorkspaceStore();
 
 const badge = computed(() => statusBadge(props.turn.status));
 const label = computed(() => processBoxLabel(props.turn));
+/** P007：桩摘要走分隔线渲染，不请求任何块内容。 */
+const compactLabel = computed(() => stubLabel(props.turn.removedMessages));
+const compactSummary = computed(() => String(props.turn.userContent || props.turn.userPreview || ''));
+const compactSummaryHtml = computed(() => renderHtmlSmart(compactSummary.value, true));
+const compactExpanded = ref(false);
+function onCompactToggle(): void {
+  compactExpanded.value = !compactExpanded.value;
+  try {
+    setTurnExpanded(props.turn.turnId, compactExpanded.value);
+  } catch {
+    /* never blocks */
+  }
+}
 const emptyText = computed(() => {
   if (props.turn.tools > 0) return `共 ${props.turn.blocks} 个过程块，${props.turn.tools} 个工具调用。`;
   return '暂无过程内容。';
@@ -237,6 +264,7 @@ async function toggle(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
+  if (props.turn.kind === 'compact') return; // P007：桩无过程块，不请求内容
   loading.value = true;
   loadError.value = '';
   try {
@@ -275,6 +303,7 @@ function resetFinal(): void {
 }
 
 async function reloadFinal(): Promise<void> {
+  if (props.turn.kind === 'compact') return; // P007：桩无正文块，不请求内容
   const fid = (props.turn.finalBlockId || '').trim();
   if (!fid) {
     resetFinal();

@@ -16,6 +16,10 @@ export interface FlatTimelineTurn {
   status: string;
   lastRequestId: string;
   anchorKey: string;
+  /** P007：'turn' | 'compact'（缺省 'turn'）。 */
+  kind: 'turn' | 'compact' | string;
+  /** P007：本次压缩覆盖的消息条数（仅 compact 轮）。 */
+  removedMessages: number;
 }
 
 export function toFlatTurn(summary: TurnSummary): FlatTimelineTurn {
@@ -36,6 +40,8 @@ export function toFlatTurn(summary: TurnSummary): FlatTimelineTurn {
     status: String(summary.status || 'completed'),
     lastRequestId: String(summary.lastRequestId || ''),
     anchorKey: String(summary.anchorKey || turnId),
+    kind: String(summary.kind || 'turn'), // P007：缺省视为 'turn'
+    removedMessages: Number(summary.removedMessages || 0), // P007：缺省 0
   };
 }
 

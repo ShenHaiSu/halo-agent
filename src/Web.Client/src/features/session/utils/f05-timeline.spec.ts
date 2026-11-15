@@ -100,3 +100,21 @@ describe('historyToc', () => {
     expect(labelOfEntry(toolEntry)).toContain('🔧');
   });
 });
+
+describe('P007 historyToc 压缩桩', () => {
+  it('T2：桩目录条目固定文案且零字数，可按 key 定位', () => {
+    const entries = buildUserTurns([
+      msg({ id: 'u1', role: 'user', content: '第一问' }),
+      msg({ id: 'a1', role: 'assistant', content: '第一答' }),
+      msg({ id: 'stub-1', role: 'user', content: '本轮摘要', kind: 'compact_stub' }),
+      msg({ id: 'u2', role: 'user', content: '第二问' }),
+    ]);
+    expect(entries.map((e) => e.kind)).toEqual(['user-turn', 'compact', 'user-turn']);
+    const toc = buildHistoryToc(entries as unknown as TimelineEntry[], { role: 'all', roundHeadsOnly: false, skipSystem: false });
+    const stub = toc.find((t) => t.anchorKey === 'c-stub-1');
+    expect(stub).toBeDefined();
+    expect(stub?.label).toBe('上下文压缩');
+    expect(stub?.charCount).toBe(0);
+    expect(labelOfEntry(entries[1] as unknown as TimelineEntry)).toBe('上下文压缩');
+  });
+});

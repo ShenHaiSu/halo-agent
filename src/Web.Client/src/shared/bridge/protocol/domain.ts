@@ -81,6 +81,10 @@ export interface TurnSummary {
   createdAtUtc: string;
   updatedAtUtc: string;
   anchorKey: string;
+  /** P007：轮次语义；'turn' = 普通轮，'compact' = 压缩分隔（缺省视为 'turn'，见 10-§6）。 */
+  kind?: 'turn' | 'compact' | string;
+  /** P007：本次压缩覆盖的消息条数（仅 compact 轮）。 */
+  removedMessages?: number;
 }
 export interface TimelineBlockContent {
   blockId: string;
@@ -141,6 +145,10 @@ export interface UnifiedChatMessage {
   cachedTokens?: number | null;
   createdAtUtc: string;
   images?: ChatImageRef[] | null;
+  /** P007：'compact_stub' = 压缩桩（其余为 undefined，见 10-§6）。 */
+  kind?: string | null;
+  /** P007：桩元数据 JSON 原文（前端仅在需要 removedCount 时解析）。 */
+  metaJson?: string | null;
 }
 
 export interface ContextBudgetStatusDto {
