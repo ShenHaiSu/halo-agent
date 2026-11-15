@@ -29,6 +29,8 @@ export default {
         primary: 'rgb(var(--text-primary-rgb) / <alpha-value>)',
         secondary: 'rgb(var(--text-secondary-rgb) / <alpha-value>)',
         accent: 'rgb(var(--accent-primary-rgb) / <alpha-value>)',
+        error: 'rgb(var(--color-error-rgb) / <alpha-value>)',
+        success: 'rgb(var(--color-success-rgb) / <alpha-value>)',
       },
     },
   },

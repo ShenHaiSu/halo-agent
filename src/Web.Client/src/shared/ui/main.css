@@ -35,6 +35,11 @@
   --text-primary-rgb: 230 237 243;
   --text-secondary-rgb: 139 148 158;
   --accent-primary-rgb: 59 130 246;
+  /* 状态色：暗色默认取值 */
+  --color-error: #ef4444;
+  --color-error-rgb: 239 68 68;
+  --color-success: #22c55e;
+  --color-success-rgb: 34 197 94;
 }
 
 html.light {
@@ -55,6 +60,11 @@ html.light {
   --text-primary-rgb: 15 23 42;
   --text-secondary-rgb: 100 116 139;
   --accent-primary-rgb: 37 99 235;
+  /* 状态色：亮色取值与 naiveTheme.ts 的 successColor/errorColor 保持一致，避免两套色系打架 */
+  --color-error: #dc2626;
+  --color-error-rgb: 220 38 38;
+  --color-success: #16a34a;
+  --color-success-rgb: 22 163 74;
   /* need03-04 明亮：浅底+深字，保证对比度 */
   --code-bg: #f1f5f9; --code-text: #0f172a; --code-border: #e2e8f0;
   --tool-output-bg: #f8fafc; --tool-output-text: #334155;
@@ -336,5 +346,18 @@ html.light .toc-bubble--user { background: #eff6ff; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* 边框兜底：把 preflight 的固定浅灰 #e5e7eb 换成主题变量。
+   preflight 的 *,::before,::after{border-color:#e5e7eb} 原本在暗色下表现为亮灰白边框；
+   改走 var(--border-subtle) 后，即便某处透明度修饰漏网，边框也会跟随主题而不是恒定浅灰。
+   注意：这条只是安全网，不能替代真实修复——语义色透明度修饰仍由
+   scripts/assert-tailwind-color-alpha.mjs 静态守卫拦截。 */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border-subtle);
   }
 }
