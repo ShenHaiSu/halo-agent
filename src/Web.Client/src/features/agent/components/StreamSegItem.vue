@@ -1,11 +1,5 @@
 <template>
-  <div
-    v-if="seg.kind === 'reasoning' && seg.text"
-    class="whitespace-pre-wrap break-words app-text-small text-[var(--reasoning-text)] max-h-[40vh] overflow-y-auto reasoning-seg"
-    :data-seg="seg.key"
-  >
-    {{ seg.text }}
-  </div>
+  <ReasoningText v-if="seg.kind === 'reasoning'" :raw="seg.text" :data-seg="seg.key" />
   <div v-else-if="seg.kind === 'tool' && seg.card" data-testid="active-turn-tools" :data-seg="seg.key">
     <ToolCallCard v-if="hasToolContent" :card="seg.card" :default-collapsed="true" />
     <!-- P1：参数/结果尚未到达时卡片正文是空的，不再渲染可展开的空折叠，先占位明示接收中 -->
@@ -40,6 +34,7 @@
 import { computed } from 'vue';
 import type { DisplaySeg } from '../composables/useTimelineProjection';
 import ToolCallCard from './ToolCallCard.vue';
+import ReasoningText from '@shared/ui/ReasoningText.vue';
 import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';
 import '@features/agent/composables/smooth-cursor.css';
 
@@ -62,11 +57,6 @@ const hasToolContent = computed(() => {
 });
 </script>
 <style scoped>
-.reasoning-seg {
-  /* 与 TimelineView 中的同类声明一致：滚动条出现时宽度不变 */
-  scrollbar-gutter: stable;
-  overflow-anchor: auto;
-}
 /* P02-P0a：空工具卡占位与终态卡片同高，毕业切换只换内容不改父高度。 */
 .tool-pending-slot {
   min-height: 44px;

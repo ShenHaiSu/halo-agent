@@ -59,9 +59,7 @@
           <div v-if="b.kind === 'tool_result'" class="text-[11px] whitespace-pre-wrap break-words select-text">
             {{ resultPreviewOf(b) }}
           </div>
-          <div v-else-if="b.kind === 'reasoning'" class="text-[11px] text-secondary whitespace-pre-wrap break-words opacity-80">
-            {{ plainTextOf(b) }}
-          </div>
+          <ReasoningText v-else-if="b.kind === 'reasoning'" :raw="plainTextOf(b)" />
           <div v-else class="text-[11px] whitespace-pre-wrap break-words select-text">
             {{ plainTextOf(b) }}
           </div>
@@ -116,6 +114,8 @@ import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
 import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
+import ReasoningText from '@shared/ui/ReasoningText.vue';
+import { trimBlankEdges } from '@shared/utils/trimBlank';
 import CompactDivider from './CompactDivider.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { markBlockDirty } from '@features/session/utils/markdownDirty';
@@ -179,13 +179,13 @@ const toolGroups = computed<ToolGroup[]>(() => pairedGroups.value.tools);
 const otherBlocks = computed<TimelineBlockContent[]>(() => pairedGroups.value.others);
 
 function plainTextOf(b: TimelineBlockContent): string {
-  const s = String(b.markdown || b.preview || '');
+  const s = trimBlankEdges(String(b.markdown || b.preview || ''));
   return s.length > 4000 ? s.slice(0, 4000) + '\n…（已截断，展开工具卡查看全文）' : s;
 }
 
 function resultPreviewOf(b: TimelineBlockContent): string {
   if (b.resultRef) return `工具结果较大，已落盘（${b.resultRef}），点击工具卡按需加载全文。`;
-  const s = String(b.resultText || b.markdown || b.preview || '');
+  const s = trimBlankEdges(String(b.resultText || b.markdown || b.preview || ''));
   return s.length > 2000 ? s.slice(0, 2000) + '\n…（结果过长已截断）' : s || '（空结果）';
 }
 

@@ -31,14 +31,9 @@
             v-if="st.content"
             class="mt-1 app-text-body leading-relaxed text-primary break-words select-text min-w-0"
             @click="emit('link-click', $event)"
-            v-html="renderHtml(st.content)"
+            v-html="renderHtml(trimBlankEdges(st.content))"
           />
-          <div
-            v-if="st.reasoning"
-            class="mt-1 whitespace-pre-wrap break-words select-text app-text-small text-[var(--reasoning-text)] max-h-[40vh] overflow-y-auto"
-          >
-            {{ st.reasoning }}
-          </div>
+          <ReasoningText v-if="st.reasoning" :raw="st.reasoning" class="mt-1" />
           <div v-if="(st.toolMessages?.length || 0) > 0" class="turn-body mt-1 min-w-0">
             <ToolCallCard v-for="t in st.toolMessages" :key="cardKey(t)" :card="cardFor(t, stepGroup(st))" :default-collapsed="true" />
           </div>
@@ -74,6 +69,8 @@ import { groupOfStep, turnStepAnchorKey } from '@features/session/utils/turnRend
 import UserTurnSummary from '@features/agent/components/UserTurnSummary.vue';
 import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
 import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
+import ReasoningText from '@shared/ui/ReasoningText.vue';
+import { trimBlankEdges } from '@shared/utils/trimBlank';
 import UserTurnSteady from './UserTurnSteady.vue';
 import { timelineViewFallback, useTimelineViewOptional, type TimelineLiveSeg } from '@features/agent/composables/timelineViewKey';
 

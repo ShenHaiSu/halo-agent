@@ -93,4 +93,10 @@ describe('M1 静态抖动（图片槽位 / 思考段高度）', () => {
     expect(html).not.toContain('max-h-24');
     expect(html).toContain('max-h-[40vh]');
   });
+
+  it('reasoning 段走思考渲染壳（微底 + 主题色左线）', () => {
+    const wrapper = mountTimeline([{ kind: 'reasoning', key: 'r1', text: '\n\n思考\n\n', card: null }]);
+    expect(wrapper.find('[data-testid="reasoning-block"]').exists()).toBe(true);
+    expect(wrapper.html()).toContain('border-accent');
+  });
 });
