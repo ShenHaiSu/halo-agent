@@ -48,6 +48,13 @@ public interface ISessionRepository
         string sessionId,
         CancellationToken ct = default
     );
+
+    /// <summary>P007：活跃切片读（v2 DB 单语句快路径；无库/失败回退全量）。无桩会话等价于全量。</summary>
+    Task<List<UnifiedChatMessage>> GetActiveContextMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
     IAsyncEnumerable<UnifiedChatMessage> StreamMessagesAsync(
         string workspaceId,
         string sessionId,

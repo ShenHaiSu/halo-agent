@@ -185,8 +185,8 @@ public sealed partial class SessionHistoryStore
         }
     }
 
-    /// <summary>P007：DB 行→实体映射（与 GetMessagesAsync 同一列序，避免列漂移）。</summary>
-    private static UnifiedChatMessage? MapCompactMessage(SqliteDataReader reader)
+    /// <summary>P007：DB 行→实体映射（与 GetMessagesAsync 同一列序，避免列漂移；仓储快路径复用）。</summary>
+    internal static UnifiedChatMessage? MapCompactMessage(SqliteDataReader reader)
     {
         string id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
         if (string.IsNullOrWhiteSpace(id))
