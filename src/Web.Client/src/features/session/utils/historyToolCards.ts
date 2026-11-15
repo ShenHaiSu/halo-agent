@@ -6,9 +6,69 @@ export interface ToolGroup {
   callId: string;
   callBlock?: TimelineBlockContent;
   resultBlock?: TimelineBlockContent;
-  order: number;
   functionName: string;
 }
+
+/**
+ * 盒内渲染项：输出序与输入块序一致。
+ * 调用方传入的块数组本身已是后端排好的时间序（请求返回序即渲染序），
+ * 本函数只做“块到渲染项”的保序映射：不排序，不按类型分组，不重算顺序。
+ * 工具卡占其调用块的位置；已被卡消费的结果块不再单独占位。
+ */
+export type HistoryItem =
+  | { kind: 'tool'; key: string; group: ToolGroup }
+  | { kind: 'reasoning'; key: string; block: TimelineBlockContent }
+  | { kind: 'text'; key: string; block: TimelineBlockContent }
+  | { kind: 'tool_result'; key: string; block: TimelineBlockContent };
+
+export function buildHistoryItems(blocks: TimelineBlockContent[]): HistoryItem[] {
+  const list = Array.isArray(blocks) ? blocks : [];
+  const items: HistoryItem[] = [];
+  // 仅用于配对查找，产出顺序始终以输入遍历为准，不以该表迭代拼装结果。
+  const groups = new Map<string, ToolGroup>();
+
+  for (const block of list) {
+    if (!block) continue;
+    const kind = String(block.kind || '');
+    const callId = String(block.callId || '').trim();
+
+    if (kind === 'tool_call' && callId) {
+      const hit = groups.get(callId);
+      if (hit) {
+        if (!hit.callBlock) hit.callBlock = block;
+        continue;
+      }
+      const group: ToolGroup = { callId, functionName: 'tool', callBlock: block };
+      groups.set(callId, group);
+      items.push({ kind: 'tool', key: `tool:${callId}`, group });
+      continue;
+    }
+
+    if (kind === 'tool_result' && callId) {
+      const group = groups.get(callId);
+      if (group) {
+        if (!group.resultBlock) group.resultBlock = block;
+        continue;
+      }
+    }
+
+    if (kind === 'reasoning') {
+      items.push({ kind: 'reasoning', key: `rsn:${block.blockId}`, block });
+      continue;
+    }
+    if (kind === 'tool_result') {
+      items.push({ kind: 'tool_result', key: `res:${block.blockId}`, block });
+      continue;
+    }
+    items.push({ kind: 'text', key: `txt:${block.blockId}`, block });
+  }
+
+  for (const group of groups.values()) {
+    group.functionName = pickFunctionName(group.callBlock, group.resultBlock);
+  }
+  return items;
+}
+
 function pickFunctionName(callBlock?: TimelineBlockContent, resultBlock?: TimelineBlockContent): string {
   const fromCall = String(callBlock?.functionName || '').trim();
   if (fromCall) return fromCall;
@@ -32,63 +92,6 @@ function resolveStatus(group: ToolGroup, turn: { failed: number; status: string 
   const failedCount = Number(turn?.failed || 0);
   const statusText = String(turn?.status || '').toLowerCase();
   return failedCount > 0 || statusText === 'error' ? 'error' : 'done';
-}
-
-export function pairToolGroupsInOrder(blocks: TimelineBlockContent[]): { tools: ToolGroup[]; others: TimelineBlockContent[] } {
-  const list = Array.isArray(blocks) ? blocks : [];
-  const groupsByCall = new Map<string, ToolGroup>();
-  const others: TimelineBlockContent[] = [];
-  const pendingResults: TimelineBlockContent[] = [];
-
-  for (let index = 0; index < list.length; index++) {
-    const block = list[index];
-    if (!block) continue;
-    const kind = String(block.kind || '');
-    const callId = String(block.callId || '').trim();
-    if (kind === 'tool_call' && callId) {
-      let group = groupsByCall.get(callId);
-      if (!group) {
-        group = {
-          callId,
-          order: typeof block.seq === 'number' ? Number(block.seq) : index,
-          functionName: 'tool',
-        };
-        groupsByCall.set(callId, group);
-      }
-      if (!group.callBlock) {
-        group.callBlock = block;
-      }
-      continue;
-    }
-    if (kind === 'tool_result' && callId) {
-      pendingResults.push(block);
-      continue;
-    }
-    if ((kind === 'tool_call' || kind === 'tool_result') && !callId) {
-      others.push(block);
-      continue;
-    }
-    others.push(block);
-  }
-
-  for (const resultBlock of pendingResults) {
-    const callId = String(resultBlock.callId || '').trim();
-    const group = groupsByCall.get(callId);
-    if (group && !group.resultBlock) {
-      group.resultBlock = resultBlock;
-    } else if (group && group.resultBlock) {
-      continue;
-    } else {
-      others.push(resultBlock);
-    }
-  }
-
-  const tools = Array.from(groupsByCall.values());
-  for (const group of tools) {
-    group.functionName = pickFunctionName(group.callBlock, group.resultBlock);
-  }
-  tools.sort((a, b) => a.order - b.order);
-  return { tools, others };
 }
 
 export function toAgentToolCard(group: ToolGroup, turn: { failed: number; status: string }): AgentToolCard {
