@@ -179,6 +179,14 @@ public sealed class UnifiedChatMessage
     public long? OutputTokens { get; set; }
     public long? CachedTokens { get; set; }
 
+    /// <summary>P007：消息语义标记；null/'chat' = 普通消息，'compact_stub' = 压缩桩。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; set; }
+
+    /// <summary>P007：桩的结构化元数据（仅 kind='compact_stub' 时非空）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MetaJson { get; set; }
+
     /// <summary>need09-05：本消息附带的图片引用；null/空 = 纯文本（STJ 缺字段容忍，WhenWritingNull 保证老快照零抖动）。</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ChatImageRef>? Images { get; set; }

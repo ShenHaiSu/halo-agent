@@ -20,7 +20,7 @@ namespace Host.Desktop.Services;
 /// need22-P1 T5：三段式（快照拷贝→释锁→LLM 摘要→重加锁重写），压缩耗时不再占用追加锁临界区；
 /// 压缩中查询/追加可用；取消经 ct 接入（HostBridgeFacade.cancelCompaction）。
 /// </summary>
-public sealed class CompactionService : ICompactionService
+public sealed partial class CompactionService : ICompactionService
 {
     public const int KeepDefaultGroups = 6;
     public const int TruncPerMessage = 2000;
@@ -174,10 +174,47 @@ public sealed class CompactionService : ICompactionService
         if (string.IsNullOrWhiteSpace(summary))
             return CompactionResult.Fail("COMPACT_EMPTY", "摘要模型返回为空");
 
-        // Phase 3（重加锁，短临界区）：原子落盘；压缩期间新追加的消息（append-only 尾巴）予以保留不丢失。
+        // Phase 3（重加锁，短临界区）：stub=append-only 桩写入；legacy=旧物理重写（M5 下线）。
+        // P007：mode 唯一口径 snapshot.FrozenCompactMode（会话冻结优先，全局次之，M1 保持 legacy 默认）。
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            string mode = string.IsNullOrWhiteSpace(snapshot.FrozenCompactMode)
+                ? CompactMode.Legacy
+                : snapshot.FrozenCompactMode.Trim();
+            if (string.Equals(mode, CompactMode.Stub, StringComparison.OrdinalIgnoreCase))
+            {
+                // P007：stub 下备份失败只告警不阻断（backupFile=null，后续恢复工具不可用需明示）。
+                string? backupFile = null;
+                try
+                {
+                    backupFile = await concrete
+                        .SessionRepository.BackupMessagesJsonlAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        Infrastructure.Logging.HaloLogger.App.Warn(
+                            $"[Compact] stub backup failed, continue without backup: {ex.Message}"
+                        );
+                    }
+                    catch { }
+                    backupFile = null;
+                }
+                return await AppendStubAsync(
+                        concrete,
+                        workspaceId,
+                        sessionId,
+                        snapshot,
+                        summary,
+                        compactUsage,
+                        backupFile,
+                        ct
+                    )
+                    .ConfigureAwait(false);
+            }
             return await RewriteAsync(concrete, workspaceId, sessionId, snapshot, summary, ct)
                 .ConfigureAwait(false);
         }
@@ -195,6 +232,13 @@ public sealed class CompactionService : ICompactionService
         public List<UnifiedChatMessage> TailMessages = new();
         public int OldCount;
         public int SnapshotCount;
+
+        // P007：桩区间（DB 路径可得；纯 jsonl 会话为 null）。
+        public long? FromSeq;
+        public long? ToSeq;
+
+        // P007：快照时解析的压缩模型（会话级冻结优先，全局次之）。
+        public string FrozenCompactMode = "legacy";
         public ProviderConfig Provider = null!;
         public ModelConfig Model = null!;
         public UnifiedLlmRequest Request = null!;
@@ -365,6 +409,10 @@ public sealed class CompactionService : ICompactionService
             OrigSystem = origSystem,
             OldCount = oldCount,
             SnapshotCount = messages.Count,
+            // P007：M1 仍读全量；From/ToSeq 暂 null（DB 快路径 M2 接线）。
+            FromSeq = null,
+            ToSeq = null,
+            FrozenCompactMode = ResolveCompactMode(session, service),
             Provider = provider,
             Model = model,
             Request = request,
@@ -671,6 +719,24 @@ public sealed class CompactionService : ICompactionService
                 MaxOutputTokens = 4096
             };
         return (provider, model);
+    }
+
+    /// <summary>P007：压缩模型唯一口径（会话级冻结优先，全局次之；默认 legacy）。</summary>
+    private static string ResolveCompactMode(
+        SessionMetadata? session,
+        WorkspaceSessionService service
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(session?.CompactMode))
+            return session!.CompactMode!.Trim();
+        try
+        {
+            var global = service.SessionRepository.Storage.LoadAppSettings();
+            if (global != null && !string.IsNullOrWhiteSpace(global.CompactMode))
+                return global.CompactMode.Trim();
+        }
+        catch { }
+        return CompactMode.Legacy;
     }
 
     private static string RoleLabel(string? role)

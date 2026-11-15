@@ -60,6 +60,9 @@ public sealed class TurnSummary
 {
     public string TurnId { get; set; } = string.Empty;
     public long TurnSeq { get; set; }
+
+    /// <summary>P007：轮次语义；'turn' = 普通轮，'compact' = 压缩分隔。</summary>
+    public string Kind { get; set; } = "turn";
     public int IterEnd { get; set; }
     public string UserPreview { get; set; } = string.Empty;
 
@@ -77,6 +80,9 @@ public sealed class TurnSummary
     public string CreatedAtUtc { get; set; } = string.Empty;
     public string UpdatedAtUtc { get; set; } = string.Empty;
     public string AnchorKey { get; set; } = string.Empty;
+
+    /// <summary>P007：本轮压缩覆盖的消息条数；普通轮恒 0。</summary>
+    public int RemovedMessages { get; set; }
 }
 
 /// <summary>块内容点查结果：小块直接给全文，大块给引用再读文件。</summary>

@@ -35,6 +35,8 @@ public sealed class SessionHistoryDb
         + "input_tokens INT,"
         + "output_tokens INT,"
         + "cached_tokens INT,"
+        + "kind TEXT,"
+        + "meta_json TEXT,"
         + "created_utc TEXT NOT NULL"
         + ");"
         + "CREATE TABLE IF NOT EXISTS blocks("
@@ -68,10 +70,13 @@ public sealed class SessionHistoryDb
         + "status TEXT NOT NULL DEFAULT 'completed'"
         + " CHECK(status IN ('completed','truncated','cancelled','error')),"
         + "last_request_id TEXT NOT NULL DEFAULT '',"
+        + "kind TEXT NOT NULL DEFAULT 'turn',"
+        + "removed_messages INT NOT NULL DEFAULT 0,"
         + "updated_at TEXT NOT NULL"
         + ");"
         + "CREATE INDEX IF NOT EXISTS ix_blocks_turn_seq ON blocks(turn_id, seq);"
-        + "CREATE INDEX IF NOT EXISTS ix_blocks_call ON blocks(call_id) WHERE call_id IS NOT NULL;";
+        + "CREATE INDEX IF NOT EXISTS ix_blocks_call ON blocks(call_id) WHERE call_id IS NOT NULL;"
+        + "CREATE INDEX IF NOT EXISTS ix_messages_kind ON messages(kind) WHERE kind IS NOT NULL;";
 
     public string EnsureDatabase(string workspaceId, string sessionId)
     {
@@ -124,6 +129,24 @@ public sealed class SessionHistoryDb
                 add3.CommandText = "ALTER TABLE messages ADD COLUMN images_json TEXT;";
                 add3.ExecuteNonQuery();
             }
+            // P007: 压缩桩标记列（幂等，老库自动补列）。
+            if (!names.Contains("kind"))
+            {
+                using var addK = conn.CreateCommand();
+                addK.CommandText = "ALTER TABLE messages ADD COLUMN kind TEXT;";
+                addK.ExecuteNonQuery();
+            }
+            if (!names.Contains("meta_json"))
+            {
+                using var addM = conn.CreateCommand();
+                addM.CommandText = "ALTER TABLE messages ADD COLUMN meta_json TEXT;";
+                addM.ExecuteNonQuery();
+            }
+            // P007: 桩查询快路径索引（体积极小，只索引桩行）。
+            using var idx = conn.CreateCommand();
+            idx.CommandText =
+                "CREATE INDEX IF NOT EXISTS ix_messages_kind ON messages(kind) WHERE kind IS NOT NULL;";
+            idx.ExecuteNonQuery();
         }
         catch { }
         try
@@ -170,6 +193,22 @@ public sealed class SessionHistoryDb
                 addContent.CommandText =
                     "ALTER TABLE turns ADD COLUMN user_content TEXT NOT NULL DEFAULT '';";
                 addContent.ExecuteNonQuery();
+            }
+            // P007: 压缩轮标记列（默认 'turn'，老行自动回填）。
+            if (!turnNames.Contains("kind"))
+            {
+                using var addTK = conn.CreateCommand();
+                addTK.CommandText =
+                    "ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'turn';";
+                addTK.ExecuteNonQuery();
+            }
+            // P007: 桩轮覆盖条数（普通轮恒 0；老行默认 0）。
+            if (!turnNames.Contains("removed_messages"))
+            {
+                using var addRM = conn.CreateCommand();
+                addRM.CommandText =
+                    "ALTER TABLE turns ADD COLUMN removed_messages INT NOT NULL DEFAULT 0;";
+                addRM.ExecuteNonQuery();
             }
             using var backfill = conn.CreateCommand();
             backfill.CommandText =

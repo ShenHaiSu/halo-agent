@@ -25,6 +25,15 @@ public sealed class CompactionResult
     public string SummaryPreview { get; init; } = string.Empty;
     public string? BackupFileName { get; init; }
 
+    /// <summary>P007：桩消息 id（stub 模式成功时非空）。</summary>
+    public string? StubMessageId { get; init; }
+
+    /// <summary>P007：桩轮 id（stub 模式成功时非空，v1 会话为 null）。</summary>
+    public string? StubTurnId { get; init; }
+
+    /// <summary>P007：压缩请求 completion tokens（= meta_json.summaryTokens）。</summary>
+    public int SummaryOutputTokens { get; init; }
+
     public static CompactionResult Ok(int removed, int kept, string preview, string? backup) =>
         new()
         {
@@ -33,6 +42,28 @@ public sealed class CompactionResult
             KeptMessages = kept,
             SummaryPreview = preview ?? string.Empty,
             BackupFileName = backup
+        };
+
+    /// <summary>P007：append-only 桩写入成功（不删旧行；Kept = 全量条数）。</summary>
+    public static CompactionResult OkStub(
+        int removed,
+        int kept,
+        string stubMsgId,
+        string? stubTurnId,
+        int summaryTokens,
+        string preview,
+        string? backupFile = null
+    ) =>
+        new()
+        {
+            Success = true,
+            RemovedMessages = removed,
+            KeptMessages = kept,
+            SummaryPreview = preview ?? string.Empty,
+            BackupFileName = backupFile,
+            StubMessageId = stubMsgId,
+            StubTurnId = stubTurnId,
+            SummaryOutputTokens = summaryTokens,
         };
 
     /// <summary>无事可做（太短无需压缩）：Success 且 Removed==0，前端据此提示。</summary>
