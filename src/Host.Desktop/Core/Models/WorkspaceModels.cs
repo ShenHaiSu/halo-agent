@@ -132,6 +132,9 @@ public sealed class SessionMetadata
     public string? TaskPrompt { get; set; }
 
     public int HistoryVersion { get; set; }
+
+    /// <summary>P007：会话级压缩模型冻结：null = 继承全局；首次写桩后固化为 stub。</summary>
+    public string? CompactMode { get; set; }
 }
 
 /// <summary>

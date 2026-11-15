@@ -17,6 +17,9 @@ public sealed class StorageBootstrapConfig
 public sealed class AppSettingsConfig
 {
     public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>P007：压缩模型开关：legacy（旧重写，默认）/ stub（新桩模型）。</summary>
+    public string CompactMode { get; set; } = "legacy";
     public string Theme { get; set; } = "dark";
     public string PreferredShell { get; set; } = "cmd";
     public int LogRetentionDays { get; set; } = 14;
