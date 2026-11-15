@@ -1,4 +1,5 @@
 import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
+import { trimBlankEdges } from '@shared/utils/trimBlank';
 import type { UserTurn } from '@features/session/utils/userTurn';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import type { TimelineMenu } from './useTimelineMenu';
@@ -46,7 +47,7 @@ export function useTimelineRowActions(deps: RowActionDeps) {
       });
       return;
     }
-    deps.menu.openMenu(e, { kind: 'user', id: String(item.msg?.id || ''), text: String(item.msg?.content || '') });
+    deps.menu.openMenu(e, { kind: 'user', id: String(item.msg?.id || ''), text: trimBlankEdges(String(item.msg?.content || '')) });
   }
 
   /** 助手区右键同样按轮（锚点取本轮末 assistant，重放/分支/删除整轮）。 */
@@ -76,14 +77,14 @@ export function useTimelineRowActions(deps: RowActionDeps) {
       deps.menu.openMenu(e, {
         kind: 'assistant',
         id: String(item.group?.assistantId || item.group?.key || ''),
-        text: String(item.group?.content || ''),
+        text: trimBlankEdges(String(item.group?.content || '')),
       });
       return;
     }
     deps.menu.openMenu(e, {
       kind: 'assistant',
       id: String(item.msg?.id || ''),
-      text: String(item.msg?.content || ''),
+      text: trimBlankEdges(String(item.msg?.content || '')),
     });
   }
 

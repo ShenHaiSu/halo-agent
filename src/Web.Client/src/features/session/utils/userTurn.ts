@@ -6,6 +6,7 @@ import type { TurnGroup } from './turnGroup';
 import { isCompactStub } from './compactStub';
 import { turnPhaseOf, type TurnPhase } from './turnProcess';
 import { TOOL_ERROR_MARK, isToolErrorText } from './toolErrorText';
+import { trimBlankEdges } from '@shared/utils/trimBlank';
 
 /** 失败工具判定口径（与 useTimeline 卡片判定同源，见 toolErrorText）。 */
 export const USER_TURN_TOOL_ERROR_MARK = TOOL_ERROR_MARK;
@@ -590,19 +591,25 @@ export function turnMessageIds(turn: UserTurn): string[] {
   return out;
 }
 
-/** 整轮复制文本（user 全文 + 各 step 全文 + 工具结果，阅读序）。 */
+/** 整轮复制文本（user 全文 + 各 step 全文 + 工具结果，阅读序）。正文与思考首尾空白一并裁掉。 */
 export function turnCopyText(turn: UserTurn): string {
   const parts: string[] = [];
-  if (turn.userMsg && String(turn.userMsg.content || '').trim()) parts.push(String(turn.userMsg.content));
+  const push = (s: string | null | undefined): void => {
+    const t = trimBlankEdges(String(s ?? ''));
+    if (t) parts.push(t);
+  };
+  push(turn.userMsg?.content);
   for (const st of turn.steps || []) {
-    if (String(st.content || '').trim()) parts.push(String(st.content));
-    if (st.reasoning && String(st.reasoning).trim()) parts.push(String(st.reasoning));
+    push(st.content);
+    push(st.reasoning);
     for (const m of st.toolMessages || []) {
+      // 工具输出口径保持不变（既有全量 trim，不是首尾行空白口径）
       const c = String(m?.content || '').trim();
       if (c) parts.push(`[工具 ${String((m as unknown as { name?: unknown }).name || '')}] ${c}`);
     }
   }
-  return parts.join('\n\n');
+  // 块间分隔统一由 join 负责：先去掉每块的尾换行，否则块尾换行会与分隔符叠成两个空行
+  return parts.map((p) => p.replace(/\n+$/, '')).join('\n\n');
 }
 
 /** 整轮重放锚点（D3=A：重试另起一轮；user 锚优先，孤儿轮用末 assistant 锚）。 */
