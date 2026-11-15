@@ -300,7 +300,8 @@ public sealed partial class ProviderConfigService
             SupportsVision = m.SupportsVision,
             MaxImagesPerTurn = m.MaxImagesPerTurn,
             VisionDetail = VisionDefaults.NormalizeDetail(m.VisionDetail),
-            IncludeReasoningInHistory = m.IncludeReasoningInHistory
+            IncludeReasoningInHistory = m.IncludeReasoningInHistory,
+            ThinkTagMode = m.ThinkTagMode
         };
     }
 

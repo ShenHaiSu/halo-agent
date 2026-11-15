@@ -144,7 +144,9 @@ public sealed partial class HostBridgeFacade
                 MaxContextTokens = model.MaxContextTokens,
                 MaxOutputTokens = 50,
                 Temperature = 0.2,
-                Enabled = true
+                Enabled = true,
+                // 标题与正文共用同一套正文通道语义，否则关掉转写的模型在标题里仍会被剥标签
+                ThinkTagMode = model.ThinkTagMode
             };
             var llmRequest = new UnifiedLlmRequest
             {

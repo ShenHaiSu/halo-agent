@@ -311,9 +311,12 @@ public sealed partial class LlmGatewayClient : ILlmGatewayClient
 
             var responseStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
 
-            await foreach (
-                var evt in adapter.ParseStreamAsync(responseStream, ct).ConfigureAwait(false)
-            )
+            // 正文标签转写模式随请求下发：适配器是单例，实例字段在并发流之间会串味。
+            var streamEvents = adapter is ChatCompletionsAdapter chatAdapter
+                ? chatAdapter.ParseStreamAsync(responseStream, request.Model.ThinkTagMode, ct)
+                : adapter.ParseStreamAsync(responseStream, ct);
+
+            await foreach (var evt in streamEvents.ConfigureAwait(false))
             {
                 if (
                     !ttftMs.HasValue
