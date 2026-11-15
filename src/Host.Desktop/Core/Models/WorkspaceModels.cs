@@ -248,6 +248,9 @@ public sealed class ContextBudgetStatusDto
     /// <summary>need05-01：true = UsedInputTokens 来自估算回退（流式中/无快照）。</summary>
     public bool UsedInputIsEstimated { get; set; }
 
+    /// <summary>P007：占用基线来源 exact | compact-estimate | estimated。缺省 exact = 旧行为。</summary>
+    public string OccupancyBaseline { get; set; } = "exact";
+
     /// <summary>need05-01：known | unknown | estimated。空会话为 known+0%；有消息无快照为 unknown。</summary>
     public string OccupancyState { get; set; } = "known";
 

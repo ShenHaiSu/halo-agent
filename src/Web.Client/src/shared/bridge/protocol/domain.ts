@@ -165,6 +165,8 @@ export interface ContextBudgetStatusDto {
   lastCachedTokens?: number | null; // null = unknown；非 null 时恒 ≤ lastPromptTokens
   cacheHitRate?: number | null; // = cached/input；未知则 null（不画 0%）
   usedInputIsEstimated?: boolean; // true = UsedInputTokens 来自估算回退
+  /** P007：占用基线来源 exact | compact-estimate | estimated（缺省 exact，见 10-§6）。 */
+  occupancyBaseline?: string;
   occupancyState?: string; // known | unknown | estimated
   billedPromptTokens?: number; // Σ账单 prompt
   billedCompletionTokens?: number;
@@ -182,6 +184,12 @@ export interface CompactionResultDto {
   keptMessages: number;
   summaryPreview: string;
   backupFileName?: string | null;
+}
+/** P007：压缩完成事件增量载荷（见 10-§2，键只增不改）。 */
+export interface CompactCompletedPayload {
+  stubMessageId?: string | null;
+  summaryTokens?: number;
+  occupancyBaseline?: string;
 }
 export interface PromptConfigDocument {
   version: number;

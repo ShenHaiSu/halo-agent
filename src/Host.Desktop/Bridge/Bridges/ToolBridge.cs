@@ -178,6 +178,35 @@ public sealed partial class HostBridgeFacade
                             .ConfigureAwait(false);
                         if (result.Success)
                         {
+                            // P007：占用基线取压缩后即时重算的实值（通常为 compact-estimate），禁止写死。
+                            string occupancyBaseline = "compact-estimate";
+                            try
+                            {
+                                var active = await _workspaceSessionService
+                                    .GetActiveContextMessagesAsync(
+                                        wsId,
+                                        sessId,
+                                        CancellationToken.None
+                                    )
+                                    .ConfigureAwait(false);
+                                var stub = await _workspaceSessionService
+                                    .GetLastCompactStubAsync(wsId, sessId, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                                var probe = new ModelConfig
+                                {
+                                    Id = "compact-baseline",
+                                    MaxContextTokens = 128000,
+                                    MaxOutputTokens = 4096
+                                };
+                                occupancyBaseline =
+                                    _tokenBudgetService
+                                        .CalculateBudgetStatus(probe, active, null, 0, stub)
+                                        .OccupancyBaseline ?? "compact-estimate";
+                            }
+                            catch
+                            {
+                                // 预算重算失败不阻断压缩完成事件，按暂存态回退
+                            }
                             JsEventDispatcher.Publish(
                                 "agent:turn-event",
                                 new
@@ -190,6 +219,9 @@ public sealed partial class HostBridgeFacade
                                         keptMessages = result.KeptMessages,
                                         summaryPreview = result.SummaryPreview,
                                         backupFileName = result.BackupFileName,
+                                        stubMessageId = result.StubMessageId,
+                                        summaryTokens = result.SummaryOutputTokens,
+                                        occupancyBaseline,
                                         updatedAtUtc = DateTime.UtcNow.ToString("o")
                                     },
                                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()

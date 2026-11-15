@@ -133,14 +133,22 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   }
   try {
     finalizePending(t);
-  } catch { /* optimistic tag finalize never blocks turn end */ }
+  } catch {
+    /* optimistic tag finalize never blocks turn end */
+  }
   try {
     const tags: Record<string, string> = {};
     for (const s of t.segs) {
       if (s.blockId && s.tag) tags[s.blockId] = String(s.tag);
       else if (s.key && s.tag) tags[s.key] = String(s.tag);
     }
-    lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now(), tags };
+    lastTurnSnapshot.value[sid] = {
+      toolCards: [...t.toolCards],
+      reasoning: t.streamingReasoning,
+      text: t.streamingText,
+      at: Date.now(),
+      tags,
+    };
     haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
   } catch (e) {
     console.warn('[agent-turn] snapshot failed:', e);
@@ -273,7 +281,11 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
     case 'CompactCompleted': {
       t.isGenerating = false;
       t.streamingActive = false;
-      t.turnNotice = `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
+      // P007：压缩完成文案带摘要 tokens（≈N tokens）；无 tokens 时回退无后缀文案
+      t.turnNotice =
+        num(payload['summaryTokens']) > 0
+          ? `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要（摘要 ≈${num(payload['summaryTokens'])} tokens）`
+          : `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
       void refreshAfterTool(sid, 'finish'); // 重拉消息与预算
