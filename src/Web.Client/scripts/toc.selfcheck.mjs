@@ -1,6 +1,5 @@
-// need19 P2/P4：目录纯函数自检（node --experimental-strip-types scripts/toc.selfcheck.mjs）
+// 目录纯函数自检（node --experimental-strip-types scripts/toc.selfcheck.mjs）
 import { toDisplayText, bubbleLabel, buildHistoryToc } from '../src/features/session/utils/historyToc.ts';
-import { buildTimelineEntries } from '../src/features/session/utils/turnGroup.ts';
 
 let pass = 0;
 let fail = 0;
@@ -29,47 +28,54 @@ eq('U6', toDisplayText('```ts\nconst a = 1;\n```'), 'const a = 1;');
 // U7：HTML 标签
 eq('U7', toDisplayText('<script>alert(1)</script>hi').includes('hi'), true);
 
-// U8/U9：buildHistoryToc 计数与轮次
-const msgs = [
-  { id: 'u1', role: 'user', content: '第一问是什么', createdAtUtc: '' },
-  { id: 'a1', role: 'assistant', content: '第一答内容', createdAtUtc: '' },
-  { id: 'u2', role: 'user', content: '第二问是什么', createdAtUtc: '' },
-  { id: 'a2', role: 'assistant', content: '第二答内容', createdAtUtc: '' },
-  { id: 'a3', role: 'assistant', content: '第三答内容', createdAtUtc: '' },
-  { id: 's1', role: 'system', content: '系统提示', createdAtUtc: '' },
-];
-const entries = buildTimelineEntries(msgs, [
+// U8/U9：目录计数与轮次（新链条目手工构造，不依赖已删除的旧聚合）
+const entries = [
+  { key: 'u-u1', kind: 'user', msg: { id: 'u1', role: 'user', content: '第一问是什么', createdAtUtc: '' } },
   {
     key: 'a1',
-    assistantId: 'a1',
-    reasoning: null,
-    content: '第一答内容',
-    toolCalls: [],
-    toolMessages: [],
-    telemetry: null,
-    createdAtUtc: '',
+    kind: 'turn',
+    group: {
+      key: 'a1',
+      assistantId: 'a1',
+      reasoning: null,
+      content: '第一答内容',
+      toolCalls: [],
+      toolMessages: [],
+      telemetry: null,
+      createdAtUtc: '',
+    },
   },
+  { key: 'u-u2', kind: 'user', msg: { id: 'u2', role: 'user', content: '第二问是什么', createdAtUtc: '' } },
   {
     key: 'a2',
-    assistantId: 'a2',
-    reasoning: null,
-    content: '第二答内容',
-    createdAtUtc: '',
-    toolCalls: [],
-    toolMessages: [],
-    telemetry: null,
+    kind: 'turn',
+    group: {
+      key: 'a2',
+      assistantId: 'a2',
+      reasoning: null,
+      content: '第二答内容',
+      toolCalls: [],
+      toolMessages: [],
+      telemetry: null,
+      createdAtUtc: '',
+    },
   },
   {
     key: 'a3',
-    assistantId: 'a3',
-    reasoning: null,
-    content: '第三答内容',
-    createdAtUtc: '',
-    toolCalls: [],
-    toolMessages: [],
-    telemetry: null,
+    kind: 'turn',
+    group: {
+      key: 'a3',
+      assistantId: 'a3',
+      reasoning: null,
+      content: '第三答内容',
+      toolCalls: [],
+      toolMessages: [],
+      telemetry: null,
+      createdAtUtc: '',
+    },
   },
-]);
+  { key: 's-s1', kind: 'system', msg: { id: 's1', role: 'system', content: '系统提示', createdAtUtc: '' } },
+];
 eq('U8-count', buildHistoryToc(entries, { role: 'all', roundHeadsOnly: false }).length, 5);
 const heads = buildHistoryToc(entries, { role: 'all', roundHeadsOnly: true });
 eq(
@@ -80,10 +86,11 @@ eq(
 eq('U9-heads-rounds', heads.filter((t) => t.role === 'assistant').length, 2);
 
 // U10：孤立 tool 组
-const toolEntries = buildTimelineEntries(
-  [{ id: 't1', role: 'tool', content: 'out', createdAtUtc: '' }],
-  [
-    {
+const toolEntries = [
+  {
+    key: 'tool-t1',
+    kind: 'turn',
+    group: {
       key: 'tool-t1',
       assistantId: '',
       reasoning: null,
@@ -93,8 +100,8 @@ const toolEntries = buildTimelineEntries(
       telemetry: null,
       createdAtUtc: '',
     },
-  ]
-);
+  },
+];
 const toolToc = buildHistoryToc(toolEntries, { role: 'all', roundHeadsOnly: false });
 eq('U10-role', toolToc[0]?.role, 'assistant');
 eq('U10-label', String(toolToc[0]?.label || '').startsWith('🔧'), true);

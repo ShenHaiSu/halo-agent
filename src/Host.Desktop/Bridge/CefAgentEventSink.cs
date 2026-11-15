@@ -36,16 +36,26 @@ public sealed class CefAgentEventSink : IAgentEventSink
         return Task.CompletedTask;
     }
 
-    public void EmitStreamDelta(string sessionId, string kind, string textDelta)
+    public void EmitStreamDelta(
+        string sessionId,
+        string kind,
+        string textDelta,
+        string? blockId = null,
+        long seq = 0,
+        string? tag = null
+    )
     {
         try
         {
-            var dto = SessionStreamEventDto.FromUnifiedEvent(
-                sessionId,
+            UnifiedStreamEvent evt =
                 kind == "ReasoningDelta"
                     ? UnifiedStreamEvent.Reasoning(textDelta)
-                    : UnifiedStreamEvent.Text(textDelta)
-            );
+                    : UnifiedStreamEvent.Text(textDelta);
+            if (!string.IsNullOrWhiteSpace(blockId) || seq != 0 || !string.IsNullOrWhiteSpace(tag))
+            {
+                evt = evt with { BlockId = blockId, Sequence = seq, Tag = tag };
+            }
+            var dto = SessionStreamEventDto.FromUnifiedEvent(sessionId, evt);
             JsEventDispatcher.Publish("llm:stream-event", dto);
         }
         catch { }

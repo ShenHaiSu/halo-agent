@@ -14,7 +14,13 @@ import {
   type ComposerDraft,
   type ComposerImageMime,
 } from '@shared/utils/composerModel';
-import { acceptImageFile, collectImageFiles, extractPaste, UNSUPPORTED_IMAGE_REASON } from '@shared/utils/clipboardImage';
+import {
+  acceptImageFile,
+  collectImageFiles,
+  extractPaste,
+  normalizePasteText,
+  UNSUPPORTED_IMAGE_REASON,
+} from '@shared/utils/clipboardImage';
 import { formatSmartBytesShort } from '@shared/utils/formatSmartBytes';
 import { pasteHtmlImage } from './composerEditorDom';
 
@@ -124,20 +130,33 @@ export function useComposerAttachments(deps: AttachmentDeps) {
       lastPasteSig = sig;
       lastPasteAt = now;
       for (const f of files) addFile(f.name ? f : new File([f], `pasted-${Date.now()}.png`, { type: f.type }), 'paste');
-      if (text.trim()) deps.insertTextAtCaret(text);
+      const plain = normalizePasteText(text);
+      if (plain.trim()) deps.insertTextAtCaret(plain);
       return;
     }
     if (/<img/i.test(html)) {
       if (pasteHtmlImage(html, addFile, deps.insertTextAtCaret)) {
         e.preventDefault();
         e.stopPropagation();
+        return;
       }
-      return;
-    }
-    if (text && text.length > MAX_PASTE_TEXT) {
+      // 外链破图：吞掉默认行为，fallthrough 到纯文本分支（text 一般是 alt/空），
+      // 彻底禁浏览器插入追踪破图；与 pasteHtmlImage 内外链提示文案同口径。
       e.preventDefault();
-      deps.insertTextAtCaret(text.slice(0, MAX_PASTE_TEXT));
-      deps.warn(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
+      e.stopPropagation();
+    }
+    // A档富粘贴去样式兜底：任何不含本地图片的粘贴一律只进 text/plain，
+    // 不把 text/html 交给浏览器（否则 <b>/<span style> 原样进 contenteditable）。
+    if (text) {
+      e.preventDefault();
+      e.stopPropagation();
+      const plain = normalizePasteText(text);
+      if (plain.length > MAX_PASTE_TEXT) {
+        deps.insertTextAtCaret(plain.slice(0, MAX_PASTE_TEXT));
+        deps.warn(`粘贴文本超 ${MAX_PASTE_TEXT} 字符，已截断`);
+      } else {
+        deps.insertTextAtCaret(plain);
+      }
     }
   }
   function onDrop(e: DragEvent): void {

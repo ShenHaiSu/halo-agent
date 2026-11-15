@@ -26,12 +26,23 @@ import { flushSegBufSync } from './useAgentStream';
 
 let listenersBound = false;
 
+/**
+ * 参数解析：兼容完整参数与增量字段。
+ * 后端 LlmCaller 的参数增量事件（kind=ToolCallUpdated）只带 argsDelta，不带 argsJson；
+ * 旧实现只认完整字段 → card.argsJson 恒空 → 工具卡展开后一片空白。
+ */
 function pickArgs(payload: Record<string, unknown>): string {
-  const cands = [payload['argsJson'], payload['argumentsJson'], payload['arguments']];
+  const cands = [payload['argsJson'], payload['argumentsJson'], payload['arguments'], payload['argsDelta']];
   for (const c of cands) {
     if (typeof c === 'string' && c) return c;
   }
   return '';
+}
+/** 是否为增量型事件（argsDelta 需要累加，不能覆盖）。 */
+function isDeltaPayload(payload: Record<string, unknown>): boolean {
+  const full = [payload['argsJson'], payload['argumentsJson'], payload['arguments']];
+  if (full.some((c) => typeof c === 'string' && c)) return false;
+  return typeof payload['argsDelta'] === 'string' && (payload['argsDelta'] as string).length > 0;
 }
 
 /** need13：子进度聚合（主桶隔离；subId 事件不污染主时间线，只更新 items） */
@@ -96,11 +107,15 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       const args = pickArgs(payload);
       const rb = typeof payload['receivedBytes'] === 'number' ? (payload['receivedBytes'] as number) : 0;
       const pit = num(payload['iteration']);
+      const bid = str(payload['blockId']) || null;
+      const bseq = num(payload['seq']) || null;
       if (pit > t.curIteration) t.curIteration = pit;
       flushSegBufSync(sid);
       if (callId && cardById(t, callId) === null) {
         t.toolCards.push({
           callId,
+          blockId: bid,
+          seq: bseq,
           functionName,
           argsJson: args,
           status: 'running',
@@ -111,15 +126,16 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
           receivedBytes: rb,
         });
         rebuildIndex(t);
-        pushToolSeg(t, callId);
+        pushToolSeg(t, callId, bid, bseq);
       } else if (callId && args) {
         const ex = cardById(t, callId);
         if (ex && !ex.argsJson) ex.functionName = functionName || ex.functionName;
         if (ex && !ex.argsJson) ex.argsJson = args;
         if (ex) ex.receivedBytes = rb;
-        pushToolSeg(t, callId);
+        if (ex && bid && !ex.blockId) ex.blockId = bid;
+        pushToolSeg(t, callId, bid, bseq);
       } else if (callId) {
-        pushToolSeg(t, callId);
+        pushToolSeg(t, callId, bid, bseq);
       }
       touch(t);
       break;
@@ -128,13 +144,22 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
     case 'ToolCallArgs':
     case 'ToolCallCompleted': {
       const callId = str(payload['callId']);
+      const updBid = str(payload['blockId']) || null;
+      const updSeq = num(payload['seq']) || null;
       const args = pickArgs(payload);
       const argsDelta = typeof payload['argsDelta'] === 'string' ? (payload['argsDelta'] as string) : '';
       const hasBytes = typeof payload['receivedBytes'] === 'number';
       const fallbackBytes = argsDelta ? estimateUtf8Bytes(argsDelta) : 0;
       const card = cardById(t, callId);
+      const deltaOnly = isDeltaPayload(payload);
       if (card) {
-        if (args) {
+        if (deltaOnly) {
+          // 增量：累加进参数串（后端分片下发），字节数与后端 receivedBytes 对齐。
+          card.argsJson = (card.argsJson || '') + argsDelta;
+          if (hasBytes) card.receivedBytes = num(payload['receivedBytes']);
+          else if (fallbackBytes > 0) card.receivedBytes = (card.receivedBytes || 0) + fallbackBytes;
+        } else if (args) {
+          // 完整参数：覆盖（ToolCallCompleted 带全量 argsJson）。
           card.argsJson = args;
           if (kind === 'ToolCallCompleted') card.receivedBytes = estimateUtf8Bytes(args);
           else if (hasBytes) card.receivedBytes = num(payload['receivedBytes']);
@@ -148,8 +173,10 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       } else if (callId && (args || argsDelta || hasBytes)) {
         t.toolCards.push({
           callId,
+          blockId: updBid,
+          seq: updSeq,
           functionName: str(payload['functionName']) || 'tool',
-          argsJson: args,
+          argsJson: deltaOnly ? argsDelta : args,
           status: 'running',
           resultText: '',
           exitCode: null,
@@ -158,7 +185,7 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
           receivedBytes: hasBytes ? num(payload['receivedBytes']) : fallbackBytes,
         });
         rebuildIndex(t);
-        pushToolSeg(t, callId);
+        pushToolSeg(t, callId, updBid, updSeq);
       }
       touch(t);
       break;
@@ -193,9 +220,11 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
       // need23-R1：tool 消息落盘即增量合并进视图（不再等下一轮全量重拉）
       const callId = str(payload['callId']);
       const messageId = str(payload['messageId']);
+      const msgBid = str(payload['blockId']) || null;
       const card = cardById(t, callId);
       if (card) {
         card.messageId = messageId || card.messageId;
+        if (msgBid && !card.blockId) card.blockId = msgBid;
         card.persisted = true;
         // S6 §4.4：机器可判错误码透传（view_image 四态等）；仅当事件带值时为 error，
         // 否则沿用 ToolExecutionCompleted 已定的状态，不与成功态冲突。

@@ -7,6 +7,7 @@
   --code-bg: #090d12; --code-text: #e6edf3; --code-border: #283241;
   --tool-output-bg: #090d12; --tool-output-text: #cbd5e1;
   --reasoning-bg: rgba(15,23,42,.6); --reasoning-text: #cbd5e1;
+  --reasoning-block-bg: rgba(148,163,184,.12);
   --diff-add-text: #a7f3d0; --diff-del-text: #fecdd3; --diff-ctx-text: #94a3b8;
   --stat-add-text: #34d399; --stat-del-text: #fb7185;
   /* Win7 兼容字体栈：优先雅黑 UI/雅黑，等宽优先 Consolas */
@@ -22,6 +23,24 @@
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
   --accent-primary: #3b82f6;
+
+  /* 与上列 hex 变量一一对应的 RGB 三元组：仅供 tailwind 的
+     rgb(var(--xxx-rgb) / <alpha-value>) 使用，用来支持 /40 /50 等透明度修饰。
+     三元组写空格分隔（rgb(R G B / a) 需 Chrome 65+，符合 Chrome109 约束），
+     禁止改用 color-mix()（Chrome 111+）。 */
+  --bg-app-rgb: 13 17 23;
+  --bg-sidebar-rgb: 19 24 32;
+  --bg-surface-rgb: 24 31 41;
+  --bg-elevated-rgb: 33 42 54;
+  --border-subtle-rgb: 40 50 65;
+  --text-primary-rgb: 230 237 243;
+  --text-secondary-rgb: 139 148 158;
+  --accent-primary-rgb: 59 130 246;
+  /* 状态色：暗色默认取值 */
+  --color-error: #ef4444;
+  --color-error-rgb: 239 68 68;
+  --color-success: #22c55e;
+  --color-success-rgb: 34 197 94;
 }
 
 html.light {
@@ -33,10 +52,25 @@ html.light {
   --text-primary: #0f172a;
   --text-secondary: #64748b;
   --accent-primary: #2563eb;
+  /* 亮色三元组：与上方 hex 严格同值，勿单独调色 */
+  --bg-app-rgb: 248 250 252;
+  --bg-sidebar-rgb: 241 245 249;
+  --bg-surface-rgb: 255 255 255;
+  --bg-elevated-rgb: 248 250 252;
+  --border-subtle-rgb: 226 232 240;
+  --text-primary-rgb: 15 23 42;
+  --text-secondary-rgb: 100 116 139;
+  --accent-primary-rgb: 37 99 235;
+  /* 状态色：亮色取值与 naiveTheme.ts 的 successColor/errorColor 保持一致，避免两套色系打架 */
+  --color-error: #dc2626;
+  --color-error-rgb: 220 38 38;
+  --color-success: #16a34a;
+  --color-success-rgb: 22 163 74;
   /* need03-04 明亮：浅底+深字，保证对比度 */
   --code-bg: #f1f5f9; --code-text: #0f172a; --code-border: #e2e8f0;
   --tool-output-bg: #f8fafc; --tool-output-text: #334155;
   --reasoning-bg: #f1f5f9; --reasoning-text: #334155;
+  --reasoning-block-bg: rgba(15,23,42,.05);
   --diff-add-text: #047857; --diff-del-text: #be123c; --diff-ctx-text: #64748b;
   --stat-add-text: #059669; --stat-del-text: #e11d48;
 }
@@ -208,16 +242,6 @@ html.light {
 .turn-body > * + * {
   margin-top: 8px;
 }
-/* 折叠舱内「按 iteration 分节」的步骤列表（RunStepList）与消息块同一套口径。 */
-.run-steps {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.run-steps > * + * {
-  margin-top: 8px;
-}
-
 /* need19 右侧栏：icon rail */
 .rail-tab { width: 100%; height: 36px; display: flex; align-items: center; justify-content: center;
   position: relative; border-radius: 8px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer;
@@ -324,5 +348,18 @@ html.light .toc-bubble--user { background: #eff6ff; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* 边框兜底：把 preflight 的固定浅灰 #e5e7eb 换成主题变量。
+   preflight 的 *,::before,::after{border-color:#e5e7eb} 原本在暗色下表现为亮灰白边框；
+   改走 var(--border-subtle) 后，即便某处透明度修饰漏网，边框也会跟随主题而不是恒定浅灰。
+   注意：这条只是安全网，不能替代真实修复——语义色透明度修饰仍由
+   scripts/assert-tailwind-color-alpha.mjs 静态守卫拦截。 */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border-subtle);
   }
 }

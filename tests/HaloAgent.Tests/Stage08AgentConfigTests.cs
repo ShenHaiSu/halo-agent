@@ -529,7 +529,14 @@ public sealed class Stage08AgentConfigTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public void EmitStreamDelta(string sessionId, string kind, string textDelta) { }
+        public void EmitStreamDelta(
+            string sessionId,
+            string kind,
+            string textDelta,
+            string? blockId = null,
+            long seq = 0,
+            string? tag = null
+        ) { }
     }
 
     private sealed class ScriptedFakeGatewayFor08 : ILlmGatewayClient

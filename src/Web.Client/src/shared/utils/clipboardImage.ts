@@ -147,3 +147,17 @@ export function firstHtmlImgSrc(html: string): string {
   const m = /<img[^>]+src\s*=\s*["']([^"']+)["']/i.exec(String(html || ''));
   return m ? m[1] : '';
 }
+
+/**
+ * 粘贴纯文本归一化（富粘贴去样式兜底用，纯函数）：
+ *   · `\r\n → \n`、`孤立 \r → \n`（与 readSegments 的 `\n` 口径对齐）；
+ *   · 去 `\0`（CefSharp 剪贴板偶发）；
+ *   · 保留 `\n\t` 与首尾空白（代码缩进要留），不做 trim；
+ *   · 不做 HTML 转义——调用方走 execCommand('insertText')/TextNode，天然文本节点。
+ */
+export function normalizePasteText(raw: string): string {
+  return String(raw || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\0/g, '');
+}

@@ -39,7 +39,8 @@ public interface ITokenBudgetService
         ModelConfig model,
         IReadOnlyList<UnifiedChatMessage> messages,
         string? sessionHash = null,
-        int residentStableTokens = 0
+        int residentStableTokens = 0,
+        CompactStubInfo? stub = null
     );
     Task<ContextBudgetStatusDto> GetBudgetStatusAsync(
         string providerId,

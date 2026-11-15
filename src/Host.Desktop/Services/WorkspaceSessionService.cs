@@ -376,6 +376,7 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             SubStatus = isSub ? "pending" : null,
             CreatedByCallId = isSub ? createdByCallId : null,
             TaskPrompt = isSub ? (string.IsNullOrEmpty(taskIdx) ? null : taskIdx) : null,
+            HistoryVersion = 2,
         };
         if (isSub)
             meta.TitleLocked = true;

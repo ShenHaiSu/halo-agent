@@ -9,13 +9,13 @@
     data-testid="ask-user-modal"
     @close="handleDismiss"
   >
-    <div v-if="pending" class="space-y-3">
+    <div v-if="displayPending" class="space-y-3">
       <n-steps :current="step" size="small">
-        <n-step v-for="(q, i) in pending.questions" :key="q.id" :title="`问题${i + 1}`" />
+        <n-step v-for="(q, i) in displayPending.questions" :key="q.id" :title="`问题${i + 1}`" />
       </n-steps>
 
       <div
-        v-for="(q, i) in pending.questions"
+        v-for="(q, i) in displayPending.questions"
         v-show="i === step - 1"
         :key="q.id"
         class="rounded-md border border-subtle bg-surface p-3 space-y-2.5 max-h-[50vh] overflow-y-auto"
@@ -97,19 +97,19 @@
 
     <template #footer>
       <div class="flex items-center justify-between gap-2">
-        <span v-if="pending" class="text-[11px] text-secondary font-mono" :title="pending.sessionId"
-          >问询归属会话 …{{ pending.sessionId.slice(-6) }}</span
+        <span v-if="displayPending" class="text-[11px] text-secondary font-mono" :title="displayPending.sessionId"
+          >问询归属会话 …{{ displayPending.sessionId.slice(-6) }}</span
         >
         <span v-else />
         <div class="flex items-center justify-end gap-2">
           <n-button size="small" :disabled="step <= 1" @click="prev">上一步</n-button>
-          <n-button v-if="pending && step < pending.questions.length" size="small" @click="next">下一步</n-button>
+          <n-button v-if="displayPending && step < displayPending.questions.length" size="small" @click="next">下一步</n-button>
           <n-button
             type="primary"
             size="small"
             data-testid="ask-user-submit"
             :loading="submitting"
-            :disabled="!pending"
+            :disabled="!displayPending"
             @click="handleSubmit"
           >
             提交回答（{{ answeredCount }}/{{ totalCount }}）
@@ -141,11 +141,12 @@ const submitting = ref(false);
 const activeSessionId = computed(() => workspaceStore.activeSessionId || '');
 
 const pending = computed<AskUserPending | null>(() => {
-  // need22-P2 F4：问询按 sessionId 归属，以 modalSessionId 为准（不再优先当前会话，防 A 问卷切 B 错票）
   const sid = modalSessionId.value;
   if (!sid) return null;
   return askUserStore.getPending(sid);
 });
+
+const displayPending = computed<AskUserPending | null>(() => pending.value);
 
 const visible = computed<boolean>({
   get: () => modalVisible.value && !!pending.value,
@@ -154,10 +155,14 @@ const visible = computed<boolean>({
   },
 });
 
-const totalCount = computed(() => pending.value?.questions.length || 0);
+const totalCount = computed(() => displayPending.value?.questions.length || 0);
+
+function draftSessionId(): string {
+  return displayPending.value?.sessionId || '';
+}
 
 function draftOf(qid: string): { selected: string[]; customInput: string } {
-  const sid = pending.value?.sessionId || '';
+  const sid = draftSessionId();
   const bucket = (sid && draftBySession.value[sid]) || {};
   const d = bucket[qid];
   if (d) return d;
@@ -174,10 +179,10 @@ function hasCustom(qid: string): boolean {
 }
 
 function setSingle(qid: string, v: string): void {
-  const sid = pending.value?.sessionId || '';
+  const sid = draftSessionId();
   if (!sid) return;
   if (hasCustom(qid)) return;
-  askUserStore.ensureDraft(sid, pending.value?.questions || []);
+  askUserStore.ensureDraft(sid, displayPending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
   bucket[qid].selected = v ? [v] : [];
@@ -194,19 +199,19 @@ function clearSingle(qid: string): void {
 }
 
 function setMulti(qid: string, v: Array<string | number>): void {
-  const sid = pending.value?.sessionId || '';
+  const sid = draftSessionId();
   if (!sid) return;
   if (hasCustom(qid)) return;
-  askUserStore.ensureDraft(sid, pending.value?.questions || []);
+  askUserStore.ensureDraft(sid, displayPending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
   bucket[qid].selected = (v || []).map((s) => String(s)).filter(Boolean);
 }
 
 function setCustom(qid: string, v: string): void {
-  const sid = pending.value?.sessionId || '';
+  const sid = draftSessionId();
   if (!sid) return;
-  askUserStore.ensureDraft(sid, pending.value?.questions || []);
+  askUserStore.ensureDraft(sid, displayPending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
   let text = String(v || '');
@@ -220,9 +225,9 @@ function setCustom(qid: string, v: string): void {
 }
 
 function skipQuestion(qid: string): void {
-  const sid = pending.value?.sessionId || '';
+  const sid = draftSessionId();
   if (!sid) return;
-  askUserStore.ensureDraft(sid, pending.value?.questions || []);
+  askUserStore.ensureDraft(sid, displayPending.value?.questions || []);
   const bucket = draftBySession.value[sid];
   if (!bucket[qid]) bucket[qid] = { selected: [], customInput: '' };
   bucket[qid].selected = [];
@@ -235,9 +240,9 @@ function isSkipped(qid: string): boolean {
 }
 
 const answeredCount = computed(() => {
-  if (!pending.value) return 0;
+  if (!displayPending.value) return 0;
   let n = 0;
-  for (const q of pending.value.questions) {
+  for (const q of displayPending.value.questions) {
     if (!isSkipped(q.id)) n++;
   }
   return n;
@@ -248,18 +253,18 @@ function prev(): void {
 }
 
 function next(): void {
-  if (pending.value && step.value < pending.value.questions.length) step.value++;
+  if (displayPending.value && step.value < displayPending.value.questions.length) step.value++;
 }
 
 watch(
-  () => pending.value?.ticketId,
+  () => displayPending.value?.ticketId,
   () => {
     step.value = 1;
   }
 );
 
 watch(
-  () => pending.value?.sessionId,
+  () => displayPending.value?.sessionId,
   () => {
     step.value = 1;
   }
@@ -271,10 +276,9 @@ watch(activeSessionId, (sid) => {
   if (askUserStore.hasPending(sid)) {
     askUserStore.openModal(sid);
   } else if (modalVisible.value) {
-    // F6 dismiss 语义：只关问询窗，不取消问询本身（pendingBySession 保留）
-    const prev = modalSessionId.value || '';
+    const prevSid = modalSessionId.value || '';
     askUserStore.closeModal();
-    haloEventBus.emitLocal('agent:ask-user-dismissed', { sessionId: prev });
+    haloEventBus.emitLocal('agent:ask-user-dismissed', { sessionId: prevSid });
   }
 });
 
@@ -293,7 +297,6 @@ async function handleSubmit(): Promise<void> {
       return { id: q.id, selected, customInput, skipped };
     });
     const payload = JSON.stringify({ answers });
-    // resolveAskUser 由 D 轨道在 hostBridge.ts 合入；本轨道经可选调用兼容（合入前 toast 保留草稿不断链）
     const bridge = getHostBridge() as unknown as {
       resolveAskUser?: (
         sessionId: string,
@@ -325,7 +328,6 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
-// need22-P2 F6：两级取消——“只关问询”（稍后回答，pending 保留，顶栏 badge 可跳回）
 function handleDismiss(): void {
   const p = pending.value;
   const sid = p?.sessionId || modalSessionId.value || '';
@@ -334,7 +336,6 @@ function handleDismiss(): void {
   message.info('问询已收起（稍后可从顶栏红点继续回答），本轮继续等待');
 }
 
-// need22-P2 F6：“取消整轮”（取消提问 + 取消后端整轮）
 async function handleCancel(): Promise<void> {
   const p = pending.value;
   if (p) {

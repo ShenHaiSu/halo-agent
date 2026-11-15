@@ -6,6 +6,7 @@ import {
   buildFontStack,
   buildMonoFontStack,
   normalizeHexColor,
+  hexToRgbTriplet,
   type AppearanceSettings,
   type ChatWidthMode,
   type ThemeMode,
@@ -64,7 +65,11 @@ export const useAppearanceStore = defineStore('appearance', () => {
     root.style.setProperty('--font-sans', buildFontStack(s));
     root.style.setProperty('--font-mono', buildMonoFontStack(s.monoFont));
     root.style.setProperty('--app-font-size', `${s.fontSize}px`);
-    root.style.setProperty('--accent-primary', s.themeColor);
+    // 主题色可运行时自定义：hex 与 rgb 三元组必须同步写，否则 accent/<alpha> 系列
+    // （rgb(var(--accent-primary-rgb) / 0.4)）会停留在默认蓝，表现为自定义色失效。
+    const accent = normalizeHexColor(s.themeColor) ?? '#3b82f6';
+    root.style.setProperty('--accent-primary', accent);
+    root.style.setProperty('--accent-primary-rgb', hexToRgbTriplet(accent) ?? '59 130 246');
   }
 
   function save(): void {

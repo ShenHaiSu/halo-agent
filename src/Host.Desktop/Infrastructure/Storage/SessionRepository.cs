@@ -30,6 +30,8 @@ public sealed partial class SessionRepository : ISessionRepository
         _storageManager = storageManager ?? throw new ArgumentNullException(nameof(storageManager));
     }
 
+    public StoragePathManager Storage => _storageManager;
+
     public string GetWorkspacesIndexPath() =>
         Path.Combine(_storageManager.WorkspacesDirectory, "workspaces-index.json");
 
@@ -341,6 +343,22 @@ public sealed partial class SessionRepository : ISessionRepository
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            if (meta.HistoryVersion == 2)
+            {
+                try
+                {
+                    var timelineDb = new SessionHistoryDb(_storageManager);
+                    timelineDb.EnsureDatabase(workspaceId, meta.Id);
+                    timelineDb.Checkpoint(workspaceId, meta.Id);
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Warn(
+                        "[SessionRepository] timeline database bootstrap failed, meta save continues: "
+                            + ex.Message
+                    );
+                }
+            }
             string path = GetSessionMetaPath(workspaceId, meta.Id);
             await AtomicFileWriter.WriteJsonAtomicAsync(path, meta, ct).ConfigureAwait(false);
         }

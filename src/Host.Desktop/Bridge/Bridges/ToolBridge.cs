@@ -111,7 +111,7 @@ public sealed partial class HostBridgeFacade
     /// 前后发布 agent:turn-event（CompactStarted → CompactCompleted/CompactFailed）。
     /// 不复用 _activeSessionTokens 的 agent: 键（避免与推理互相取消），另起 compact: 键且不提供 Cancel 入口。
     /// </summary>
-    public Task<BridgeResponse<CompactionResult>> CompactSession(
+    public async Task<BridgeResponse<CompactionResult>> CompactSession(
         string workspaceId,
         string sessionId,
         string? providerId = null,
@@ -123,13 +123,26 @@ public sealed partial class HostBridgeFacade
         {
             if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(
-                    BridgeResponse<CompactionResult>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空")
+                return BridgeResponse<CompactionResult>.Fail(
+                    "INVALID_SESSION",
+                    "工作区 ID 与会话 ID 不能为空"
                 );
             }
 
             string wsId = workspaceId.Trim();
             string sessId = sessionId.Trim();
+            try
+            {
+                var meta = await _workspaceSessionService
+                    .GetSessionAsync(wsId, sessId)
+                    .ConfigureAwait(false);
+                if (meta != null && meta.HistoryVersion != 2)
+                    return BridgeResponse<CompactionResult>.Fail(
+                        "HISTORY_READONLY",
+                        "历史版本只读，不可压缩，可分支"
+                    );
+            }
+            catch { }
             string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
             string? modId = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
             int keep = keepLastGroups < 1 ? 6 : keepLastGroups;
@@ -137,9 +150,7 @@ public sealed partial class HostBridgeFacade
 
             if (_activeSessionTokens.ContainsKey(compactKey))
             {
-                return Task.FromResult(
-                    BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候")
-                );
+                return BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候");
             }
 
             JsEventDispatcher.Publish(
@@ -167,6 +178,35 @@ public sealed partial class HostBridgeFacade
                             .ConfigureAwait(false);
                         if (result.Success)
                         {
+                            // P007：占用基线取压缩后即时重算的实值（通常为 compact-estimate），禁止写死。
+                            string occupancyBaseline = "compact-estimate";
+                            try
+                            {
+                                var active = await _workspaceSessionService
+                                    .GetActiveContextMessagesAsync(
+                                        wsId,
+                                        sessId,
+                                        CancellationToken.None
+                                    )
+                                    .ConfigureAwait(false);
+                                var stub = await _workspaceSessionService
+                                    .GetLastCompactStubAsync(wsId, sessId, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                                var probe = new ModelConfig
+                                {
+                                    Id = "compact-baseline",
+                                    MaxContextTokens = 128000,
+                                    MaxOutputTokens = 4096
+                                };
+                                occupancyBaseline =
+                                    _tokenBudgetService
+                                        .CalculateBudgetStatus(probe, active, null, 0, stub)
+                                        .OccupancyBaseline ?? "compact-estimate";
+                            }
+                            catch
+                            {
+                                // 预算重算失败不阻断压缩完成事件，按暂存态回退
+                            }
                             JsEventDispatcher.Publish(
                                 "agent:turn-event",
                                 new
@@ -179,6 +219,9 @@ public sealed partial class HostBridgeFacade
                                         keptMessages = result.KeptMessages,
                                         summaryPreview = result.SummaryPreview,
                                         backupFileName = result.BackupFileName,
+                                        stubMessageId = result.StubMessageId,
+                                        summaryTokens = result.SummaryOutputTokens,
+                                        occupancyBaseline,
                                         updatedAtUtc = DateTime.UtcNow.ToString("o")
                                     },
                                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -233,14 +276,12 @@ public sealed partial class HostBridgeFacade
                 CancellationToken.None
             );
 
-            return Task.FromResult(BridgeResponse<CompactionResult>.Success(default!, "压缩已启动"));
+            return BridgeResponse<CompactionResult>.Success(default!, "压缩已启动");
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("CompactSession failed", ex);
-            return Task.FromResult(
-                BridgeResponse<CompactionResult>.Fail("COMPACT_START_ERROR", ex.Message)
-            );
+            return BridgeResponse<CompactionResult>.Fail("COMPACT_START_ERROR", ex.Message);
         }
     }
 

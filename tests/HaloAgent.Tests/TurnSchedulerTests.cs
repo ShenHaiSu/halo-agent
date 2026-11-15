@@ -71,7 +71,14 @@ public sealed class TurnSchedulerTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public void EmitStreamDelta(string sessionId, string kind, string textDelta)
+        public void EmitStreamDelta(
+            string sessionId,
+            string kind,
+            string textDelta,
+            string? blockId = null,
+            long seq = 0,
+            string? tag = null
+        )
         {
             lock (Events)
                 Events.Add((sessionId, kind + ":delta"));

@@ -103,11 +103,18 @@ public sealed partial class AgentOrchestrator
         catch { }
     }
 
-    private void PublishStreamDelta(string sessionId, string kind, string textDelta)
+    private void PublishStreamDelta(
+        string sessionId,
+        string kind,
+        string textDelta,
+        string? blockId = null,
+        long seq = 0,
+        string? tag = null
+    )
     {
         try
         {
-            _sink.EmitStreamDelta(sessionId, kind, textDelta);
+            _sink.EmitStreamDelta(sessionId, kind, textDelta, blockId, seq, tag);
         }
         catch { }
     }
@@ -144,6 +151,8 @@ public sealed partial class AgentOrchestrator
         string? streamErrorMessage = null;
         long ttftMark = Environment.TickCount64;
         bool ttftSent = false;
+        var timelineTracker = new TimelineBlockTracker(request.RequestId, iteration);
+        ctx.TimelineLog.Clear();
 
         PublishTurnEvent(
             sessionId,
@@ -170,13 +179,23 @@ public sealed partial class AgentOrchestrator
                 switch (evt.Kind)
                 {
                     case UnifiedStreamEventKind.ReasoningDelta:
+                        timelineTracker.RecordReasoning(evt);
                         if (!string.IsNullOrEmpty(evt.TextDelta))
                         {
                             reasoningAcc.Append(evt.TextDelta);
-                            PublishStreamDelta(sessionId, "ReasoningDelta", evt.TextDelta);
+                            var curR = timelineTracker.Current;
+                            PublishStreamDelta(
+                                sessionId,
+                                "ReasoningDelta",
+                                evt.TextDelta,
+                                curR?.BlockId,
+                                evt.Sequence,
+                                curR?.Tag ?? Host.Desktop.Core.Models.TimelineBlockTag.Process
+                            );
                         }
                         break;
                     case UnifiedStreamEventKind.TextDelta:
+                        timelineTracker.RecordText(evt);
                         if (!string.IsNullOrEmpty(evt.TextDelta))
                         {
                             if (!ttftSent)
@@ -189,10 +208,19 @@ public sealed partial class AgentOrchestrator
                                 );
                             }
                             textAcc.Append(evt.TextDelta);
-                            PublishStreamDelta(sessionId, "TextDelta", evt.TextDelta);
+                            var curT = timelineTracker.Current;
+                            PublishStreamDelta(
+                                sessionId,
+                                "TextDelta",
+                                evt.TextDelta,
+                                curT?.BlockId,
+                                evt.Sequence,
+                                curT?.Tag ?? Host.Desktop.Core.Models.TimelineBlockTag.Pending
+                            );
                         }
                         break;
                     case UnifiedStreamEventKind.ToolCallStarted:
+                        timelineTracker.RecordToolStarted(evt);
                         if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
                         {
                             string cid = evt.ToolCall.CallId;
@@ -211,6 +239,11 @@ public sealed partial class AgentOrchestrator
                             {
                                 pending.FunctionName = evt.ToolCall.FunctionName;
                             }
+                            timelineTracker.TryGetBlockId(
+                                cid,
+                                out string startedBid,
+                                out long startedSeq
+                            );
                             PublishTurnEvent(
                                 sessionId,
                                 "ToolCallStarted",
@@ -219,12 +252,15 @@ public sealed partial class AgentOrchestrator
                                     iteration,
                                     callId = cid,
                                     functionName = pending.FunctionName,
-                                    receivedBytes = 0L
+                                    receivedBytes = 0L,
+                                    blockId = startedBid,
+                                    seq = startedSeq == 0 ? evt.Sequence : startedSeq
                                 }
                             );
                         }
                         break;
                     case UnifiedStreamEventKind.ToolCallArgsDelta:
+                        timelineTracker.RecordToolArgs(evt);
                         if (
                             evt.ToolCall != null
                             && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId)
@@ -253,6 +289,11 @@ public sealed partial class AgentOrchestrator
                                 {
                                     p.LastPublishTick = now;
                                     p.LastPublishedBytes = p.ReceivedBytes;
+                                    timelineTracker.TryGetBlockId(
+                                        evt.ToolCall.CallId,
+                                        out string argsBid,
+                                        out long argsSeq
+                                    );
                                     PublishTurnEvent(
                                         sessionId,
                                         "ToolCallUpdated",
@@ -263,7 +304,9 @@ public sealed partial class AgentOrchestrator
                                             functionName = p.FunctionName,
                                             argsDelta = evt.TextDelta,
                                             receivedBytes = p.ReceivedBytes,
-                                            argsLength = p.ArgsBuilder.Length
+                                            argsLength = p.ArgsBuilder.Length,
+                                            blockId = argsBid,
+                                            seq = argsSeq == 0 ? evt.Sequence : argsSeq
                                         }
                                     );
                                 }
@@ -271,6 +314,7 @@ public sealed partial class AgentOrchestrator
                         }
                         break;
                     case UnifiedStreamEventKind.ToolCallCompleted:
+                        timelineTracker.RecordToolDone(evt);
                         if (evt.ToolCall != null && !string.IsNullOrWhiteSpace(evt.ToolCall.CallId))
                         {
                             string cid2 = evt.ToolCall.CallId;
@@ -300,7 +344,11 @@ public sealed partial class AgentOrchestrator
                                 }
                                 catch { }
                             }
-                            // P1：把完整参数实时推送给前端，转入对应会话桶，避免卡片参数区永久为空
+                            timelineTracker.TryGetBlockId(
+                                cid2,
+                                out string doneBid,
+                                out long doneSeq
+                            );
                             PublishTurnEvent(
                                 sessionId,
                                 "ToolCallUpdated",
@@ -311,7 +359,9 @@ public sealed partial class AgentOrchestrator
                                     functionName = done2.FunctionName,
                                     argsJson = done2.ArgsBuilder.ToString(),
                                     receivedBytes = done2.ReceivedBytes,
-                                    argsLength = done2.ArgsBuilder.Length
+                                    argsLength = done2.ArgsBuilder.Length,
+                                    blockId = doneBid,
+                                    seq = doneSeq == 0 ? evt.Sequence : doneSeq
                                 }
                             );
                         }
@@ -327,15 +377,19 @@ public sealed partial class AgentOrchestrator
                         break;
                     case UnifiedStreamEventKind.StreamCancelled:
                         streamCancelled = true;
+                        timelineTracker.CloseCurrent();
                         break;
-                    case UnifiedStreamEventKind.StreamTruncated: // NEED17-06 §6.4
+                    case UnifiedStreamEventKind.StreamTruncated:
                         streamTruncated = true;
+                        timelineTracker.CloseCurrent();
                         break;
                     case UnifiedStreamEventKind.StreamError:
                         streamErrorCode = evt.ErrorCode ?? "STREAM_ERROR";
                         streamErrorMessage = evt.ErrorMessage ?? "流式推理失败";
+                        timelineTracker.CloseCurrent();
                         break;
                     case UnifiedStreamEventKind.StreamCompleted:
+                        timelineTracker.CloseCurrent();
                         break;
                 }
 
@@ -363,6 +417,8 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -371,8 +427,7 @@ public sealed partial class AgentOrchestrator
 
         if (cancellationToken.IsCancellationRequested || streamCancelled)
         {
-            // 持久化已有部分输出，避免前端空白
-            if (textAcc.Length > 0 || reasoningAcc.Length > 0)
+            if ((textAcc.Length > 0 || reasoningAcc.Length > 0) && ctx.Session?.HistoryVersion != 2)
             {
                 try
                 {
@@ -410,6 +465,8 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -459,6 +516,7 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Error).ConfigureAwait(false);
             return (
                 PhaseOutcome.End(
                     AgentTurnResult.Failed(
@@ -476,6 +534,8 @@ public sealed partial class AgentOrchestrator
         ctx.LlmReasoning = reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null;
         ctx.CurrentUsage = usage;
         ctx.StreamTruncated = streamTruncated;
+        ctx.TimelineLog.Clear();
+        ctx.TimelineLog.AddRange(timelineTracker.Drafts);
         var state = new LlmStreamState
         {
             Request = request,

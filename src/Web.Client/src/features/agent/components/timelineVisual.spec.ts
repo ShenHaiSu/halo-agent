@@ -1,10 +1,11 @@
-/** M1 静态抖动：图片槽位恒定 + 思考段类名（§1.1 (b)(c)）。 */
+/** M1 静态抖动：图片槽位 + 思考段类名（§1.1 (b)(c)）。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
 import TimelineRow from '@features/agent/components/TimelineRow.vue';
 import TimelineView from '@features/agent/components/TimelineView.vue';
 import type { ChatImageRef } from '@shared/bridge/hostBridge';
+import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
 const img = { imageId: 'i1', fileName: 'a.png' } as unknown as ChatImageRef;
 const item = {
@@ -14,67 +15,52 @@ const item = {
 } as never;
 
 function mountRow(thumb: string, opts?: { lost?: boolean }) {
+  const stub = {
+    ...timelineViewFallback(),
+    msgImages: () => [img],
+    thumbOf: () => thumb,
+    imgLost: () => !!opts?.lost,
+  };
   return mount(TimelineRow, {
-    props: {
-      item,
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [img],
-      thumbOf: () => thumb,
-      hasLost: () => !!opts?.lost,
-      imgLost: () => !!opts?.lost,
-      renderHtml: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
+    props: { item },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
     },
-    global: { plugins: [naive] },
   });
 }
 
-function mountTimeline(segs: unknown[]) {
+function mountTimeline(liveSegs: unknown[]) {
+  const turn = {
+    key: 'uturn-u1',
+    userId: 'u1',
+    userMsg: { id: 'u1', role: 'user', content: '看图', createdAtUtc: '' },
+    steps: [],
+    stepCount: 0,
+    toolCount: 0,
+    isRunning: true,
+  };
+  const row = { key: 'uturn-u1', kind: 'user-turn', turn };
+  const stub = {
+    ...timelineViewFallback(),
+    liveSegsFor: () => liveSegs as never[],
+    renderHtml: (t: string) => t,
+    renderStream: (t: string) => t,
+    isGenerating: true,
+    streamMdKillSwitch: true,
+  };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [],
+      items: [row] as never[],
       historyItems: [],
-      tailItems: [],
+      tailItems: [row] as never[],
       chatWidthMode: 'centered',
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      renderStream: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      hasActiveTurn: true,
-      thinkingLine: '',
-      isGenerating: false,
-      segs: segs as never,
-      segKillSwitch: false,
-      fallbackCards: [],
-      streamingText: '',
-      showThinking: false,
-      turnNotice: '',
-      lastError: '',
-      showRetry: false,
-      liveTelemetry: null,
-      menuVisible: false,
-      menuX: 0,
-      menuY: 0,
-      menuBusy: false,
-      menuCanCopy: false,
     },
-    global: { plugins: [naive] },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
+    },
   });
 }
 
@@ -106,5 +92,11 @@ describe('M1 静态抖动（图片槽位 / 思考段高度）', () => {
     expect(html).toContain('reasoning-seg');
     expect(html).not.toContain('max-h-24');
     expect(html).toContain('max-h-[40vh]');
+  });
+
+  it('reasoning 段走思考渲染壳（微底 + 主题色左线）', () => {
+    const wrapper = mountTimeline([{ kind: 'reasoning', key: 'r1', text: '\n\n思考\n\n', card: null }]);
+    expect(wrapper.find('[data-testid="reasoning-block"]').exists()).toBe(true);
+    expect(wrapper.html()).toContain('border-accent');
   });
 });

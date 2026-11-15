@@ -177,6 +177,11 @@ public static class JsEventDispatcher
                 && item.Payload is LlmGateway.Models.SessionStreamEventDto currDto
                 && lastDto.SessionId == currDto.SessionId
                 && lastDto.Kind == currDto.Kind
+                && string.Equals(
+                    lastDto.BlockId ?? string.Empty,
+                    currDto.BlockId ?? string.Empty,
+                    StringComparison.Ordinal
+                )
                 && (
                     currDto.Kind == nameof(LlmGateway.Models.UnifiedStreamEventKind.TextDelta)
                     || currDto.Kind

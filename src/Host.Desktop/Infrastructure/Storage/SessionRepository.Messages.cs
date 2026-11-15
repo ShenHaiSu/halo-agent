@@ -54,6 +54,17 @@ public sealed partial class SessionRepository : ISessionRepository
         {
             sessionLock.Release();
         }
+        // S3 B3: v2 dual-write DB messages (mirror when history.db exists, INSERT OR IGNORE, never breaks jsonl)
+        try
+        {
+            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+            if (File.Exists(dbPath))
+            {
+                var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+                store.InsertSingleMessage(workspaceId, sessionId, message);
+            }
+        }
+        catch { }
     }
 
     public async Task<List<UnifiedChatMessage>> GetMessagesAsync(
@@ -62,6 +73,23 @@ public sealed partial class SessionRepository : ISessionRepository
         CancellationToken ct = default
     )
     {
+        // S3 B3: v2 reads from DB messages first (history.db exists => DB is truth, ignore blocks)
+        try
+        {
+            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+            if (File.Exists(dbPath))
+            {
+                var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+                var dbMsgs = await store
+                    .GetMessagesAsync(workspaceId, sessionId, ct)
+                    .ConfigureAwait(false);
+                foreach (var m in dbMsgs)
+                    MarkMissingImages(workspaceId, sessionId, m);
+                if (dbMsgs.Count > 0)
+                    return dbMsgs;
+            }
+        }
+        catch { }
         string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
         if (!File.Exists(jsonlPath))
         {

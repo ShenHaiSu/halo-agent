@@ -7,6 +7,7 @@ import {
   activeSessionId,
   dirtyPersisted,
   ensureTurn,
+  finalizePending,
   getTurn,
   lastTurnSnapshot,
   markIterationTextPersisted,
@@ -17,6 +18,7 @@ import {
 } from './model';
 import { agentRuntime } from './runtime';
 import { dropSegBuf, flushSegBufSync } from './useAgentStream';
+import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 
 /** need04-01：任何写消息路径结束时内存态秒级刷新会话卡时间（乐观+事件双通道）。 */
 function touchSessionClock(sessionId: string, iso?: string): void {
@@ -24,6 +26,21 @@ function touchSessionClock(sessionId: string, iso?: string): void {
     agentRuntime().touchSessionTime(sessionId, iso);
   } catch {
     /* 时间刷新永不阻断主链路 */
+  }
+}
+
+// 轮末交接：终态已就位后流容器延迟 300ms 再清，供交接编排做交叉淡入淡出。
+
+/** need02-P4（p4-reload）：persisted 事件只刷预算、全量重拉收敛到轮末。master/子开关任一 off 即回旧链。 */
+function isNeed02P4ReloadOn(): boolean {
+  try {
+    const p4 = String(window.localStorage.getItem('halo-need02-p4') || '').toLowerCase();
+    if (p4 === 'off') return false;
+    const sub = String(window.localStorage.getItem('halo-need02-p4-reload') || '').toLowerCase();
+    if (!sub) return true;
+    return sub !== 'off';
+  } catch {
+    return true;
   }
 }
 
@@ -70,12 +87,31 @@ async function reloadNow(sid: string): Promise<void> {
 }
 
 // need04-03：分流刷新：tool-completed 只内存更新（调用方已标脏）；persisted/finish 才拉全量对账（need23-R4 起走合并窗口）
+// need02-P4（p4-reload）：persisted 只刷预算（400ms 防抖保留在 scheduleReload 的 budget 位），
+// 全量 getSessionMessages 收敛到轮末 finish（Completed/Cancelled/Error/Truncated 经 finishTurn.reloadNow）。
+// 首 user 已有 P1 乐观覆盖，无需中途全量拉。master/子开关 off 即回旧链。
+const pendingBudget = new Map<string, number>();
+function scheduleBudgetOnly(sid: string): void {
+  const cur = pendingBudget.get(sid);
+  if (cur) window.clearTimeout(cur);
+  const timer = window.setTimeout(() => {
+    pendingBudget.delete(sid);
+    void agentRuntime()
+      .refreshBudget()
+      .catch((err) => console.error('[agent-turn] budget refresh failed:', err));
+  }, RELOAD_DEBOUNCE_MS);
+  pendingBudget.set(sid, timer);
+}
 export async function refreshAfterTool(targetSessionId?: string, reason?: string): Promise<void> {
   try {
     const sid = (targetSessionId ?? activeSessionId.value).trim();
     if (!sid) return;
     // 后台会话只落桶、不碰当前视图：避免把 B 的消息列表刷成 A 的（切卡时 selectSession 天然对账）
     if (sid !== activeSessionId.value) return;
+    if (reason === 'persisted' && isNeed02P4ReloadOn()) {
+      scheduleBudgetOnly(sid);
+      return;
+    }
     if (reason !== 'persisted' && reason !== 'finish') {
       await agentRuntime().refreshBudget();
       return;
@@ -86,7 +122,7 @@ export async function refreshAfterTool(targetSessionId?: string, reason?: string
   }
 }
 
-export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean }): Promise<void> {
+export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean; deferClearMs?: number }): Promise<void> {
   const sid = (targetSessionId ?? activeSessionId.value).trim();
   if (!sid) return;
   const t = ensureTurn(sid);
@@ -96,13 +132,38 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     console.warn('[agent-turn] finish flush failed:', e);
   }
   try {
-    lastTurnSnapshot.value[sid] = { toolCards: [...t.toolCards], reasoning: t.streamingReasoning, text: t.streamingText, at: Date.now() };
+    finalizePending(t);
+  } catch {
+    /* optimistic tag finalize never blocks turn end */
+  }
+  try {
+    const tags: Record<string, string> = {};
+    for (const s of t.segs) {
+      if (s.blockId && s.tag) tags[s.blockId] = String(s.tag);
+      else if (s.key && s.tag) tags[s.key] = String(s.tag);
+    }
+    lastTurnSnapshot.value[sid] = {
+      toolCards: [...t.toolCards],
+      reasoning: t.streamingReasoning,
+      text: t.streamingText,
+      at: Date.now(),
+      tags,
+    };
     haloEventBus.emitLocal('agent:turn-archived', { sessionId: sid, snapshot: lastTurnSnapshot.value[sid] });
   } catch (e) {
     console.warn('[agent-turn] snapshot failed:', e);
   }
   // need23-R4：先立即重拉（取消该 session 待定的防抖定时器），保证内容已在视图里，
   // 再清空流式容器 —— 避免"内容先消失、400ms 后才回来"的闪烁。
+  // need02-P3：defer 窗的 liveCompleting 必须在 reloadNow 之前立——handleTurnLifecycle 已先熄 isGenerating，
+  // 若等 reload 完成才立，中间一轮 bridge 往返里内嵌 LiveBody 无依据渲染，仍是一帧真空。
+  const deferMs = Math.max(0, Number(opts?.deferClearMs) || 0);
+  const willDefer = deferMs > 0 && !(opts?.keepOnFailure && t.lastErrorInfo?.retry);
+  if (willDefer) {
+    t.liveCompleting = true;
+    touch(t);
+    need02Debug('handoff', { requestId: t.requestId, deferMs, at: Date.now() });
+  }
   dirtyPersisted.value[sid] = false;
   await reloadNow(sid);
   try {
@@ -115,15 +176,36 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     touch(t);
     return;
   }
-  t.toolCards = [];
-  t.toolCardIndex = {};
-  t.segs = [];
-  t.curIteration = 0;
-  t.streamingText = '';
-  t.streamingReasoning = '';
-  t.streamingActive = false;
-  dropSegBuf(sid);
-  touch(t);
+  // 终态已就位（reloadNow 先拉后清），流容器延迟 300ms 再清，供交接编排做交叉淡入淡出；
+  // Cancel/Error 路径不延迟（调用方只在 Completed/Truncated 传 defer）。
+  // 交接窗内 LiveBody 在 completing 期继续渲染全量 segs（absolute 脱流淡出），与稳态交叉淡入。
+  // 交接埋点（DEV 限定，供量化）：handoff {requestId, liveMs, steadyMs}。
+  const doClear = (): void => {
+    t.toolCards = [];
+    t.toolCardIndex = {};
+    t.segs = [];
+    t.curIteration = 0;
+    t.streamingText = '';
+    t.streamingReasoning = '';
+    t.streamingActive = false;
+    t.liveCompleting = false;
+    dropSegBuf(sid);
+    touch(t);
+  };
+  if (willDefer) {
+    // 交接窗竞态守卫：若窗内起了新轮（sendPrompt 重置 turnStartMarks），旧定时器不得清空新轮容器。
+    const deferMark = turnStartMarks[sid] || 0;
+    window.setTimeout(() => {
+      try {
+        if ((turnStartMarks[sid] || 0) !== deferMark) return;
+        doClear();
+      } catch (e) {
+        console.warn('[agent-turn] deferred clear failed:', e);
+      }
+    }, deferMs);
+    return;
+  }
+  doClear();
 }
 
 /** llm:stream-event StreamError 分支（旧 ensureListeners 内同分支语义）。 */
@@ -185,7 +267,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.subAgents.done = t.subAgents.total;
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void finishTurn(sid);
+      void finishTurn(sid, { deferClearMs: 300 });
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -199,7 +281,11 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
     case 'CompactCompleted': {
       t.isGenerating = false;
       t.streamingActive = false;
-      t.turnNotice = `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
+      // P007：压缩完成文案带摘要 tokens（≈N tokens）；无 tokens 时回退无后缀文案
+      t.turnNotice =
+        num(payload['summaryTokens']) > 0
+          ? `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要（摘要 ≈${num(payload['summaryTokens'])} tokens）`
+          : `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
       void refreshAfterTool(sid, 'finish'); // 重拉消息与预算
@@ -232,7 +318,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
         t.turnNotice = '已达到单轮迭代上限，已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
       }
       touch(t);
-      void finishTurn(sid);
+      void finishTurn(sid, { deferClearMs: 300 });
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -264,6 +350,23 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       toast('error', t.lastError);
       void finishTurn(sid, { keepOnFailure: true });
       agentRuntime().generateTitle(sid);
+      break;
+    }
+    case 'BlockTagUpdated': {
+      const bid = str(payload['blockId']);
+      const tag = str(payload['tag']);
+      const reason = str(payload['reason']);
+      if (reason !== 'demote' && reason !== 'finalize' && reason !== 'flip') break;
+      if (tag !== 'process' && tag !== 'final') break;
+      if (!bid) break;
+      let touched = false;
+      for (const s of t.segs) {
+        if (String(s.blockId || '') === bid || String(s.key || '') === bid) {
+          s.tag = tag;
+          touched = true;
+        }
+      }
+      if (touched) touch(t);
       break;
     }
     default:

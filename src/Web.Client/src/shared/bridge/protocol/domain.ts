@@ -41,6 +41,88 @@ export interface SessionMetadata {
   subStatus?: string | null;
   createdByCallId?: string | null;
   taskPrompt?: string | null;
+  historyVersion?: number;
+}
+
+export type TimelineBlockKind = 'reasoning' | 'text' | 'tool_call' | 'tool_result';
+export type TimelineBlockTag = 'process' | 'final' | 'pending';
+export type TimelineTurnStatus = 'completed' | 'truncated' | 'cancelled' | 'error';
+
+export interface TimelineBlock {
+  blockId: string;
+  turnId: string;
+  iteration: number;
+  seq: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  callId?: string | null;
+  charCount: number;
+  preview: string;
+  content: string;
+  contentRef?: string | null;
+  truncated: boolean;
+}
+
+export interface TurnSummary {
+  turnId: string;
+  turnSeq: number;
+  iterEnd: number;
+  userPreview: string;
+  userContent?: string;
+  finalBlockId?: string | null;
+  finalPreview: string;
+  blocks: number;
+  tools: number;
+  failed: number;
+  durationMs: number;
+  chars: number;
+  status: TimelineTurnStatus;
+  lastRequestId: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  anchorKey: string;
+  /** P007：轮次语义；'turn' = 普通轮，'compact' = 压缩分隔（缺省视为 'turn'，见 10-§6）。 */
+  kind?: 'turn' | 'compact' | string;
+  /** P007：本次压缩覆盖的消息条数（仅 compact 轮）。 */
+  removedMessages?: number;
+}
+export interface TimelineBlockContent {
+  blockId: string;
+  callId?: string | null;
+  functionName?: string | null;
+  seq?: number;
+  kind: TimelineBlockKind;
+  tag: TimelineBlockTag;
+  markdown: string;
+  preview: string;
+  truncated: boolean;
+  /** 逐工具成败位：tool_result 行透出；null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
+  argsJson?: string | null;
+  resultText?: string | null;
+  resultRef?: string | null;
+}
+
+export interface TimelineBlockContentsResponse {
+  items: Record<string, TimelineBlockContent>;
+  missing: string[];
+}
+
+export interface TimelineToolResult {
+  argsJson: string;
+  resultText: string;
+  resultRef?: string | null;
+  functionName?: string | null;
+  /** 逐工具成败位：null/undefined=未知（老数据走回退链），与 false 严格区分。 */
+  success?: boolean | null;
+}
+
+export type TimelineTagReason = 'demote' | 'finalize' | 'flip';
+
+export interface TimelineTagUpdated {
+  blockId: string;
+  tag: TimelineBlockTag;
+  reason: TimelineTagReason;
 }
 
 export interface UnifiedChatMessage {
@@ -63,6 +145,10 @@ export interface UnifiedChatMessage {
   cachedTokens?: number | null;
   createdAtUtc: string;
   images?: ChatImageRef[] | null;
+  /** P007：'compact_stub' = 压缩桩（其余为 undefined，见 10-§6）。 */
+  kind?: string | null;
+  /** P007：桩元数据 JSON 原文（前端仅在需要 removedCount 时解析）。 */
+  metaJson?: string | null;
 }
 
 export interface ContextBudgetStatusDto {
@@ -79,6 +165,8 @@ export interface ContextBudgetStatusDto {
   lastCachedTokens?: number | null; // null = unknown；非 null 时恒 ≤ lastPromptTokens
   cacheHitRate?: number | null; // = cached/input；未知则 null（不画 0%）
   usedInputIsEstimated?: boolean; // true = UsedInputTokens 来自估算回退
+  /** P007：占用基线来源 exact | compact-estimate | estimated（缺省 exact，见 10-§6）。 */
+  occupancyBaseline?: string;
   occupancyState?: string; // known | unknown | estimated
   billedPromptTokens?: number; // Σ账单 prompt
   billedCompletionTokens?: number;
@@ -96,6 +184,12 @@ export interface CompactionResultDto {
   keptMessages: number;
   summaryPreview: string;
   backupFileName?: string | null;
+}
+/** P007：压缩完成事件增量载荷（见 10-§2，键只增不改）。 */
+export interface CompactCompletedPayload {
+  stubMessageId?: string | null;
+  summaryTokens?: number;
+  occupancyBaseline?: string;
 }
 export interface PromptConfigDocument {
   version: number;

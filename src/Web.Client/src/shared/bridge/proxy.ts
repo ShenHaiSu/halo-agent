@@ -24,7 +24,7 @@ export async function negotiate(): Promise<NegotiateResult> {
     CefSharp?: { BindObjectAsync: (n: string) => Promise<void> };
     hostBridge?: unknown;
   };
-  // 1) Bind
+  // 1) Bind legacy hostBridge; failure degrades to explicit Mock (never silent).
   if (w.CefSharp && !w.hostBridge) {
     try {
       await w.CefSharp.BindObjectAsync('hostBridge');

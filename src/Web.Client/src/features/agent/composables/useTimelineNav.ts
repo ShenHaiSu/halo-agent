@@ -13,6 +13,11 @@ export interface ScrollToAnchorOptions {
   paddingTop?: number;
   /** 锚点缺失时的兜底：按索引找最近的更早锚点；默认 true */
   fallbackNearest?: boolean;
+  /** 未挂载时先挂载再跳；返回 true 表示已就绪 */
+  ensureMounted?: (key: string) => Promise<boolean>;
+  /** 发生 fallback 时通知调用方弹 Toast */
+  onFallback?: (usedKey: string, requestedKey: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface TimelineNav {
@@ -21,9 +26,11 @@ export interface TimelineNav {
   clear(): void;
   setContainer(el: HTMLElement | null): void;
   setOrder(keys: string[]): void;
-  scrollToAnchor(key: string, opts?: ScrollToAnchorOptions): boolean;
+  scrollToAnchor(key: string, opts?: ScrollToAnchorOptions): Promise<boolean>;
   scrollToBottom(): void;
   keys(): string[];
+  /** 导航单调号：连续点击时过期跳转丢弃 */
+  navEpoch(): number;
 }
 
 const FLASH_CLASS = 'timeline-anchor-flash';
@@ -35,6 +42,7 @@ export function createTimelineNav(): TimelineNav {
   let order: string[] = [];
   let activeEl: HTMLElement | null = null;
   let activeTimer: number | null = null;
+  let epoch = 0;
 
   function highlight(el: HTMLElement, ms: number): void {
     try {
@@ -73,20 +81,50 @@ export function createTimelineNav(): TimelineNav {
     return null;
   }
 
-  function scrollToAnchor(rawKey: string, opts: ScrollToAnchorOptions = {}): boolean {
+  async function scrollToAnchor(rawKey: string, opts: ScrollToAnchorOptions = {}): Promise<boolean> {
+    const myEpoch = ++epoch;
     try {
+      if (opts.signal?.aborted) return false;
+      if (opts.ensureMounted) {
+        try {
+          const ready = await opts.ensureMounted(rawKey);
+          if (myEpoch !== epoch) return false;
+          if (opts.signal?.aborted) return false;
+          void ready;
+        } catch (e) {
+          console.warn('[timelineNav] ensureMounted failed:', e);
+        }
+      }
+      if (myEpoch !== epoch) return false;
       const paddingTop = opts.paddingTop ?? 12;
-      const resolved = resolveKey(rawKey, opts.fallbackNearest !== false);
+      const direct = registry.get(rawKey);
+      const resolved = direct ? { el: direct, key: rawKey } : resolveKey(rawKey, opts.fallbackNearest !== false);
       if (!resolved) return false;
+      if (resolved.key !== rawKey) {
+        try {
+          opts.onFallback?.(resolved.key, rawKey);
+        } catch { /* toast never blocks nav */ }
+      }
       const { el } = resolved;
       if (!container) {
-        el.scrollIntoView({ block: 'center' });
+        try {
+          if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+        } catch { /* jsdom may lack scrollIntoView */ }
       } else {
-        const cRect = container.getBoundingClientRect();
-        const eRect = el.getBoundingClientRect();
-        const target = container.scrollTop + (eRect.top - cRect.top) - paddingTop;
-        const max = Math.max(0, container.scrollHeight - container.clientHeight);
-        container.scrollTo({ top: Math.max(0, Math.min(max, target)), behavior: opts.behavior ?? 'smooth' });
+        try {
+          const cRect = container.getBoundingClientRect();
+          const eRect = el.getBoundingClientRect();
+          const target = container.scrollTop + (eRect.top - cRect.top) - paddingTop;
+          const max = Math.max(0, container.scrollHeight - container.clientHeight);
+          const top = Math.max(0, Math.min(max, target));
+          const c = container as HTMLElement & { scrollTo?: (o: ScrollToOptions | number, y?: number) => void };
+          if (typeof c.scrollTo === 'function') c.scrollTo({ top, behavior: opts.behavior ?? 'smooth' });
+          else container.scrollTop = top;
+        } catch {
+          try {
+            if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+          } catch { /* ignore */ }
+        }
       }
       if (opts.highlight !== false) highlight(el, opts.highlightMs ?? 1200);
       return true;
@@ -116,6 +154,9 @@ export function createTimelineNav(): TimelineNav {
       order = keys.slice();
     },
     scrollToAnchor,
+    navEpoch() {
+      return epoch;
+    },
     scrollToBottom() {
       if (container) container.scrollTop = container.scrollHeight;
     },
@@ -141,12 +182,15 @@ export function useTimelineNav(): TimelineNav {
     clear() {},
     setContainer() {},
     setOrder() {},
-    scrollToAnchor() {
+    async scrollToAnchor() {
       return false;
     },
     scrollToBottom() {},
     keys() {
       return [];
+    },
+    navEpoch() {
+      return 0;
     },
   };
   console.warn('[timelineNav] not provided; using no-op');

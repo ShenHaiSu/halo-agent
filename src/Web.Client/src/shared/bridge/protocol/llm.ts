@@ -39,6 +39,9 @@ export interface SessionStreamEventDto {
   usage?: UnifiedTokenUsageDto | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  blockId?: string | null;
+  seq?: number | null;
+  tag?: string | null;
 }
 
 export interface UnifiedChatMessageDto {

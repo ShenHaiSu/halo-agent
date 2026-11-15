@@ -141,8 +141,6 @@ public sealed record TranscriptJournalRow(
 /// </summary>
 public static class SystemTranscriptCheckpoint
 {
-    public const string SummaryMarker = "【上下文摘要";
-
     /// <summary>剥掉 context（水位瞬时）再进摘要输入。</summary>
     public static SystemTranscript.TranscriptState Strip(SystemTranscript.TranscriptState state) =>
         SystemTranscript.Checkpoint(state);
@@ -199,38 +197,5 @@ public static class SystemTranscriptCheckpoint
         if (end == list.Count)
             return list;
         return list.Take(end).ToList();
-    }
-
-    /// <summary>尾部是否已是 checkpoint（摘要 marker 之后无有效 user 追问）。</summary>
-    public static bool IsTailCheckpointed(IReadOnlyList<UnifiedChatMessage>? messages)
-    {
-        if (messages == null || messages.Count == 0)
-            return true;
-        int lastSummary = -1;
-        for (int i = messages.Count - 1; i >= 0; i--)
-        {
-            var m = messages[i];
-            if (m == null)
-                continue;
-            if (
-                string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
-                && (m.Content ?? string.Empty).Contains(SummaryMarker, StringComparison.Ordinal)
-            )
-            {
-                lastSummary = i;
-                break;
-            }
-        }
-        if (lastSummary < 0)
-            return false;
-        for (int i = lastSummary + 1; i < messages.Count; i++)
-        {
-            var m = messages[i];
-            if (m == null)
-                continue;
-            if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-        return true;
     }
 }

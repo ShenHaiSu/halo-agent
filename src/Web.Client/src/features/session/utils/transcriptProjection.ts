@@ -1,4 +1,5 @@
-/** bigChange P2-1: transcript projection — WeakMap snapshot + 64-block diff + history/tail split + generation guard. */
+/** bigChange P2-1: transcript projection — WeakMap snapshot + 64-block diff + history/tail split + generation guard.
+ * S3 增补 G-2 结论：旧按条投影仅 v1 兼容保留；v2 时间轴挂载走摘要源 + 三级懒加载配额，不经过本投影。 */
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 export const BLOCK_SIZE = 64;
 

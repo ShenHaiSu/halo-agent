@@ -83,7 +83,19 @@ export function bubbleLabel(text: string, max = LABEL_MAX): string {
 }
 
 function textOfEntry(e: TimelineEntry): { text: string; createdAtUtc: string } {
-  if (e.kind === 'user' || e.kind === 'system') {
+  // need02-P2：用户轮按轮一条（user 首 12 字 + 汇总，见 P4b#4；Toc off 时回 iteration）。
+  if (e.kind === 'user-turn') {
+    const t = (e as unknown as { turn?: Record<string, unknown> }).turn;
+    const um = t?.userMsg as unknown as { content?: unknown; createdAtUtc?: unknown } | null | undefined;
+    const steps = Array.isArray(t?.steps) ? (t!.steps as Array<Record<string, unknown>>) : [];
+    const last = steps.length ? steps[steps.length - 1] : null;
+    const userText = String(um?.content ?? '');
+    const lastText = String((last as { content?: unknown } | null)?.content ?? '');
+    const summary = String((t as { summary?: unknown } | undefined)?.summary ?? '');
+    const text = lastText ? userText + '\n' + lastText : userText;
+    return { text: summary ? text + '\n' + summary : text, createdAtUtc: String(um?.createdAtUtc || '') };
+  }
+  if (e.kind === 'user' || e.kind === 'system' || (e as { kind?: string }).kind === 'compact') {
     return {
       text: String(e.msg?.content ?? ''),
       createdAtUtc: String((e.msg as unknown as { createdAtUtc?: string } | undefined)?.createdAtUtc || ''),
@@ -98,6 +110,19 @@ function textOfEntry(e: TimelineEntry): { text: string; createdAtUtc: string } {
 }
 
 export function labelOfEntry(e: TimelineEntry): string {
+  // P007：压缩桩目录固定文案，样式复用 system 行。
+  if ((e as { kind?: string }).kind === 'compact') return '上下文压缩';
+  // need02-P2：用户轮一条（user 首 12 字 + 汇总）。
+  if (e.kind === 'user-turn') {
+    const t = (e as unknown as { turn?: Record<string, unknown> }).turn;
+    const um = t?.userMsg as unknown as { content?: unknown; images?: unknown } | null | undefined;
+    const raw = String(um?.content ?? '');
+    const display = toDisplayText(raw);
+    const head = display ? bubbleLabel(display) : '[图片]';
+    const summary = String((t as { summary?: unknown } | undefined)?.summary ?? '');
+    if (summary) return head + ' · ' + summary;
+    return head;
+  }
   if (e.kind === 'user') {
     const t = toDisplayText(String(e.msg?.content ?? ''));
     if (t) return bubbleLabel(t);
@@ -131,6 +156,7 @@ export function labelOfEntry(e: TimelineEntry): string {
   return '[空回复]';
 }
 
+/** S3 增补 G-1：旧链目录计算仅 v1 兼容保留；v2 会话目录只用摘要源（HistoryTocPanel.displayTocItems），不再调用本函数。 */
 export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): TocItem[] {
   // 预扫描：确定每轮最后一个 assistant 下标（只看每轮末条用）
   const rounds: number[] = [];
@@ -138,11 +164,11 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
   let r = 0;
   for (const e of entries) {
     let role: TocRole;
-    if (e.kind === 'user') {
+    if (e.kind === 'user' || e.kind === 'user-turn') {
       role = 'user';
       r += 1;
     } else if (e.kind === 'turn') role = 'assistant';
-    else role = 'system';
+    else role = 'system'; // P007：compact 桩复用 system 样式行
     roles.push(role);
     rounds.push(role === 'system' ? 0 : r);
   }
@@ -168,21 +194,23 @@ export function buildHistoryToc(entries: TimelineEntry[], filter: TocFilter): To
     // 过滤：角色
     if (filter.role === 'user' && role !== 'user') continue;
     if (filter.role === 'assistant' && role !== 'assistant') continue;
-    // roundHeadsOnly 复用为“只看每轮末条”
+    // roundHeadsOnly 复用为“只看每轮末条”；P007 桩恒显示
     if (filter.roundHeadsOnly && role === 'assistant' && !isRoundTail) continue;
-    if (filter.roundHeadsOnly && role === 'system') continue;
-    if (filter.skipSystem !== false && role === 'system') continue;
+    if (filter.roundHeadsOnly && role === 'system' && (e as { kind?: string }).kind !== 'compact') continue;
+    if (filter.skipSystem !== false && role === 'system' && (e as { kind?: string }).kind !== 'compact') continue;
+    const isCompact = (e as { kind?: string }).kind === 'compact';
     const { text, createdAtUtc } = textOfEntry(e);
     const display = toDisplayText(text);
     const label = labelOfEntry(e);
-    const toolCount = e.kind === 'turn' ? (e.group?.toolMessages || []).length : 0;
-    const hasReasoning = e.kind === 'turn' ? !!e.group?.reasoning : false;
+    const uturn = e.kind === 'user-turn' ? (e as unknown as { turn?: Record<string, unknown> }).turn : null;
+    const toolCount = e.kind === 'turn' ? (e.group?.toolMessages || []).length : uturn ? Number(uturn.toolCount || 0) : 0;
+    const hasReasoning = e.kind === 'turn' ? !!e.group?.reasoning : uturn ? Number(uturn.reasoningChars || 0) > 0 : false;
     out.push({
       anchorKey: e.key,
       role,
-      label,
+      label: isCompact ? '上下文压缩' : label, // P007：桩固定文案
       fullText: display.slice(0, MAX_SCAN),
-      charCount: Array.from(display).length,
+      charCount: isCompact ? 0 : Array.from(display).length, // P007：桩 chars=0
       index: i + 1,
       round,
       toolCount,

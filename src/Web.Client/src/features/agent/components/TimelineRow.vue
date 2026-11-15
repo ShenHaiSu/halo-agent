@@ -1,142 +1,152 @@
 <template>
-  <div v-if="item.kind === 'user'" :ref="anchorRef(item.key)" class="flex justify-end">
-    <div
-      class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
-      @contextmenu.prevent="emit('user-menu', $event, item)"
-    >
-      <template v-for="(part, pi) in userParts(String(item.msg?.content ?? ''))" :key="pi">
-        <span v-if="part.type === 'text'">{{ part.text }}</span>
-        <SkillPillChip v-else :scope="part.scope" :name="part.name" class="inline-chip" />
-      </template>
-      <div v-if="msgImages(item.msg).length" class="mt-1.5 flex flex-wrap gap-1.5" data-testid="msg-images">
-        <template v-for="img in msgImages(item.msg)" :key="img.imageId">
-          <!-- 已加载：恒定 96×96 槽位，缩略图到达后原位替换，不改变高度 -->
-          <n-image
-            v-if="thumbOf(img)"
-            :src="thumbOf(img)"
-            :alt="img.fileName"
-            width="96"
-            height="96"
-            object-fit="cover"
-            class="rounded border msg-thumb-slot"
-            :data-testid="`msg-image-${img.imageId}`"
-          />
-          <!-- 丢失：保留原有标签语义，但占同一尺寸槽位 -->
-          <n-tag v-else-if="isImgLost(img)" size="small" :bordered="true" :title="img.fileName" class="msg-thumb-slot">
-            {{ img.fileName }}
-          </n-tag>
-          <!-- 加载中：占位骨架，尺寸与 n-image 一致 → 零高度跳变 -->
-          <div v-else class="msg-thumb-slot msg-thumb-skeleton" :title="img.fileName" aria-busy="true" />
-        </template>
-      </div>
-      <div v-if="hasLost(item.msg)" class="text-[11px] text-amber-500">部分图片已丢失（文件被删除）</div>
-    </div>
+  <div v-if="item.kind === 'user'" :ref="anchor(item.key)" class="flex justify-end">
+    <UserBubble
+      :content="String(item.msg?.content ?? '')"
+      :images="userImages"
+      :pending-status="userPending"
+      @user-menu="(e) => emit('user-menu', e, item)"
+      @retry-pending="emit('retry-pending', item)"
+    />
   </div>
-  <div v-else-if="item.kind === 'system'" :ref="anchorRef(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
+  <div v-else-if="item.kind === 'system'" :ref="anchor(item.key)" class="text-[11px] text-secondary text-center font-mono px-4">
     {{ item.msg?.content }}
   </div>
-  <!-- need-01：无正文轮次合并舱（独立 kind，显式分支；不影响任何 item.group 断言） -->
-  <div v-else-if="item.kind === 'turn-run'" :ref="anchorRef(item.key)">
-    <TurnRunItem
-      v-if="item.run"
-      :run="item.run"
-      :expanded="isExpanded(item.run.key || item.key)"
-      :reading-window="!!readingWindow"
-      :card-for="cardFor"
-      :tool-key="toolKey"
+  <div v-else-if="item.kind === 'user-turn'" :ref="anchor(item.key)">
+    <UserTurnBlock
+      v-if="item.turn"
+      :turn="item.turn"
+      :expanded="turnExpanded"
+      :live-segs="liveSegs"
+      :is-generating="generating"
+      :pending-status="turnPending"
+      :live-completing="completing"
+      :handoff-anim="handoff"
+      :single-process="singleProc"
       @toggle="emit('toggle', $event)"
-    />
-  </div>
-  <div v-else :ref="anchorRef(item.key)">
-    <TurnGroupItem
-      v-if="item.group"
-      :group="item.group"
-      :expanded="isExpanded(item.group.key || item.key)"
-      :has-failed="hasFailed(item.group)"
-      :failed-count="failedCount?.(item.group)"
-      :show-telemetry="showTelemetry(item.group)"
-      :protocol="protocolOf(item.group)"
-      :cache-line="cacheLineOf(item.group)"
-      :render-html="renderHtml"
-      :card-for="(m) => cardFor(m, item.group!)"
-      :tool-key="toolKey"
-      @toggle="emit('toggle', $event)"
-      @content-menu="emit('assistant-menu', $event, item)"
+      @user-menu="(e) => emit('user-menu', e, item)"
+      @assistant-menu="(e) => emit('assistant-menu', e, item)"
       @link-click="emit('link-click', $event)"
+      @retry-pending="emit('retry-pending', item)"
+    />
+    <TimelineAlerts
+      v-if="isLast && noticeOn && (noticeText || lastErrorText)"
+      :notice="noticeText"
+      :error="lastErrorText"
+      :show-retry="retryOn"
+      @retry="emit('retry')"
+      @dismiss="emit('dismiss')"
     />
   </div>
+  <div v-else-if="item.kind === 'compact'" :ref="anchor(item.key)" class="w-full">
+    <CompactDivider
+      :stub-id="String(item.msg?.id || '')"
+      :label="stubLabel(metaOf(item.msg).removedCount)"
+      :summary="summaryBodyOf(item.msg)"
+      :summary-html="compactHtml(item.msg)"
+      :backup-file="metaOf(item.msg).backupFile ?? null"
+      :expanded="compactOpen(item.key)"
+      @toggle="emit('toggle', item.key)"
+    />
+  </div>
+  <TimelineAlerts
+    v-if="isLast && noticeOn && (noticeText || lastErrorText) && item.kind !== 'user-turn'"
+    :notice="noticeText"
+    :error="lastErrorText"
+    :show-retry="retryOn"
+    @retry="emit('retry')"
+    @dismiss="emit('dismiss')"
+  />
 </template>
-<script setup lang="ts">
-import type { ComponentPublicInstance } from 'vue';
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
-import type { AgentToolCard } from '@features/agent/stores/model';
-import TurnGroupItem from './TurnGroupItem.vue';
-import TurnRunItem from './TurnRunItem.vue';
-import SkillPillChip from './SkillPillChip.vue';
-import { userParts } from '../utils/userParts';
 
-const props = defineProps<{
-  item: TimelineEntry;
-  isExpanded: (key: string) => boolean;
-  anchorRef: (key: string) => (el: Element | ComponentPublicInstance | null) => void;
-  msgImages: (msg: UnifiedChatMessage | undefined) => ChatImageRef[];
-  thumbOf: (img: ChatImageRef) => string;
-  hasLost: (msg: UnifiedChatMessage | undefined) => boolean;
-  renderHtml: (text: string) => string;
-  cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
-  toolKey: (m: UnifiedChatMessage) => string;
-  hasFailed: (g: TurnGroup) => boolean;
-  /** 该轮失败 tool 条数；缺省时 TurnGroupItem 回落到 hasFailed 的布尔语义（1 个红点）。 */
-  failedCount?: (g: TurnGroup) => number;
-  showTelemetry: (g: TurnGroup) => boolean;
-  protocolOf: (g: TurnGroup) => string;
-  cacheLineOf: (g: TurnGroup) => string;
-  /** M1-4：单图丢失判定（调用方提供精确判定时优先；缺省回落到 img.lost）。 */
-  imgLost?: (img: ChatImageRef) => boolean;
-  /** need-01：历史阅读窗口内不点亮合并舱的「运行中」态（与 useTimeline.readingWindow 同源）。 */
-  readingWindow?: boolean;
-}>();
-/** M1-4：单图丢失判定——决定渲染「标签槽位」还是「加载骨架」。 */
-function isImgLost(img: ChatImageRef): boolean {
-  if (props.imgLost) return props.imgLost(img);
-  return img.lost === true;
-}
+<script setup lang="ts">
+import { computed } from 'vue';
+import type { TimelineEntry } from '@features/session/utils/turnGroup';
+import UserBubble from './userturn/UserBubble.vue';
+import UserTurnBlock from './UserTurnBlock.vue';
+import CompactDivider from '@features/session/components/CompactDivider.vue';
+import TimelineAlerts from './timeline/TimelineAlerts.vue';
+import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
+import { metaOf, stubLabel, summaryBodyOf } from '@features/session/utils/compactStub';
+
+/** 行路由：user / system 直出，用户轮转装配器；派生一律经视图模型取用。 */
+const props = defineProps<{ item: TimelineEntry; isLast?: boolean }>();
+
 const emit = defineEmits<{
   toggle: [key: string];
   'user-menu': [e: MouseEvent, item: TimelineEntry];
   'assistant-menu': [e: MouseEvent, item: TimelineEntry];
   'link-click': [e: MouseEvent];
   'content-menu': [e: MouseEvent];
+  'retry-pending': [item: TimelineEntry];
+  retry: [];
+  dismiss: [];
 }>();
-void emit;
+
+const view = computed(() => useTimelineViewOptional() ?? timelineViewFallback());
+
+function anchor(key: string) {
+  return view.value.anchorRef(key);
+}
+
+const turnKey = computed(() => {
+  if (props.item.kind !== 'user-turn') return String(props.item.key || '');
+  const t = (props.item as unknown as { turn?: { key?: string } }).turn;
+  return String(t?.key || props.item.key || '');
+});
+
+const userImages = computed(() => {
+  if (props.item.kind !== 'user') return [];
+  try {
+    return view.value.msgImages(props.item.msg) || [];
+  } catch {
+    return [];
+  }
+});
+
+const userPending = computed(() => {
+  if (props.item.kind !== 'user') return '';
+  try {
+    return String(view.value.pendingStatus(props.item.msg) || '');
+  } catch {
+    return '';
+  }
+});
+
+const turnPending = computed(() => {
+  if (props.item.kind !== 'user-turn') return '';
+  try {
+    const um = (props.item as unknown as { turn?: { userMsg?: Parameters<typeof view.value.pendingStatus>[0] } }).turn?.userMsg;
+    if (!um) return '';
+    return String(view.value.pendingStatus(um) || '');
+  } catch {
+    return '';
+  }
+});
+
+const turnExpanded = computed(() => view.value.isExpanded(turnKey.value));
+/** P007：桩摘要 HTML 走场景渲染器，不直引 markdown 渲染器；展开态复用视图展开仓库。 */
+function compactHtml(m: TimelineEntry['msg']): string {
+  try {
+    return view.value.renderHtml(summaryBodyOf(m));
+  } catch {
+    return '';
+  }
+}
+function compactOpen(key: string): boolean {
+  try {
+    return view.value.isExpanded(key);
+  } catch {
+    return false;
+  }
+}
+const liveSegs = computed(() => view.value.liveSegsFor(props.item));
+const generating = computed(() => view.value.isGenerating);
+const completing = computed(() => view.value.liveCompleting && !!props.isLast);
+const handoff = computed(() => view.value.handoffAnim);
+const singleProc = computed(() => view.value.singleProcess);
+
+const noticeOn = computed(() => view.value.noticeInTurn);
+const noticeText = computed(() => view.value.turnNotice);
+const lastErrorText = computed(() => view.value.lastError);
+const retryOn = computed(() => view.value.showRetry);
 </script>
-<style scoped>
-/* M1-4：图片槽位恒定 96×96 —— 加载中/已加载/丢失三种状态占同一块空间，
-   缩略图到达时只做原位替换，下方内容完全不移动（治 R6.3 的一次 +72px 跳变）。 */
-.msg-thumb-slot {
-  width: 96px;
-  height: 96px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.msg-thumb-skeleton {
-  border-radius: 4px;
-  border: 1px solid var(--border-subtle);
-  background: linear-gradient(90deg, #8881 25%, #8883 50%, #8881 75%);
-  background-size: 200% 100%;
-  animation: thumb-shimmer 1.2s linear infinite;
-}
-@keyframes thumb-shimmer {
-  to {
-    background-position: -200% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .msg-thumb-skeleton {
-    animation: none;
-  }
-}
-</style>

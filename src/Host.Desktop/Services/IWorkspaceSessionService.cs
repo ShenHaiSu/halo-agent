@@ -100,6 +100,20 @@ public interface IWorkspaceSessionService
         string sessionId,
         CancellationToken ct = default
     );
+
+    /// <summary>P007：活跃切片（真正进模型上下文的那段）。无桩会话等价于全量。</summary>
+    Task<List<UnifiedChatMessage>> GetActiveContextMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
+
+    /// <summary>P007：最后一个压缩桩（无桩返回 null）。预算暂存态/诊断用。</summary>
+    Task<CompactStubInfo?> GetLastCompactStubAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
     Task<bool> AppendSessionMessageAsync(
         string workspaceId,
         string sessionId,

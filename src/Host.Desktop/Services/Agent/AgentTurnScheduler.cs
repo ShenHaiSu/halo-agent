@@ -143,6 +143,7 @@ public sealed partial class AgentOrchestrator
             }
         );
         UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+        await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated).ConfigureAwait(false);
         return AgentTurnResult.Truncated(ctx.EffectiveMax, ctx.ToolExecutions);
     }
 }

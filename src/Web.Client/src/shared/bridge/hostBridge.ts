@@ -14,6 +14,8 @@ export { haloEventBus };
 export { MOCK_BANNER_TEXT, BRIDGE_VERSION };
 export { CefTransport, MockTransport };
 export type { BridgeTransport };
+export { toolCallsOf } from './toolCalls';
+export type { ToolCallRef } from './toolCalls';
 
 const MOCK_FLAG_KEY = 'halo-bridge-mock';
 const WRAPPED_MARK = '__haloWrappedApi';
@@ -42,7 +44,8 @@ export function isWrappedHostBridge(v: unknown): boolean {
   return !!v && (v as Record<string, unknown>)[WRAPPED_MARK] === true;
 }
 
-function getNativeRaw(): unknown {
+/** Raw legacy bridge object (unwrapped Cef object); null when missing or already wrapped. */
+function readRawBridge(): unknown {
   try {
     const cur = window.hostBridge as unknown;
     if (cur && !isWrappedHostBridge(cur)) return cur;
@@ -104,15 +107,19 @@ export async function initHostBridge(): Promise<HostBridgeApi> {
     return resolvedBridge;
   }
 
-  if (window.CefSharp && !getNativeRaw()) {
-    try {
-      await window.CefSharp.BindObjectAsync('hostBridge');
-    } catch (err) {
-      console.error('[hostBridge] BindObjectAsync failed:', err);
+  try {
+    const scope = window as unknown as {
+      CefSharp?: { BindObjectAsync: (name: string) => Promise<void> };
+      hostBridge?: unknown;
+    };
+    if (scope.CefSharp && !scope.hostBridge) {
+      await scope.CefSharp.BindObjectAsync('hostBridge');
     }
+  } catch (err) {
+    console.error('[hostBridge] BindObjectAsync(hostBridge) failed:', err);
   }
 
-  const nativeRaw = getNativeRaw();
+  const nativeRaw = readRawBridge();
 
   if (import.meta.env.DEV && wantsMock()) {
     // 显式 ?mock：即使有原生对象也走 Mock（联调复现用）。
@@ -149,7 +156,7 @@ export async function initHostBridge(): Promise<HostBridgeApi> {
 
 export function getHostBridge(): HostBridgeApi {
   if (!resolvedBridge) {
-    const nativeRaw = getNativeRaw();
+    const nativeRaw = readRawBridge();
     if (nativeRaw) {
       // 同步懒加载仅组装 Cef 通道（版本断言在 initHostBridge 内完成）。
       activeTransport = new CefTransport(nativeRaw);
@@ -256,6 +263,12 @@ export type {
   UsageSourceOption,
   UsageTrend,
   UsageTrendSeries,
+  TurnSummary,
+  TimelineBlock,
+  TimelineBlockContent,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
+  TimelineTagUpdated,
   WorkspaceInfo,
 } from './protocol/types';
 export type { BridgeError } from './protocol/errors';

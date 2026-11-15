@@ -110,6 +110,12 @@ public sealed class ModelConfig
     /// </summary>
     public bool IncludeReasoningInHistory { get; set; } = true;
 
+    /// <summary>
+    /// 正文通道思维链标签的转写模式：Auto=出现标签即转入思考链（默认，无标签零抖动）；
+    /// Off=关闭转写（问题提供商回退到整段正文）；On=与 Auto 同一条实现路径，仅用于显式声明该模型会写标签。
+    /// </summary>
+    public ThinkTagMode ThinkTagMode { get; set; } = ThinkTagMode.Auto;
+
     public ModelConfig Clone()
     {
         return new ModelConfig
@@ -124,9 +130,21 @@ public sealed class ModelConfig
             SupportsVision = SupportsVision,
             MaxImagesPerTurn = MaxImagesPerTurn,
             VisionDetail = VisionDetail,
-            IncludeReasoningInHistory = IncludeReasoningInHistory
+            IncludeReasoningInHistory = IncludeReasoningInHistory,
+            ThinkTagMode = ThinkTagMode
         };
     }
+}
+
+/// <summary>
+/// 正文通道思维链标签的转写模式。<c>Auto</c> 与 <c>On</c> 走同一条分流实现，
+/// 区别只在语义声明：<c>Off</c> 是问题提供商的代码级回退开关。
+/// </summary>
+public enum ThinkTagMode
+{
+    Auto = 0,
+    Off = 1,
+    On = 2
 }
 
 /// <summary>

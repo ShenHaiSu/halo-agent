@@ -34,6 +34,14 @@
             查看子进度（{{ subDone }}/{{ subTotal }}）
           </button>
         </div>
+        <!-- need02-P4（P4b#1）：发送中态（isGenerating 高亮停止按钮已有，此处补文案预期；输入框不置灰，草稿可继续编辑）。 -->
+        <div
+          v-if="isGenerating && !subWaiting"
+          class="rounded-md bg-elevated border border-subtle px-2.5 py-1.5 text-xs text-secondary"
+          data-testid="composer-sending"
+        >
+          发送中… Esc 停止
+        </div>
         <div
           ref="editor"
           class="composer-editor"

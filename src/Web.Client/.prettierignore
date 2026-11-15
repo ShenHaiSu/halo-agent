@@ -1,0 +1,4 @@
+# Machine-generated contract surface: byte-stable output of
+# scripts/gen-contract-types.mjs. Keep the generator's native quoting so the
+# contract consistency gate can compare bytes exactly.
+src/contract/agent.d.ts

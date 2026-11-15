@@ -15,14 +15,29 @@ namespace Host.Desktop.LlmGateway.Adapters;
 
 public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
 {
+    /// <inheritdoc />
+    public IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(
+        Stream responseStream,
+        CancellationToken ct = default
+    ) => ParseStreamAsync(responseStream, ThinkTagMode.Auto, ct);
+
+    /// <summary>
+    /// 带正文标签转写模式的流式解析：把思维链写在 content 里的提供商在此分流。
+    /// 模式按请求作参数传入而非存实例字段——适配器是网关单例，实例字段会在并发流之间串味。
+    /// </summary>
     public async IAsyncEnumerable<UnifiedStreamEvent> ParseStreamAsync(
         Stream responseStream,
+        ThinkTagMode thinkTagMode,
         [EnumeratorCancellation] CancellationToken ct = default
     )
     {
         yield return UnifiedStreamEvent.Started();
 
         var toolCallStates = new SortedDictionary<int, PartialToolCallState>();
+
+        // 正文标签转写开关关闭时按旧行为逐包直发（问题提供商回退路径，无需改代码）。
+        ThinkTagStreamFilter? thinkFilter =
+            thinkTagMode == ThinkTagMode.Off ? null : new ThinkTagStreamFilter();
         bool streamCompletedEmitted = false;
 
         await foreach (
@@ -37,6 +52,15 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
             string data = frame.Data.Trim();
             if (data.Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
             {
+                // 残尾先发：它来自更早的 content 帧，排在工具闭合之后会让时间线把旧文本画到工具卡下方
+                if (thinkFilter != null)
+                {
+                    foreach (var evt in ToStreamEvents(thinkFilter.FlushEnd()))
+                    {
+                        yield return evt;
+                    }
+                }
+
                 // 完成未闭合的工具调用
                 foreach (var state in toolCallStates.Values)
                 {
@@ -82,6 +106,15 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                     string errCode = errorElem.TryGetProperty("code", out var codeElem)
                         ? codeElem.GetString() ?? "UPSTREAM_ERROR"
                         : "UPSTREAM_ERROR";
+
+                    // 上游报错前已收到的残尾照发，否则分块边界上的几个字符会凭空消失
+                    if (thinkFilter != null)
+                    {
+                        foreach (var evt in ToStreamEvents(thinkFilter.FlushEnd()))
+                        {
+                            yield return evt;
+                        }
+                    }
 
                     yield return UnifiedStreamEvent.Error(errCode, errMessage);
                     yield break;
@@ -152,13 +185,24 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                             yield return UnifiedStreamEvent.Reasoning(reasoning);
                         }
 
-                        // 3.2 正文文本增量
+                        // 3.2 正文文本增量（把思维链写在 content 里的提供商在此分流；
+                        //     无标签时逐段 1:1 透传，事件序列与旧行为一致）
                         if (deltaElem.TryGetProperty("content", out var contentElem))
                         {
                             string? text = contentElem.GetString();
                             if (!string.IsNullOrEmpty(text))
                             {
-                                yield return UnifiedStreamEvent.Text(text);
+                                if (thinkFilter == null)
+                                {
+                                    yield return UnifiedStreamEvent.Text(text);
+                                }
+                                else
+                                {
+                                    foreach (var evt in ToStreamEvents(thinkFilter.Append(text)))
+                                    {
+                                        yield return evt;
+                                    }
+                                }
                             }
                         }
 
@@ -238,6 +282,15 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
                     // 3.4 检查 finish_reason
                     if (choice.TryGetProperty("finish_reason", out var finishElem))
                     {
+                        // finish_reason 驱动的收尾事件之前先发残尾，保持与正文的时间先后
+                        if (thinkFilter != null)
+                        {
+                            foreach (var evt in ToStreamEvents(thinkFilter.FlushEnd()))
+                            {
+                                yield return evt;
+                            }
+                        }
+
                         string? finishReason = finishElem.GetString();
                         if (
                             string.Equals(
@@ -302,6 +355,15 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
             }
         }
 
+        // 截断在标签中间时把残尾补发，避免丢字节
+        if (thinkFilter != null)
+        {
+            foreach (var evt in ToStreamEvents(thinkFilter.FlushEnd()))
+            {
+                yield return evt;
+            }
+        }
+
         if (!streamCompletedEmitted)
         {
             yield return UnifiedStreamEvent.Completed();
@@ -342,6 +404,27 @@ public sealed partial class ChatCompletionsAdapter : ILlmProtocolAdapter
         }
 
         return $"[OpenAI Chat] 上游接口返回 HTTP {statusCode}: {raw}";
+    }
+
+    /// <summary>
+    /// 把标签提取器切出的段映射成统一事件：思维链段走 Reasoning，其余走正文，
+    /// 空段直接丢弃（下游按 kind 切时间线块，空事件会造成无意义切块）。
+    /// </summary>
+    private static IEnumerable<UnifiedStreamEvent> ToStreamEvents(
+        IReadOnlyList<ThinkTagSegment> segments
+    )
+    {
+        foreach (var segment in segments)
+        {
+            if (string.IsNullOrEmpty(segment.Text))
+            {
+                continue;
+            }
+
+            yield return segment.IsReasoning
+                ? UnifiedStreamEvent.Reasoning(segment.Text)
+                : UnifiedStreamEvent.Text(segment.Text);
+        }
     }
 
     private static int TryGetInt32(JsonElement parent, string propertyName, int defaultValue = 0)

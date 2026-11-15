@@ -1,4 +1,4 @@
-/** M3 过渡动画：TransitionGroup 结构 + leave 脱流红线 + 流式光标（§3.1）。 */
+/** 过渡动画：轮内 live 渲染 + 流式光标（§3.1）。轴尾容器已收敛进轮内，断言随之更新。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
@@ -6,50 +6,42 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import TimelineView from '@features/agent/components/TimelineView.vue';
 import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
+import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
 const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: null });
 const TIMELINE_SFC = (): string => readFileSync(resolve(process.cwd(), 'src/features/agent/components/TimelineView.vue'), 'utf8');
 
-function mountTimeline(segs: unknown[]) {
+function mountTimeline(liveSegs: unknown[]) {
+  const turn = {
+    key: 'uturn-u1',
+    userId: 'u1',
+    userMsg: { id: 'u1', role: 'user', content: 'hi', createdAtUtc: '' },
+    steps: [],
+    stepCount: 0,
+    toolCount: 0,
+    isRunning: true,
+  };
+  const item = { key: 'uturn-u1', kind: 'user-turn', turn };
+  const stub = {
+    ...timelineViewFallback(),
+    liveSegsFor: () => liveSegs as never[],
+    renderHtml: (t: string) => t,
+    renderStream: (t: string) => t,
+    isGenerating: true,
+    streamMdKillSwitch: true,
+  };
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [],
+      items: [item] as never[],
       historyItems: [],
-      tailItems: [],
+      tailItems: [item] as never[],
       chatWidthMode: 'centered',
-      isExpanded: () => false,
-      anchorRef: () => () => undefined,
-      msgImages: () => [],
-      thumbOf: () => '',
-      hasLost: () => false,
-      renderHtml: (t: string) => t,
-      renderStream: (t: string) => t,
-      cardFor: () => ({}) as never,
-      toolKey: () => '',
-      hasFailed: () => false,
-      showTelemetry: () => false,
-      protocolOf: () => '',
-      cacheLineOf: () => '',
-      hasActiveTurn: true,
-      thinkingLine: '',
-      isGenerating: true,
-      segs: segs as never,
-      segKillSwitch: false,
-      fallbackCards: [],
-      streamingText: '',
-      showThinking: false,
-      turnNotice: '',
-      lastError: '',
-      showRetry: false,
-      liveTelemetry: null,
-      menuVisible: false,
-      menuX: 0,
-      menuY: 0,
-      menuBusy: false,
-      menuCanCopy: false,
     },
-    global: { plugins: [naive] },
+    global: {
+      plugins: [naive],
+      provide: { [TimelineViewKey as unknown as string]: stub },
+    },
   });
 }
 
@@ -66,12 +58,12 @@ function cursorOf(isTail: boolean) {
   });
 }
 
-describe('M3 过渡动画', () => {
-  it('seg 列表渲染为 TransitionGroup 容器（.seg-list），子段保持 data-seg', () => {
+describe('轮内过渡', () => {
+  it('live 段收敛进轮内渲染（user-turn-live），不再有轴尾容器', () => {
     const wrapper = mountTimeline([seg('s1', '第一段'), seg('s2', '第二段')]);
-    expect(wrapper.find('.seg-list').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="user-turn-live"]').exists()).toBe(true);
     expect(wrapper.findAll('[data-seg]')).toHaveLength(2);
-    expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(false);
   });
 
   it('红线：.seg-leave-active 必须 position:absolute（否则「下移再上移」双重抖动）', () => {
@@ -82,13 +74,11 @@ describe('M3 过渡动画', () => {
     expect(rule![1]).not.toContain('height');
   });
 
-  it('活动容器使用 Transition，且过渡只动 opacity/transform（无 height/max-height）', () => {
+  it('轴尾容器与旧开关无残留', () => {
     const src = TIMELINE_SFC();
-    expect(src).toContain('<Transition name="live-turn">');
-    const rule = /\.live-turn-enter-active\s*\{([^}]*)\}/.exec(src);
-    expect(rule).not.toBeNull();
-    expect(rule![1]).toContain('opacity');
-    expect(rule![1]).not.toContain('max-height');
+    expect(src).not.toContain('active-turn-container');
+    expect(src).not.toContain('showAxis' + 'Tail');
+    expect(src).not.toContain('live' + 'Coalesce');
   });
 
   it('流式光标只在尾段显示', () => {

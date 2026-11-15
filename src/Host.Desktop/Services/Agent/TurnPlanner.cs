@@ -232,8 +232,12 @@ public sealed partial class AgentOrchestrator
         try
         {
             history = await _sessionService
-                .GetSessionMessagesAsync(workspaceId, sessionId, cancellationToken)
+                .GetActiveContextMessagesAsync(workspaceId, sessionId, cancellationToken)
                 .ConfigureAwait(false);
+            // P007：发包只带活跃切片（桩之前的历史留在库里供回溯，不进上下文）。
+            // P007-R12：单桩边缘（切片仅 1 条桩、无桩后内容）时追加一条本次请求级 system 提示，不落库、不进历史。
+            if (history.Count == 1 && Context.ActiveContext.IsStub(history[0]))
+                history.Add(UnifiedChatMessage.System("以下是此前对话摘要，请在此基础上继续。"));
             // FIX(tool-400)：同轮内上次迭代可能留下孤儿（取消/截断死在 assistant→tool 之间），本轮发包前内存愈合，不写盘。
             try
             {
@@ -675,6 +679,8 @@ public sealed partial class AgentOrchestrator
                 }
             );
             FlushUsageRows(ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated)
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Truncated(iteration, ctx.ToolExecutions)),
                 false

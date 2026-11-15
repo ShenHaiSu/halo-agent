@@ -204,6 +204,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         return 0;
     }
 
+    /// P007：本函数语义冻结（桩分支在 CalculateBudgetStatus 侧叠加，此处不改）。
     /// <summary>
     /// need05-01：与 ResolveUsedInputTokens 并列，返回是否估算 + 可空快照。
     /// 口径：IN=占用快照（末轮 prompt），cache⊆IN，无精确值 = unknown。

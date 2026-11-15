@@ -82,6 +82,7 @@ public sealed class TurnContext
     public List<string> EmptyNameCids { get; set; } = new();
     public UnifiedTokenUsage? CurrentUsage { get; set; }
     public bool StreamTruncated { get; set; }
+    public List<TimelineBlockDraft> TimelineLog { get; } = new();
 }
 
 /// <summary>轮首准备结果：Terminal 非空即直接返回，不进循环。</summary>

@@ -118,6 +118,12 @@ public static class ProgramBoot
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "disable-gpu.flag")
         );
         gpuDisabled = isWin7 || hasFlag;
+        var wwwrootPath = ResolveWwwrootDirectory();
+        Directory.CreateDirectory(wwwrootPath);
+        // 前端指纹变化即清 HTTP 磁盘缓存（只删 Cache/Code Cache/GPUCache，保留 Local Storage 主题等）。
+        // 原因：app://local 经 FolderSchemeHandler 走 HTTP 缓存，index.html 被缓存后新 wwwroot 不生效；
+        // 全禁 CachePath 会连 localStorage 一起丢，故只做版本门控的精准清理（Cef.Initialize 前执行，无锁）。
+        EnsureFreshCefHttpCache(storageManager, wwwrootPath);
         var settings = new CefSettings
         {
             Locale = "zh-CN",
@@ -136,8 +142,6 @@ public static class ProgramBoot
             "disable-features",
             "CalculateNativeWinOcclusion,WinUseBrowserSpellChecker"
         );
-        var wwwrootPath = ResolveWwwrootDirectory();
-        Directory.CreateDirectory(wwwrootPath);
         settings.RegisterScheme(
             new CefCustomScheme
             {
@@ -156,6 +160,82 @@ public static class ProgramBoot
             }
         );
         return settings;
+    }
+
+    /// <summary>前端指纹变化时清理 CEF HTTP 磁盘缓存。只删 Cache/Code Cache/GPUCache，保留 Local Storage/IndexedDB。</summary>
+    private static void EnsureFreshCefHttpCache(
+        StoragePathManager storageManager,
+        string wwwrootPath
+    )
+    {
+        try
+        {
+            var fingerprint = ComputeWwwrootFingerprint(wwwrootPath);
+            var markerDir = storageManager.ConfigDirectory;
+            Directory.CreateDirectory(markerDir);
+            var markerPath = Path.Combine(markerDir, "cef-cache.frontend");
+            string? prev = null;
+            try
+            {
+                if (File.Exists(markerPath))
+                    prev = File.ReadAllText(markerPath).Trim();
+            }
+            catch { }
+            if (
+                !string.IsNullOrEmpty(prev)
+                && string.Equals(prev, fingerprint, StringComparison.Ordinal)
+            )
+                return;
+            var cacheRoot = storageManager.CefCacheDirectory;
+            // Cef.Initialize 前执行，无文件锁，可安全删除。
+            foreach (
+                var sub in new[]
+                {
+                    "Cache",
+                    "Code Cache",
+                    "GPUCache",
+                    Path.Combine("Service Worker", "CacheStorage")
+                }
+            )
+            {
+                try
+                {
+                    var dir = Path.Combine(cacheRoot, sub);
+                    if (Directory.Exists(dir))
+                        Directory.Delete(dir, recursive: true);
+                }
+                catch { }
+            }
+            try
+            {
+                File.WriteAllText(markerPath, fingerprint);
+            }
+            catch { }
+            try
+            {
+                Directory.CreateDirectory(cacheRoot);
+            }
+            catch { }
+        }
+        catch { }
+    }
+
+    private static string ComputeWwwrootFingerprint(string wwwrootPath)
+    {
+        try
+        {
+            var indexPath = Path.Combine(wwwrootPath, "index.html");
+            if (!File.Exists(indexPath))
+                return "noindex";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            using var fs = File.OpenRead(indexPath);
+            var hash = sha.ComputeHash(fs);
+            return Convert.ToHexString(hash, 0, 8);
+        }
+        catch
+        {
+            return "unknown";
+        }
     }
 
     public static void RefreshPythonSnapshotFireAndForget()

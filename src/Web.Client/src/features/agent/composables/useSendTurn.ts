@@ -18,7 +18,7 @@ export function useSendTurn(c: ComposerApi) {
   const stream = useAgentStream();
   const cards = useAgentCards();
   const telemetry = useAgentTelemetry();
-  const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id));
+  const canSend = computed(() => !!(workspaceStore.activeSessionId || workspaceStore.activeSession?.id) && !(workspaceStore as unknown as { isHistoryReadonly?: boolean }).isHistoryReadonly);
   const subWaiting = computed(() => cards.subAgents?.waiting === true);
   const subDone = computed(() => cards.subAgents?.done ?? 0);
   const subTotal = computed(() => cards.subAgents?.total ?? 0);
@@ -44,6 +44,10 @@ export function useSendTurn(c: ComposerApi) {
   }
   async function handleSend(): Promise<void> {
     if (stream.isGenerating || c.askMasked.value) return;
+    if ((workspaceStore as unknown as { isHistoryReadonly?: boolean }).isHistoryReadonly) {
+      message.warning('历史版本只读，不可继续对话，可分支');
+      return;
+    }
     if (!canSend.value) return;
     c.readEditorToDraft();
     // need22-F02/F03：仅含 skill 段（无任何文字）也算非空，可发送；

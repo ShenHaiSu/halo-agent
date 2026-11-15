@@ -129,8 +129,12 @@ public sealed class SessionMetadata
     /// <summary>need13：由主轮哪次 tool_call 创建（callId，链路追踪）。</summary>
     public string? CreatedByCallId { get; set; }
 
-    /// <summary>need13：task 截断 2000 字（索引用，全文不存 meta）。</summary>
     public string? TaskPrompt { get; set; }
+
+    public int HistoryVersion { get; set; }
+
+    /// <summary>P007：会话级压缩模型冻结：null = 继承全局；首次写桩后固化为 stub。</summary>
+    public string? CompactMode { get; set; }
 }
 
 /// <summary>
@@ -174,6 +178,14 @@ public sealed class UnifiedChatMessage
     public long? InputTokens { get; set; }
     public long? OutputTokens { get; set; }
     public long? CachedTokens { get; set; }
+
+    /// <summary>P007：消息语义标记；null/'chat' = 普通消息，'compact_stub' = 压缩桩。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; set; }
+
+    /// <summary>P007：桩的结构化元数据（仅 kind='compact_stub' 时非空）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MetaJson { get; set; }
 
     /// <summary>need09-05：本消息附带的图片引用；null/空 = 纯文本（STJ 缺字段容忍，WhenWritingNull 保证老快照零抖动）。</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -235,6 +247,9 @@ public sealed class ContextBudgetStatusDto
 
     /// <summary>need05-01：true = UsedInputTokens 来自估算回退（流式中/无快照）。</summary>
     public bool UsedInputIsEstimated { get; set; }
+
+    /// <summary>P007：占用基线来源 exact | compact-estimate | estimated。缺省 exact = 旧行为。</summary>
+    public string OccupancyBaseline { get; set; } = "exact";
 
     /// <summary>need05-01：known | unknown | estimated。空会话为 known+0%；有消息无快照为 unknown。</summary>
     public string OccupancyState { get; set; } = "known";
@@ -332,4 +347,32 @@ public sealed class HistoryDeleteResult
 
     public static HistoryDeleteResult Fail(string code) =>
         new() { Success = false, ErrorCode = code };
+}
+
+/// <summary>P007：压缩恢复结果（运维操作：删桩与全量重写唯一入口）。</summary>
+public sealed class HistoryRestoreResult
+{
+    public bool Success { get; init; }
+    public bool NoOp { get; init; }
+    public int Restored { get; init; }
+    public int MergedTotal { get; init; }
+    public string? ErrorCode { get; init; }
+
+    public static HistoryRestoreResult Ok(int r, int t) =>
+        new()
+        {
+            Success = true,
+            Restored = r,
+            MergedTotal = t
+        };
+
+    public static HistoryRestoreResult NoOpResult(int t) =>
+        new()
+        {
+            Success = true,
+            NoOp = true,
+            MergedTotal = t
+        };
+
+    public static HistoryRestoreResult Fail(string c) => new() { Success = false, ErrorCode = c };
 }

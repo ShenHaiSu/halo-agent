@@ -15,6 +15,7 @@ namespace Host.Desktop.Infrastructure.Storage;
 
 public interface ISessionRepository
 {
+    StoragePathManager Storage { get; }
     Task<List<WorkspaceInfo>> LoadWorkspacesIndexAsync(CancellationToken ct = default);
     Task SaveWorkspacesIndexAsync(List<WorkspaceInfo> workspaces, CancellationToken ct = default);
     Task<List<SessionMetadata>> LoadSessionsIndexAsync(
@@ -43,6 +44,13 @@ public interface ISessionRepository
         CancellationToken ct = default
     );
     Task<List<UnifiedChatMessage>> GetMessagesAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
+
+    /// <summary>P007：活跃切片读（v2 DB 单语句快路径；无库/失败回退全量）。无桩会话等价于全量。</summary>
+    Task<List<UnifiedChatMessage>> GetActiveContextMessagesAsync(
         string workspaceId,
         string sessionId,
         CancellationToken ct = default

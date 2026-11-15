@@ -35,7 +35,7 @@ public sealed partial class HostBridgeFacade
         catch { }
     }
 
-    public Task<BridgeResponse<string>> StartAgentTurn(
+    public async Task<BridgeResponse<string>> StartAgentTurn(
         string workspaceId,
         string sessionId,
         string userText,
@@ -47,15 +47,30 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            try
+            {
+                var meta = await _workspaceSessionService
+                    .GetSessionAsync(
+                        workspaceId?.Trim() ?? string.Empty,
+                        sessionId?.Trim() ?? string.Empty
+                    )
+                    .ConfigureAwait(false);
+                if (meta != null && meta.HistoryVersion != 2)
+                    return BridgeResponse<string>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
+                if (
+                    meta != null
+                    && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
+                )
+                    return BridgeResponse<string>.Fail("SUB_READONLY", "子会话只读，不可发轮");
+            }
+            catch { }
             if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             {
-                return Task.FromResult(
-                    BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空")
-                );
+                return BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
             }
             if (string.IsNullOrWhiteSpace(userText))
             {
-                return Task.FromResult(BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空"));
+                return BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空");
             }
             string turnKey = "agent:" + sessionId.Trim();
             // need22-P1 T1：sendPrompt requestId 回显去重（重复投递直接成功回显，不重起一轮）。
@@ -64,19 +79,15 @@ public sealed partial class HostBridgeFacade
                 : requestId.Trim();
             if (_recentAgentRequestIds.ContainsKey(turnRequestId))
             {
-                return Task.FromResult(
-                    BridgeResponse<string>.Success(
-                        sessionId.Trim(),
-                        $"重复请求已去重（requestId={turnRequestId} 回显）"
-                    )
+                return BridgeResponse<string>.Success(
+                    sessionId.Trim(),
+                    $"重复请求已去重（requestId={turnRequestId} 回显）"
                 );
             }
             // need22-P1 T5：压缩中查询可用，但新轮明确拒绝（COMPACTING 码；可先 CancelCompaction 再发轮）。
             if (_activeSessionTokens.ContainsKey("compact:" + sessionId.Trim()))
             {
-                return Task.FromResult(
-                    BridgeResponse<string>.Fail("COMPACTING", "该会话正在压缩上下文（查询可用），新一轮请稍候或先取消压缩")
-                );
+                return BridgeResponse<string>.Fail("COMPACTING", "该会话正在压缩上下文（查询可用），新一轮请稍候或先取消压缩");
             }
             // need22-P1 T1：同 session 重入不再静默丢旧轮 → 返回 TURN_IN_PROGRESS（附 activeRequestId），旧轮继续跑。
             // 旧轮走正常 TurnCancelled 落盘仅发生在显式 CancelAgentTree 时。
@@ -85,11 +96,9 @@ public sealed partial class HostBridgeFacade
                 string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar)
                     ? ar
                     : "unknown";
-                return Task.FromResult(
-                    BridgeResponse<string>.Fail(
-                        "TURN_IN_PROGRESS",
-                        $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"
-                    )
+                return BridgeResponse<string>.Fail(
+                    "TURN_IN_PROGRESS",
+                    $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"
                 );
             }
             var cts = new CancellationTokenSource();
@@ -154,12 +163,12 @@ public sealed partial class HostBridgeFacade
                 CancellationToken.None
             );
 
-            return Task.FromResult(BridgeResponse<string>.Success(sessId, "Agent 推理已启动"));
+            return BridgeResponse<string>.Success(sessId, "Agent 推理已启动");
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("StartAgentTurn failed", ex);
-            return Task.FromResult(BridgeResponse<string>.Fail("AGENT_START_ERROR", ex.Message));
+            return BridgeResponse<string>.Fail("AGENT_START_ERROR", ex.Message);
         }
     }
 
