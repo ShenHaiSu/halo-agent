@@ -38,21 +38,9 @@ export const THEME_COLOR_PRESETS: Array<{ label: string; value: string }> = [
   { label: '玫红', value: '#f43f5e' },
 ];
 
-export const CHINESE_FONT_OPTIONS = [
-  'Microsoft YaHei UI',
-  'Microsoft YaHei',
-  'PingFang SC',
-  'SimSun',
-  'SimHei',
-];
+export const CHINESE_FONT_OPTIONS = ['Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'SimSun', 'SimHei'];
 
-export const ENGLISH_FONT_OPTIONS = [
-  'Segoe UI',
-  'Inter',
-  'Arial',
-  'Helvetica Neue',
-  'system-ui',
-];
+export const ENGLISH_FONT_OPTIONS = ['Segoe UI', 'Inter', 'Arial', 'Helvetica Neue', 'system-ui'];
 
 export const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16];
 
@@ -106,6 +94,17 @@ export function normalizeHexColor(value: unknown): string | null {
   return hex;
 }
 
+/** hex(#rgb / #rrggbb) → CSS rgb 三元组 "R G B"；非法输入返回 null。
+ *  供 rgb(var(--xxx-rgb) / <alpha-value>) 方案在运行时改写主题色使用。 */
+export function hexToRgbTriplet(value: unknown): string | null {
+  const hex = normalizeHexColor(value);
+  if (!hex) return null;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r} ${g} ${b}`;
+}
+
 function quoteFont(name: string): string {
   const clean = name.trim().replace(/^["']+|["']+$/g, '');
   return `"${clean}"`;
@@ -135,10 +134,7 @@ function resolvePrimaryShades(themeColor: string, mode: ThemeMode): PrimaryShade
  * 以现有两套 naiveTheme 为基座，仅覆盖字体/字号/主色系。
  * mode 同时接受 'dark' | 'light' 与 boolean（true = dark），保持调用方兼容。
  */
-export function buildHaloThemeOverrides(
-  appearance: AppearanceSettings,
-  mode: ThemeMode | boolean
-): GlobalThemeOverrides {
+export function buildHaloThemeOverrides(appearance: AppearanceSettings, mode: ThemeMode | boolean): GlobalThemeOverrides {
   const themeMode: ThemeMode = typeof mode === 'boolean' ? (mode ? 'dark' : 'light') : mode;
   const base = themeMode === 'dark' ? haloDarkThemeOverrides : haloLightThemeOverrides;
   const shades = resolvePrimaryShades(appearance.themeColor, themeMode);

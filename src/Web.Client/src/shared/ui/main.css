@@ -22,6 +22,19 @@
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
   --accent-primary: #3b82f6;
+
+  /* 与上列 hex 变量一一对应的 RGB 三元组：仅供 tailwind 的
+     rgb(var(--xxx-rgb) / <alpha-value>) 使用，用来支持 /40 /50 等透明度修饰。
+     三元组写空格分隔（rgb(R G B / a) 需 Chrome 65+，符合 Chrome109 约束），
+     禁止改用 color-mix()（Chrome 111+）。 */
+  --bg-app-rgb: 13 17 23;
+  --bg-sidebar-rgb: 19 24 32;
+  --bg-surface-rgb: 24 31 41;
+  --bg-elevated-rgb: 33 42 54;
+  --border-subtle-rgb: 40 50 65;
+  --text-primary-rgb: 230 237 243;
+  --text-secondary-rgb: 139 148 158;
+  --accent-primary-rgb: 59 130 246;
 }
 
 html.light {
@@ -33,6 +46,15 @@ html.light {
   --text-primary: #0f172a;
   --text-secondary: #64748b;
   --accent-primary: #2563eb;
+  /* 亮色三元组：与上方 hex 严格同值，勿单独调色 */
+  --bg-app-rgb: 248 250 252;
+  --bg-sidebar-rgb: 241 245 249;
+  --bg-surface-rgb: 255 255 255;
+  --bg-elevated-rgb: 248 250 252;
+  --border-subtle-rgb: 226 232 240;
+  --text-primary-rgb: 15 23 42;
+  --text-secondary-rgb: 100 116 139;
+  --accent-primary-rgb: 37 99 235;
   /* need03-04 明亮：浅底+深字，保证对比度 */
   --code-bg: #f1f5f9; --code-text: #0f172a; --code-border: #e2e8f0;
   --tool-output-bg: #f8fafc; --tool-output-text: #334155;
