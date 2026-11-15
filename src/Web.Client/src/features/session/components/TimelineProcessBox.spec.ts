@@ -333,3 +333,115 @@ describe('P007 TimelineProcessBox 压缩桩', () => {
     expect(wrapper.find('[data-testid="compact-pill"]').text()).toContain('42');
   });
 });
+describe('盒内渲染序', () => {
+  const toolCardStub = {
+    props: ['card'],
+    template: '<div data-testid="tool-call-card" :data-tool="card.functionName" :data-status="card.status">{{ card.functionName }}</div>',
+  };
+
+  it('按块序交织渲染思考正文与工具卡而不是按类型分组', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-rsn', 'b-txt', 'b-call', 'b-res', 'b-txt2']);
+    getBlockContentsMock.mockImplementation(async (ids: string[]) => {
+      const items: Record<string, unknown> = {};
+      for (const id of ids) {
+        items[id] =
+          id === 'b-rsn'
+            ? { blockId: id, kind: 'reasoning', tag: 'process', seq: 1, markdown: '思考', preview: '', truncated: false }
+            : id === 'b-txt'
+              ? { blockId: id, kind: 'text', tag: 'process', seq: 2, markdown: '过程正文', preview: '', truncated: false }
+              : id === 'b-call'
+                ? {
+                    blockId: id,
+                    kind: 'tool_call',
+                    tag: 'process',
+                    seq: 3,
+                    callId: 'c1',
+                    functionName: 'read_file',
+                    argsJson: '{}',
+                    markdown: '{}',
+                    preview: '',
+                    truncated: false,
+                  }
+                : id === 'b-res'
+                  ? {
+                      blockId: id,
+                      kind: 'tool_result',
+                      tag: 'process',
+                      seq: 4,
+                      callId: 'c1',
+                      functionName: 'read_file',
+                      resultText: 'ok',
+                      resultRef: null,
+                      preview: '',
+                      truncated: false,
+                    }
+                  : { blockId: id, kind: 'text', tag: 'process', seq: 5, markdown: '收尾', preview: '', truncated: false };
+      }
+      return { items, missing: [] };
+    });
+
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: toolCardStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+
+    const kinds = wrapper.findAll('[data-hi-kind]').map((n) => n.attributes('data-hi-kind'));
+    expect(kinds).toEqual(['reasoning', 'text', 'tool', 'text']);
+  });
+
+  it('思考节点在文档序中位于工具卡之前', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-rsn', 'b-txt', 'b-call', 'b-res', 'b-txt2']);
+    getBlockContentsMock.mockImplementation(async (ids: string[]) => {
+      const items: Record<string, unknown> = {};
+      for (const id of ids) {
+        items[id] =
+          id === 'b-rsn'
+            ? { blockId: id, kind: 'reasoning', tag: 'process', seq: 1, markdown: '思考', preview: '', truncated: false }
+            : id === 'b-txt'
+              ? { blockId: id, kind: 'text', tag: 'process', seq: 2, markdown: '过程正文', preview: '', truncated: false }
+              : id === 'b-call'
+                ? {
+                    blockId: id,
+                    kind: 'tool_call',
+                    tag: 'process',
+                    seq: 3,
+                    callId: 'c1',
+                    functionName: 'read_file',
+                    argsJson: '{}',
+                    markdown: '{}',
+                    preview: '',
+                    truncated: false,
+                  }
+                : id === 'b-res'
+                  ? {
+                      blockId: id,
+                      kind: 'tool_result',
+                      tag: 'process',
+                      seq: 4,
+                      callId: 'c1',
+                      functionName: 'read_file',
+                      resultText: 'ok',
+                      resultRef: null,
+                      preview: '',
+                      truncated: false,
+                    }
+                  : { blockId: id, kind: 'text', tag: 'process', seq: 5, markdown: '收尾', preview: '', truncated: false };
+      }
+      return { items, missing: [] };
+    });
+
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: toolCardStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+
+    const els = wrapper.findAll('[data-hi-kind]');
+    expect(els.length).toBe(4);
+    const pos = els[0].element.compareDocumentPosition(els[2].element);
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

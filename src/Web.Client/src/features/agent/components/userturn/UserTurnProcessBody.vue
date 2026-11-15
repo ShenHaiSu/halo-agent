@@ -62,6 +62,8 @@
 </template>
 
 <script setup lang="ts">
+// 顺序说明：该体的上屏顺序受消息模型限制（思考与正文是同一条助手消息的不同字段），
+// 无法还原真实交错序，不可按块序重排；历史时间线过程盒走 TimelineProcessBox 单循环渲染。
 import { computed } from 'vue';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { UserTurn, UserTurnStep } from '@features/session/utils/userTurn';

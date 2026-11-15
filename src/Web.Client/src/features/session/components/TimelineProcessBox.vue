@@ -52,18 +52,29 @@
         {{ emptyText }}
       </div>
       <div v-else class="flex flex-col gap-1.5">
-        <div v-for="g in toolGroups" :key="`tool-${g.callId}`" :data-testid="`timeline-tool-call-${g.callId}`" @click="ensureToolResult(g)">
-          <ToolCallCard :card="historyCardFor(g)" :default-collapsed="true" />
-        </div>
-        <div v-for="b in otherBlocks" :key="b.blockId">
-          <div v-if="b.kind === 'tool_result'" class="text-[11px] whitespace-pre-wrap break-words select-text">
-            {{ resultPreviewOf(b) }}
+        <!-- 块序唯一真相源：顺序 = orderedBlocks 序（请求返回序即渲染序）。
+              禁止拆成“工具一组、其余一组”的多个循环，那会按类型重排（回归见 TimelineProcessBox.spec.ts“盒内渲染序”）。 -->
+        <template v-for="it in historyItems" :key="it.key">
+          <div
+            v-if="it.kind === 'tool'"
+            :data-hi-kind="it.kind"
+            :data-testid="`timeline-tool-call-${it.group.callId}`"
+            @click="ensureToolResult(it.group)"
+          >
+            <ToolCallCard :card="historyCardFor(it.group)" :default-collapsed="true" />
           </div>
-          <ReasoningText v-else-if="b.kind === 'reasoning'" :raw="plainTextOf(b)" />
-          <div v-else class="text-[11px] whitespace-pre-wrap break-words select-text">
-            {{ plainTextOf(b) }}
+          <div
+            v-else-if="it.kind === 'tool_result'"
+            :data-hi-kind="it.kind"
+            class="text-[11px] whitespace-pre-wrap break-words select-text"
+          >
+            {{ resultPreviewOf(it.block) }}
           </div>
-        </div>
+          <ReasoningText v-else-if="it.kind === 'reasoning'" :data-hi-kind="it.kind" :raw="plainTextOf(it.block)" />
+          <div v-else :data-hi-kind="it.kind" class="text-[11px] whitespace-pre-wrap break-words select-text">
+            {{ plainTextOf(it.block) }}
+          </div>
+        </template>
         <div v-if="missing.length > 0" class="text-[11px] text-secondary opacity-70">（{{ missing.length }} 个块已删除，仅保留占位）</div>
       </div>
     </div>
@@ -122,7 +133,7 @@ import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
 import { stubLabel } from '../utils/compactStub';
 import { renderHtmlSmart } from '../utils/markdownRender';
-import { pairToolGroupsInOrder, toAgentToolCard, type ToolGroup } from '../utils/historyToolCards';
+import { buildHistoryItems, toAgentToolCard, type HistoryItem, type ToolGroup } from '../utils/historyToolCards';
 
 const props = defineProps<{
   turn: FlatTimelineTurn;
@@ -174,9 +185,7 @@ const orderedBlocks = computed<TimelineBlockContent[]>(() => {
   return out;
 });
 
-const pairedGroups = computed(() => pairToolGroupsInOrder(orderedBlocks.value));
-const toolGroups = computed<ToolGroup[]>(() => pairedGroups.value.tools);
-const otherBlocks = computed<TimelineBlockContent[]>(() => pairedGroups.value.others);
+const historyItems = computed<HistoryItem[]>(() => buildHistoryItems(orderedBlocks.value));
 
 function plainTextOf(b: TimelineBlockContent): string {
   const s = trimBlankEdges(String(b.markdown || b.preview || ''));
