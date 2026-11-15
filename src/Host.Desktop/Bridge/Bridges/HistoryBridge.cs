@@ -313,4 +313,37 @@ public sealed partial class HostBridgeFacade
             return 0;
         }
     }
+
+    /// <summary>P007：压缩备份恢复入口（运维操作：删桩与全量重写唯一入口，须显式调用）。</summary>
+    public async Task<BridgeResponse<HistoryRestoreResult>> RestoreCompactedHistory(
+        string workspaceId,
+        string sessionId,
+        string backupFileName
+    )
+    {
+        try
+        {
+            if (IsHistoryBusy(sessionId))
+                return BridgeResponse<HistoryRestoreResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
+            if (_workspaceSessionService is not Services.WorkspaceSessionService concrete)
+                return BridgeResponse<HistoryRestoreResult>.Fail(
+                    "UNSUPPORTED_SERVICE",
+                    "当前会话服务不支持恢复"
+                );
+            var tool = new Services.CompactionRestore(concrete);
+            var result = await tool.RestoreAsync(workspaceId, sessionId, backupFileName)
+                .ConfigureAwait(false);
+            if (!result.Success)
+                return BridgeResponse<HistoryRestoreResult>.Fail(
+                    result.ErrorCode ?? "RESTORE_FAILED",
+                    result.ErrorCode ?? "恢复失败"
+                );
+            return BridgeResponse<HistoryRestoreResult>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"RestoreCompactedHistory failed for session '{sessionId}'", ex);
+            return BridgeResponse<HistoryRestoreResult>.Fail("RESTORE_ERROR", ex.Message);
+        }
+    }
 }

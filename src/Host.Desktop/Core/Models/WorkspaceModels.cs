@@ -348,3 +348,31 @@ public sealed class HistoryDeleteResult
     public static HistoryDeleteResult Fail(string code) =>
         new() { Success = false, ErrorCode = code };
 }
+
+/// <summary>P007：压缩恢复结果（运维操作：删桩与全量重写唯一入口）。</summary>
+public sealed class HistoryRestoreResult
+{
+    public bool Success { get; init; }
+    public bool NoOp { get; init; }
+    public int Restored { get; init; }
+    public int MergedTotal { get; init; }
+    public string? ErrorCode { get; init; }
+
+    public static HistoryRestoreResult Ok(int r, int t) =>
+        new()
+        {
+            Success = true,
+            Restored = r,
+            MergedTotal = t
+        };
+
+    public static HistoryRestoreResult NoOpResult(int t) =>
+        new()
+        {
+            Success = true,
+            NoOp = true,
+            MergedTotal = t
+        };
+
+    public static HistoryRestoreResult Fail(string c) => new() { Success = false, ErrorCode = c };
+}

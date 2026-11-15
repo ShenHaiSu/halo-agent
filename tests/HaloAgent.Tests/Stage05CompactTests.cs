@@ -41,6 +41,11 @@ public sealed class Stage05CompactTests : IDisposable
             customFallbackDataRoot: _tempRoot
         );
         _repository = new SessionRepository(_storageManager);
+        // P007-M5: 本文件覆盖 legacy 重写路径；默认已切 stub，此处显式钉回 legacy（断言零放宽）。
+        _storageManager
+            .SaveAppSettingsAsync(new AppSettingsConfig { CompactMode = CompactMode.Legacy })
+            .GetAwaiter()
+            .GetResult();
         _service = new WorkspaceSessionService(_repository);
         _budgetService = new TokenBudgetService();
     }

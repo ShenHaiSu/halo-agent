@@ -32,6 +32,7 @@ public sealed partial class CompactionService : ICompactionService
         + "- 已完成的关键操作与结果（重要的文件路径、命令、数据结论）\n"
         + "- 用户的明确决定、偏好与要求\n"
         + "- 尚未完成、需要继续处理的事项\n"
+        + "- 最近一轮的具体结论与下一步动作（原文保留关键标识：文件路径、命令、参数名）\n"
         + "只输出要点，不要复述对话原文，不要添加对话里没有的内容。";
 
     private readonly IWorkspaceSessionService _sessionService;
@@ -399,9 +400,8 @@ public sealed partial class CompactionService : ICompactionService
                                 .Append(' ');
                     }
                     body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                    // need22-B02：TODO（本期不改，契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.2）：
-                    // 压缩摘要里的 [[skill:scope/name]] 标记属于噪音，未来可在此处用
-                    // SkillActivationExpander.StripMarkers(m.Content) 去掉；当前 marker 短、语义可接受，保持原样。
+                    // P007 legacy 说明：摘要里的技能标记属于噪音，未来可在此处剥离；本期不改，保持原样。
+                    // 当前标记短、语义可接受，直接保留。
                 }
             }
         }
@@ -457,8 +457,8 @@ public sealed partial class CompactionService : ICompactionService
         return snapshot;
     }
 
-    /// <summary>P007：legacy 物理重写（stub 走 AppendStubAsync；M5 下线本方法）。
-    /// 压缩期间新增搬运（Skip 快照条数）仅 legacy 保留，stub 下 append-only 无需补偿。</summary>
+    /// <summary>P007 legacy：仅在 CompactMode=legacy 下使用，下个版本删除（保留一个版本周期）。压缩期间新增搬运仅 legacy 保留。</summary>
+    // P007 legacy：stub 路径零调用本方法；三处破坏性调用仅 legacy 分支保留。
     private async Task<CompactionResult> RewriteAsync(
         WorkspaceSessionService service,
         string workspaceId,
@@ -472,6 +472,8 @@ public sealed partial class CompactionService : ICompactionService
         var summaryMsg = UnifiedChatMessage.User(
             "【上下文摘要：压缩自此前 " + snapshot.OldCount + " 条，由模型自动生成，细节以备份为准】\n" + summary
         );
+        // P007 legacy：新写 legacy 摘要显式标 chat，幂等回填（仅 kind IS NULL）只认 M5 前老桩，不误伤本版本 legacy 摘要。
+        summaryMsg.Kind = MessageKind.Chat;
         var newMessages = new List<UnifiedChatMessage>();
         if (snapshot.OrigSystem != null)
             newMessages.Add(snapshot.OrigSystem);

@@ -253,6 +253,8 @@ public sealed partial class CompactionService
             Messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User(bodyText) },
             Tools = Array.Empty<UnifiedToolDefinition>(),
         };
+        // P007 会话级冻结：本快照仅在会话级 mode==stub 时进入；首次写桩由 AppendCompactTurnAsync 固化 meta.CompactMode=stub。
+        // P007 全局切回 legacy 后有桩会话仍走 stub；无桩会话读侧切片恒等（零影响）。
         return new CompactSnapshot
         {
             OrigSystem = lead > 0 ? active[0] : null,

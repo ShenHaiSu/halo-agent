@@ -217,6 +217,17 @@ public sealed class SessionHistoryDb
             backfill.ExecuteNonQuery();
         }
         catch { }
+        try
+        {
+            // P007: 老式字符串桩回填结构化桩（幂等：kind IS NULL 保证仅首跑有效）。
+            // P007: 仅回填 messages；不写 meta_json（老桩无 usage，前端走兼容层）；不迁 turns（老轮非摘要前缀且 final_block_id 含 compact 前缀，LIKE 会误伤）。
+            using var stubBackfill = conn.CreateCommand();
+            stubBackfill.CommandText =
+                "UPDATE messages SET kind = 'compact_stub'"
+                + " WHERE kind IS NULL AND role = 'user' AND content LIKE '【上下文摘要%';";
+            stubBackfill.ExecuteNonQuery();
+        }
+        catch { }
         return dbPath;
     }
 

@@ -116,6 +116,10 @@ public sealed class CompactStubStorageTests : IDisposable
     [Fact(DisplayName = "P007-M1: legacy 路径行为与基线一致")]
     public async Task Legacy_Path_Unchanged()
     {
+        // P007-M5: 默认已切 stub；legacy 路径用例显式钉回 legacy（断言零放宽）。
+        var legacySettings = _storageManager.LoadAppSettings();
+        legacySettings.CompactMode = CompactMode.Legacy;
+        _storageManager.SaveAppSettingsAsync(legacySettings).GetAwaiter().GetResult();
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId);
         var before = await _service.GetSessionMessagesAsync(wsId, sessId);

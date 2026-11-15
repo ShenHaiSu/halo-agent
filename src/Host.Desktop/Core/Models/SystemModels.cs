@@ -18,8 +18,8 @@ public sealed class AppSettingsConfig
 {
     public int SchemaVersion { get; set; } = 1;
 
-    /// <summary>P007：压缩模型开关：legacy（旧重写，默认）/ stub（新桩模型）。</summary>
-    public string CompactMode { get; set; } = "legacy";
+    /// <summary>P007：压缩模式开关：legacy（旧重写）/ stub（默认 stub；老配置缺该键时走默认值）。</summary>
+    public string CompactMode { get; set; } = "stub";
     public string Theme { get; set; } = "dark";
     public string PreferredShell { get; set; } = "cmd";
     public int LogRetentionDays { get; set; } = 14;
