@@ -193,3 +193,41 @@ describe('need02-P2 buildUserTurns', () => {
     expect(t2!.isRunning).toBe(true);
   });
 });
+
+describe('P007 buildUserTurns 压缩桩', () => {
+  function stub(id: string, content = '本轮摘要正文'): UnifiedChatMessage {
+    return {
+      id,
+      role: 'user',
+      kind: 'compact_stub',
+      content,
+      metaJson: '{"removedCount":3}',
+      createdAtUtc: '2026-10-26T11:59:40Z',
+    } as unknown as UnifiedChatMessage;
+  }
+  it('T1：桩独立 entry 不并入相邻轮，桩后首 user 起新轮', () => {
+    const entries = buildUserTurns(
+      [user('u1', '问一'), assistant('a1', '答一'), stub('stub-1'), user('u2', '问二'), assistant('a2', '答二')],
+      { now: NOW }
+    );
+    expect(entries.map((e) => e.kind)).toEqual(['user-turn', 'compact', 'user-turn']);
+    expect(entries[0].key).toBe('uturn-u1');
+    expect(entries[1].key).toBe('c-stub-1');
+    expect(entries[2].key).toBe('uturn-u2');
+  });
+  it('T1：桩前孤儿 steps 丢弃不渲染', () => {
+    const entries = buildUserTurns([tool('t9', 'c9', 'out'), stub('stub-2'), user('u2', '问二')], { now: NOW });
+    expect(entries.map((e) => e.kind)).toEqual(['compact', 'user-turn']);
+    expect(entries[0].key).toBe('c-stub-2');
+  });
+  it('T1：老桩前缀同样成桩', () => {
+    const legacy = {
+      id: 'stub-3',
+      role: 'user',
+      content: '【上下文摘要】旧标题\n旧正文',
+      createdAtUtc: '2026-10-26T11:59:40Z',
+    } as unknown as UnifiedChatMessage;
+    const entries = buildUserTurns([user('u1', '问一'), legacy, user('u2', '问二')], { now: NOW });
+    expect(entries.map((e) => e.kind)).toEqual(['user-turn', 'compact', 'user-turn']);
+  });
+});

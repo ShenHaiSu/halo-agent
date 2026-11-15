@@ -57,6 +57,7 @@ function collectAnchors(): void {
       nav.register(anchors.user, turnEl);
       keys.push(anchors.user);
     }
+    if ((turn as { kind?: string }).kind === 'compact') continue; // P007：桩只注册 user 锚点
     const processEl = root.querySelector(`[data-testid="timeline-process-head-${safeId}"]`);
     if (processEl instanceof HTMLElement) {
       nav.register(anchors.process, processEl);

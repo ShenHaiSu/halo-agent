@@ -70,8 +70,10 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 
             // need03-03 T1：首条 user 且未冻结时取第一句话前 5 字（与前端 instantTitleFromUserText 同语义，surrogate 安全）
             // need13：子会话标题已锁定（sub: label），跳过自动精炼
+            // P007: placeholder-stub-kind-guard
             if (
-                !string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
+                !string.Equals(message.Kind, MessageKind.CompactStub, StringComparison.Ordinal)
+                && !string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase)
                 && !meta.TitleLocked
                 && (

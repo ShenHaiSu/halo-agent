@@ -34,6 +34,8 @@ function makeTurn(over: Partial<FlatTimelineTurn> = {}): FlatTimelineTurn {
     status: 'completed',
     lastRequestId: 'req',
     anchorKey: 'uturn-u1',
+    kind: 'turn',
+    removedMessages: 0,
     ...over,
   };
 }
@@ -300,5 +302,34 @@ describe('TimelineProcessBox user slot', () => {
     });
     await flush();
     expect(wrapper.find('.turn-user-slot').text()).toContain('hello');
+  });
+});
+
+describe('P007 TimelineProcessBox 压缩桩', () => {
+  it('T4：compact 轮不请求任何块内容，直接渲染分隔线', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: {
+        turn: makeTurn({
+          key: 'cturn-s1',
+          turnId: 'cturn-s1',
+          turnSeq: 9,
+          kind: 'compact',
+          removedMessages: 42,
+          userPreview: '上下文压缩',
+          userContent: '本轮摘要正文',
+          finalBlockId: null,
+          finalPreview: '',
+          blocks: 0,
+          tools: 0,
+        }),
+      },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    expect(getBlockContentsMock).not.toHaveBeenCalled();
+    expect(getTurnBlockIdsMock).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="compact-divider"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="timeline-process-box"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="compact-pill"]').text()).toContain('42');
   });
 });

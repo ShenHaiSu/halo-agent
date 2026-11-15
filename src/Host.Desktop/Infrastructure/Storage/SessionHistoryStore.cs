@@ -11,7 +11,7 @@ namespace Host.Desktop.Infrastructure.Storage;
 /// Per-session timeline write and summary read.
 /// Single writer per session, short-lived connections, full single-transaction turn commit.
 /// </summary>
-public sealed class SessionHistoryStore
+public sealed partial class SessionHistoryStore
 {
     public const long LargeBlockThresholdBytes = 64L * 1024;
     public const int LargeBlockPreviewChars = 4096;
@@ -392,7 +392,7 @@ public sealed class SessionHistoryStore
         cmd.CommandText =
             "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id,"
             + " (SELECT preview FROM blocks WHERE block_id = turns.final_block_id) AS final_preview,"
-            + " blocks, tools, failed, duration_ms, chars, status, last_request_id, updated_at"
+            + " blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at"
             + " FROM turns ORDER BY turn_seq;";
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -414,7 +414,10 @@ public sealed class SessionHistoryStore
                 Chars = reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
                 Status = reader.IsDBNull(12) ? TimelineTurnStatus.Completed : reader.GetString(12),
                 LastRequestId = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
-                UpdatedAtUtc = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
+                // P007：桩轮标记与覆盖条数（老行默认 turn/0）。
+                Kind = reader.IsDBNull(14) ? "turn" : reader.GetString(14),
+                RemovedMessages = reader.IsDBNull(15) ? 0 : reader.GetInt32(15),
+                UpdatedAtUtc = reader.IsDBNull(16) ? string.Empty : reader.GetString(16),
             };
             summary.CreatedAtUtc = summary.UpdatedAtUtc;
             summary.AnchorKey = turnId;
@@ -678,7 +681,7 @@ public sealed class SessionHistoryStore
         using var conn = _db.Open(workspaceId, sessionId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc"
+            "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
             + " FROM messages ORDER BY seq;";
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -689,11 +692,11 @@ public sealed class SessionHistoryStore
                 if (string.IsNullOrWhiteSpace(id))
                     continue;
                 DateTime createdUtc = DateTime.UtcNow;
-                if (!reader.IsDBNull(11))
+                if (!reader.IsDBNull(13))
                 {
                     try
                     {
-                        string rawUtc = reader.GetString(11);
+                        string rawUtc = reader.GetString(13);
                         if (
                             !DateTime.TryParse(
                                 rawUtc,
@@ -747,6 +750,11 @@ public sealed class SessionHistoryStore
                     msg.OutputTokens = reader.GetInt64(9);
                 if (!reader.IsDBNull(10))
                     msg.CachedTokens = reader.GetInt64(10);
+                // P007：桩标记列（普通消息为 null，老行兼容）。
+                if (!reader.IsDBNull(11))
+                    msg.Kind = reader.GetString(11);
+                if (!reader.IsDBNull(12))
+                    msg.MetaJson = reader.GetString(12);
                 result.Add(msg);
             }
             catch { }
@@ -765,8 +773,8 @@ public sealed class SessionHistoryStore
             using var conn = _db.Open(workspaceId, sessionId);
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc)"
-                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $utc);";
+                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
+                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
             cmd.Parameters.AddWithValue("$id", msg.Id);
             cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
             cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
@@ -801,6 +809,9 @@ public sealed class SessionHistoryStore
             cmd.Parameters.AddWithValue("$inTok", (object?)msg.InputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$outTok", (object?)msg.OutputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cached", (object?)msg.CachedTokens ?? DBNull.Value);
+            // P007：桩标记列与结构化元数据（普通消息为 null，老行兼容）。
+            cmd.Parameters.AddWithValue("$kind", (object?)msg.Kind ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$meta", (object?)msg.MetaJson ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$utc", msg.CreatedAtUtc.ToString("o"));
             cmd.ExecuteNonQuery();
         }
@@ -1522,9 +1533,9 @@ public sealed class SessionHistoryStore
             }
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText =
-                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, created_utc)"
-                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $utc);";
+            cmd.CommandText = cmd.CommandText =
+                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
+                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
             cmd.Parameters.AddWithValue("$id", msg.Id);
             cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
             cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
@@ -1561,6 +1572,8 @@ public sealed class SessionHistoryStore
             cmd.Parameters.AddWithValue("$inTok", (object?)msg.InputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$outTok", (object?)msg.OutputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cached", (object?)msg.CachedTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$kind", (object?)msg.Kind ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$meta", (object?)msg.MetaJson ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$utc", msg.CreatedAtUtc.ToString("o"));
             cmd.ExecuteNonQuery();
         }
@@ -1628,9 +1641,9 @@ public sealed class SessionHistoryStore
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText =
-            "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, updated_at)"
-            + " VALUES($tid, $seq, $iterEnd, $userPreview, $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $updated)"
+        cmd.CommandText = cmd.CommandText =
+            "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
+            + " VALUES($tid, $seq, $iterEnd, $userPreview, $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $kind, $removed, $updated)"
             + " ON CONFLICT(turn_id) DO UPDATE SET"
             + " iter_end=excluded.iter_end,"
             + " blocks=turns.blocks+excluded.blocks,"
@@ -1642,6 +1655,8 @@ public sealed class SessionHistoryStore
             + " final_block_id=excluded.final_block_id,"
             + " status=excluded.status,"
             + " last_request_id=excluded.last_request_id,"
+            + " kind=excluded.kind,"
+            + " removed_messages=excluded.removed_messages,"
             + " updated_at=excluded.updated_at;";
         cmd.Parameters.AddWithValue("$tid", turn.TurnId);
         cmd.Parameters.AddWithValue("$seq", turnSeq);
@@ -1656,6 +1671,12 @@ public sealed class SessionHistoryStore
         cmd.Parameters.AddWithValue("$chars", turn.Chars);
         cmd.Parameters.AddWithValue("$status", NormalizeStatus(turn.Status));
         cmd.Parameters.AddWithValue("$req", turn.LastRequestId ?? string.Empty);
+        // P007：桩轮标记与覆盖条数（普通轮默认 turn/0）。
+        cmd.Parameters.AddWithValue(
+            "$kind",
+            string.IsNullOrWhiteSpace(turn.Kind) ? "turn" : turn.Kind
+        );
+        cmd.Parameters.AddWithValue("$removed", turn.RemovedMessages);
         string updated = string.IsNullOrWhiteSpace(turn.UpdatedAtUtc)
             ? DateTime.UtcNow.ToString("o")
             : turn.UpdatedAtUtc;

@@ -3,6 +3,7 @@
 // 字数口径：String.length（UTF-16），emoji 计 2，含 markdown 源码；0 字隐藏（2026-10-26 已定）。
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import type { TurnGroup } from './turnGroup';
+import { isCompactStub } from './compactStub';
 import { turnPhaseOf, type TurnPhase } from './turnProcess';
 import { TOOL_ERROR_MARK, isToolErrorText } from './toolErrorText';
 
@@ -45,8 +46,11 @@ export interface UserTurn {
   fullSummary: string;
 }
 
-/** P2 时间轴条目：用户轮 + 系统；孤儿 assistant/tool 归入无 user 头的 UserTurn（不丢内容）。 */
-export type UserTurnEntry = { key: string; kind: 'user-turn'; turn: UserTurn } | { key: string; kind: 'system'; msg: UnifiedChatMessage };
+/** P007 时间轴条目：用户轮 + 系统 + 压缩桩；孤儿 assistant/tool 归入无 user 头的 UserTurn（不丢内容）。 */
+export type UserTurnEntry =
+  | { key: string; kind: 'user-turn'; turn: UserTurn }
+  | { key: string; kind: 'system'; msg: UnifiedChatMessage }
+  | { key: string; kind: 'compact'; msg: UnifiedChatMessage };
 
 export interface BuildUserTurnsOpts {
   activeAssistantId?: string | null;
@@ -329,6 +333,22 @@ export function buildUserTurns(messages: UnifiedChatMessage[] | null | undefined
   };
 
   for (const msg of list) {
+    // P007：桩是独立 entry；桩前孤儿 steps 按自愈口径丢弃不渲染。
+    if (isCompactStub(msg)) {
+      pendingStepAssistant = null;
+      pendingStepTools = [];
+      if (curUser) {
+        pushStep(curSteps);
+        emitTurn(curUser, curSteps, curRequestId);
+      }
+      orphanSteps = [];
+      orphanHeadId = '';
+      out.push({ key: `c-${String(msg.id || `stub-${out.length}`)}`, kind: 'compact', msg });
+      curUser = null;
+      curRequestId = null;
+      curSteps = [];
+      continue;
+    }
     const role = String((msg as UnifiedChatMessage)?.role || '').toLowerCase();
     if (role === 'user') {
       // 断开上一轮：先落步骤，再落整轮，最后落 ранее攒的孤儿（孤儿恒在更早位置，已先落）。
@@ -525,7 +545,8 @@ export function buildUserTurnsIncremental(
           break;
         }
       }
-    } else if (lastEntry && lastEntry.kind === 'system') {
+    } else if (lastEntry && (lastEntry.kind === 'system' || lastEntry.kind === 'compact')) {
+      // P007：桩 entry 按消息 id 回退重建，与 system 同口径。
       const id = String(lastEntry.msg?.id || '');
       for (let i = 0; i < list.length; i++) {
         if (id && String(list[i]?.id || '') === id) {

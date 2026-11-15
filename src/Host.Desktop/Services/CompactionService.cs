@@ -20,7 +20,7 @@ namespace Host.Desktop.Services;
 /// need22-P1 T5：三段式（快照拷贝→释锁→LLM 摘要→重加锁重写），压缩耗时不再占用追加锁临界区；
 /// 压缩中查询/追加可用；取消经 ct 接入（HostBridgeFacade.cancelCompaction）。
 /// </summary>
-public sealed class CompactionService : ICompactionService
+public sealed partial class CompactionService : ICompactionService
 {
     public const int KeepDefaultGroups = 6;
     public const int TruncPerMessage = 2000;
@@ -32,6 +32,7 @@ public sealed class CompactionService : ICompactionService
         + "- 已完成的关键操作与结果（重要的文件路径、命令、数据结论）\n"
         + "- 用户的明确决定、偏好与要求\n"
         + "- 尚未完成、需要继续处理的事项\n"
+        + "- 最近一轮的具体结论与下一步动作（原文保留关键标识：文件路径、命令、参数名）\n"
         + "只输出要点，不要复述对话原文，不要添加对话里没有的内容。";
 
     private readonly IWorkspaceSessionService _sessionService;
@@ -174,10 +175,47 @@ public sealed class CompactionService : ICompactionService
         if (string.IsNullOrWhiteSpace(summary))
             return CompactionResult.Fail("COMPACT_EMPTY", "摘要模型返回为空");
 
-        // Phase 3（重加锁，短临界区）：原子落盘；压缩期间新追加的消息（append-only 尾巴）予以保留不丢失。
+        // Phase 3（重加锁，短临界区）：stub=append-only 桩写入；legacy=旧物理重写（M5 下线）。
+        // P007：mode 唯一口径 snapshot.FrozenCompactMode（会话冻结优先，全局次之，M1 保持 legacy 默认）。
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            string mode = string.IsNullOrWhiteSpace(snapshot.FrozenCompactMode)
+                ? CompactMode.Legacy
+                : snapshot.FrozenCompactMode.Trim();
+            if (string.Equals(mode, CompactMode.Stub, StringComparison.OrdinalIgnoreCase))
+            {
+                // P007：stub 下备份失败只告警不阻断（backupFile=null，后续恢复工具不可用需明示）。
+                string? backupFile = null;
+                try
+                {
+                    backupFile = await concrete
+                        .SessionRepository.BackupMessagesJsonlAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        Infrastructure.Logging.HaloLogger.App.Warn(
+                            $"[Compact] stub backup failed, continue without backup: {ex.Message}"
+                        );
+                    }
+                    catch { }
+                    backupFile = null;
+                }
+                return await AppendStubAsync(
+                        concrete,
+                        workspaceId,
+                        sessionId,
+                        snapshot,
+                        summary,
+                        compactUsage,
+                        backupFile,
+                        ct
+                    )
+                    .ConfigureAwait(false);
+            }
             return await RewriteAsync(concrete, workspaceId, sessionId, snapshot, summary, ct)
                 .ConfigureAwait(false);
         }
@@ -190,11 +228,22 @@ public sealed class CompactionService : ICompactionService
     /// <summary>need22-P1 T5：压缩快照（锁内拷贝，锁外消费）。</summary>
     private sealed class CompactSnapshot
     {
+        // P007：以下三字段仅 legacy 重写路径使用（stub 只读 OldCount/SnapshotCount/FromSeq/Provider/Model/Request/PrevSummary）。
         public UnifiedChatMessage? OrigSystem;
         public List<UnifiedChatMessage> AnchorMessages = new();
         public List<UnifiedChatMessage> TailMessages = new();
         public int OldCount;
         public int SnapshotCount;
+
+        // P007：桩区间（DB 路径可得；纯 jsonl 会话为 null）。
+        public long? FromSeq;
+        public long? ToSeq;
+
+        // P007：快照时解析的压缩模型（会话级冻结优先，全局次之）。
+        public string FrozenCompactMode = "legacy";
+
+        // P007：上轮桩摘要（stub 多轮压缩经 prevSummary 通道装配，不进 body）。
+        public string? PrevSummary;
         public ProviderConfig Provider = null!;
         public ModelConfig Model = null!;
         public UnifiedLlmRequest Request = null!;
@@ -210,6 +259,35 @@ public sealed class CompactionService : ICompactionService
         CancellationToken ct
     )
     {
+        // P007：stub 先行（活跃切片语义，见 CompactionService.Stub.BuildStubSnapshotAsync）；
+        // legacy 走旧全量快照（M5 下线）。
+        SessionMetadata? earlySession = null;
+        try
+        {
+            earlySession = await service
+                .GetSessionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+        }
+        catch { }
+        if (
+            string.Equals(
+                ResolveCompactMode(earlySession, service),
+                CompactMode.Stub,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+            return await BuildStubSnapshotAsync(
+                    service,
+                    earlySession,
+                    workspaceId,
+                    sessionId,
+                    providerId,
+                    modelId,
+                    keepLastGroups,
+                    ct
+                )
+                .ConfigureAwait(false);
+
         // 1. load messages；太短 → null（外层转 NoOp，不动盘、无 bak，前端提示“还短无需压缩”）
         var messages =
             await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
@@ -322,9 +400,8 @@ public sealed class CompactionService : ICompactionService
                                 .Append(' ');
                     }
                     body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                    // need22-B02：TODO（本期不改，契约见 docs/need22/backend/02-发包接入与副作用修正.md §2.2）：
-                    // 压缩摘要里的 [[skill:scope/name]] 标记属于噪音，未来可在此处用
-                    // SkillActivationExpander.StripMarkers(m.Content) 去掉；当前 marker 短、语义可接受，保持原样。
+                    // P007 legacy 说明：摘要里的技能标记属于噪音，未来可在此处剥离；本期不改，保持原样。
+                    // 当前标记短、语义可接受，直接保留。
                 }
             }
         }
@@ -365,6 +442,10 @@ public sealed class CompactionService : ICompactionService
             OrigSystem = origSystem,
             OldCount = oldCount,
             SnapshotCount = messages.Count,
+            // P007：M1 仍读全量；From/ToSeq 暂 null（DB 快路径 M2 接线）。
+            FromSeq = null,
+            ToSeq = null,
+            FrozenCompactMode = ResolveCompactMode(session, service),
             Provider = provider,
             Model = model,
             Request = request,
@@ -376,6 +457,8 @@ public sealed class CompactionService : ICompactionService
         return snapshot;
     }
 
+    /// <summary>P007 legacy：仅在 CompactMode=legacy 下使用，下个版本删除（保留一个版本周期）。压缩期间新增搬运仅 legacy 保留。</summary>
+    // P007 legacy：stub 路径零调用本方法；三处破坏性调用仅 legacy 分支保留。
     private async Task<CompactionResult> RewriteAsync(
         WorkspaceSessionService service,
         string workspaceId,
@@ -389,6 +472,8 @@ public sealed class CompactionService : ICompactionService
         var summaryMsg = UnifiedChatMessage.User(
             "【上下文摘要：压缩自此前 " + snapshot.OldCount + " 条，由模型自动生成，细节以备份为准】\n" + summary
         );
+        // P007 legacy：新写 legacy 摘要显式标 chat，幂等回填（仅 kind IS NULL）只认 M5 前老桩，不误伤本版本 legacy 摘要。
+        summaryMsg.Kind = MessageKind.Chat;
         var newMessages = new List<UnifiedChatMessage>();
         if (snapshot.OrigSystem != null)
             newMessages.Add(snapshot.OrigSystem);
@@ -671,6 +756,24 @@ public sealed class CompactionService : ICompactionService
                 MaxOutputTokens = 4096
             };
         return (provider, model);
+    }
+
+    /// <summary>P007：压缩模型唯一口径（会话级冻结优先，全局次之；默认 legacy）。</summary>
+    private static string ResolveCompactMode(
+        SessionMetadata? session,
+        WorkspaceSessionService service
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(session?.CompactMode))
+            return session!.CompactMode!.Trim();
+        try
+        {
+            var global = service.SessionRepository.Storage.LoadAppSettings();
+            if (global != null && !string.IsNullOrWhiteSpace(global.CompactMode))
+                return global.CompactMode.Trim();
+        }
+        catch { }
+        return CompactMode.Legacy;
     }
 
     private static string RoleLabel(string? role)

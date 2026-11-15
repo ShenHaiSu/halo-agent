@@ -261,10 +261,15 @@ const totalTokens = computed(() => budgetStatus.value?.totalContextTokens || act
 const maxOutputTokens = computed(() => budgetStatus.value?.maxOutputTokens || activeModel.value?.maxOutputTokens || 4096);
 const safetyBuffer = computed(() => budgetStatus.value?.safetyBuffer || 1024);
 const usedTokens = computed(() => budgetStatus.value?.usedInputTokens || 0);
+// P007：占用基线（exact | compact-estimate | estimated，缺省 exact）。
+const occupancyBaseline = computed(() => String(budgetStatus.value?.occupancyBaseline || 'exact'));
+const isCompactEstimate = computed(() => occupancyBaseline.value === 'compact-estimate');
 // need05-01：占用态：unknown 画 ?（灰色），绝不画 0% 误导；空会话 known+0% 画蓝色 0%
 const occupancyState = computed(() => budgetStatus.value?.occupancyState || 'known');
 const lastPromptTokens = computed(() => budgetStatus.value?.lastPromptTokens ?? null);
 const isUnknown = computed(() => {
+  // P007：压缩暂存态优先短路（否则 lastPromptTokens===null 会被误判成 unknown 显示 '?'）
+  if (isCompactEstimate.value) return false;
   if (usedTokens.value === 0 && occupancyState.value === 'known') return false; // 空会话
   return occupancyState.value === 'unknown' || lastPromptTokens.value === null;
 });
@@ -272,14 +277,20 @@ const liveEst = computed(() => agentTelemetry.telemetry.liveEst || 0);
 const usedDisplay = computed(() => {
   if (isUnknown.value) return '?';
   const base = formatTokens(usedTokens.value);
+  // P007：暂存态加 ~ 前缀（~109K），配色沿用既有阈值
+  if (isCompactEstimate.value) return `~${base}`;
   return liveEst.value > 0 ? `${base}≈+${formatTokens(liveEst.value)}` : base; // need05-01：流式中 ≈ 估算
 });
 const usedDisplayLong = computed(() => {
   if (isUnknown.value) return '占用未知 (?)';
   const base = `${usedTokens.value.toLocaleString()} tokens`;
+  // P007：暂存态说明行；下一轮 usage 到账后自动校准
+  if (isCompactEstimate.value) return `${base}（压缩后估算：摘要 + 其后消息估算；下一轮 usage 到账后自动校准）`;
   return liveEst.value > 0 ? `${base} ≈+${liveEst.value.toLocaleString()}` : base;
 });
-const percentDisplay = computed(() => (isUnknown.value ? '?' : `${usagePercentage.value}%`));
+const percentDisplay = computed(() =>
+  isUnknown.value ? '?' : isCompactEstimate.value ? `~${usagePercentage.value}%` : `${usagePercentage.value}%`
+);
 const progressPercentage = computed(() => (isUnknown.value ? 0 : usagePercentage.value));
 // need05-01：悬停卡计费累计与命中率
 // 计费单位强制为 K（千）/ M（百万），最多两位小数，避免横向过长换行

@@ -276,6 +276,36 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         return BuildWithinBudget(messages, budget); // 达线才进现有原子组裁剪
     }
 
+    /// <summary>P007：压缩后暂存基线口径。true=A（摘要 tokens + 桩后估算，默认）；false=B（仅摘要 tokens）。</summary>
+    public const bool CompactBaselineIncludesTail = true;
+
+    /// <summary>P007：暂存基线下限，避免摘要极短时顶栏接近 0% 造成误判。验收按 max(512, 真值) 口径断言。</summary>
+    public const int CompactBaselineMinTokens = 512;
+
+    /// <summary>P007：压缩后暂存基线（A 口径默认 max(512, summary + 桩后估算)；B 口径 max(512, summary)）。</summary>
+#pragma warning disable CS0162 // P007：B口径分支在默认A下不可达属预期（B验证切常量重编）
+    private static int ResolveCompactBaseline(
+        CompactStubInfo stub,
+        IReadOnlyList<UnifiedChatMessage> active
+    )
+    {
+        int summary = Math.Max(0, stub.SummaryTokens);
+        if (!CompactBaselineIncludesTail)
+            return Math.Max(CompactBaselineMinTokens, summary);
+        int from = -1;
+        for (int i = 0; i < active.Count; i++)
+            if (string.Equals(active[i].Id, stub.MessageId, StringComparison.Ordinal))
+            {
+                from = i;
+                break;
+            }
+        int tail = 0;
+        for (int i = Math.Max(0, from + 1); i < active.Count; i++)
+            tail += EstimateMessageTokens(active[i]);
+        return Math.Max(CompactBaselineMinTokens, summary + tail);
+    }
+#pragma warning restore CS0162
+
     /// <summary>
     /// 计算上下文配额状态 DTO
     /// need09-02：residentStableTokens（Skill 索引 + pinned Memory 常驻）计入 usedInput（仅无精确快照的启发式回退路径；缺省 0）。
@@ -284,18 +314,40 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
         ModelConfig model,
         IReadOnlyList<UnifiedChatMessage> messages,
         string? sessionHash = null,
-        int residentStableTokens = 0
+        int residentStableTokens = 0,
+        CompactStubInfo? stub = null
     )
     {
         int maxContext = model.MaxContextTokens > 0 ? model.MaxContextTokens : 128000;
         int maxOutput = model.MaxOutputTokens > 0 ? model.MaxOutputTokens : 4096;
         int safetyBuffer = ContextBudgetLimits.FromModel(model).Headroom;
-        var (prompt, cached, isEst) = ResolveOccupancy(messages);
+        var (prompt, cached, _) = ResolveOccupancy(messages);
         int msgCount = messages?.Count ?? 0;
         int resident = Math.Max(0, residentStableTokens);
-        int usedInput =
-            prompt
-            ?? (msgCount == 0 ? resident : messages!.Sum(m => EstimateMessageTokens(m)) + resident);
+        // P007：占用来源优先级：空切片 exact(0) > 精确快照 exact > 桩暂存 compact-estimate > 启发式 estimated。
+        int usedInput;
+        string occupancyBaseline;
+        if (msgCount == 0)
+        {
+            // P007：空切片按 exact(0)；stub==null 老路径回退 resident（缺省 0，与现状逐字节一致）。
+            usedInput = stub != null ? 0 : resident;
+            occupancyBaseline = "exact";
+        }
+        else if (prompt.HasValue)
+        {
+            usedInput = prompt.Value;
+            occupancyBaseline = "exact";
+        }
+        else if (stub != null)
+        {
+            usedInput = ResolveCompactBaseline(stub, messages!);
+            occupancyBaseline = "compact-estimate";
+        }
+        else
+        {
+            usedInput = messages!.Sum(m => EstimateMessageTokens(m)) + resident;
+            occupancyBaseline = "estimated";
+        }
         int availableInput = Math.Max(0, maxContext - maxOutput - safetyBuffer - usedInput);
         double percentage =
             maxContext > 0
@@ -319,8 +371,9 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
                 (prompt.HasValue && cached.HasValue && prompt.Value > 0)
                     ? (double)cached.Value / prompt.Value
                     : (double?)null,
-            UsedInputIsEstimated = isEst && msgCount > 0,
-            OccupancyState = prompt.HasValue ? "known" : (msgCount == 0 ? "known" : "unknown"),
+            UsedInputIsEstimated = occupancyBaseline is "compact-estimate" or "estimated",
+            OccupancyState = occupancyBaseline == "estimated" ? "unknown" : "known",
+            OccupancyBaseline = occupancyBaseline,
         };
         if (
             !string.IsNullOrWhiteSpace(sessionHash)
@@ -377,6 +430,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
             }
         }
         List<UnifiedChatMessage> messages = new();
+        CompactStubInfo? compactStub = null;
         string? sessionHash = null;
         long billedPrompt = 0;
         long billedCompletion = 0;
@@ -389,8 +443,19 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
             try
             {
                 messages = await _workspaceSessionService
-                    .GetSessionMessagesAsync(workspaceId, sessionId, ct)
+                    .GetActiveContextMessagesAsync(workspaceId, sessionId, ct)
                     .ConfigureAwait(false);
+                try
+                {
+                    compactStub = await _workspaceSessionService
+                        .GetLastCompactStubAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    compactStub = null;
+                }
+                // P007：预算走活跃切片（桩前历史不进占用口径；M4 再叠暂存基线）。
                 var sessions = await _workspaceSessionService
                     .GetSessionsByWorkspaceAsync(workspaceId, ct)
                     .ConfigureAwait(false);
@@ -407,7 +472,7 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
                 // 使用默认回退
             }
         }
-        var dto = CalculateBudgetStatus(model, messages, sessionHash);
+        var dto = CalculateBudgetStatus(model, messages, sessionHash, 0, compactStub);
         dto.BilledPromptTokens = billedPrompt;
         dto.BilledCompletionTokens = billedCompletion;
         return dto;

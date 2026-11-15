@@ -86,3 +86,20 @@ describe('toFlatTurn user content', () => {
     expect(flat.userContent).toBe('hello');
   });
 });
+
+describe('P007 toFlatTurn 压缩桩透传', () => {
+  it('T3：透传 kind 与 removedMessages，flatBlocks 仍按 turnSeq 升序', () => {
+    const stub = toFlatTurn(makeSummary({ turnId: 'cturn-s1', turnSeq: 9, kind: 'compact', removedMessages: 42, blocks: 0 }));
+    expect(stub.kind).toBe('compact');
+    expect(stub.removedMessages).toBe(42);
+    const normal = toFlatTurn(makeSummary({ turnId: 'uturn-u1', turnSeq: 1 }));
+    expect(normal.kind).toBe('turn');
+    expect(normal.removedMessages).toBe(0);
+    const out = flatBlocks([
+      makeSummary({ turnId: 'cturn-s1', turnSeq: 9, kind: 'compact', removedMessages: 42 }),
+      makeSummary({ turnId: 'uturn-u1', turnSeq: 1 }),
+    ]);
+    expect(out.map((t) => t.turnId)).toEqual(['uturn-u1', 'cturn-s1']);
+    expect(out[1]?.kind).toBe('compact');
+  });
+});
