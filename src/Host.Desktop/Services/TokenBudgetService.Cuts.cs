@@ -389,8 +389,9 @@ public sealed partial class TokenBudgetService : ITokenBudgetService
             try
             {
                 messages = await _workspaceSessionService
-                    .GetSessionMessagesAsync(workspaceId, sessionId, ct)
+                    .GetActiveContextMessagesAsync(workspaceId, sessionId, ct)
                     .ConfigureAwait(false);
+                // P007：预算走活跃切片（桩前历史不进占用口径；M4 再叠暂存基线）。
                 var sessions = await _workspaceSessionService
                     .GetSessionsByWorkspaceAsync(workspaceId, ct)
                     .ConfigureAwait(false);

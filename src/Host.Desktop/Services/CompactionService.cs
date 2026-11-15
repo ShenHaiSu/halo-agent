@@ -227,6 +227,7 @@ public sealed partial class CompactionService : ICompactionService
     /// <summary>need22-P1 T5：压缩快照（锁内拷贝，锁外消费）。</summary>
     private sealed class CompactSnapshot
     {
+        // P007：以下三字段仅 legacy 重写路径使用（stub 只读 OldCount/SnapshotCount/FromSeq/Provider/Model/Request/PrevSummary）。
         public UnifiedChatMessage? OrigSystem;
         public List<UnifiedChatMessage> AnchorMessages = new();
         public List<UnifiedChatMessage> TailMessages = new();
@@ -239,6 +240,9 @@ public sealed partial class CompactionService : ICompactionService
 
         // P007：快照时解析的压缩模型（会话级冻结优先，全局次之）。
         public string FrozenCompactMode = "legacy";
+
+        // P007：上轮桩摘要（stub 多轮压缩经 prevSummary 通道装配，不进 body）。
+        public string? PrevSummary;
         public ProviderConfig Provider = null!;
         public ModelConfig Model = null!;
         public UnifiedLlmRequest Request = null!;
@@ -254,6 +258,35 @@ public sealed partial class CompactionService : ICompactionService
         CancellationToken ct
     )
     {
+        // P007：stub 先行（活跃切片语义，见 CompactionService.Stub.BuildStubSnapshotAsync）；
+        // legacy 走旧全量快照（M5 下线）。
+        SessionMetadata? earlySession = null;
+        try
+        {
+            earlySession = await service
+                .GetSessionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+        }
+        catch { }
+        if (
+            string.Equals(
+                ResolveCompactMode(earlySession, service),
+                CompactMode.Stub,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+            return await BuildStubSnapshotAsync(
+                    service,
+                    earlySession,
+                    workspaceId,
+                    sessionId,
+                    providerId,
+                    modelId,
+                    keepLastGroups,
+                    ct
+                )
+                .ConfigureAwait(false);
+
         // 1. load messages；太短 → null（外层转 NoOp，不动盘、无 bak，前端提示“还短无需压缩”）
         var messages =
             await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
@@ -424,6 +457,8 @@ public sealed partial class CompactionService : ICompactionService
         return snapshot;
     }
 
+    /// <summary>P007：legacy 物理重写（stub 走 AppendStubAsync；M5 下线本方法）。
+    /// 压缩期间新增搬运（Skip 快照条数）仅 legacy 保留，stub 下 append-only 无需补偿。</summary>
     private async Task<CompactionResult> RewriteAsync(
         WorkspaceSessionService service,
         string workspaceId,
