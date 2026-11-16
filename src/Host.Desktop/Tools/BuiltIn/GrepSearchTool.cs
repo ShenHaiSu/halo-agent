@@ -49,7 +49,7 @@ public sealed class GrepSearchTool : IToolHandler
                 required: true
             )
             .AddString(
-                "path",
+                "file_path",
                 "Optional subdirectory or file to search in. Defaults to workspace root. Directories .git/node_modules/bin/obj/dist are skipped."
             )
             .AddString(
@@ -93,7 +93,7 @@ public sealed class GrepSearchTool : IToolHandler
             catch (JsonException ex)
             {
                 return ToolResult.Fail(
-                    $"参数 JSON 解析失败：{ex.Message}。请检查 pattern/path/include_glob 字段后重试。",
+                    $"参数 JSON 解析失败：{ex.Message}。请检查 pattern/file_path/include_glob 字段后重试。",
                     durationMs: sw.ElapsedMilliseconds
                 );
             }
