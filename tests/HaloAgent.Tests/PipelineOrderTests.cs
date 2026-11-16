@@ -177,7 +177,7 @@ public sealed class ToolRegistrationTests
     public void Scan_Produces_Same_Count_As_Before()
     {
         var reg = new ToolRegistry();
-        // 16 个 [Tool]（含批量编辑工具；禁用桩由工厂另行注册）。
-        Assert.Equal(16, reg.ToolNames.Count);
+        // 17 个 [Tool]（含批量编辑与删除工具；禁用桩由工厂另行注册）。
+        Assert.Equal(17, reg.ToolNames.Count);
     }
 }

@@ -72,6 +72,7 @@ public static partial class ToolCallValidator
         "timeout_ms",
         "backup_path",
         "restore_to",
+        "recursive",
     };
 
     internal static readonly string[] ReadOnlyTools =
@@ -90,6 +91,7 @@ public static partial class ToolCallValidator
         "edit",
         "undo_edit",
         "edit_batch",
+        "delete_file",
     };
 
     internal static int EditDistance(string a, string b)
@@ -281,6 +283,17 @@ public static partial class ToolCallValidator
                 ToolName = "undo_edit",
                 Required = new[] { "backup_path" },
                 Params = P(S("backup_path"), S("restore_to")),
+            },
+            ["delete_file"] = new ToolSchemaSpec
+            {
+                ToolName = "delete_file",
+                Required = new[] { "file_path" },
+                Params = P(
+                    S("file_path"),
+                    S("expected_hash"),
+                    S("dry_run", "boolean"),
+                    S("recursive", "boolean")
+                ),
             },
             ["edit"] = new ToolSchemaSpec
             {

@@ -33,6 +33,7 @@ public sealed class ToolPipeline
             "list_dir",
             "grep_search",
             "undo_edit",
+            "delete_file",
             "view_image",
         };
 
@@ -84,7 +85,8 @@ public sealed class ToolPipeline
                 || toolName.Equals("edit_lines", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("edit_batch", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("edit", StringComparison.OrdinalIgnoreCase)
-                || toolName.Equals("undo_edit", StringComparison.OrdinalIgnoreCase);
+                || toolName.Equals("undo_edit", StringComparison.OrdinalIgnoreCase)
+                || toolName.Equals("delete_file", StringComparison.OrdinalIgnoreCase);
             foreach (var raw in found)
             {
                 var (allowed, error, _, _) = isWrite

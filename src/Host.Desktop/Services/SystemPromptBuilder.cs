@@ -183,6 +183,14 @@ public sealed partial class SystemPromptBuilder
             "Create new files or fully overwrite (allow_overwrite:true)",
             Array.Empty<string>()
         ),
+        new(
+            "delete_file",
+            "Delete a workspace file after writing a backup (preview by default)",
+            new[]
+            {
+                "Pass dry_run:false explicitly to really delete; use recursive:true only for small directories.",
+            }
+        ),
         new("list_dir", "List directory structure", Array.Empty<string>()),
         new("grep_search", "Search file content", Array.Empty<string>()),
         new("view_image", "Inspect workspace images", Array.Empty<string>()),

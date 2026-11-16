@@ -40,6 +40,7 @@ public sealed class ToolRegistrationTests
             "spawn_subagent",
             "undo_edit",
             "edit",
+            "delete_file",
         };
         foreach (string name in required)
             Assert.Contains(name, reg.ToolNames);
