@@ -35,7 +35,7 @@ public sealed class ReadFileTool : IToolHandler
             )
             .AddInteger(
                 "offset",
-                "1-based first line. Out-of-range returns an error with total lines.",
+                "1-based first line. Out-of-range returns 0 lines with an explicit OFFSET_OUT_OF_RANGE marker; check TotalLines in the header.",
                 minimum: 1,
                 defaultValue: 1
             )
@@ -200,6 +200,7 @@ public sealed class ReadFileTool : IToolHandler
 
             string hashShown = fileHash;
 
+            bool offsetOutOfRange = offset > totalLines;
             sb.Append("[Encoding: ")
                 .Append(detected.EncodingLabel)
                 .Append(", LineEndings: ")
@@ -207,10 +208,18 @@ public sealed class ReadFileTool : IToolHandler
                 .Append(", TotalLines: ")
                 .Append(totalLines)
                 .Append(", Hash: ")
-                .Append(hashShown)
-                .Append(']');
-            if (offset > totalLines)
+                .Append(hashShown);
+            if (offsetOutOfRange)
             {
+                sb.Append(", OffsetRequested: ").Append(offset).Append(", EmptyPage: true");
+            }
+            sb.Append(']');
+            if (offsetOutOfRange)
+            {
+                sb.AppendLine()
+                    .Append(
+                        $"⚠ OFFSET_OUT_OF_RANGE: offset {offset} 超出文件总行数 {totalLines}（合法范围 1..{totalLines}），本页 0 行。"
+                    );
                 sb.AppendLine().Append($"offset {offset} 超出文件总行数 {totalLines}，无内容返回。");
                 sb.AppendLine().Append($"returned_lines:0/total_lines:{totalLines}");
                 return Task.FromResult(

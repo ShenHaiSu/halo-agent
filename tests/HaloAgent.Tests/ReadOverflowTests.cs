@@ -84,4 +84,41 @@ public sealed class ReadOverflowTests : IDisposable
         Assert.Contains("line3", r.Output);
         Assert.DoesNotContain("returned_lines:0", r.Output);
     }
+
+    [Fact]
+    public async Task OffsetOverflow_HasExplicitMarkerOnFirstBodyLine()
+    {
+        File.WriteAllText(Path.Combine(_workspaceRoot, "notes.txt"), "line1\nline2\nline3");
+
+        ToolResult r = await _tool.ExecuteAsync(
+            new ToolCallDto(
+                "c1",
+                "read_file",
+                "{\"file_path\":\"notes.txt\",\"offset\":99,\"limit\":10}"
+            ),
+            _context
+        );
+
+        Assert.True(r.Success);
+        string[] rows = r.Output.Split('\n');
+        Assert.Contains("OffsetRequested: 99", rows[0]);
+        Assert.Contains("EmptyPage: true", rows[0]);
+        Assert.Contains("OFFSET_OUT_OF_RANGE", rows[1]);
+        Assert.DoesNotContain("EmptyPage", rows[1]);
+    }
+
+    [Fact]
+    public async Task NormalRead_HasNoEmptyPageMarker()
+    {
+        File.WriteAllText(Path.Combine(_workspaceRoot, "notes.txt"), "line1\nline2\nline3");
+
+        ToolResult r = await _tool.ExecuteAsync(
+            new ToolCallDto("c1", "read_file", "{\"file_path\":\"notes.txt\"}"),
+            _context
+        );
+
+        Assert.True(r.Success);
+        Assert.DoesNotContain("EmptyPage", r.Output);
+        Assert.DoesNotContain("OFFSET_OUT_OF_RANGE", r.Output);
+    }
 }
