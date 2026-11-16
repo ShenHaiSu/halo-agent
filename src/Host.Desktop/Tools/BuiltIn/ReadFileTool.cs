@@ -198,6 +198,7 @@ public sealed class ReadFileTool : IToolHandler
             if (offset > totalLines)
             {
                 sb.AppendLine().Append($"offset {offset} 超出文件总行数 {totalLines}，无内容返回。");
+                sb.AppendLine().Append($"returned_lines:0/total_lines:{totalLines}");
                 return Task.FromResult(
                     ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds)
                 );
