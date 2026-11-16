@@ -177,6 +177,12 @@ public sealed class GoalService
                         && nv.ValueKind == JsonValueKind.String
                     )
                         cur.Note = nv.GetString() ?? string.Empty;
+                    if (
+                        args.TryGetProperty("percent", out var pv)
+                        && pv.ValueKind == JsonValueKind.Number
+                        && pv.TryGetInt32(out int pi)
+                    )
+                        cur.Percent = Math.Clamp(pi, 0, 100);
                 }
                 return cur;
             }

@@ -59,7 +59,12 @@ public sealed class GoalTool : IToolHandler
                 .AddString("description", string.Empty)
                 .AddArray("milestones", string.Empty, itemsType: "string")
                 .AddString("milestone", "id or title for complete_milestone")
-                .AddInteger("percent", string.Empty, minimum: 0, maximum: 100)
+                .AddInteger(
+                    "percent",
+                    "Progress percent 0-100. Applies to set/progress/update only.",
+                    minimum: 0,
+                    maximum: 100
+                )
                 .AddString("note", string.Empty)
                 .Build()
         );
