@@ -29,7 +29,8 @@ public sealed class ReadFileTool : IToolHandler
         string schema = new ToolSchemaBuilder()
             .AddString(
                 "file_path",
-                "Relative path from workspace root or absolute file path. Use list_dir first if unsure.",
+                "Relative path from workspace root or absolute file path. Use list_dir first if unsure. "
+                    + "Directories are rejected with IS_A_DIRECTORY; use list_dir to browse.",
                 required: true
             )
             .AddInteger(
@@ -115,6 +116,19 @@ public sealed class ReadFileTool : IToolHandler
                     );
                 }
                 fullPath = resolved;
+            }
+
+            // 目录的 File.Exists 为 false，必须先判类型再判存在性
+            if (Directory.Exists(fullPath))
+            {
+                return Task.FromResult(
+                    ToolResult.FailCode(
+                        "IS_A_DIRECTORY",
+                        $"IS_A_DIRECTORY：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是目录而非文件。"
+                            + "请用 list_dir 列出目录内容，或用 read_file 指定目录下的具体文件。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
             }
 
             if (!File.Exists(fullPath))
