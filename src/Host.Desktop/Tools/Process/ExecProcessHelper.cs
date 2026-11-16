@@ -11,7 +11,10 @@ namespace Host.Desktop.Tools.Process;
 internal static class ExecProcessHelper
 {
     private static readonly Regex AbsPathProbe =
-        new(@"(?i)(?<![A-Za-z0-9_])([A-Za-z]:[\\/]|\\\\[A-Za-z0-9])", RegexOptions.Compiled);
+        new(
+            @"(?i)(?<![A-Za-z0-9_])(\.\.[\\/]|[A-Za-z]:[\\/]|\\\\[A-Za-z0-9._-]+\\[A-Za-z0-9%$._-]+)",
+            RegexOptions.Compiled
+        );
 
     private static readonly Regex RedirectProbe =
         new(@"(^|[^\d\w])\d?\s*>>?\s*(""[^""]+""|\S+)", RegexOptions.Compiled);
@@ -71,6 +74,79 @@ internal static class ExecProcessHelper
         foreach (Match m in AbsPathProbe.Matches(command))
         {
             string candidate = TakePathToken(command, m.Index);
+            // 引号感知：候选完全落在双引号内（按双引号配对扫描，反斜杠转义的引号不配对），
+            // 且所在命令段首 token 为搜索类命令时视为搜索模式放行；其余一律走工作区外拦截。
+            bool insideQuotes = false;
+            int spanStart = m.Index;
+            int spanEnd = spanStart + candidate.Length;
+            {
+                bool inQ = false;
+                int qStart = -1;
+                for (int k = 0; k < command.Length; k++)
+                {
+                    if (command[k] != '"')
+                    {
+                        continue;
+                    }
+                    int bs = 0;
+                    int j = k - 1;
+                    while (j >= 0 && command[j] == '\\')
+                    {
+                        bs++;
+                        j--;
+                    }
+                    if (bs % 2 == 1)
+                    {
+                        continue;
+                    }
+                    if (!inQ)
+                    {
+                        inQ = true;
+                        qStart = k + 1;
+                    }
+                    else
+                    {
+                        inQ = false;
+                        if (qStart <= spanStart && spanEnd <= k)
+                        {
+                            insideQuotes = true;
+                        }
+                        qStart = -1;
+                    }
+                }
+            }
+            if (insideQuotes)
+            {
+                int offset = 0;
+                string? hitSeg = null;
+                foreach (string seg in SplitSegments(command))
+                {
+                    int found = command.IndexOf(seg, offset, StringComparison.Ordinal);
+                    if (found < 0)
+                    {
+                        continue;
+                    }
+                    if (m.Index >= found && m.Index < found + seg.Length)
+                    {
+                        hitSeg = seg;
+                        break;
+                    }
+                    offset = found + seg.Length;
+                }
+                string segName = NormalizeExeName(ExtractFirstToken(hitSeg ?? string.Empty));
+                if (
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "findstr",
+                        "find",
+                        "rg",
+                        "grep",
+                    }.Contains(segName)
+                )
+                {
+                    continue;
+                }
+            }
             string abs;
             try
             {
