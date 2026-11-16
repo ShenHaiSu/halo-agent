@@ -108,4 +108,33 @@ public sealed class ExecGuardTests : IDisposable
         Assert.False(r!.Success);
         Assert.Equal(PathSafetyValidator.Codes.OutsideWorkspace, r.ErrorCode);
     }
+
+    [Fact(DisplayName = "拒绝文案列出外部可执行与 cmd 内建，并声明整表替换")]
+    public void NotAllowedMessage_ListsBuiltinCommands()
+    {
+        ToolResult? r = Probe("curl --version");
+        Assert.NotNull(r);
+        Assert.Equal("COMMAND_NOT_ALLOWED", r!.ErrorCode);
+
+        string msg = r.Error ?? string.Empty;
+        Assert.Contains("允许的外部可执行：", msg);
+        Assert.Contains("允许的 cmd 内建：", msg);
+        Assert.Contains("整表替换", msg);
+        Assert.DoesNotContain("增补", msg);
+        foreach (string exe in ToolPolicy.DefaultAllowedCommands)
+            Assert.Contains(exe, msg);
+        foreach (string builtin in ToolPolicy.CmdBuiltinCommands)
+            Assert.Contains(builtin, msg);
+    }
+
+    [Fact(DisplayName = "覆盖白名单是整表替换而非增量追加")]
+    public void AllowedCommandsOverride_IsReplaceNotExtend()
+    {
+        ToolResult? git = Probe("git status", new List<string> { "del" });
+        Assert.NotNull(git);
+        Assert.Equal("COMMAND_NOT_ALLOWED", git!.ErrorCode);
+        Assert.Contains("当前生效来源：agent.json AllowedCommands", git.Error ?? string.Empty);
+
+        Assert.Null(Probe("del /q x", new List<string> { "del" }));
+    }
 }

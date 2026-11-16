@@ -62,9 +62,18 @@ internal static class ExecProcessHelper
             string name = NormalizeExeName(first);
             if (!allowed.Contains(name))
             {
+                string sourceNote =
+                    context.AllowedCommandsOverride != null
+                    && context.AllowedCommandsOverride.Count > 0
+                        ? "agent.json AllowedCommands（整表替换，未列出的默认项全部失效）"
+                        : "内置默认（13+36）；AllowedCommands 配置也是整表替换，未列出的默认项全部失效";
                 return ToolResult.FailCode(
                     "COMMAND_NOT_ALLOWED",
-                    $"COMMAND_NOT_ALLOWED：命令首 token '{first}' 不在白名单（允许：{string.Join("/", ToolPolicy.DefaultAllowedCommands)} + 安全 cmd 内建；可经 AllowedCommands 配置增补）。请改用白名单命令后重试。",
+                    $"COMMAND_NOT_ALLOWED：命令首 token '{first}' 不在白名单。\n"
+                        + $"允许的外部可执行：{string.Join("/", ToolPolicy.DefaultAllowedCommands)}；\n"
+                        + $"允许的 cmd 内建：{string.Join("/", ToolPolicy.CmdBuiltinCommands)}；\n"
+                        + $"当前生效来源：{sourceNote}。\n"
+                        + "请改用白名单命令后重试。",
                     durationMs: sw.ElapsedMilliseconds
                 );
             }
