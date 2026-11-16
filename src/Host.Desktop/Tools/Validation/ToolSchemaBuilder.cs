@@ -26,6 +26,8 @@ public sealed class ToolSchemaBuilder
         public string? ItemsType;
     }
 
+    /// <summary>Wire schema slim switch: when true (default), numeric/string constraints and defaults stay server-side only.</summary>
+    public static bool SlimWire { get; set; } = true;
     private readonly List<FieldSpec> _fields = new();
 
     public ToolSchemaBuilder AddString(
@@ -153,9 +155,31 @@ public sealed class ToolSchemaBuilder
             {
                 w.WriteStartObject(f.Name);
                 w.WriteString("type", f.Type);
-                if (!string.IsNullOrEmpty(f.Description))
+                string desc = f.Description ?? string.Empty;
+                if (SlimWire && f.DefaultRawJson != null)
                 {
-                    w.WriteString("description", f.Description);
+                    try
+                    {
+                        using var dj = JsonDocument.Parse(f.DefaultRawJson);
+                        string dv =
+                            dj.RootElement.ValueKind == JsonValueKind.String
+                                ? dj.RootElement.GetString() ?? string.Empty
+                                : dj.RootElement.GetRawText();
+                        if (
+                            !string.IsNullOrEmpty(dv)
+                            && !desc.Contains("default", StringComparison.OrdinalIgnoreCase)
+                        )
+                        {
+                            desc = string.IsNullOrEmpty(desc)
+                                ? $"Default {dv}."
+                                : desc.TrimEnd() + $" (default {dv}).";
+                        }
+                    }
+                    catch { }
+                }
+                if (!string.IsNullOrEmpty(desc))
+                {
+                    w.WriteString("description", desc);
                 }
                 if (f.EnumValues != null && f.EnumValues.Length > 0)
                 {
@@ -166,27 +190,30 @@ public sealed class ToolSchemaBuilder
                     }
                     w.WriteEndArray();
                 }
-                if (f.MinLength.HasValue)
+                if (!SlimWire)
                 {
-                    w.WriteNumber("minLength", f.MinLength.Value);
-                }
-                if (f.MaxLength.HasValue)
-                {
-                    w.WriteNumber("maxLength", f.MaxLength.Value);
-                }
-                if (f.Minimum.HasValue)
-                {
-                    w.WriteNumber("minimum", f.Minimum.Value);
-                }
-                if (f.Maximum.HasValue)
-                {
-                    w.WriteNumber("maximum", f.Maximum.Value);
-                }
-                if (f.DefaultRawJson != null)
-                {
-                    w.WritePropertyName("default");
-                    using var def = JsonDocument.Parse(f.DefaultRawJson);
-                    def.RootElement.WriteTo(w);
+                    if (f.MinLength.HasValue)
+                    {
+                        w.WriteNumber("minLength", f.MinLength.Value);
+                    }
+                    if (f.MaxLength.HasValue)
+                    {
+                        w.WriteNumber("maxLength", f.MaxLength.Value);
+                    }
+                    if (f.Minimum.HasValue)
+                    {
+                        w.WriteNumber("minimum", f.Minimum.Value);
+                    }
+                    if (f.Maximum.HasValue)
+                    {
+                        w.WriteNumber("maximum", f.Maximum.Value);
+                    }
+                    if (f.DefaultRawJson != null)
+                    {
+                        w.WritePropertyName("default");
+                        using var def = JsonDocument.Parse(f.DefaultRawJson);
+                        def.RootElement.WriteTo(w);
+                    }
                 }
                 if (f.Type == "array" && !string.IsNullOrEmpty(f.ItemsType))
                 {

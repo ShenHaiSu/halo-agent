@@ -37,9 +37,8 @@ public sealed class EditFileTool : IToolHandler
             .AddString("file_path", "Target file path.", required: true)
             .AddString(
                 "old_string",
-                "Verbatim copy-paste from read_file (2-5 context lines for uniqueness). Min 16 chars.",
-                required: true,
-                minLength: 16
+                "Verbatim copy-paste from read_file (2-5 context lines for uniqueness).",
+                required: true
             )
             .AddString(
                 "new_string",
@@ -65,7 +64,31 @@ public sealed class EditFileTool : IToolHandler
                 "expected_hash",
                 "Optional sha256 of the file bytes; mismatch rejects the edit to avoid concurrent overwrite."
             )
-            .AddBoolean("dry_run", "If true, only compute and preview the diff without writing.")
+            .AddBoolean(
+                "dry_run",
+                "If true, only compute and preview the diff without writing.",
+                defaultValue: false
+            )
+            .AddBoolean(
+                "normalize_eol",
+                "Advanced: normalize CRLF/LF before matching. Default true.",
+                defaultValue: true
+            )
+            .AddInteger(
+                "expand_tabs",
+                "Advanced: tab expansion width for matching. Default 4.",
+                defaultValue: 4
+            )
+            .AddBoolean(
+                "trim_trailing_space",
+                "Advanced: ignore trailing spaces while matching. Default true.",
+                defaultValue: true
+            )
+            .AddBoolean(
+                "ignore_leading_whitespace",
+                "Advanced: ignore leading indentation while matching. Default false.",
+                defaultValue: false
+            )
             .Build();
         return new(Name, Description, schema);
     }

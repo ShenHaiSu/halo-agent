@@ -26,6 +26,10 @@ public static class ConditionalRequired
         {
             return EditBranch(args);
         }
+        if (string.Equals(tool, "edit_batch", StringComparison.OrdinalIgnoreCase))
+        {
+            return EditBatchBranch(args);
+        }
         if (string.Equals(tool, "memory_tool", StringComparison.OrdinalIgnoreCase))
         {
             return MemoryBranch(args);
@@ -56,6 +60,13 @@ public static class ConditionalRequired
         return mode == "lines"
             ? new[] { "old_string", "new_string", "offset", "limit", "new_text" }[2..]
             : new[] { "old_string", "new_string" };
+    }
+
+    private static IReadOnlyList<string> EditBatchBranch(Dictionary<string, JsonElement> args)
+    {
+        // Batch items are validated by the handler with indexed error codes;
+        // central check keeps only the envelope so deep errors carry edits[i] context.
+        return Array.Empty<string>();
     }
 
     private static IReadOnlyList<string> MemoryBranch(Dictionary<string, JsonElement> args)

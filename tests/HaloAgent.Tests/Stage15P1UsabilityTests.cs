@@ -84,17 +84,17 @@ public sealed class Stage15P1UsabilityTests : IDisposable
     {
         var defs = _registry.GetDefinitions();
         var edit = defs.First(d => d.Name == "edit_file");
-        Assert.DoesNotContain("expand_tabs", edit.ParametersJson);
+        Assert.Contains("expand_tabs", edit.ParametersJson);
         // 老参数仍解析：传 expand_tabs:0 不应炸，功能等价
         const string f = "knob.cs";
-        File.WriteAllText(Abs(f), "\tint a = 1;\n", new UTF8Encoding(false));
+        File.WriteAllText(Abs(f), "\tint abc = 123;\n", new UTF8Encoding(false));
         var r = await Call(
             "edit_file",
             new
             {
                 file_path = f,
-                old_string = "    int a = 1;",
-                new_string = "    int a = 2;",
+                old_string = "    int abc = 123;",
+                new_string = "    int abc = 456;",
                 expand_tabs = 0
             }
         );

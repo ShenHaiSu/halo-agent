@@ -401,29 +401,48 @@ public static partial class ToolCallValidator
 
         if (tool.Equals("edit_file", StringComparison.OrdinalIgnoreCase))
         {
-            // 小驼峰→蛇形（无歧义）。
             Rename(dict, warnings, "oldString", "old_string");
             Rename(dict, warnings, "newString", "new_string");
-            // old_string 为 JSON 字符串且能解析→保持原样交业务层（不猜），此处不做任何处理。
+        }
+
+        if (tool.Equals("edit_lines", StringComparison.OrdinalIgnoreCase))
+        {
+            Rename(dict, warnings, "newText", "new_text");
+            Rename(dict, warnings, "filePath", "file_path");
+            RenameFileAlias(dict, warnings);
         }
 
         if (tool.Equals("write_file", StringComparison.OrdinalIgnoreCase))
         {
             Rename(dict, warnings, "allowOverwrite", "allow_overwrite");
-            // content 非 string（如数字）→拒（不做 ToString 猜），此处不动，交 Validator 报 TYPE_MISMATCH。
         }
 
         if (tool.Equals("edit", StringComparison.OrdinalIgnoreCase))
         {
-            // 缺 mode→默认 text + warning（老调用不断）；mode 非法→ENUM_VIOLATION（Validator 统一拒）。
+            if (
+                !dict.TryGetValue("mode", out var editModeEl)
+                || editModeEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(editModeEl.GetString())
+            )
+            {
+                dict["mode"] = JsonDocument.Parse("\"text\"").RootElement.Clone();
+                warnings.Add("DEFAULTED_PARAM：缺失 'mode'，已默认按 'text'执行；请显式传 mode。");
+            }
+        }
+
+        if (string.Equals(tool, "edit_batch", StringComparison.OrdinalIgnoreCase))
+        {
+            Rename(dict, warnings, "newText", "new_text");
+            Rename(dict, warnings, "filePath", "file_path");
+            RenameFileAlias(dict, warnings);
             if (
                 !dict.TryGetValue("mode", out var modeEl)
                 || modeEl.ValueKind != JsonValueKind.String
                 || string.IsNullOrWhiteSpace(modeEl.GetString())
             )
             {
-                dict["mode"] = JsonDocument.Parse("\"text\"").RootElement.Clone();
-                warnings.Add("DEFAULTED_PARAM：缺失 'mode'，已默认按 'text'（edit_file 引擎）执行；请显式传 mode。");
+                dict["mode"] = JsonDocument.Parse("\"lines\"").RootElement.Clone();
+                warnings.Add("DEFAULTED_PARAM：缺失 'mode'，已默认按 'lines' 执行；请显式传 mode。");
             }
         }
 
@@ -448,6 +467,23 @@ public static partial class ToolCallValidator
         {
             dict[to] = el;
             warnings.Add($"ALIASED_PARAM：别名 '{from}' 已搬运为 '{to}'，请改用 '{to}'。");
+        }
+    }
+
+    private static void RenameFileAlias(Dictionary<string, JsonElement> dict, List<string> warnings)
+    {
+        if (
+            dict.TryGetValue("file", out var el)
+            && el.ValueKind == JsonValueKind.String
+            && (
+                !dict.TryGetValue("file_path", out var has)
+                || has.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(has.GetString())
+            )
+        )
+        {
+            dict["file_path"] = el;
+            warnings.Add("ALIASED_PARAM：别名 'file' 已搬运为 'file_path'，请改用 'file_path'。");
         }
     }
 

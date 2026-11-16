@@ -66,7 +66,7 @@ public sealed class Stage17ValidationTests
     [Fact]
     public void Reject_UnknownField_NamesIt()
     {
-        var r = ToolCallValidator.Validate("read_file", "{\"file_path\":\"a.txt\",\"nope\":1}");
+        var r = ToolCallValidator.Validate("exec_command", "{\"command\":\"dir\",\"nope\":1}");
         Assert.False(r.Success);
         Assert.Equal("UNKNOWN_ARGUMENT", r.Code);
         Assert.Contains("nope", r.Message);
@@ -89,15 +89,13 @@ public sealed class Stage17ValidationTests
     }
 
     [Fact]
-    public void Reject_EmptyContent_MinLength()
+    public void Accept_EmptyContent_AsClear()
     {
-        // 联调：空串按缺失处理（MISSING_REQUIRED_PARAM），与业务层一致。
         var r = ToolCallValidator.Validate(
             "write_file",
             "{\"file_path\":\"a.txt\",\"content\":\"\"}"
         );
-        Assert.False(r.Success);
-        Assert.True(r.Code == "CONSTRAINT_VIOLATION" || r.Code == "MISSING_REQUIRED_PARAM", r.Code);
+        Assert.True(r.Success, r.Message);
     }
 
     [Fact]
@@ -128,7 +126,7 @@ public sealed class Stage17ValidationTests
     [Fact]
     public void ErrorCodes_Frozen_Subset()
     {
-        var r1 = ToolCallValidator.Validate("read_file", "{\"file_path\":\"a.txt\",\"nope\":1}");
+        var r1 = ToolCallValidator.Validate("exec_command", "{\"command\":\"dir\",\"nope\":1}");
         Assert.Equal("UNKNOWN_ARGUMENT", r1.Code);
         var r2 = ToolCallValidator.Validate("read_file", "{}");
         Assert.Equal("MISSING_REQUIRED_PARAM", r2.Code);

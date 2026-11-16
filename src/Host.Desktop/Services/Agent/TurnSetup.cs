@@ -289,6 +289,7 @@ public sealed partial class AgentOrchestrator
                 ctx.CfgToolsAllow = cfg.ToolsAllowlist;
                 ctx.CfgToolsDeny = cfg.ToolsDenylist;
                 ctx.CfgClosedWorld = cfg.StrictToolsMode != StrictToolsMode.Off;
+                ctx.CfgEnableJsonRepair = cfg.EnableJsonRepair;
                 if (cfg.MaxIterations == 0)
                     effectiveMax = 0;
                 else if (cfg.MaxIterations > 0)

@@ -157,7 +157,7 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
     {
         // 真实文件：edit 的 old_string 首次故意未命中（自愈提示回写），Fake LLM 下一轮先 read 再 edit 成功。
         string targetFile = Path.Combine(_projectDir, "notes.txt");
-        await File.WriteAllTextAsync(targetFile, "line1\nline2\n");
+        await File.WriteAllTextAsync(targetFile, "line1-content\nline2-content\n");
 
         var script = new Queue<Func<UnifiedLlmRequest, List<UnifiedStreamEvent>>>();
         script.Enqueue(_ => new List<UnifiedStreamEvent>
@@ -196,7 +196,7 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
             UnifiedStreamEvent.ToolDone(
                 "call_edit_2",
                 "edit_file",
-                "{\"file_path\":\"notes.txt\",\"old_string\":\"line1\",\"new_string\":\"line1-edited\"}"
+                "{\"file_path\":\"notes.txt\",\"old_string\":\"line1-content\",\"new_string\":\"line1-edited\"}"
             ),
             UnifiedStreamEvent.Completed(),
         });
@@ -225,7 +225,7 @@ public sealed class Stage06AgentOrchestratorTests : IDisposable
         Assert.False(result.WasTruncated);
         Assert.Equal(4, result.Iterations);
         Assert.Equal(3, result.ToolExecutions);
-        Assert.Equal("line1-edited\nline2\n", await File.ReadAllTextAsync(targetFile));
+        Assert.Equal("line1-edited\nline2-content\n", await File.ReadAllTextAsync(targetFile));
 
         var messages = await _service.GetSessionMessagesAsync(_workspace.Id, _session.Id);
         Assert.Contains(

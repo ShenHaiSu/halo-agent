@@ -19,6 +19,7 @@ public static class ToolPreset
         "exec_command",
         "edit_file",
         "edit_lines",
+        "edit_batch",
         "write_file"
     };
     public static readonly string[] ReadOnly =

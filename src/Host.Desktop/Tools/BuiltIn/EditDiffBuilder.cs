@@ -128,4 +128,62 @@ internal static class EditDiffBuilder
 
         return (sb.ToString(), truncated);
     }
+
+    public sealed record BatchSpan(int StartLine, int OldCount, int NewCount);
+
+    public static (string Diff, bool Truncated) BuildMulti(
+        string relative,
+        string oldContentLf,
+        string newContentLf,
+        IReadOnlyList<BatchSpan> spans,
+        int budget = DefaultMaxChars
+    )
+    {
+        if (spans == null || spans.Count == 0)
+        {
+            return Build(relative, oldContentLf, newContentLf, DefaultContextLines, budget);
+        }
+        string[] oldLines = oldContentLf.Split('\n');
+        string[] newLines = newContentLf.Split('\n');
+        int per = Math.Max(200, budget / Math.Max(1, spans.Count));
+        var sb = new StringBuilder(budget + 256);
+        bool truncated = false;
+        sb.Append("--- a/").Append(relative).Append('\n');
+        sb.Append("+++ b/").Append(relative).Append('\n');
+        foreach (var s in spans)
+        {
+            int oldStart = Math.Max(1, s.StartLine - DefaultContextLines);
+            int oldEnd = Math.Min(
+                oldLines.Length,
+                s.StartLine + Math.Max(s.OldCount, 1) - 1 + DefaultContextLines
+            );
+            int newEnd = Math.Min(
+                newLines.Length,
+                s.StartLine + Math.Max(s.NewCount, 1) - 1 + DefaultContextLines
+            );
+            sb.Append("@@ -")
+                .Append(oldStart)
+                .Append(',')
+                .Append(Math.Max(0, oldEnd - oldStart + 1));
+            sb.Append(" +").Append(oldStart).Append(',').Append(Math.Max(0, newEnd - oldStart + 1));
+            sb.Append(" @@\n");
+            int used = 0;
+            for (int i = oldStart; i < oldEnd + 1 && used < per; i++)
+            {
+                string line = (i - 1) < oldLines.Length ? oldLines[i - 1] : string.Empty;
+                bool changed = i >= s.StartLine && i < s.StartLine + Math.Max(s.OldCount, 1);
+                string row = (changed ? "-" : " ") + line + "\n";
+                if (sb.Length + row.Length > budget)
+                {
+                    truncated = true;
+                    break;
+                }
+                sb.Append(row);
+                used += row.Length;
+            }
+            if (truncated)
+                break;
+        }
+        return (sb.ToString(), truncated);
+    }
 }

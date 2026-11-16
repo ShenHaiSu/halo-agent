@@ -109,7 +109,8 @@ public sealed partial class AgentOrchestrator
                         toolContext,
                         ctx.TurnActiveSet,
                         cancellationToken,
-                        ctx.CfgClosedWorld
+                        ctx.CfgClosedWorld,
+                        ctx.CfgEnableJsonRepair
                     )
                     .ConfigureAwait(false);
                 toolResult ??= ToolResult.Fail($"工具 '{call.FunctionName}' 返回空结果，请重试。");

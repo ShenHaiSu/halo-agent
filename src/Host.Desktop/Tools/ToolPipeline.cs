@@ -28,6 +28,7 @@ public sealed class ToolPipeline
             "write_file",
             "edit_file",
             "edit_lines",
+            "edit_batch",
             "edit",
             "list_dir",
             "grep_search",
@@ -35,12 +36,12 @@ public sealed class ToolPipeline
             "view_image",
         };
 
-    /// <summary>Validation 中间件：中央校验（失败不进执行，不计时）。</summary>
     public static ToolCallValidationResult Validate(
         string toolName,
         string? argumentsJson,
-        bool closedWorld
-    ) => ToolCallValidator.Validate(toolName, argumentsJson, closedWorld);
+        bool closedWorld,
+        bool enableRepair = true
+    ) => ToolCallValidator.Validate(toolName, argumentsJson, closedWorld, enableRepair);
 
     /// <summary>
     /// Safety 中间件：文件类工具的路径键集中越界拦截。
@@ -81,6 +82,7 @@ public sealed class ToolPipeline
                 toolName.Equals("write_file", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("edit_file", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("edit_lines", StringComparison.OrdinalIgnoreCase)
+                || toolName.Equals("edit_batch", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("edit", StringComparison.OrdinalIgnoreCase)
                 || toolName.Equals("undo_edit", StringComparison.OrdinalIgnoreCase);
             foreach (var raw in found)
@@ -118,7 +120,8 @@ public sealed class ToolPipeline
         CancellationToken ct,
         bool closedWorld,
         Func<string, IToolHandler?> resolver,
-        Func<string> availableNames
+        Func<string> availableNames,
+        bool enableRepair = true
     )
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -177,7 +180,7 @@ public sealed class ToolPipeline
             );
         }
 
-        var validation = Validate(toolName, call?.ArgumentsJson, closedWorld);
+        var validation = Validate(toolName, call?.ArgumentsJson, closedWorld, enableRepair);
         if (!validation.Success)
         {
             sw.Stop();

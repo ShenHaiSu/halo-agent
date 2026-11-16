@@ -29,18 +29,122 @@ public static partial class ToolCallValidator
         // COMMAND_REDIRECT_OUTSIDE 由各业务层经 FailCode 抛出。
     }
 
-    /// <summary>别名→主名（未知字段检查时豁免；shim 已做搬运，normalized 仅保留主名与 path 双键过渡）。</summary>
     internal static readonly Dictionary<string, string> AliasToCanonical =
         new(StringComparer.Ordinal)
         {
             ["path"] = "file_path",
+            ["file"] = "file_path",
+            ["filePath"] = "file_path",
             ["cmd"] = "command",
             ["timeout"] = "timeout_ms",
             ["timeoutMs"] = "timeout_ms",
             ["oldString"] = "old_string",
             ["newString"] = "new_string",
+            ["newText"] = "new_text",
             ["allowOverwrite"] = "allow_overwrite",
         };
+
+    internal static readonly string[] SafetyFieldTable =
+    {
+        "allow_overwrite",
+        "expected_hash",
+        "dry_run",
+        "allow_empty",
+        "limit",
+        "offset",
+        "old_string",
+        "new_string",
+        "new_text",
+        "file_path",
+        "content",
+        "replace_all",
+        "match_mode",
+        "mode",
+        "max_bytes",
+        "regex_expand_groups",
+        "normalize_eol",
+        "expand_tabs",
+        "trim_trailing_space",
+        "ignore_leading_whitespace",
+        "command",
+        "runner",
+        "workdir",
+        "timeout_ms",
+        "backup_path",
+        "restore_to",
+    };
+
+    internal static readonly string[] ReadOnlyTools =
+    {
+        "read_file",
+        "list_dir",
+        "grep_search",
+        "view_image"
+    };
+
+    internal static readonly string[] WriteTools =
+    {
+        "write_file",
+        "edit_file",
+        "edit_lines",
+        "edit",
+        "undo_edit",
+        "edit_batch",
+    };
+
+    internal static int EditDistance(string a, string b)
+    {
+        a = (a ?? string.Empty).ToLowerInvariant();
+        b = (b ?? string.Empty).ToLowerInvariant();
+        int n = a.Length;
+        int m = b.Length;
+        if (n == 0)
+            return m;
+        if (m == 0)
+            return n;
+        var prev = new int[m + 1];
+        var cur = new int[m + 1];
+        for (int j = 0; j <= m; j++)
+            prev[j] = j;
+        for (int i = 1; i <= n; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(Math.Min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost);
+            }
+            var t = prev;
+            prev = cur;
+            cur = t;
+        }
+        return prev[m];
+    }
+
+    internal static string? FindClosestSafetyField(string unknown)
+    {
+        string? best = null;
+        int bestDist = int.MaxValue;
+        foreach (string s in SafetyFieldTable)
+        {
+            int d = EditDistance(unknown, s);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = s;
+            }
+        }
+        return bestDist <= 2 ? best : null;
+    }
+
+    internal static bool HitsSafetySubstringGuard(string unknown)
+    {
+        string u = (unknown ?? string.Empty).ToLowerInvariant();
+        return u.Contains("dry")
+            || u.Contains("overwrite")
+            || u.Contains("hash")
+            || u.Contains("empty");
+    }
 
     private static ToolParamSpec S(
         string name,
@@ -152,10 +256,23 @@ public static partial class ToolCallValidator
                 Required = new[] { "file_path", "content" },
                 Params = P(
                     S("file_path"),
-                    S("content", minLength: 1),
+                    S("content"),
                     S("allow_overwrite", "boolean"),
                     S("expected_hash"),
                     S("max_bytes", "integer", maximum: 1000000),
+                    S("dry_run", "boolean")
+                ),
+            },
+            ["edit_batch"] = new ToolSchemaSpec
+            {
+                ToolName = "edit_batch",
+                Required = new[] { "file_path", "edits" },
+                Params = P(
+                    S("file_path"),
+                    S("mode", enums: new[] { "lines", "text" }),
+                    S("edits", "array"),
+                    S("expected_hash"),
+                    S("allow_empty", "boolean"),
                     S("dry_run", "boolean")
                 ),
             },
@@ -301,11 +418,11 @@ public static partial class ToolCallValidator
         return d;
     }
 
-    /// <summary>need17-02：四步校验入口。成功返回归一化 JSON + warnings；失败返回码化错误（不抛）。closedWorld=false（Strict Off 回滚）时未知字段降级为 warning，不拒绝。</summary>
     public static ToolCallValidationResult Validate(
         string toolName,
         string? rawArgsJson,
-        bool closedWorld = true
+        bool closedWorld = true,
+        bool enableRepair = true
     )
     {
         string tool = (toolName ?? string.Empty).Trim();
@@ -313,7 +430,6 @@ public static partial class ToolCallValidator
 
         if (!Schemas.TryGetValue(tool, out var spec))
         {
-            // need22-P0 S3：未知工具一律拒绝 UNKNOWN_TOOL，删除透传分支。
             return Fail(
                 Codes.UnknownTool,
                 $"未知工具 '{tool}'。请修正工具名后重试（可用工具以 ToolRegistry 声明为准）。",
@@ -322,47 +438,50 @@ public static partial class ToolCallValidator
             );
         }
 
-        // 1. Parse：空串→{}；失败→INVALID_JSON_ARGUMENTS（含解析错误前 200 字符 + 原 args 前 500 字符）。
+        // 1. Parse with conservative repair fallback.
         Dictionary<string, JsonElement> args;
+        var repairWarnings = new List<string>();
         try
         {
-            using var doc = JsonDocument.Parse(raw);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return Fail(
-                    Codes.InvalidJsonArguments,
-                    $"参数不是合法 JSON 对象（收到 {doc.RootElement.ValueKind}）。收到的参数：{Summarize(raw)}。请传 JSON 对象后重试。",
-                    tool,
-                    null
-                );
-            }
-            args = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            foreach (var prop in doc.RootElement.EnumerateObject())
-            {
-                args[prop.Name] = prop.Value.Clone();
-            }
+            args = ParseObject(raw);
         }
         catch (JsonException ex)
         {
-            string err = ex.Message ?? string.Empty;
-            if (err.Length > 200)
+            if (enableRepair && ToolJsonRepair.TryRepair(raw, out string fixedRaw))
             {
-                err = err.Substring(0, 200);
+                try
+                {
+                    args = ParseObject(fixedRaw);
+                    repairWarnings.Add(
+                        "REPAIRED_JSON：参数 JSON 经保守修复（裸换行/trailing comma），请直接传合法 JSON。"
+                    );
+                }
+                catch (JsonException ex2)
+                {
+                    return InvalidJsonFail(tool, raw, ex2);
+                }
             }
+            else
+            {
+                return InvalidJsonFail(tool, raw, ex);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
             return Fail(
                 Codes.InvalidJsonArguments,
-                $"参数 JSON 解析失败：{err}。收到的参数：{Summarize(raw)}。请修正 JSON 后重试。",
+                $"参数不是合法 JSON 对象（{ex.Message}）。收到的参数：{Summarize(raw)}。请传 JSON 对象后重试。",
                 tool,
                 null
             );
         }
 
-        // 2. Shim：别名搬运、形状修复、类型宽容转换（产出 normalized + warnings）。
+        // 2. Shim.
         var shim = ApplyShim(tool, args);
         var dict = shim.Args;
         var warnings = new List<string>(shim.Warnings);
+        warnings.AddRange(repairWarnings);
 
-        // file_path→path 反向双键（过渡）：list_dir/grep_search 业务层仍读 legacy 'path'（04 收敛后移除）。
         if (
             (
                 tool.Equals("list_dir", StringComparison.OrdinalIgnoreCase)
@@ -376,7 +495,7 @@ public static partial class ToolCallValidator
             dict["path"] = fpEl;
         }
 
-        // 3. Required：缺失必填→MISSING_REQUIRED_PARAM（含缺失字段名 + 该工具必填全表 + 参数摘要）。
+        // 3. Required (content/ new_text allow empty string).
         var required = new List<string>(spec.Required);
         foreach (var extra in ConditionalRequired.GetAdditionalRequired(tool, dict))
         {
@@ -387,7 +506,7 @@ public static partial class ToolCallValidator
         }
         foreach (var name in required)
         {
-            if (IsMissing(dict, name, exceptEmptyString: name == "new_text"))
+            if (IsMissing(dict, name, exceptEmptyString: name is "new_text" or "content"))
             {
                 return Fail(
                     Codes.MissingRequiredParam,
@@ -397,32 +516,74 @@ public static partial class ToolCallValidator
                     {
                         tool,
                         missing = required
-                            .Where(n => IsMissing(dict, n, exceptEmptyString: n == "new_text"))
+                            .Where(n =>
+                                IsMissing(dict, n, exceptEmptyString: n is "new_text" or "content")
+                            )
                             .ToArray()
                     }
                 );
             }
         }
 
-        // 4. 未知字段（additionalProperties:false 生效）→UNKNOWN_ARGUMENT（别名键豁免；Off 回滚时降级为 warning）。
+        // 4. Unknown fields: tiered policy.
         foreach (var key in dict.Keys.ToList())
         {
-            if (!spec.Params.ContainsKey(key) && !AliasToCanonical.ContainsKey(key))
+            if (spec.Params.ContainsKey(key) || AliasToCanonical.ContainsKey(key))
             {
-                if (!closedWorld)
-                {
-                    warnings.Add($"UNKNOWN_ARGUMENT (ignored, strict off)：未知参数 '{key}' 已忽略（回滚模式）。");
-                    continue;
-                }
-                return Fail(
-                    Codes.UnknownArgument,
-                    $"未知参数 '{key}'（工具 '{tool}' 不支持该字段）。请删掉该字段后重试。收到的参数：{Summarize(SerializeArgs(dict))}。",
-                    tool,
-                    new { tool, unknown = key }
-                );
+                continue;
             }
+            bool readOnly = ReadOnlyTools.Contains(tool, StringComparer.OrdinalIgnoreCase);
+            bool writeTool = WriteTools.Contains(tool, StringComparer.OrdinalIgnoreCase);
+            if (!closedWorld)
+            {
+                warnings.Add($"UNKNOWN_ARGUMENT (ignored, strict off)：未知参数 '{key}' 已忽略（回滚模式）。");
+                dict.Remove(key);
+                continue;
+            }
+            if (readOnly)
+            {
+                warnings.Add($"STRIPPED_UNKNOWN_PARAM：未知参数 '{key}' 已剥离忽略。");
+                dict.Remove(key);
+                continue;
+            }
+            if (writeTool)
+            {
+                string? guess = FindClosestSafetyField(key);
+                if (guess != null)
+                {
+                    return Fail(
+                        Codes.UnknownArgument,
+                        $"未知参数 '{key}'（工具 '{tool}' 不支持该字段）。你是不是想传 `{guess}`？请修正字段名后重试。收到的参数：{Summarize(SerializeArgs(dict))}。",
+                        tool,
+                        new
+                        {
+                            tool,
+                            unknown = key,
+                            guess
+                        }
+                    );
+                }
+                if (HitsSafetySubstringGuard(key))
+                {
+                    return Fail(
+                        Codes.UnknownArgument,
+                        $"未知参数 '{key}' 涉及安全字段拼写（工具 '{tool}' 不支持该字段）。请检查 dry_run / allow_overwrite / expected_hash / allow_empty 拼写后重试。收到的参数：{Summarize(SerializeArgs(dict))}。",
+                        tool,
+                        new { tool, unknown = key }
+                    );
+                }
+                warnings.Add($"STRIPPED_UNKNOWN_PARAM：未知参数 '{key}' 已剥离忽略。");
+                dict.Remove(key);
+                continue;
+            }
+            return Fail(
+                Codes.UnknownArgument,
+                $"未知参数 '{key}'（工具 '{tool}' 不支持该字段）。请删掉该字段后重试。收到的参数：{Summarize(SerializeArgs(dict))}。",
+                tool,
+                new { tool, unknown = key }
+            );
         }
-        // 5. Type/Enum/约束：逐字段校验；数字宽容成功记 warning，不拒绝。
+        // 5. Type/Enum/constraints.
         foreach (var kv in spec.Params)
         {
             if (!dict.TryGetValue(kv.Key, out var el))
@@ -434,7 +595,6 @@ public static partial class ToolCallValidator
                 dict.Remove(kv.Key);
                 continue;
             }
-            // need17联调：ask_user question 的 object 形态是存量兼容别名（handler 可解析），02 豁免类型检查交业务层。
             if (
                 tool.Equals("ask_user", StringComparison.OrdinalIgnoreCase)
                 && kv.Key.Equals("question", StringComparison.Ordinal)
@@ -455,7 +615,6 @@ public static partial class ToolCallValidator
             }
         }
 
-        // normalized 输出：剥离别名残留键（path 双键过渡保留）。
         var normalized = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (var kv in dict)
         {
@@ -475,5 +634,39 @@ public static partial class ToolCallValidator
             NormalizedJson = SerializeArgs(normalized),
             Warnings = warnings,
         };
+    }
+
+    private static Dictionary<string, JsonElement> ParseObject(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"收到 {doc.RootElement.ValueKind}");
+        }
+        var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            args[prop.Name] = prop.Value.Clone();
+        }
+        return args;
+    }
+
+    private static ToolCallValidationResult InvalidJsonFail(
+        string tool,
+        string raw,
+        JsonException ex
+    )
+    {
+        string err = ex.Message ?? string.Empty;
+        if (err.Length > 200)
+        {
+            err = err.Substring(0, 200);
+        }
+        return Fail(
+            Codes.InvalidJsonArguments,
+            $"参数 JSON 解析失败：{err}。收到的参数：{Summarize(raw)}。请修正 JSON 后重试。",
+            tool,
+            null
+        );
     }
 }

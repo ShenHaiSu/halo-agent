@@ -204,8 +204,8 @@ internal static class EditFileHelpers
     /// <summary>R5：replace_all 时锚点去空白后的最小长度。</summary>
     internal const int MinAnchorCharsForReplaceAll = 8;
 
-    /// <summary>need15 P1-2：通用短锚拦截阈值（去空白后非空白字符数）。</summary>
-    internal const int MinAnchorNonBlankChars = 4;
+    /// <summary>Anchor floor: unified minimum non-blank chars.</summary>
+    internal const int MinAnchorNonBlankChars = 8;
 
     /// <summary>need15 P0-4：replace_all 批量警告阈值（可热调）。</summary>
     internal static int MaxBulkWarnThreshold = 20;

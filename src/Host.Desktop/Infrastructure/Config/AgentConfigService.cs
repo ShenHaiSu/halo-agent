@@ -308,6 +308,7 @@ public sealed class AgentConfigService
             SubAllowAskUser = incoming.SubAllowAskUser,
             // need17：新字段透传（老文件缺失→默认；非法值读时回默认、存时拒绝，见下）。
             StrictToolsMode = incoming.StrictToolsMode,
+            EnableJsonRepair = incoming.EnableJsonRepair,
             ToolsPreset = string.IsNullOrWhiteSpace(incoming.ToolsPreset)
                 ? null
                 : incoming.ToolsPreset.Trim(),

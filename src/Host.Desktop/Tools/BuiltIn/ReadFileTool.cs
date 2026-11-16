@@ -184,20 +184,7 @@ public sealed class ReadFileTool : IToolHandler
                 fileHash = FileToolShared.ComputeTextHash(detected.Content, detected);
             }
 
-            const long HashFullLimit = 1_048_576;
-            string hashShown;
-            try
-            {
-                long size = new FileInfo(fullPath).Length;
-                hashShown =
-                    size > HashFullLimit
-                        ? fileHash.Substring(0, 16) + $"... (hash_full:skipped(size={size}))"
-                        : fileHash;
-            }
-            catch
-            {
-                hashShown = fileHash;
-            }
+            string hashShown = fileHash;
 
             sb.Append("[Encoding: ")
                 .Append(detected.EncodingLabel)

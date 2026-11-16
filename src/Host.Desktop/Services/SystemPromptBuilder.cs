@@ -170,6 +170,15 @@ public sealed partial class SystemPromptBuilder
         new("edit_file", "Small partial edit with a verbatim string anchor", Array.Empty<string>()),
         new("edit_lines", "Line-number edit (explicit limit; 0 = insert)", Array.Empty<string>()),
         new(
+            "edit_batch",
+            "Batch line edits in one atomic call (disjoint ranges; modes: lines/text)",
+            new[]
+            {
+                "edit_batch ranges must be disjoint: overlapping [offset,offset+limit) rejects the whole call.",
+                "For large edit_batch calls, preview with dry_run:true first.",
+            }
+        ),
+        new(
             "write_file",
             "Create new files or fully overwrite (allow_overwrite:true)",
             Array.Empty<string>()

@@ -18,9 +18,9 @@ public sealed class Stage17OverlayTests
         var reg = new ToolRegistry();
         var codingActive = new HashSet<string>(ToolPreset.Coding, StringComparer.OrdinalIgnoreCase);
         var coding = reg.GetActiveDefinitions(codingActive);
-        Assert.Equal(5, coding.Count);
+        Assert.Equal(6, coding.Count);
         var full = reg.GetActiveDefinitions(null);
-        Assert.Equal(14, full.Count);
+        Assert.Equal(15, full.Count);
     }
 
     [Fact]

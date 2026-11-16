@@ -155,7 +155,8 @@ public sealed partial class ToolRegistry
         ToolContext context,
         ISet<string>? activeTools,
         CancellationToken ct = default,
-        bool closedWorld = true
+        bool closedWorld = true,
+        bool enableRepair = true
     ) =>
         _pipeline.ExecuteAsync(
             call,
@@ -164,7 +165,8 @@ public sealed partial class ToolRegistry
             ct,
             closedWorld,
             ResolveHandler,
-            () => string.Join("、", ToolNames)
+            () => string.Join("、", ToolNames),
+            enableRepair
         );
 
     private IToolHandler? ResolveHandler(string name)
