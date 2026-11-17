@@ -20,8 +20,8 @@ public sealed class Stage17CoreToolsTests
         var d = new ReadFileTool().GetDefinition();
         using var doc = J(d.ParametersJson);
         Assert.True(doc.RootElement.TryGetProperty("required", out _));
-        Assert.Contains("maximum", d.ParametersJson);
-        Assert.Contains("2000", d.ParametersJson);
+        Assert.DoesNotContain("maximum", d.ParametersJson);
+        Assert.Contains("file_path", d.ParametersJson);
         Assert.Equal(500, ReadFileTool.DefaultLimit);
     }
 
@@ -41,16 +41,18 @@ public sealed class Stage17CoreToolsTests
     [Fact]
     public void EditFile_OldString_MinLength()
     {
-        Assert.Contains("minLength", new EditFileTool().GetDefinition().ParametersJson);
-        Assert.Contains("16", new EditFileTool().GetDefinition().ParametersJson);
+        Assert.DoesNotContain("minLength", new EditFileTool().GetDefinition().ParametersJson);
+        Assert.Equal(8, EditFileHelpers.MinAnchorNonBlankChars);
     }
 
     [Fact]
-    public void EditFile_HidesAdvancedKnobs()
+    public void EditFile_DeclaresAdvancedKnobs()
     {
         var j = new EditFileTool().GetDefinition().ParametersJson;
-        Assert.DoesNotContain("normalize_eol", j);
-        Assert.DoesNotContain("expand_tabs", j);
+        Assert.Contains("normalize_eol", j);
+        Assert.Contains("expand_tabs", j);
+        Assert.Contains("trim_trailing_space", j);
+        Assert.Contains("ignore_leading_whitespace", j);
     }
 
     [Fact]

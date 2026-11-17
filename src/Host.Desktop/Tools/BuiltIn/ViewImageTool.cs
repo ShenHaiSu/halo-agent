@@ -159,6 +159,19 @@ public sealed class ViewImageTool : IToolHandler
                 );
             }
 
+            // 目录的 File.Exists 为 false；必须在扩展名判定之前拦下，否则会误报不支持的图片类型
+            if (Directory.Exists(fullPath))
+            {
+                return Task.FromResult(
+                    ToolResult.FailCode(
+                        "IS_A_DIRECTORY",
+                        $"IS_A_DIRECTORY：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是目录而非图片文件。"
+                            + "请用 list_dir 找到图片后再读，或用 view_image 指定目录下的具体图片文件。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
+            }
+
             if (!ImageAttachmentStore.IsSupportedExtension(fullPath))
             {
                 // S3 §4.1：非 jpg/png/webp 一律 NOT_AN_IMAGE（含 svg/gif/bmp 一刀切拒绝）。

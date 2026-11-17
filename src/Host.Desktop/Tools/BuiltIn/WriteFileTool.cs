@@ -41,8 +41,7 @@ public sealed class WriteFileTool : IToolHandler
             .AddString(
                 "content",
                 "Full file content (not a patch). Existing files >250KB must use edit_* instead; truncated content is rejected. Overwriting an existing file requires allow_overwrite:true.",
-                required: true,
-                minLength: 1
+                required: true
             )
             .AddBoolean(
                 "allow_overwrite",
@@ -217,7 +216,34 @@ public sealed class WriteFileTool : IToolHandler
                     );
                 }
 
-                if (!allowOverwrite)
+                bool confirmed = false;
+                if (!string.IsNullOrWhiteSpace(expectedHash))
+                {
+                    string currentHash;
+                    try
+                    {
+                        currentHash = FileToolShared.ComputeHash(File.ReadAllBytes(fullPath));
+                    }
+                    catch
+                    {
+                        currentHash = FileToolShared.ComputeTextHash(detected.Content, detected);
+                    }
+
+                    string want = NormalizeHash(expectedHash);
+                    if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Task.FromResult(
+                            ToolResult.FailCode(
+                                "EXPECTED_HASH_MISMATCH",
+                                $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
+                                durationMs: sw.ElapsedMilliseconds
+                            )
+                        );
+                    }
+                    confirmed = true;
+                }
+
+                if (!allowOverwrite && !confirmed)
                 {
                     long curBytes;
                     string curHash;
@@ -246,31 +272,6 @@ public sealed class WriteFileTool : IToolHandler
                             durationMs: sw.ElapsedMilliseconds
                         )
                     );
-                }
-
-                if (!string.IsNullOrWhiteSpace(expectedHash))
-                {
-                    string currentHash;
-                    try
-                    {
-                        currentHash = FileToolShared.ComputeHash(File.ReadAllBytes(fullPath));
-                    }
-                    catch
-                    {
-                        currentHash = FileToolShared.ComputeTextHash(detected.Content, detected);
-                    }
-
-                    string want = NormalizeHash(expectedHash);
-                    if (!string.Equals(want, currentHash, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Task.FromResult(
-                            ToolResult.FailCode(
-                                "EXPECTED_HASH_MISMATCH",
-                                $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
-                                durationMs: sw.ElapsedMilliseconds
-                            )
-                        );
-                    }
                 }
             }
             else

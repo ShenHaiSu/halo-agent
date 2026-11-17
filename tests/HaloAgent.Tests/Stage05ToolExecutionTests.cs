@@ -337,7 +337,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         Assert.Contains("\r\n", roundTrip);
         Assert.DoesNotContain("�", SmartConsoleDecoder.DecodeBytes(raw));
 
-        // 4. 唯一性校验：重复 old_string 非 replace_all 应拒绝
+        // 4) 唯一性校验：重复长锚点非 replace_all 应拒绝（短锚点走 ANCHOR_TOO_SHORT）
         var dupResult = await _registry.DispatchAsync(
             new ToolCallDto(
                 "call_ac04d",
@@ -346,7 +346,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
                     new
                     {
                         file_path = fileName,
-                        old_string = "// 中文注释",
+                        old_string = "// 中文注释：待修改行\nint b = 2;",
                         new_string = "X",
                     }
                 )
@@ -355,7 +355,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         );
         Assert.False(dupResult.Success);
         Assert.Contains(
-            "matched",
+            "OLD_STRING_NOT_FOUND",
             dupResult.Error ?? string.Empty,
             StringComparison.OrdinalIgnoreCase
         );
@@ -614,7 +614,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
     public async Task AC_Registry_SixTools_DualSchema_SelfHeal()
     {
         var defs = _registry.GetDefinitions();
-        Assert.Equal(15, defs.Count);
+        Assert.Equal(17, defs.Count);
         foreach (
             string expected in new[]
             {
@@ -623,6 +623,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
                 "write_file",
                 "edit_file",
                 "edit_lines",
+                "edit_batch",
                 "list_dir",
                 "grep_search",
                 "view_image",
@@ -632,7 +633,8 @@ public sealed class Stage05ToolExecutionTests : IDisposable
                 "spawn_subagent",
                 "undo_edit",
                 "edit",
-                "goal_tool"
+                "goal_tool",
+                "delete_file"
             }
         )
         {
@@ -642,7 +644,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         string chatJson = _registry.GetChatToolsJson();
         using (JsonDocument chat = JsonDocument.Parse(chatJson))
         {
-            Assert.Equal(15, chat.RootElement.GetArrayLength());
+            Assert.Equal(17, chat.RootElement.GetArrayLength());
             Assert.Equal("function", chat.RootElement[0].GetProperty("type").GetString());
             Assert.True(chat.RootElement[0].GetProperty("function").TryGetProperty("name", out _));
         }
@@ -650,7 +652,7 @@ public sealed class Stage05ToolExecutionTests : IDisposable
         string respJson = _registry.GetResponsesToolsJson();
         using (JsonDocument resp = JsonDocument.Parse(respJson))
         {
-            Assert.Equal(15, resp.RootElement.GetArrayLength());
+            Assert.Equal(17, resp.RootElement.GetArrayLength());
             Assert.Equal("function", resp.RootElement[0].GetProperty("type").GetString());
             Assert.True(resp.RootElement[0].TryGetProperty("name", out _));
         }

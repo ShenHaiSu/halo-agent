@@ -33,7 +33,8 @@ public class AgentConfigDocument
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public StrictToolsMode StrictToolsMode { get; set; } = StrictToolsMode.Prefer;
 
-    // need17-01：工具激活集（preset/allowlist/denylist，互斥规则见 ToolPreset；null/空=默认 Coding）。
+    public bool EnableJsonRepair { get; set; } = true;
+
     public string? ToolsPreset { get; set; }
     public List<string>? ToolsAllowlist { get; set; }
     public List<string>? ToolsDenylist { get; set; }

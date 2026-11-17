@@ -415,14 +415,14 @@ public sealed class Stage14EditFileToolTests : IDisposable
         Assert.True(big.Output.Length <= 2000, $"成功回吐 {big.Output.Length} 字符，超过 2000 上限");
         Assert.Contains("truncated", big.Output);
 
-        // 小改动同样是短回吐
+        // 小改动同样是短回吐（锚点需 ≥8 非空白字符）
         ToolResult small = await Call(
             "edit_file",
             new
             {
                 file_path = fileName,
-                old_string = "BEGIN",
-                new_string = "BEGIN!",
+                old_string = "BEGIN\nreplace-me",
+                new_string = "BEGIN!\nreplace-me",
             }
         );
         Assert.True(small.Success, small.Error);
@@ -593,14 +593,14 @@ public sealed class Stage14EditFileToolTests : IDisposable
         const string fileName = "legacy.txt";
         File.WriteAllText(Absolute(fileName), "line1\nline2\nline3\n", new UTF8Encoding(false));
 
-        // 1) 单处替换：成功且落盘正确
+        // 1) 单处替换：成功且落盘正确（锚点 ≥8 非空白字符）
         ToolResult once = await Call(
             "edit_file",
             new
             {
                 file_path = fileName,
-                old_string = "line2",
-                new_string = "line2-edited",
+                old_string = "line1\nline2\nline3",
+                new_string = "line1\nline2-edited\nline3",
             }
         );
         Assert.True(once.Success, once.Error);
@@ -612,13 +612,18 @@ public sealed class Stage14EditFileToolTests : IDisposable
             File.ReadAllText(Absolute(fileName), Encoding.UTF8)
         );
 
-        // 2) 多处命中且未开 replace_all：need15 后为 ANCHOR_AMBIGUOUS（含 matched 兼容词）
+        // 2) 多处命中且未开 replace_all：长锚点重复命中为 ANCHOR_AMBIGUOUS
+        File.WriteAllText(
+            Absolute(fileName),
+            "repeat-anchor-xyz\nrepeat-anchor-xyz\nunique-tail-123\n",
+            new UTF8Encoding(false)
+        );
         ToolResult ambiguous = await Call(
             "edit_file",
             new
             {
                 file_path = fileName,
-                old_string = "line",
+                old_string = "repeat-anchor-xyz",
                 new_string = "LINE",
             }
         );

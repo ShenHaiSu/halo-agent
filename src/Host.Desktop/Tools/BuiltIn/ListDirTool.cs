@@ -40,7 +40,7 @@ public sealed class ListDirTool : IToolHandler
     {
         string schema = new ToolSchemaBuilder()
             .AddString(
-                "path",
+                "file_path",
                 "Relative directory path from workspace root or absolute path. Defaults to \".\".",
                 defaultValue: "."
             )
@@ -78,7 +78,11 @@ public sealed class ListDirTool : IToolHandler
                 JsonElement root = args.Root;
                 if (root.ValueKind == JsonValueKind.Object)
                 {
-                    pathArg = args.GetString("path");
+                    pathArg = args.GetString("file_path");
+                    if (string.IsNullOrWhiteSpace(pathArg))
+                    {
+                        pathArg = args.GetString("path");
+                    }
                     if (args.TryGetBool("recursive", out bool rec))
                     {
                         recursive = rec;
@@ -93,7 +97,7 @@ public sealed class ListDirTool : IToolHandler
             {
                 return Task.FromResult(
                     ToolResult.Fail(
-                        $"参数 JSON 解析失败：{ex.Message}。请检查 path/recursive/max_depth 字段后重试。",
+                        $"参数 JSON 解析失败：{ex.Message}。请检查 file_path/recursive/max_depth 字段后重试。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );
@@ -141,7 +145,7 @@ public sealed class ListDirTool : IToolHandler
 
                 return Task.FromResult(
                     ToolResult.Fail(
-                        $"目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请检查 path 参数后重试。",
+                        $"目录不存在：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}'。请检查 file_path 参数后重试。",
                         durationMs: sw.ElapsedMilliseconds
                     )
                 );

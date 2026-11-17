@@ -100,8 +100,10 @@ public static class ToolRoleRegistries
             r.Register(new BuiltIn.WriteFileTool());
             r.Register(new BuiltIn.EditFileTool());
             r.Register(new BuiltIn.EditLinesTool());
+            r.Register(new BuiltIn.EditBatchTool());
             r.Register(new BuiltIn.EditTool());
             r.Register(new BuiltIn.UndoEditTool());
+            r.Register(new BuiltIn.DeleteFileTool());
         }
         r.Register(new BuiltIn.SkillTool());
         r.Register(new BuiltIn.MemoryTool());

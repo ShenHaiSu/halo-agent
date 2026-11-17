@@ -37,18 +37,31 @@ public sealed class ExecCommandTool : IToolHandler
         {
             desc += NoPyNote;
         }
-        return new ToolDefinition(
-            Name,
-            desc,
-            "{\"type\":\"object\",\"properties\":{"
-                + "\"command\":{\"type\":\"string\",\"description\":\"Full command line (runner cmd) or Python code/script args (runner python). Runs in workspace root; stdout+stderr merged. Max 8192 chars; cmd runner only allows whitelisted executables.\"},"
-                + "\"runner\":{\"type\":\"string\",\"enum\":[\"cmd\",\"python\"],\"default\":\"cmd\",\"description\":\"cmd first. python for text processing. No PowerShell."
-                + runnerNote
-                + "\"},"
-                + "\"workdir\":{\"type\":\"string\",\"description\":\"Optional dir relative to workspace root. Defaults to workspace root. Must stay inside the workspace; missing dir fails fast.\"},"
-                + "\"timeout_ms\":{\"type\":\"integer\",\"minimum\":1,\"default\":60000,\"maximum\":300000,\"description\":\"Optional timeout in ms. Must be >=1. Defaults 60000. Capped 300000.\"}"
-                + "},\"required\":[\"command\"],\"additionalProperties\":false}"
-        );
+        string schema = new ToolSchemaBuilder()
+            .AddString(
+                "command",
+                "Full command line (runner cmd) or Python code/script args (runner python). Runs in workspace root; stdout+stderr merged. Max 8192 chars; cmd runner only allows whitelisted executables.",
+                required: true
+            )
+            .AddString(
+                "runner",
+                "cmd first. python for text processing. No PowerShell." + runnerNote,
+                enumValues: new[] { "cmd", "python" },
+                defaultValue: "cmd"
+            )
+            .AddString(
+                "workdir",
+                "Optional dir relative to workspace root. Defaults to workspace root. Must stay inside the workspace; missing dir fails fast."
+            )
+            .AddInteger(
+                "timeout_ms",
+                "Optional timeout in ms. Must be >=1. Defaults 60000. Capped 300000.",
+                minimum: 1,
+                maximum: 300000,
+                defaultValue: 60000
+            )
+            .Build();
+        return new ToolDefinition(Name, desc, schema);
     }
 
     public async Task<ToolResult> ExecuteAsync(

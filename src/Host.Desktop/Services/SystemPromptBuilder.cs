@@ -170,9 +170,26 @@ public sealed partial class SystemPromptBuilder
         new("edit_file", "Small partial edit with a verbatim string anchor", Array.Empty<string>()),
         new("edit_lines", "Line-number edit (explicit limit; 0 = insert)", Array.Empty<string>()),
         new(
+            "edit_batch",
+            "Batch line edits in one atomic call (disjoint ranges; modes: lines/text)",
+            new[]
+            {
+                "edit_batch ranges must be disjoint: overlapping [offset,offset+limit) rejects the whole call.",
+                "For large edit_batch calls, preview with dry_run:true first.",
+            }
+        ),
+        new(
             "write_file",
             "Create new files or fully overwrite (allow_overwrite:true)",
             Array.Empty<string>()
+        ),
+        new(
+            "delete_file",
+            "Delete a workspace file after writing a backup (preview by default)",
+            new[]
+            {
+                "Pass dry_run:false explicitly to really delete; use recursive:true only for small directories.",
+            }
         ),
         new("list_dir", "List directory structure", Array.Empty<string>()),
         new("grep_search", "Search file content", Array.Empty<string>()),

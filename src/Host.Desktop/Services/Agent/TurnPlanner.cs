@@ -49,6 +49,14 @@ public sealed partial class AgentOrchestrator
                     return " Hint: the tool is not in this turn's preset; use an active tool or ask for Full preset.";
                 case "INVALID_JSON_ARGUMENTS":
                     return " Hint: resend with complete JSON (no truncation); keep strings escaped.";
+                case "REPAIRED_JSON":
+                    return " Hint: arguments were auto-repaired (bare newline/trailing comma); resend strict JSON next time.";
+                case "EDITS_OVERLAP":
+                    return " Hint: batch intervals overlap; make [offset,offset+limit) disjoint and retry.";
+                case "EMPTY_EDITS":
+                    return " Hint: edits array must not be empty; pass at least one edit.";
+                case "EMPTY_NEW_TEXT":
+                    return " Hint: new_text is empty; add allow_empty:true to confirm deletion, or fill replacement text.";
                 // S3 §4.1：view_image 四态错误码 Hint（英文一句，模型可判下一步动作）。
                 case "IMAGE_TOO_LARGE":
                     return " Hint: the image exceeds the per-image limit; compress/resize it or pick a smaller file, then retry.";
@@ -63,7 +71,6 @@ public sealed partial class AgentOrchestrator
                     return " Hint: 本机无 Python，请用 runner:'cmd' 继续；需要 Python 请按上方指引安装后重启 HaloAgent。";
                 case "OUT_OF_RANGE":
                 case "NO_CHANGE":
-                case "EMPTY_NEW_TEXT":
                 case "REGEX_ZERO_LENGTH":
                     break;
             }
@@ -197,6 +204,11 @@ public sealed partial class AgentOrchestrator
             if (code is "MISSING_LIMIT")
             {
                 return "\nNextAction: retry edit_lines with explicit \"limit\" (replace N lines, or 0 to insert).";
+            }
+
+            if (code is "EDITS_OVERLAP")
+            {
+                return "\nNextAction: split edit_batch into disjoint [offset,offset+limit) ranges, or retry failed ranges as single edit_lines calls.";
             }
         }
         catch { }

@@ -205,6 +205,15 @@ public sealed partial class SubAgentCoordinator
         catch { }
     }
 
+    private static bool IsStatusMarker(string? content)
+    {
+        return !string.IsNullOrEmpty(content)
+            && (
+                content.StartsWith("[SubStatus]", StringComparison.Ordinal)
+                || content.StartsWith("[子", StringComparison.Ordinal)
+            );
+    }
+
     private async Task<string> ReadLastAssistantTextAsync(string workspaceId, string subSessionId)
     {
         try
@@ -212,6 +221,7 @@ public sealed partial class SubAgentCoordinator
             var msgs = await _sessions
                 .GetSessionMessagesAsync(workspaceId, subSessionId)
                 .ConfigureAwait(false);
+            string? fallbackMarker = null;
             for (int i = msgs.Count - 1; i >= 0; i--)
             {
                 var m = msgs[i];
@@ -220,9 +230,15 @@ public sealed partial class SubAgentCoordinator
                 bool hasCalls = m.ToolCalls != null && m.ToolCalls.Count > 0;
                 if (hasCalls)
                     continue;
-                if (!string.IsNullOrWhiteSpace(m.Content))
-                    return m.Content!;
+                if (string.IsNullOrWhiteSpace(m.Content))
+                    continue;
+                fallbackMarker ??= m.Content;
+                if (IsStatusMarker(m.Content))
+                    continue;
+                return m.Content!;
             }
+            if (fallbackMarker != null)
+                return fallbackMarker;
             var last = msgs.LastOrDefault();
             return (last?.Content ?? string.Empty) + "\n[子未输出总结]";
         }

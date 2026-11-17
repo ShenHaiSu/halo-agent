@@ -22,8 +22,8 @@ public sealed partial class EditLinesTool : IToolHandler
             )
             .AddInteger(
                 "limit",
-                "Lines to REPLACE; 0 = insert before offset. Required (missing limit keeps MISSING_LIMIT business message).",
-                required: true,
+                "Lines to REPLACE; 0 = insert before offset. Missing limit returns MISSING_LIMIT.",
+                required: false,
                 minimum: 0
             )
             .AddString(

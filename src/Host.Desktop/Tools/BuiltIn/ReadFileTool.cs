@@ -29,12 +29,13 @@ public sealed class ReadFileTool : IToolHandler
         string schema = new ToolSchemaBuilder()
             .AddString(
                 "file_path",
-                "Relative path from workspace root or absolute file path. Use list_dir first if unsure.",
+                "Relative path from workspace root or absolute file path. Use list_dir first if unsure. "
+                    + "Directories are rejected with IS_A_DIRECTORY; use list_dir to browse.",
                 required: true
             )
             .AddInteger(
                 "offset",
-                "1-based first line. Out-of-range returns an error with total lines.",
+                "1-based first line. Out-of-range returns 0 lines with an explicit OFFSET_OUT_OF_RANGE marker; check TotalLines in the header.",
                 minimum: 1,
                 defaultValue: 1
             )
@@ -117,6 +118,19 @@ public sealed class ReadFileTool : IToolHandler
                 fullPath = resolved;
             }
 
+            // 目录的 File.Exists 为 false，必须先判类型再判存在性
+            if (Directory.Exists(fullPath))
+            {
+                return Task.FromResult(
+                    ToolResult.FailCode(
+                        "IS_A_DIRECTORY",
+                        $"IS_A_DIRECTORY：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, fullPath)}' 是目录而非文件。"
+                            + "请用 list_dir 列出目录内容，或用 read_file 指定目录下的具体文件。",
+                        durationMs: sw.ElapsedMilliseconds
+                    )
+                );
+            }
+
             if (!File.Exists(fullPath))
             {
                 return Task.FromResult(
@@ -184,21 +198,9 @@ public sealed class ReadFileTool : IToolHandler
                 fileHash = FileToolShared.ComputeTextHash(detected.Content, detected);
             }
 
-            const long HashFullLimit = 1_048_576;
-            string hashShown;
-            try
-            {
-                long size = new FileInfo(fullPath).Length;
-                hashShown =
-                    size > HashFullLimit
-                        ? fileHash.Substring(0, 16) + $"... (hash_full:skipped(size={size}))"
-                        : fileHash;
-            }
-            catch
-            {
-                hashShown = fileHash;
-            }
+            string hashShown = fileHash;
 
+            bool offsetOutOfRange = offset > totalLines;
             sb.Append("[Encoding: ")
                 .Append(detected.EncodingLabel)
                 .Append(", LineEndings: ")
@@ -206,11 +208,20 @@ public sealed class ReadFileTool : IToolHandler
                 .Append(", TotalLines: ")
                 .Append(totalLines)
                 .Append(", Hash: ")
-                .Append(hashShown)
-                .Append(']');
-            if (offset > totalLines)
+                .Append(hashShown);
+            if (offsetOutOfRange)
             {
+                sb.Append(", OffsetRequested: ").Append(offset).Append(", EmptyPage: true");
+            }
+            sb.Append(']');
+            if (offsetOutOfRange)
+            {
+                sb.AppendLine()
+                    .Append(
+                        $"⚠ OFFSET_OUT_OF_RANGE: offset {offset} 超出文件总行数 {totalLines}（合法范围 1..{totalLines}），本页 0 行。"
+                    );
                 sb.AppendLine().Append($"offset {offset} 超出文件总行数 {totalLines}，无内容返回。");
+                sb.AppendLine().Append($"returned_lines:0/total_lines:{totalLines}");
                 return Task.FromResult(
                     ToolResult.Ok(sb.ToString(), durationMs: sw.ElapsedMilliseconds)
                 );

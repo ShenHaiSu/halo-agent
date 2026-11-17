@@ -39,6 +39,7 @@ public sealed class TurnContext
     public List<string>? CfgToolsAllow { get; set; }
     public List<string>? CfgToolsDeny { get; set; }
     public bool CfgClosedWorld { get; set; } = true;
+    public bool CfgEnableJsonRepair { get; set; } = true;
     public HashSet<string> TurnActiveSet { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public int ToolExecutions { get; set; }

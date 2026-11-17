@@ -50,6 +50,8 @@
           aria-label="任务指令输入框，支持粘贴图片"
           :class="askMasked || subWaiting ? 'masked' : ''"
           :data-placeholder="subWaiting ? `子代理执行中（${subDone}/${subTotal}），取消可掐断整树` : undefined"
+          :data-hint="editorHint"
+          :title="editorHint"
           @input="emit('editor-input')"
           @paste="emit('paste', $event)"
           @keydown="emit('keydown', $event)"
@@ -87,14 +89,16 @@
               v-if="!isGenerating"
               type="primary"
               size="small"
+              circle
               data-testid="composer-send"
               :disabled="!canSend"
+              :title="sendKeyMode === 'ctrl-enter' ? '发送 (Ctrl+Enter)' : '发送 (Enter)'"
+              :aria-label="sendKeyMode === 'ctrl-enter' ? '发送 (Ctrl+Enter)' : '发送 (Enter)'"
               @click="emit('send')"
             >
               <template #icon>
                 <SendHorizontal class="w-3.5 h-3.5" />
               </template>
-              发送 (Enter)
             </n-button>
             <n-button v-else type="error" size="small" @click="emit('stop')">
               <template #icon>
@@ -109,13 +113,13 @@
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, useTemplateRef } from 'vue';
+import { computed, onMounted, useTemplateRef } from 'vue';
 import { SendHorizontal, Square } from 'lucide-vue-next';
 import PresetPopover from './PresetPopover.vue';
 import SlashMenu from './SlashMenu.vue';
 import type { SlashCandidate } from '@shared/utils/slashRegistry';
 
-defineProps<{
+const props = defineProps<{
   canSend: boolean;
   isGenerating: boolean;
   askMasked: boolean;
@@ -127,6 +131,7 @@ defineProps<{
   overLimitWarn: boolean;
   oversizeWarn: boolean;
   maxImages: number;
+  sendKeyMode: 'enter' | 'ctrl-enter';
   /** need22-F03：斜杠候选面板 */
   slashVisible: boolean;
   slashCandidates: SlashCandidate[];
@@ -134,6 +139,11 @@ defineProps<{
   slashError: string;
   slashLoading: boolean;
 }>();
+const editorHint = computed(() =>
+  props.sendKeyMode === 'ctrl-enter'
+    ? '输入任务指令，Ctrl+Enter 发送，Enter 换行，可粘贴/拖入图片…'
+    : '输入任务指令，Enter 发送，Shift+Enter 换行，可粘贴/拖入图片…'
+);
 const emit = defineEmits<{
   ready: [editor: HTMLElement | null, picker: HTMLInputElement | null];
   'editor-input': [];
@@ -172,7 +182,7 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 .composer-editor:empty::before {
-  content: '输入任务指令，Enter 发送，Shift+Enter 换行，可粘贴/拖入图片…';
+  content: attr(data-hint);
   color: var(--text-secondary, #6b7280);
   pointer-events: none;
 }

@@ -133,7 +133,14 @@ public sealed class Stage17PythonFallbackTests : IDisposable
         {
             Assert.False(PythonAvailabilitySnapshot.Current.Found);
             var def = new Host.Desktop.Tools.BuiltIn.ExecCommandTool().GetDefinition();
-            Assert.Contains("runner:'python' 不可用", def.ParametersJson);
+            using var doc = System.Text.Json.JsonDocument.Parse(def.ParametersJson);
+            string runnerDesc =
+                doc.RootElement.GetProperty("properties")
+                    .GetProperty("runner")
+                    .GetProperty("description")
+                    .GetString() ?? string.Empty;
+            Assert.Contains("不可用", runnerDesc);
+            Assert.Contains("python", runnerDesc);
             Assert.Contains("runner:'python' 不可用", def.Description);
         }
         finally
