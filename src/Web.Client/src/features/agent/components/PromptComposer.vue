@@ -11,6 +11,7 @@
     :over-limit-warn="c.overLimitWarn"
     :oversize-warn="c.oversizeWarn"
     :max-images="c.maxImages"
+    :send-key-mode="c.sendKeyMode"
     :slash-visible="c.slash.active"
     :slash-candidates="c.slash.candidates"
     :slash-index="c.slash.index"

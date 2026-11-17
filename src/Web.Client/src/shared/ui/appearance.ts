@@ -3,6 +3,8 @@ import { haloDarkThemeOverrides, haloLightThemeOverrides } from './naiveTheme';
 
 export type ThemeMode = 'dark' | 'light';
 export type ChatWidthMode = 'centered' | 'full';
+/** 输入框发送键：'enter' 回车发送 / 'ctrl-enter' Ctrl+Enter 发送（回车换行） */
+export type SendKeyMode = 'enter' | 'ctrl-enter';
 
 /** 前端外观唯一真相源（持久化于 localStorage['halo.appearance.v1']） */
 export interface AppearanceSettings {
@@ -17,6 +19,8 @@ export interface AppearanceSettings {
   monoFont: string;
   /** 会话主界面宽度：'centered' 限宽居中 | 'full' 占满 */
   chatWidthMode: ChatWidthMode;
+  /** 输入框发送键：'enter' 回车发送 | 'ctrl-enter' Ctrl+Enter 发送（回车换行） */
+  sendKeyMode: SendKeyMode;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -27,6 +31,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   englishFont: 'Segoe UI',
   monoFont: 'Consolas',
   chatWidthMode: 'centered',
+  sendKeyMode: 'enter',
 };
 
 export const THEME_COLOR_PRESETS: Array<{ label: string; value: string }> = [

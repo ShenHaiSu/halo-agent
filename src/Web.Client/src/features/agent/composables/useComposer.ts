@@ -3,6 +3,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useConfigStore } from '@/stores/configStore';
+import { useAppearanceStore } from '@/stores/appearanceStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import {
   createEmptyDraft,
@@ -45,6 +46,8 @@ export interface ComposerApi {
   overLimitWarn: ComputedRef<boolean>;
   oversizeWarn: ComputedRef<boolean>;
   isGenerating: ComputedRef<boolean>;
+  /** 发送键模式：'enter' 回车发送 | 'ctrl-enter' Ctrl+Enter 发送（外观设置-输入习惯） */
+  sendKeyMode: ComputedRef<'enter' | 'ctrl-enter'>;
   /** need22-F03：斜杠候选面板状态（容器持有，视图纯展示） */
   slash: SlashMenuApi;
   bindSend(h: SendHandlers): void;
@@ -73,6 +76,7 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
   const message = useMessage();
   const workspaceStore = useWorkspaceStore();
   const configStore = useConfigStore();
+  const appearanceStore = useAppearanceStore();
   const stream = useAgentStream();
   const handlers: SendHandlers = { onSend: () => undefined, onStop: () => undefined };
   let draft: ComposerDraft = createEmptyDraft();
@@ -86,6 +90,7 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
   };
   const getDraft = (): ComposerDraft => draft;
   const isGenerating = computed(() => stream.isGenerating);
+  const sendKeyMode = computed<'enter' | 'ctrl-enter'>(() => appearanceStore.sendKeyMode);
   const attachmentList = computed<ComposerAttachment[]>(() => {
     void draftVer.value;
     return Object.values(draft.attachments);
@@ -243,7 +248,8 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     const composing =
       (e as unknown as { isComposing?: boolean }).isComposing === true || (e as unknown as { keyCode?: number }).keyCode === 229;
     if (slash.handleKeydown(e)) return;
-    const action = enterAction(e, { enterToSend: true, isComposing: composing, runActive: isGenerating.value });
+    const enterToSend = appearanceStore.sendKeyMode !== 'ctrl-enter';
+    const action = enterAction(e, { enterToSend, isComposing: composing, runActive: isGenerating.value });
     if (action === 'send' || action === 'steer') {
       e.preventDefault();
       handlers.onSend();
@@ -293,6 +299,7 @@ export function useComposer(editorRef: Ref<HTMLElement | null>, fileRef: Ref<HTM
     overLimitWarn,
     oversizeWarn,
     isGenerating,
+    sendKeyMode,
     slash,
     bindSend: (h: SendHandlers): void => {
       handlers.onSend = h.onSend;

@@ -166,7 +166,37 @@
       </div>
     </n-card>
 
-    <!-- 4. 页脚：重置 + 生效摘要 -->
+    <!-- 4. 输入习惯 -->
+    <n-card title="输入习惯" size="small" data-testid="appearance-sendkey-card">
+      <div class="grid grid-cols-2 gap-2.5">
+        <div
+          role="button"
+          tabindex="0"
+          data-testid="sendkey-enter"
+          class="setting-option p-2.5 cursor-pointer"
+          :class="{ 'setting-option-active': settings.sendKeyMode !== 'ctrl-enter' }"
+          @click="onSendKeyModeChange('enter')"
+          @keydown.enter="onSendKeyModeChange('enter')"
+        >
+          <div class="text-xs font-medium text-center">Enter 发送</div>
+          <div class="text-[11px] text-secondary text-center mt-0.5">Shift+Enter 换行</div>
+        </div>
+        <div
+          role="button"
+          tabindex="0"
+          data-testid="sendkey-ctrl-enter"
+          class="setting-option p-2.5 cursor-pointer"
+          :class="{ 'setting-option-active': settings.sendKeyMode === 'ctrl-enter' }"
+          @click="onSendKeyModeChange('ctrl-enter')"
+          @keydown.enter="onSendKeyModeChange('ctrl-enter')"
+        >
+          <div class="text-xs font-medium text-center">Ctrl+Enter 发送</div>
+          <div class="text-[11px] text-secondary text-center mt-0.5">Enter 直接换行</div>
+        </div>
+      </div>
+    </n-card>
+
+    <!-- 5. 页脚：重置 + 生效摘要 -->
     <div class="flex items-center justify-between gap-2 flex-wrap">
       <n-button secondary size="small" data-testid="appearance-reset-btn" @click="onReset"> 重置为默认 </n-button>
       <span class="text-[11px] text-secondary font-mono break-all" data-testid="appearance-summary">
@@ -188,6 +218,7 @@ import {
   buildFontStack,
   normalizeHexColor,
   type ChatWidthMode,
+  type SendKeyMode,
   type ThemeMode,
 } from '@shared/ui/appearance';
 
@@ -230,7 +261,8 @@ const previewFontStack = computed(() => buildFontStack(settings.value));
 const summaryText = computed(() => {
   const s = settings.value;
   const width = s.chatWidthMode === 'centered' ? '居中限宽' : '占满宽度';
-  return `${s.fontSize}px · ${s.chineseFont} / ${s.englishFont} · ${s.themeColor} · ${width}`;
+  const sendKey = s.sendKeyMode === 'ctrl-enter' ? 'Ctrl+Enter 发送' : 'Enter 发送';
+  return `${s.fontSize}px · ${s.chineseFont} / ${s.englishFont} · ${s.themeColor} · ${width} · ${sendKey}`;
 });
 
 function onThemeModeChange(mode: ThemeMode): void {
@@ -272,6 +304,10 @@ function onMonoFontChange(val: string): void {
 
 function onChatWidthChange(mode: ChatWidthMode): void {
   appearanceStore.update({ chatWidthMode: mode });
+}
+
+function onSendKeyModeChange(mode: SendKeyMode): void {
+  appearanceStore.update({ sendKeyMode: mode });
 }
 
 function onReset(): void {

@@ -9,6 +9,7 @@ import {
   hexToRgbTriplet,
   type AppearanceSettings,
   type ChatWidthMode,
+  type SendKeyMode,
   type ThemeMode,
 } from '@shared/ui/appearance';
 
@@ -38,6 +39,9 @@ function mergeWithDefaults(raw: unknown): AppearanceSettings {
   if (obj.chatWidthMode === 'centered' || obj.chatWidthMode === 'full') {
     next.chatWidthMode = obj.chatWidthMode;
   }
+  if (obj.sendKeyMode === 'enter' || obj.sendKeyMode === 'ctrl-enter') {
+    next.sendKeyMode = obj.sendKeyMode;
+  }
   return next;
 }
 
@@ -48,6 +52,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const themeColor = computed(() => settings.value.themeColor);
   const fontSize = computed(() => settings.value.fontSize);
   const chatWidthMode = computed<ChatWidthMode>(() => settings.value.chatWidthMode);
+  const sendKeyMode = computed<SendKeyMode>(() => settings.value.sendKeyMode);
 
   function applyToDom(): void {
     if (typeof document === 'undefined') return;
@@ -129,6 +134,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     themeColor,
     fontSize,
     chatWidthMode,
+    sendKeyMode,
     load,
     save,
     loadAndApply,
