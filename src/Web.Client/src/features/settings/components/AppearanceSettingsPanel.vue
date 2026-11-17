@@ -196,12 +196,9 @@
       </div>
     </n-card>
 
-    <!-- 5. 页脚：重置 + 生效摘要 -->
-    <div class="flex items-center justify-between gap-2 flex-wrap">
+    <!-- 5. 页脚：重置 -->
+    <div class="flex items-center">
       <n-button secondary size="small" data-testid="appearance-reset-btn" @click="onReset"> 重置为默认 </n-button>
-      <span class="text-[11px] text-secondary font-mono break-all" data-testid="appearance-summary">
-        {{ summaryText }} · 即时生效 · 已自动保存
-      </span>
     </div>
   </div>
 </template>
@@ -257,13 +254,6 @@ watch(
 );
 
 const previewFontStack = computed(() => buildFontStack(settings.value));
-
-const summaryText = computed(() => {
-  const s = settings.value;
-  const width = s.chatWidthMode === 'centered' ? '居中限宽' : '占满宽度';
-  const sendKey = s.sendKeyMode === 'ctrl-enter' ? 'Ctrl+Enter 发送' : 'Enter 发送';
-  return `${s.fontSize}px · ${s.chineseFont} / ${s.englishFont} · ${s.themeColor} · ${width} · ${sendKey}`;
-});
 
 function onThemeModeChange(mode: ThemeMode): void {
   appearanceStore.setThemeMode(mode);
