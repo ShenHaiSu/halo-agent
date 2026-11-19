@@ -25,75 +25,66 @@ import {
 
 import { enqueueFrame, flushNow as flushBatcherNow, messageKey } from '@shared/utils/frameBatcher';
 
-// ---- seg 分片缓冲（frameBatcher 接管合批；SEG_FLUSH_MS 旧定时器已删除，由 frameBatcher rAF 合批） ----
+// ---- seg 分片缓冲（frameBatcher 接管合批；单一有序队列保到达序；SEG_FLUSH_MS 旧定时器已删除，由 frameBatcher rAF 合批） ----
 const SEG_DISPLAY_CAP = 20000;
-interface SegBuf {
-  text: string;
-  reasoning: string;
-  textBlockId?: string | null;
-  textSeq?: number | null;
-  textTag?: string | null;
-  reasoningBlockId?: string | null;
-  reasoningSeq?: number | null;
-  reasoningTag?: string | null;
+
+interface StreamDeltaItem {
+  kind: 'text' | 'reasoning';
+  chunk: string;
+  blockId: string | null;
+  seq: number | null;
+  tag: string | null;
 }
+
+interface SegBuf {
+  /** 按事件到达顺序入列的 delta；flush 时按此顺序逐一入 segs。 */
+  items: StreamDeltaItem[];
+}
+
 const segBufs: Record<string, SegBuf> = {};
 function segBufOf(sid: string): SegBuf {
   let b = segBufs[sid];
   if (!b) {
-    b = { text: '', reasoning: '', textBlockId: null, textSeq: null, textTag: null, reasoningBlockId: null, reasoningSeq: null, reasoningTag: null };
+    b = { items: [] };
     segBufs[sid] = b;
   }
   return b;
 }
+
 export function flushSegBuf(sid: string): void {
   const t = turns.value[sid];
   const buf = segBufs[sid];
-  if (!t || !buf) return;
-  const hasText = !!buf.text;
-  const hasReason = !!buf.reasoning;
-  if (!hasText && !hasReason) return;
-  if (hasText) {
-    t.streamingText += buf.text;
-    pushTextSeg(t, 'text', buf.text, buf.textBlockId ?? null, buf.textSeq ?? null, buf.textTag ?? 'pending');
-    t.telemetry.liveEst += estTokens(buf.text);
-    buf.text = '';
-    buf.textBlockId = null;
-    buf.textSeq = null;
-    buf.textTag = null;
+  if (!t || !buf || buf.items.length === 0) return;
+  for (const it of buf.items) {
+    if (it.kind === 'text') {
+      t.streamingText += it.chunk;
+      pushTextSeg(t, 'text', it.chunk, it.blockId, it.seq, it.tag ?? 'pending');
+    } else {
+      t.streamingReasoning += it.chunk;
+      pushTextSeg(t, 'reasoning', it.chunk, it.blockId, it.seq, it.tag ?? 'process');
+    }
+    t.telemetry.liveEst += estTokens(it.chunk);
   }
-  if (hasReason) {
-    t.streamingReasoning += buf.reasoning;
-    pushTextSeg(t, 'reasoning', buf.reasoning, buf.reasoningBlockId ?? null, buf.reasoningSeq ?? null, buf.reasoningTag ?? 'process');
-    t.telemetry.liveEst += estTokens(buf.reasoning);
-    buf.reasoning = '';
-    buf.reasoningBlockId = null;
-    buf.reasoningSeq = null;
-    buf.reasoningTag = null;
-  }
+  buf.items.length = 0;
   t.streamingActive = true;
   t.isGenerating = true;
   touch(t);
 }
-/** 同 key 合并：流文本 append 非替换；经 frameBatcher rAF 合批进 Pinia。 */
-export function queueSegDelta(sid: string, kind: 'text' | 'reasoning', chunk: string, blockId?: string | null, seq?: number | null, tag?: string | null): void {
+
+/** 按到达序入列；同会话所有 delta 共用一个合批键，帧末一次按序 flush。 */
+export function queueSegDelta(
+  sid: string,
+  kind: 'text' | 'reasoning',
+  chunk: string,
+  blockId?: string | null,
+  seq?: number | null,
+  tag?: string | null
+): void {
   if (!chunk) return;
   ensureTurn(sid);
   const buf = segBufOf(sid);
-  if (kind === 'text') {
-    if (blockId && buf.textBlockId && buf.textBlockId !== blockId && buf.text) flushSegBuf(sid);
-    buf.text += chunk;
-    if (blockId) buf.textBlockId = blockId;
-    if (typeof seq === 'number' && seq > 0) buf.textSeq = seq;
-    if (tag) buf.textTag = tag;
-  } else {
-    if (blockId && buf.reasoningBlockId && buf.reasoningBlockId !== blockId && buf.reasoning) flushSegBuf(sid);
-    buf.reasoning += chunk;
-    if (blockId) buf.reasoningBlockId = blockId;
-    if (typeof seq === 'number' && seq > 0) buf.reasoningSeq = seq;
-    if (tag) buf.reasoningTag = tag;
-  }
-  enqueueFrame(messageKey(sid, kind), () => {
+  buf.items.push({ kind, chunk, blockId: blockId ?? null, seq: seq ?? null, tag: tag ?? null });
+  enqueueFrame(messageKey(sid, 'segs'), () => {
     try {
       flushSegBuf(sid);
     } catch (e) {
@@ -135,7 +126,11 @@ function bindStreamListeners(): void {
     const p = evt.payload || {};
     const it = typeof p['iteration'] === 'number' ? (p['iteration'] as number) : Number(p['iteration']) || 0;
     flushSegBufSync(sid);
-    try { demotePending(t); } catch { /* optimistic tag demote never blocks */ }
+    try {
+      demotePending(t);
+    } catch {
+      /* optimistic tag demote never blocks */
+    }
     if (it > 0) t.curIteration = it;
     else if (t.curIteration <= 0) t.curIteration = 1;
     // need23-R7：上一 iteration 中已落盘的工具卡直接移除（内容已在稳态折叠栏里），

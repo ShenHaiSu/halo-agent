@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN" class="dark">
   <head>
     <meta charset="UTF-8" />
@@ -6,6 +6,185 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="alternate icon" type="image/png" href="./favicon.png" />
     <title>Halo-Agent Desktop</title>
+
+    <!-- ===== P006 启动动画：critical CSS，刻意内联，勿抽到 main.css ===== -->
+    <style>
+      #boot-veil {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        overflow: hidden;
+        background: #020617;
+        color: #e6edf7;
+        font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+        opacity: 1;
+        transition: opacity 0.32s ease;
+      }
+      #boot-veil.is-leaving {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .veil-space {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 70% 28%, #1e3a5f 0%, #0b1630 45%, #020617 78%);
+      }
+      .veil-stars {
+        position: absolute;
+        inset: 0;
+        opacity: 0.75;
+        background-image:
+          radial-gradient(1.5px 1.5px at 8% 18%, #fff 50%, transparent),
+          radial-gradient(1px 1px at 28% 66%, rgb(165 243 252 / 0.9) 50%, transparent),
+          radial-gradient(2px 2px at 68% 14%, #fff 50%, transparent), radial-gradient(1px 1px at 86% 72%, #8b5cf6 60%, transparent),
+          radial-gradient(1.5px 1.5px at 54% 86%, rgb(255 255 255 / 0.75) 50%, transparent),
+          radial-gradient(1px 1px at 44% 32%, #fff 50%, transparent), radial-gradient(2px 2px at 92% 38%, #22d3ee 60%, transparent),
+          radial-gradient(1px 1px at 18% 88%, #fff 50%, transparent);
+        animation: veil-star-drift 12s ease-in-out infinite alternate;
+      }
+      @keyframes veil-star-drift {
+        from {
+          opacity: 0.45;
+        }
+        to {
+          opacity: 0.9;
+        }
+      }
+
+      .veil-comet {
+        position: absolute;
+        top: 74%;
+        left: -8%;
+        width: 0;
+        height: 0;
+        animation: veil-comet-fly 1.3s ease-out 1 forwards;
+      }
+      .veil-comet > i {
+        position: relative;
+        display: block;
+        transform: rotate(-27deg);
+      }
+      .veil-head {
+        position: absolute;
+        left: -13px;
+        top: -13px;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow:
+          0 0 14px 5px #22d3ee,
+          0 0 44px 16px rgb(34 211 238 / 0.45);
+      }
+      .veil-tail {
+        position: absolute;
+        right: 11px;
+        top: -4px;
+        width: 200px;
+        height: 9px;
+        border-radius: 9px;
+        background: linear-gradient(90deg, transparent, rgb(34 211 238 / 0.5) 55%, #fff);
+        filter: blur(3px);
+      }
+      @keyframes veil-comet-fly {
+        0% {
+          transform: translate(0, 0) scale(0.65);
+          opacity: 0;
+        }
+        8% {
+          opacity: 1;
+        }
+        85% {
+          transform: translate(620px, -345px) scale(1);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(700px, -390px) scale(1);
+          opacity: 0;
+        }
+      }
+
+      .veil-center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        opacity: 0;
+        animation: veil-reveal 0.6s ease 0.9s 1 forwards;
+      }
+      @keyframes veil-reveal {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .veil-logo {
+        width: clamp(72px, 18vmin, 120px);
+        height: clamp(72px, 18vmin, 120px);
+        overflow: visible;
+      }
+      .veil-title {
+        font-size: clamp(20px, 4.4vmin, 28px);
+        font-weight: 800;
+        letter-spacing: 2px;
+      }
+      .veil-sub {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        color: #90a1bf;
+      }
+      .veil-bar {
+        width: 240px;
+        height: 3px;
+        margin-top: 6px;
+        border-radius: 3px;
+        background: rgb(148 163 184 / 0.16);
+        overflow: hidden;
+      }
+      .veil-bar > i {
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(90deg, #8b5cf6, #22d3ee);
+        animation: veil-indeterminate 1.4s ease-in-out infinite;
+      }
+      @keyframes veil-indeterminate {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .veil-comet {
+          display: none;
+        }
+        .veil-center {
+          opacity: 1;
+          animation: none;
+        }
+        .veil-bar > i {
+          animation: none;
+          width: 100%;
+        }
+        #boot-veil {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+
     <script>
       try {
         var raw = localStorage.getItem('halo.appearance.v1');
@@ -13,10 +192,43 @@
         var root = document.documentElement;
         root.classList.remove('dark', 'light');
         root.classList.add(mode === 'light' ? 'light' : 'dark');
-      } catch (e) { /* 首屏缺省即 dark，无 class 时 veil 按亮回退可接受 */ }
+      } catch (e) {
+        /* 首屏缺省即 dark，无 class 时 veil 按亮回退可接受 */
+      }
     </script>
   </head>
   <body>
+    <!-- P006：静态 veil —— 必须在 #app 之外，Vue mount 只接管 #app 内部 -->
+    <div id="boot-veil" aria-label="正在启动 HaloAgent" role="status">
+      <div class="veil-space"></div>
+      <div class="veil-stars"></div>
+      <div class="veil-comet">
+        <i><span class="veil-tail"></span><span class="veil-head"></span></i>
+      </div>
+      <div class="veil-center">
+        <svg class="veil-logo" viewBox="0 0 256 256" aria-hidden="true">
+          <defs>
+            <linearGradient id="veilTail" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#22d3ee" stop-opacity="0" />
+              <stop offset="1" stop-color="#22d3ee" />
+            </linearGradient>
+          </defs>
+          <g transform="rotate(-24 128 128)">
+            <rect x="36" y="116" width="130" height="24" rx="12" fill="url(#veilTail)" />
+            <circle cx="182" cy="128" r="34" fill="#fff" />
+            <circle cx="182" cy="128" r="34" fill="#22d3ee" opacity=".28" />
+            <ellipse cx="182" cy="128" rx="52" ry="14" fill="none" stroke="#a5f3fc" stroke-width="6" opacity=".9" />
+          </g>
+          <circle cx="70" cy="70" r="5" fill="#fff" />
+          <circle cx="200" cy="200" r="6" fill="#8b5cf6" />
+          <circle cx="210" cy="60" r="4" fill="#22d3ee" />
+        </svg>
+        <div class="veil-title">HaloAgent</div>
+        <div class="veil-sub">你的智能工作伙伴 · 正在启动</div>
+        <div class="veil-bar"><i></i></div>
+      </div>
+    </div>
+
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

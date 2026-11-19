@@ -485,6 +485,9 @@ public sealed partial class StoragePathManager
                     NormalizedPath = fullPath,
                     ReasonCode = "INSUFFICIENT_DISK_SPACE",
                     AvailableFreeSpaceMb = availableFreeSpaceMb,
+                    RequiredSpaceMb = EstimateMigrationRequiredSpaceMb(),
+                    TargetNonEmpty = IsDirectoryNonEmpty(fullPath),
+                    RiskCode = "INSUFFICIENT_FOR_MIGRATE",
                     Message = $"目标磁盘可用空间不足 200 MB（当前剩余 {availableFreeSpaceMb} MB）。"
                 };
             }
@@ -517,6 +520,8 @@ public sealed partial class StoragePathManager
             IsValid = true,
             NormalizedPath = fullPath,
             AvailableFreeSpaceMb = availableFreeSpaceMb,
+            RequiredSpaceMb = EstimateMigrationRequiredSpaceMb(),
+            TargetNonEmpty = IsDirectoryNonEmpty(fullPath),
             Message = "目标路径校验通过，具备完整读写权限。"
         };
     }

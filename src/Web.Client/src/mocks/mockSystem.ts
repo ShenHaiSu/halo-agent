@@ -87,6 +87,9 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
           normalizedPath: targetPath.trim(),
           message: '路径校验通过 (Mock)',
           availableFreeSpaceMb: 131480,
+          requiredSpaceMb: 0,
+          targetNonEmpty: false,
+          riskCode: null,
         },
       };
     },
@@ -142,6 +145,48 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
     },
     async cleanupExpiredLogs() {
       return { ok: true, data: 0, message: '清理完成，共移除 0 个过期日志文件。' };
+    },
+    async setLogRetentionDays(retentionDays: number) {
+      return { ok: true, data: retentionDays, message: `日志保留天数已设为 ${retentionDays} 天。` };
+    },
+    async getStorageBreakdown() {
+      return {
+        ok: true,
+        data: {
+          rootPath: s.mockDataRoot,
+          totalBytes: 7936,
+          items: [
+            { name: 'sessions', sizeBytes: 2048, fileCount: 8 },
+            { name: 'config', sizeBytes: 1024, fileCount: 4 },
+            { name: 'logs', sizeBytes: 4096, fileCount: 2 },
+            { name: 'attachments', sizeBytes: 512, fileCount: 2 },
+            { name: 'other', sizeBytes: 256, fileCount: 1 },
+          ],
+        },
+      };
+    },
+    async getRecentHostEvents(limit = 20) {
+      return {
+        ok: true,
+        data: [] as Array<{ type: string; payload: Record<string, unknown> | null; timestamp: number }>,
+        message: `近期事件上限 ${limit}`,
+      };
+    },
+    async cleanupImageAttachments(retentionDays = 30, dryRun = true) {
+      const report = {
+        scannedFiles: 12,
+        scannedBytes: 4096,
+        expiredFiles: 3,
+        expiredBytes: 1024,
+        deletedFiles: dryRun ? 0 : 3,
+        dryRun,
+        retentionDays,
+      };
+      return {
+        ok: true,
+        data: JSON.stringify(report),
+        message: dryRun ? '统计完成（Mock），未删除任何文件。' : '清理完成（Mock），已删除超期附件。',
+      };
     },
     async writeDiagnosticLog() {
       return { ok: true, data: true };

@@ -1,6 +1,13 @@
 <template>
   <section v-if="flatTurns.length > 0" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
-    <TimelineProcessBox v-for="turn in flatTurns" :key="turn.key" :turn="turn" @expand-change="onExpandChange" />
+    <TimelineProcessBox
+      v-for="turn in flatTurns"
+      :key="turn.key"
+      :turn="turn"
+      @expand-change="onExpandChange"
+      @user-menu="(ev, id) => emit('user-menu', ev, id)"
+      @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
+    />
   </section>
 </template>
 
@@ -14,6 +21,11 @@ import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
 
 const props = defineProps<{
   summaries: TurnSummary[];
+}>();
+
+const emit = defineEmits<{
+  (e: 'user-menu', ev: MouseEvent, turnId: string): void;
+  (e: 'assistant-menu', ev: MouseEvent, turnId: string): void;
 }>();
 
 const nav = useTimelineNav();

@@ -147,19 +147,36 @@ async function onBridgeRetry(): Promise<void> {
     refreshBridgeMockFlag();
   }
 }
+const MIN_VEIL_MS = 800; // 初始化过快时的最小展示时长，避免闪屏
+
+/** 淡出并移除静态 veil；幂等，多次调用安全。 */
+function finishBoot(): void {
+  const veil = document.getElementById('boot-veil');
+  if (!veil || veil.classList.contains('is-leaving')) return;
+  veil.classList.add('is-leaving');
+  window.setTimeout(() => veil.remove(), 320); // 与 CSS transition .32s 对齐
+}
+
 onMounted(async () => {
-  appearanceStore.loadAndApply();
-  systemStore.setupEventListeners();
-  // 启动即异步预取工具 preset（不阻塞首屏，失败静默回退 coding）
+  const startedAt = performance.now();
   try {
-    useAgentConfigStore().watchStorageChange();
-  } catch {
-    /* ignore */
+    appearanceStore.loadAndApply();
+    systemStore.setupEventListeners();
+    // 启动即异步预取工具 preset（不阻塞首屏，失败静默回退 coding）
+    try {
+      useAgentConfigStore().watchStorageChange();
+    } catch {
+      /* ignore */
+    }
+    const presetPrefetch = useAgentConfigStore()
+      .loadConfig()
+      .catch((e: unknown) => console.warn('[app] preset prefetch failed:', e));
+    await Promise.all([systemStore.refreshAll(), configStore.initialize(), workspaceStore.initialize(), presetPrefetch]);
+    refreshBridgeMockFlag();
+  } finally {
+    // 无论成功或抛错都撤掉 veil，绝不永久遮挡主界面
+    const rest = Math.max(0, MIN_VEIL_MS - (performance.now() - startedAt));
+    window.setTimeout(finishBoot, rest);
   }
-  const presetPrefetch = useAgentConfigStore()
-    .loadConfig()
-    .catch((e: unknown) => console.warn('[app] preset prefetch failed:', e));
-  await Promise.all([systemStore.refreshAll(), configStore.initialize(), workspaceStore.initialize(), presetPrefetch]);
-  refreshBridgeMockFlag();
 });
 </script>

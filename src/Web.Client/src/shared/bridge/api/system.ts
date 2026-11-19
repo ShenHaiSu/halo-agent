@@ -9,7 +9,9 @@ import type {
   SkillMemoryOpResult,
   SkillMemoryScope,
   SkillMemoryScopeFilter,
+  StorageBreakdown,
   StorageConfigInfo,
+  StorageEventDto,
   StorageMigrationResult,
   StorageValidationResult,
   SystemRuntimeInfo,
@@ -37,8 +39,12 @@ export function createSystemApi(
   | 'openPathInExplorer'
   | 'openExternalLink'
   | 'cleanupExpiredLogs'
+  | 'setLogRetentionDays'
   | 'writeDiagnosticLog'
   | 'setWindowTitle'
+  | 'getStorageBreakdown'
+  | 'getRecentHostEvents'
+  | 'cleanupImageAttachments'
   | 'listSkillMemory'
   | 'getSkillMemoryDetail'
   | 'setSkillMemoryEnabled'
@@ -92,6 +98,42 @@ export function createSystemApi(
     },
     async cleanupExpiredLogs(retentionDays = 14) {
       return normalizeBridgePayload<BridgeResponse<number>>(await t.call('cleanupExpiredLogs', retentionDays));
+    },
+    async setLogRetentionDays(retentionDays: number) {
+      try {
+        if (!t.supports('setLogRetentionDays')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '设置保留天数通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<number>>(await t.call('setLogRetentionDays', retentionDays));
+      } catch (e) {
+        console.warn('[bridge] setLogRetentionDays unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '设置保留天数通道不可用' };
+      }
+    },
+    async getStorageBreakdown() {
+      try {
+        if (!t.supports('getStorageBreakdown')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '存储分布通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<StorageBreakdown>>(await t.call('getStorageBreakdown'));
+      } catch (e) {
+        console.warn('[bridge] getStorageBreakdown unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '存储分布通道不可用' };
+      }
+    },
+    async getRecentHostEvents(limit = 20) {
+      try {
+        if (!t.supports('getRecentHostEvents')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '历史事件通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<StorageEventDto[]>>(await t.call('getRecentHostEvents', limit));
+      } catch (e) {
+        console.warn('[bridge] getRecentHostEvents unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '历史事件通道不可用' };
+      }
+    },
+    async cleanupImageAttachments(retentionDays = 30, dryRun = true) {
+      try {
+        if (!t.supports('cleanupImageAttachments')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '附件清理通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<string>>(await t.call('cleanupImageAttachments', retentionDays, dryRun));
+      } catch (e) {
+        console.warn('[bridge] cleanupImageAttachments unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '附件清理通道不可用' };
+      }
     },
     async writeDiagnosticLog(channel: string, message: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('writeDiagnosticLog', channel, message));

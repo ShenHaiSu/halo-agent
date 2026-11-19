@@ -2,7 +2,12 @@
   <div class="flex-1 min-h-0 min-w-0 max-w-full relative flex flex-col" data-testid="message-timeline" :data-need02="need02Attr">
     <div ref="scroll" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden transcript-scroll">
       <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
-        <TimelineSummarySection v-if="summaryList.length > 0" :summaries="summaryList" />
+        <TimelineSummarySection
+          v-if="summaryList.length > 0"
+          :summaries="summaryList"
+          @user-menu="onSummaryUserMenu"
+          @assistant-menu="onSummaryAssistantMenu"
+        />
         <TimelineEmptyState v-if="isEmpty" />
         <TranscriptHistory :entries="historyList">
           <template #default="{ entry }">
@@ -62,6 +67,9 @@ import TranscriptHistory from './TranscriptHistory.vue';
 import TranscriptTail from './TranscriptTail.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
+import { findTurnEntry } from '@features/session/utils/turnAnchorMatch';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 /** 滚动容器 + 历史/尾部分片 + 全局区；行内派生全部经视图模型取用。 */
 const props = defineProps<{
@@ -145,6 +153,55 @@ const rowHandlers = {
   retry: () => emit('retry'),
   dismiss: () => emit('dismiss'),
 };
+
+/** 按 turnId 从摘要列表取对应条目：V2 稳态下摘要是唯一携带原文的数据源。 */
+function findSummary(turnId: string): TurnSummary | null {
+  return summaryList.value.find((s) => String(s.turnId) === turnId) ?? null;
+}
+
+/**
+ * V2 摘要区右键桥接。投影条目命中时走完整轮次 handler（复制整轮全文）；
+ * 未命中（V2 稳态投影为空）时从摘要补出可复制文本：
+ * - 用户气泡：摘要 userContent 即用户原文全文，同步可得；
+ * - 最终正文：按 finalBlockId 拉正文块 markdown 全文（B 方案），命中缓存时近乎瞬时。
+ * 两者都塞进兜底 entry 的 content 字段，复用既有 openMenu→menuCanCopy 通路，不改状态机。
+ */
+function onSummaryUserMenu(ev: MouseEvent, turnId: string): void {
+  const entry = findTurnEntry(allItems.value, turnId);
+  if (entry) {
+    rowHandlers['user-menu'](ev, entry);
+    return;
+  }
+  const summary = findSummary(turnId);
+  const text = String(summary?.userContent || summary?.userPreview || '');
+  rowHandlers['user-menu'](ev, {
+    kind: 'user',
+    key: turnId,
+    msg: { id: turnId, content: text },
+  } as unknown as TimelineEntry);
+}
+
+async function onSummaryAssistantMenu(ev: MouseEvent, turnId: string): Promise<void> {
+  const entry = findTurnEntry(allItems.value, turnId);
+  if (entry) {
+    rowHandlers['assistant-menu'](ev, entry);
+    return;
+  }
+  const summary = findSummary(turnId);
+  const finalBlockId = String(summary?.finalBlockId || '').trim();
+  let text = '';
+  if (finalBlockId) {
+    const { items } = await useWorkspaceStore().getBlockContents([finalBlockId]);
+    const block = items[finalBlockId];
+    text = String(block?.markdown || block?.preview || '');
+  }
+  if (!text) text = String(summary?.finalPreview || '');
+  rowHandlers['assistant-menu'](ev, {
+    kind: 'turn',
+    key: turnId,
+    group: { assistantId: finalBlockId || turnId, key: turnId, content: text },
+  } as unknown as TimelineEntry);
+}
 
 const showJumpVisible = computed(() => !!props.showJumpBtn || !!props.readingWindow);
 

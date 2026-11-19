@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import TimelineSummarySection from './TimelineSummarySection.vue';
+import TimelineProcessBox from './TimelineProcessBox.vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
@@ -51,7 +52,7 @@ describe('TimelineSummarySection', () => {
   it('keeps process boxes collapsed by default and lazy-loads on expand', async () => {
     const wrapper = mount(TimelineSummarySection, {
       props: { summaries: [makeSummary()] },
-      global: { plugins: [ (await import('pinia')).createPinia() ] },
+      global: { plugins: [(await import('pinia')).createPinia()] },
     });
     await nextTick();
     expect(wrapper.find('[data-testid="timeline-process-body-uturn-u1"]').exists()).toBe(false);
@@ -62,5 +63,23 @@ describe('TimelineSummarySection', () => {
     const body = wrapper.find('[data-testid="timeline-process-body-uturn-u1"]');
     expect(body.exists()).toBe(true);
     expect(wrapper.find('[data-testid="timeline-process-placeholder-uturn-u1"]').exists()).toBe(false);
+  });
+});
+
+describe('TimelineSummarySection 右键事件转发', () => {
+  it('原样转发 user-menu / assistant-menu 与 turnId', async () => {
+    const { createPinia } = await import('pinia');
+    const wrapper = mount(TimelineSummarySection, {
+      props: { summaries: [makeSummary()] },
+      global: { plugins: [createPinia()] },
+    });
+    await nextTick();
+    const box = wrapper.findComponent(TimelineProcessBox);
+    const ev = new MouseEvent('contextmenu');
+    box.vm.$emit('user-menu', ev, 'uturn-u1');
+    box.vm.$emit('assistant-menu', ev, 'uturn-u1');
+    await nextTick();
+    expect(wrapper.emitted('user-menu')?.[0]).toEqual([ev, 'uturn-u1']);
+    expect(wrapper.emitted('assistant-menu')?.[0]).toEqual([ev, 'uturn-u1']);
   });
 });

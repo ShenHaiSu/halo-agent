@@ -1,5 +1,13 @@
 /** need21-F02: HostBridgeApi 接口（旧 src/bridge/types.ts 尾部原样迁移，签名不变）。 */
-import type { BridgeResponse, StorageConfigInfo, StorageMigrationResult, StorageValidationResult, SystemRuntimeInfo } from './base';
+import type {
+  BridgeResponse,
+  StorageBreakdown,
+  StorageConfigInfo,
+  StorageEventDto,
+  StorageMigrationResult,
+  StorageValidationResult,
+  SystemRuntimeInfo,
+} from './base';
 import type {
   GlobalNetworkSettings,
   ProviderConfig,
@@ -56,8 +64,12 @@ export interface HostBridgeApi {
   /** 聊天 markdown 链接统一出口：后端转系统浏览器 / explorer，永不在 CEF 内渲染。 */
   openExternalLink: (href: string, workspaceRoot?: string) => Promise<BridgeResponse<boolean>>;
   cleanupExpiredLogs: (retentionDays?: number) => Promise<BridgeResponse<number>>;
+  setLogRetentionDays: (retentionDays: number) => Promise<BridgeResponse<number>>;
   writeDiagnosticLog: (channel: string, message: string) => Promise<BridgeResponse<boolean>>;
   setWindowTitle: (title: string) => Promise<BridgeResponse<boolean>>;
+  getStorageBreakdown: () => Promise<BridgeResponse<StorageBreakdown>>;
+  getRecentHostEvents: (limit?: number) => Promise<BridgeResponse<StorageEventDto[]>>;
+  cleanupImageAttachments: (retentionDays?: number, dryRun?: boolean) => Promise<BridgeResponse<string>>;
 
   // Stage 02
   getNetworkSettings: () => Promise<BridgeResponse<GlobalNetworkSettings>>;

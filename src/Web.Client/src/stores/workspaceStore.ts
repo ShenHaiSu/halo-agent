@@ -730,7 +730,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         if (cur) {
           cur.messageCount = sessionMessages.value.length;
           cur.updatedAtUtc = new Date().toISOString();
-          // need03-03 T1：首条 user 发出即 5 字标题（第一句话前 5 字），并持久化
+          // 首条 user 发出即取首句前 5 字作为即时标题；落盘由后端追加消息流程完成，
+          // 不走改名通道，以免提前把标题锁死、导致首轮结束后的精炼被短路。
           if (
             msg.role === 'user' &&
             !titleLocked.value[sid] &&
@@ -738,13 +739,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             (cur.title === '新建会话' || !cur.title?.trim()) &&
             msg.content
           ) {
-            const t1 = instantTitleFromUserText(String(msg.content));
-            cur.title = t1;
-            try {
-              await bridge.updateSessionTitle(wid, sid, t1);
-            } catch {
-              /* 静默：T1 内存已更新 */
-            }
+            cur.title = instantTitleFromUserText(String(msg.content));
           }
         }
         await refreshBudget();
@@ -795,7 +790,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       let backendTitle = '';
       try {
         backendTitle = await requestTitleViaLlm(sid, 20000);
-      } catch {
+      } catch (e) {
+        if ((e as { titleCode?: string })?.titleCode === 'TITLE_ALREADY_LOCKED') {
+          // 后端已冻结（手动改名或跨刷新后已锁）：停手，不覆盖、不本地兜底
+          if (sess.title && sess.title !== '新建会话') autoTitleDone.value[sid] = true;
+          return;
+        }
         backendTitle = '';
       }
       if (backendTitle) {
@@ -835,7 +835,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       window.setTimeout(() => reject(new Error('title-timeout')), Math.max(1000, timeoutMs))
     );
     const res = await Promise.race([call, timeout]);
-    if (!res || !res.ok || !res.data || !String(res.data).trim()) throw new Error(String((res && res.message) || 'title-empty'));
+    if (!res || !res.ok) {
+      const code = String((res as { code?: string } | null)?.code || '');
+      throw Object.assign(new Error(String(res?.message || 'title-empty')), { titleCode: code });
+    }
+    if (!res.data || !String(res.data).trim()) throw new Error('title-empty');
     void truncateRoundText;
     return String(res.data);
   }
@@ -1078,6 +1082,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     appendMessage,
     mergePersistedMessage,
     generateTitleAfterFirstRound,
+    requestTitleViaLlm,
     titleLocked,
     autoTitleDone,
     titleGenerating,

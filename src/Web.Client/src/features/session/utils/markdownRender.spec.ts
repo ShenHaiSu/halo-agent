@@ -35,9 +35,9 @@ describe('renderMarkdown（稳态整源渲染）', () => {
   it('多条不同消息交替调用不会因缓存互相污染', () => {
     const a = renderMarkdown('# A\n\n```js\nconst a=1;\n```');
     const b = renderMarkdown('# B\n\n```py\nb=2\n```');
-    expect(a).toContain('A');
-    expect(a).not.toContain('B');
-    expect(b).toContain('B');
+    expect(a).toContain('<h1>A</h1>');
+    expect(a).not.toContain('<h1>B</h1>');
+    expect(b).toContain('<h1>B</h1>');
     // 再调一次 a，必须与首次结果一致（前置清理修掉的「共用 default 缓存键」缺陷）
     expect(renderMarkdown('# A\n\n```js\nconst a=1;\n```')).toBe(a);
   });

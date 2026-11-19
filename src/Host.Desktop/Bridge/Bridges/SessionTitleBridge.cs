@@ -42,7 +42,9 @@ public sealed partial class HostBridgeFacade
             }
             if (session.TitleLocked)
             {
-                return BridgeResponse<string>.Success(session.Title ?? string.Empty, "标题已冻结");
+                // 已冻结（手动改名或跨刷新后后端已锁）：以专用错误码返回失败，
+                // 避免前端把原值误当作 LLM 精炼结果、进而覆盖用户手改标题。
+                return BridgeResponse<string>.Fail("TITLE_ALREADY_LOCKED", "标题已冻结");
             }
 
             var messages = await _workspaceSessionService

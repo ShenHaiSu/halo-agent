@@ -123,6 +123,32 @@ export const useSystemStore = defineStore('system', () => {
     await refreshAll();
   }
 
+  async function validateStoragePath(targetPath: string) {
+    return getHostBridge().validateStoragePath(targetPath);
+  }
+
+  async function getStorageBreakdown() {
+    return getHostBridge().getStorageBreakdown();
+  }
+
+  async function getUsageDbStatus() {
+    return getHostBridge().getUsageDbStatus();
+  }
+
+  async function getRecentHostEvents(limit = 20) {
+    return getHostBridge().getRecentHostEvents(limit);
+  }
+
+  async function setLogRetentionDays(days: number) {
+    const res = await getHostBridge().setLogRetentionDays(days);
+    if (res.ok) await refreshAll();
+    return res;
+  }
+
+  async function cleanupImageAttachments(retentionDays = 30, dryRun = true) {
+    return getHostBridge().cleanupImageAttachments(retentionDays, dryRun);
+  }
+
   function setupEventListeners() {
     haloEventBus.on<{ percent: number; message: string; targetPath: string }>('storage:migration-progress', (payload, timestamp) => {
       migrationPercent.value = payload.percent;
@@ -174,6 +200,12 @@ export const useSystemStore = defineStore('system', () => {
     openInExplorer,
     cleanupLogs,
     writeTestLogEntry,
+    validateStoragePath,
+    getStorageBreakdown,
+    getUsageDbStatus,
+    getRecentHostEvents,
+    setLogRetentionDays,
+    cleanupImageAttachments,
     setupEventListeners,
   };
 });
