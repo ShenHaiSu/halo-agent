@@ -217,6 +217,26 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    /// <summary>
+    /// 只设置日志保留天数并持久化，不触发任何文件删除（与手动清理解耦）。
+    /// </summary>
+    public async Task<BridgeResponse<int>> SetLogRetentionDays(int retentionDays)
+    {
+        try
+        {
+            var days = Math.Clamp(retentionDays, 1, 365);
+            var settings = _storageManager.LoadAppSettings();
+            settings.LogRetentionDays = days;
+            await _storageManager.SaveAppSettingsAsync(settings).ConfigureAwait(false);
+            return BridgeResponse<int>.Success(days, $"日志保留天数已设为 {days} 天。");
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("SetLogRetentionDays failed", ex);
+            return BridgeResponse<int>.Fail("LOG_RETENTION_ERROR", ex.Message);
+        }
+    }
+
     public async Task<BridgeResponse<bool>> WriteDiagnosticLog(string channel, string message)
     {
         try

@@ -107,6 +107,39 @@ public sealed class StorageValidationResult
     public string? ReasonCode { get; init; }
     public string Message { get; init; } = string.Empty;
     public long AvailableFreeSpaceMb { get; init; }
+
+    /// <summary>完整迁移预估所需空间（MB），供前端在切换前提示空间风险。</summary>
+    public long RequiredSpaceMb { get; init; }
+
+    /// <summary>目标目录是否已有内容（完整迁移可能覆盖同名文件）。</summary>
+    public bool TargetNonEmpty { get; init; }
+
+    /// <summary>细分风险码（如空间不足以迁移），前端据此禁用切换并给出原因。</summary>
+    public string? RiskCode { get; init; }
+}
+
+/// <summary>单个受管子目录的存储占用明细。</summary>
+public sealed class StorageBreakdownItem
+{
+    public string Name { get; init; } = string.Empty;
+    public long SizeBytes { get; init; }
+    public int FileCount { get; init; }
+}
+
+/// <summary>数据根目录按子目录聚合的存储分布。</summary>
+public sealed class StorageBreakdown
+{
+    public string RootPath { get; init; } = string.Empty;
+    public long TotalBytes { get; init; }
+    public List<StorageBreakdownItem> Items { get; init; } = new();
+}
+
+/// <summary>持久化的存储事件记录（与 jsonl 每行一一对应）。</summary>
+public sealed class StorageEventDto
+{
+    public string Type { get; init; } = string.Empty;
+    public object? Payload { get; init; }
+    public long Timestamp { get; init; }
 }
 
 /// <summary>

@@ -70,6 +70,38 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    public Task<BridgeResponse<StorageBreakdown>> GetStorageBreakdown()
+    {
+        try
+        {
+            var breakdown = _storageManager.GetStorageBreakdown();
+            return Task.FromResult(BridgeResponse<StorageBreakdown>.Success(breakdown));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("GetStorageBreakdown failed", ex);
+            return Task.FromResult(
+                BridgeResponse<StorageBreakdown>.Fail("STORAGE_BREAKDOWN_ERROR", ex.Message)
+            );
+        }
+    }
+
+    public Task<BridgeResponse<List<StorageEventDto>>> GetRecentHostEvents(int limit = 20)
+    {
+        try
+        {
+            var events = StorageEventStore.ReadRecent(_storageManager, Math.Clamp(limit, 1, 200));
+            return Task.FromResult(BridgeResponse<List<StorageEventDto>>.Success(events));
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error("GetRecentHostEvents failed", ex);
+            return Task.FromResult(
+                BridgeResponse<List<StorageEventDto>>.Fail("STORAGE_EVENTS_ERROR", ex.Message)
+            );
+        }
+    }
+
     public async Task<BridgeResponse<StorageValidationResult>> ValidateStoragePath(
         string targetPath
     )
@@ -140,14 +172,18 @@ public sealed partial class HostBridgeFacade
                     migrateData,
                     onProgress: (percent, message) =>
                     {
-                        JsEventDispatcher.Publish(
+                        var progressPayload = new
+                        {
+                            percent,
+                            message,
+                            targetPath = newPath
+                        };
+                        JsEventDispatcher.Publish("storage:migration-progress", progressPayload);
+                        StorageEventStore.Append(
+                            _storageManager,
                             "storage:migration-progress",
-                            new
-                            {
-                                percent,
-                                message,
-                                targetPath = newPath
-                            }
+                            progressPayload,
+                            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                         );
                     }
                 )
@@ -179,15 +215,19 @@ public sealed partial class HostBridgeFacade
             }
             catch { }
 
-            JsEventDispatcher.Publish(
+            var changePayload = new
+            {
+                oldDataRootPath = result.OldDataRootPath,
+                newDataRootPath = result.NewDataRootPath,
+                migratedData = result.MigratedData,
+                migratedFileCount = result.MigratedFileCount
+            };
+            JsEventDispatcher.Publish("storage:changed", changePayload);
+            StorageEventStore.Append(
+                _storageManager,
                 "storage:changed",
-                new
-                {
-                    oldDataRootPath = result.OldDataRootPath,
-                    newDataRootPath = result.NewDataRootPath,
-                    migratedData = result.MigratedData,
-                    migratedFileCount = result.MigratedFileCount
-                }
+                changePayload,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             );
 
             return BridgeResponse<StorageMigrationResult>.Success(result, result.Message);
