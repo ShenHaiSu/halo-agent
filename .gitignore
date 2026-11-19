@@ -69,8 +69,9 @@ Thumbs.db
 *.swp
 *~
 
-# HaloAgent local state (skills/memory indexes, session cache)
+# HaloAgent local state (skills/memory indexes, session cache, local plugins)
 .haloagent/
+plugins/
 
 # Project docs — process docs are local-only, don't version them.
 # needXX / develop / toolDocs 属于过程文档，落地完即删，不进版本历史。
