@@ -165,6 +165,25 @@ code, pre, .font-mono { font-family: var(--font-mono) !important; }
 .markdown-body pre { background: var(--code-bg); border: 1px solid var(--code-border); color: var(--code-text); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.6; }
 .markdown-body code { color: var(--code-text); font-family: var(--font-mono); }
 .markdown-body pre code { background: transparent; border: none; padding: 0; }
+/* 代码块复制按钮：hover / 键盘聚焦显现；图标为内联 SVG；色值全走主题变量，暗亮自动跟随 */
+.md-code-shell { position: relative; }
+.md-code-copy {
+  position: absolute; top: 6px; right: 8px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; font-size: 11px; line-height: 1.5; font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px; cursor: pointer;
+  opacity: 0; transition: opacity .12s ease, color .12s ease;
+}
+.md-code-shell:hover .md-code-copy,
+.md-code-copy:focus-visible { opacity: 1; }
+.md-code-copy svg { width: 12px; height: 12px; flex: none; }
+.md-code-copy .md-code-icon-check { display: none; }
+.md-code-copy[data-copied="true"] { color: var(--accent-primary); }
+.md-code-copy[data-copied="true"] .md-code-icon-copy { display: none; }
+.md-code-copy[data-copied="true"] .md-code-icon-check { display: inline-block; }
 .markdown-body .hljs-keyword, .markdown-body .hljs-selector-tag, .markdown-body .hljs-built_in { color: var(--accent-primary); }
 .markdown-body .hljs-string, .markdown-body .hljs-title, .markdown-body .hljs-section { color: var(--stat-add-text); }
 .markdown-body .hljs-comment, .markdown-body .hljs-quote { color: var(--text-secondary); }

@@ -29,12 +29,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import TimelineView from './TimelineView.vue';
 import { useTimeline } from '../composables/useTimeline';
 import { renderHtmlSmart, renderStreamingText } from '@features/session/utils/markdownRender';
+import { bindCodeCopyDelegation } from '@features/session/utils/codeCopyDelegation';
 import { isP4SubOn, useP02Flags } from '@features/need02/utils/need02Flags';
 import { provideTimelineScene } from '../composables/useTimelineScene';
 import { useTimelineRowActions } from '../composables/useTimelineRowActions';
@@ -75,7 +76,12 @@ provideTimelineScene(t, {
 const paneActive = ref(true);
 t.setPaneVisible(true);
 // 硬切：会话切换直接替换 timelineItems，不挂骨架遮罩 / rAF 采样 / 淡出。
+let unbindCopy: (() => void) | null = null;
 function onReady(el: HTMLElement | null): void {
+  unbindCopy?.();
+  unbindCopy = null;
+  if (el) unbindCopy = bindCodeCopyDelegation(el);
   t.attachContainer(el);
 }
+onUnmounted(() => unbindCopy?.());
 </script>

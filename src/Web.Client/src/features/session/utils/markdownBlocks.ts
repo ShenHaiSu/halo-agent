@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
+import { highlightCode } from './codeHighlight';
 import { overflowHint, type OverflowKind } from './renderContentLimits';
 /** bigChange P2-2: markdown block splitter — shares one markdown-it instance with renderer. */
 
@@ -58,6 +59,51 @@ try {
 } catch {
   /* ignore */
 }
+
+/**
+ * 代码块复制：按钮由渲染器注入，点击由容器级事件委托接管。
+ * 代码原文始终从 <code> 的 textContent 读取，不在 HTML 中重复塞入 —— 高亮只插入 span，
+ * textContent 仍是纯代码，既准确又避免二次转义 / 注入面。
+ * 注册在 sharedMd 上，流式态与稳态共用同一实例，保证交接时代码块结构一致。
+ */
+const COPY_BUTTON_CLASS = 'md-code-copy';
+const CODE_SHELL_CLASS = 'md-code-shell';
+
+const COPY_ICON_SVG =
+  '<svg class="md-code-icon md-code-icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>' +
+  '<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+const CHECK_ICON_SVG =
+  '<svg class="md-code-icon md-code-icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M20 6 9 17l-5-5"/></svg>';
+
+/** 属性值转义：语言名来自用户输入，必须同时转义引号，杜绝属性逃逸。 */
+function escapeHtmlAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderCodeWithCopy(tokens: Array<{ content?: string; info?: string }>, idx: number): string {
+  const token = tokens[idx];
+  const raw = String(token?.content ?? '');
+  const info = String(token?.info ?? '').trim();
+  const lang = info.split(/\s+/)[0] || '';
+  // 与 highlight 钩子同源走缓存口径；未知语言 / 超长自动退化为转义纯文本。
+  const codeInner = highlightCode(raw, lang).html;
+  const safeLang = lang ? escapeHtmlAttr(lang) : '';
+  const codeClass = safeLang ? ` class="language-${safeLang}"` : '';
+  return (
+    `<div class="${CODE_SHELL_CLASS}">` +
+    `<button type="button" class="${COPY_BUTTON_CLASS}" data-code-copy aria-label="复制代码" title="复制代码">` +
+    `${COPY_ICON_SVG}${CHECK_ICON_SVG}<span class="md-code-copy-label">复制</span>` +
+    `</button>` +
+    `<pre><code${codeClass}>${codeInner}</code></pre>` +
+    `</div>`
+  );
+}
+sharedMd.renderer.rules.fence = renderCodeWithCopy;
+sharedMd.renderer.rules.code_block = renderCodeWithCopy;
 
 const DEFINITION_RE = /(^|\n)\[\^[^\]]+\]:|\n\[[^\]]+\]:\s*\S/;
 
