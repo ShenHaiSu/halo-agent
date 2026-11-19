@@ -387,4 +387,60 @@ public sealed class EditDiffBuilderTests
         VerifyHeadersMatchBody(lastDiff);
         VerifyPatchReplaysToNew(oldContent, insertLast, lastDiff);
     }
+
+    /// <summary>单行锚点展开为多行的真实 span（old=1,new=6），+ 行数必须等于 newCount 且补丁可重放。</summary>
+    [Fact]
+    public void BuildMulti_TextModeSpan_RealCounts()
+    {
+        string oldContent = JoinLf(
+            "line01: header",
+            "line02: <TimelineSummarySection :items=\"a\" />",
+            "line03: footer"
+        );
+        string newContent = JoinLf(
+            "line01: header",
+            "line02: <TimelineSummarySection",
+            "  :items=\"a\"",
+            "  @user-menu=\"onUser\"",
+            "  @assistant-menu=\"onAssistant\"",
+            "/>",
+            "line03: footer"
+        );
+        var spans = new List<EditDiffBuilder.BatchSpan> { new(2, 1, 5) };
+
+        var (diff, _) = EditDiffBuilder.BuildMulti("view.txt", oldContent, newContent, spans);
+
+        Assert.Equal(5, CountAdded(diff));
+        Assert.Equal(1, CountRemoved(diff));
+        VerifyHeadersMatchBody(diff);
+        VerifyPatchReplaysToNew(oldContent, newContent, diff);
+    }
+
+    /// <summary>多 span 的行数账本自洽：1→6 展开与 1→2 展开各据其真实 old/new 计数，不串位。</summary>
+    [Fact]
+    public void BuildMulti_MixedSpans_RealCountsStayInSync()
+    {
+        string oldContent = JoinLf("A", "OLD_ONE", "C", "OLD_TWO", "E");
+        string newContent = JoinLf(
+            "A",
+            "NEW_A",
+            "NEW_B",
+            "NEW_C",
+            "NEW_D",
+            "NEW_E",
+            "NEW_F",
+            "C",
+            "TWO_A",
+            "TWO_B",
+            "E"
+        );
+        var spans = new List<EditDiffBuilder.BatchSpan> { new(2, 1, 6), new(4, 1, 2) };
+
+        var (diff, _) = EditDiffBuilder.BuildMulti("mixed.txt", oldContent, newContent, spans);
+
+        Assert.Equal(8, CountAdded(diff));
+        Assert.Equal(2, CountRemoved(diff));
+        VerifyHeadersMatchBody(diff);
+        VerifyPatchReplaysToNew(oldContent, newContent, diff);
+    }
 }

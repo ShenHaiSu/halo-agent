@@ -54,6 +54,12 @@ public sealed class ToolResult
     )]
     public string? ErrorPayloadJson { get; set; }
 
+    /// <summary>成功时的结构化回执（批量编辑的分块真相数据）；失败时为 null。老消费方无感（null 忽略）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    )]
+    public string? SuccessPayloadJson { get; set; }
+
     /// <summary>need17-02：中央校验 warnings（ALIASED_PARAM/DEFAULTED_PARAM/COERCED_TYPE 等，仅提示不判失败；老消费方无感）。</summary>
     [System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull

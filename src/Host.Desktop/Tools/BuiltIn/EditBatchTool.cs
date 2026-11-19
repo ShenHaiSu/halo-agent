@@ -81,6 +81,7 @@ public sealed class EditBatchTool : IToolHandler
             string? expectedHash = null;
             bool allowEmpty = false;
             bool dryRun = false;
+            bool includeDiff = false;
             string matchMode = "normalized";
             bool regexExpandGroups = false;
             JsonElement editsEl = default;
@@ -119,6 +120,11 @@ public sealed class EditBatchTool : IToolHandler
                     if (args.TryGetBool("regex_expand_groups", out bool rx))
                     {
                         regexExpandGroups = rx;
+                    }
+
+                    if (args.TryGetBool("include_diff", out bool idf))
+                    {
+                        includeDiff = idf;
                     }
 
                     if (root.TryGetProperty("edits", out JsonElement e))
@@ -265,12 +271,22 @@ public sealed class EditBatchTool : IToolHandler
                         ToolResult.FailCode(
                             "EXPECTED_HASH_MISMATCH",
                             $"EXPECTED_HASH_MISMATCH：目标文件已变化（当前文件 hash: {FileToolShared.TruncateHash(currentHash)}，完整 hash 请用 read_file 查看；期望: {want}）。请用 read_file 重新确认内容后重试，或不传 expected_hash。",
+                            JsonSerializer.Serialize(
+                                new
+                                {
+                                    ok = false,
+                                    code = "EXPECTED_HASH_MISMATCH",
+                                    expected = want,
+                                    actual = currentHash
+                                }
+                            ),
                             durationMs: sw.ElapsedMilliseconds
                         )
                     );
                 }
             }
 
+            bool expectedHashChecked = !string.IsNullOrWhiteSpace(expectedHash);
             if (mode == "lines")
             {
                 return ExecuteLinesBatch(
@@ -282,6 +298,8 @@ public sealed class EditBatchTool : IToolHandler
                     detected,
                     allowEmpty,
                     dryRun,
+                    includeDiff,
+                    expectedHashChecked,
                     context,
                     sw
                 );
@@ -298,6 +316,8 @@ public sealed class EditBatchTool : IToolHandler
                 regexExpandGroups,
                 allowEmpty,
                 dryRun,
+                includeDiff,
+                expectedHashChecked,
                 context,
                 sw
             );
@@ -326,6 +346,8 @@ public sealed class EditBatchTool : IToolHandler
         FileToolShared.DetectedText detected,
         bool allowEmpty,
         bool dryRun,
+        bool includeDiff,
+        bool expectedHashChecked,
         ToolContext context,
         Stopwatch sw
     )
@@ -469,9 +491,30 @@ public sealed class EditBatchTool : IToolHandler
 
         var order = items.Select((it, i) => (it, i)).OrderByDescending(t => t.it.Offset).ToList();
         string updated = raw;
-        foreach (var (it, _) in order)
+        var writeFacts = new List<WriteFact>();
+        foreach (var (it, itemIndex) in order)
         {
-            updated = ApplySingleLineEdit(updated, detected, it.Offset, it.Limit, it.NewText);
+            int beforeLength = updated.Length;
+            var (next, writeStart, writtenLen) = ApplySingleLineEdit(
+                updated,
+                detected,
+                it.Offset,
+                it.Limit,
+                it.NewText
+            );
+            // 倒序应用时，本步之前的所有 edit 都在更靠后位置，故 writeStart 即该 edit 的原文起点。
+            writeFacts.Add(
+                new WriteFact(
+                    itemIndex,
+                    writeStart,
+                    writeStart,
+                    writtenLen,
+                    it.Limit,
+                    next.Length - beforeLength,
+                    next.Substring(writeStart, writtenLen)
+                )
+            );
+            updated = next;
         }
 
         if (string.Equals(updated, raw, StringComparison.Ordinal))
@@ -517,43 +560,38 @@ public sealed class EditBatchTool : IToolHandler
         if (dryRun)
         {
             var preview = new StringBuilder();
-            preview.Append("DRY_RUN：行号批量预览（未写盘），共 ").Append(items.Count).AppendLine(" 处");
-            for (int i = 0; i < items.Count; i++)
-            {
-                preview.Append('[').Append(i).Append("] line ").Append(items[i].Offset);
-                if (items[i].Limit == 0)
-                {
-                    preview.Append(" insert@").Append(items[i].Offset);
-                }
-                else
-                {
-                    preview.Append("..").Append(items[i].Offset + items[i].Limit - 1);
-                }
-
-                preview.Append(" → ").AppendLine(SummarizeNewText(items[i].NewText));
-            }
-
-            if (diff.Length > 0)
-            {
-                preview.AppendLine("```diff").Append(diff);
-                if (!diff.EndsWith('\n'))
-                {
-                    preview.AppendLine();
-                }
-
-                preview.AppendLine("```");
-            }
-
-            preview.Append("hash_preview: ").AppendLine(newHash);
-            return Task.FromResult(
-                ToolResult.Ok(
-                    EditFileHelpers.ClampOutput(
-                        preview.ToString(),
-                        EditFileHelpers.MaxSuccessOutputChars
-                    ),
-                    durationMs: sw.ElapsedMilliseconds
-                )
+            preview
+                .Append("DRY_RUN：行号批量预览（未写盘），共 ")
+                .Append(items.Count)
+                .Append(" 处；Encoding: ")
+                .Append(detected.EncodingLabel)
+                .Append(", LineEndings: ")
+                .Append(detected.NewLineLabel)
+                .Append(", hash_preview: ")
+                .AppendLine(newHash);
+            var (dryDigest, dryJson) = CreateReceipt(
+                relative,
+                "lines",
+                true,
+                updated,
+                detected,
+                newHash,
+                expectedHashChecked,
+                null,
+                writeFacts,
+                raw
             );
+            preview.Append(dryDigest);
+            AppendDebugDiff(preview, diff, diffTruncated, includeDiff);
+            var dryOk = ToolResult.Ok(
+                EditFileHelpers.ClampOutput(
+                    preview.ToString(),
+                    EditFileHelpers.MaxSuccessOutputChars
+                ),
+                durationMs: sw.ElapsedMilliseconds
+            );
+            dryOk.SuccessPayloadJson = dryJson;
+            return Task.FromResult(dryOk);
         }
 
         string? backupShown = null;
@@ -614,44 +652,26 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         sb.AppendLine("）");
-        for (int i = 0; i < items.Count; i++)
-        {
-            sb.Append('[').Append(i).Append("] ");
-            if (items[i].Limit == 0)
-            {
-                sb.Append("insert@").Append(items[i].Offset);
-            }
-            else
-            {
-                sb.Append("line ")
-                    .Append(items[i].Offset)
-                    .Append("..")
-                    .Append(items[i].Offset + items[i].Limit - 1);
-            }
-
-            sb.Append(" → ").AppendLine(SummarizeNewText(items[i].NewText));
-        }
-
-        if (diff.Length > 0)
-        {
-            sb.AppendLine("```diff").Append(diff);
-            if (!diff.EndsWith('\n'))
-            {
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("```");
-        }
-
-        if (diffTruncated)
-        {
-            sb.AppendLine("[truncated: true] diff 已按预算截断，完整区间请用 read_file(offset, limit) 查看。");
-        }
+        var (receiptDigest, receiptJson) = CreateReceipt(
+            relative,
+            "lines",
+            false,
+            updated,
+            detected,
+            newHash,
+            expectedHashChecked,
+            backupShown,
+            writeFacts,
+            raw
+        );
+        sb.Append(receiptDigest);
+        AppendDebugDiff(sb, diff, diffTruncated, includeDiff);
 
         var ok = ToolResult.Ok(
             EditFileHelpers.ClampOutput(sb.ToString(), EditFileHelpers.MaxSuccessOutputChars),
             durationMs: sw.ElapsedMilliseconds
         );
+        ok.SuccessPayloadJson = receiptJson;
         try
         {
             ok.FileBytes = new FileInfo(fullPath).Length;
@@ -672,6 +692,8 @@ public sealed class EditBatchTool : IToolHandler
         bool regexExpandGroups,
         bool allowEmpty,
         bool dryRun,
+        bool includeDiff,
+        bool expectedHashChecked,
         ToolContext context,
         Stopwatch sw
     )
@@ -852,6 +874,15 @@ public sealed class EditBatchTool : IToolHandler
                         ToolResult.FailCode(
                             "ANCHOR_AMBIGUOUS",
                             $"ANCHOR_AMBIGUOUS：edits[{i}] 命中 {matches.Count} 处，batch 内禁用多命中，整单已拒绝。请加长锚点或改用 mode=lines。",
+                            JsonSerializer.Serialize(
+                                new
+                                {
+                                    ok = false,
+                                    code = "ANCHOR_AMBIGUOUS",
+                                    occurrences = matches.Count,
+                                    index = i
+                                }
+                            ),
                             durationMs: sw.ElapsedMilliseconds
                         )
                     );
@@ -907,6 +938,15 @@ public sealed class EditBatchTool : IToolHandler
                         ToolResult.FailCode(
                             "ANCHOR_AMBIGUOUS",
                             $"ANCHOR_AMBIGUOUS：edits[{i}] 命中 {hits.Count} 处，batch 内禁用多命中，整单已拒绝。请加长锚点或改用 mode=lines。",
+                            JsonSerializer.Serialize(
+                                new
+                                {
+                                    ok = false,
+                                    code = "ANCHOR_AMBIGUOUS",
+                                    occurrences = hits.Count,
+                                    index = i
+                                }
+                            ),
                             durationMs: sw.ElapsedMilliseconds
                         )
                     );
@@ -933,6 +973,7 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         string updated = raw;
+        var writeFacts = new List<WriteFact>();
         foreach (var (s, e, i) in spans.OrderByDescending(t => t.Start))
         {
             string replacement = anchors[i].NewString;
@@ -949,6 +990,18 @@ public sealed class EditBatchTool : IToolHandler
             string fileEol = detected.NewLine;
             string targetEol = spanEol ?? fileEol;
             string converted = FileToolShared.ConvertNewLines(replacement, targetEol);
+            int lengthDelta = converted.Length - (e - s);
+            writeFacts.Add(
+                new WriteFact(
+                    i,
+                    s,
+                    s,
+                    converted.Length,
+                    EditReceiptBuilder.CountSpanLines(raw, s, e),
+                    lengthDelta,
+                    converted
+                )
+            );
             updated = updated.Substring(0, s) + converted + updated.Substring(e);
         }
 
@@ -977,7 +1030,12 @@ public sealed class EditBatchTool : IToolHandler
         string newHash = FileToolShared.ComputeTextHash(updated, detected);
         var diffSpans = spans
             .OrderBy(t => t.Start)
-            .Select(t => new EditDiffBuilder.BatchSpan(LineOf(raw, t.Start), 1, 1))
+            .Select(t =>
+            {
+                int oldLines = EditReceiptBuilder.CountSpanLines(raw, t.Start, t.End);
+                int newLines = EditReceiptBuilder.CountTextLines(anchors[t.Index].NewString);
+                return new EditDiffBuilder.BatchSpan(LineOf(raw, t.Start), oldLines, newLines);
+            })
             .ToList();
         var (diff, diffTruncated) = EditDiffBuilder.BuildMulti(
             relative,
@@ -989,39 +1047,38 @@ public sealed class EditBatchTool : IToolHandler
         if (dryRun)
         {
             var preview = new StringBuilder();
-            preview.Append("DRY_RUN：锚点批量预览（未写盘），共 ").Append(anchors.Count).AppendLine(" 处");
-            for (int i = 0; i < anchors.Count; i++)
-            {
-                preview
-                    .Append('[')
-                    .Append(i)
-                    .Append("] anchor ")
-                    .Append(anchors[i].OldString.Length)
-                    .Append(" chars → ")
-                    .AppendLine(SummarizeNewText(anchors[i].NewString));
-            }
-
-            if (diff.Length > 0)
-            {
-                preview.AppendLine("```diff").Append(diff);
-                if (!diff.EndsWith('\n'))
-                {
-                    preview.AppendLine();
-                }
-
-                preview.AppendLine("```");
-            }
-
-            preview.Append("hash_preview: ").AppendLine(newHash);
-            return Task.FromResult(
-                ToolResult.Ok(
-                    EditFileHelpers.ClampOutput(
-                        preview.ToString(),
-                        EditFileHelpers.MaxSuccessOutputChars
-                    ),
-                    durationMs: sw.ElapsedMilliseconds
-                )
+            preview
+                .Append("DRY_RUN：锚点批量预览（未写盘），共 ")
+                .Append(anchors.Count)
+                .Append(" 处；Encoding: ")
+                .Append(detected.EncodingLabel)
+                .Append(", LineEndings: ")
+                .Append(detected.NewLineLabel)
+                .Append(", hash_preview: ")
+                .AppendLine(newHash);
+            var (dryDigest, dryJson) = CreateReceipt(
+                relative,
+                "text",
+                true,
+                updated,
+                detected,
+                newHash,
+                expectedHashChecked,
+                null,
+                writeFacts,
+                raw
             );
+            preview.Append(dryDigest);
+            AppendDebugDiff(preview, diff, diffTruncated, includeDiff);
+            var dryOk = ToolResult.Ok(
+                EditFileHelpers.ClampOutput(
+                    preview.ToString(),
+                    EditFileHelpers.MaxSuccessOutputChars
+                ),
+                durationMs: sw.ElapsedMilliseconds
+            );
+            dryOk.SuccessPayloadJson = dryJson;
+            return Task.FromResult(dryOk);
         }
 
         string? backupShown = null;
@@ -1082,36 +1139,26 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         sb.AppendLine("）");
-        for (int i = 0; i < anchors.Count; i++)
-        {
-            sb.Append('[')
-                .Append(i)
-                .Append("] anchor ")
-                .Append(anchors[i].OldString.Length)
-                .Append(" chars → ")
-                .AppendLine(SummarizeNewText(anchors[i].NewString));
-        }
-
-        if (diff.Length > 0)
-        {
-            sb.AppendLine("```diff").Append(diff);
-            if (!diff.EndsWith('\n'))
-            {
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("```");
-        }
-
-        if (diffTruncated)
-        {
-            sb.AppendLine("[truncated: true] diff 已按预算截断，完整区间请用 read_file(offset, limit) 查看。");
-        }
+        var (receiptDigest, receiptJson) = CreateReceipt(
+            relative,
+            "text",
+            false,
+            updated,
+            detected,
+            newHash,
+            expectedHashChecked,
+            backupShown,
+            writeFacts,
+            raw
+        );
+        sb.Append(receiptDigest);
+        AppendDebugDiff(sb, diff, diffTruncated, includeDiff);
 
         var ok = ToolResult.Ok(
             EditFileHelpers.ClampOutput(sb.ToString(), EditFileHelpers.MaxSuccessOutputChars),
             durationMs: sw.ElapsedMilliseconds
         );
+        ok.SuccessPayloadJson = receiptJson;
         try
         {
             ok.FileBytes = new FileInfo(fullPath).Length;
@@ -1147,7 +1194,7 @@ public sealed class EditBatchTool : IToolHandler
         return Math.Max(aStart, bStart) < Math.Min(aEnd, bEnd);
     }
 
-    private static string ApplySingleLineEdit(
+    private static (string Text, int WriteStart, int WrittenLength) ApplySingleLineEdit(
         string current,
         FileToolShared.DetectedText detected,
         int offset,
@@ -1222,7 +1269,9 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         rebuilt.Append(tail);
-        return rebuilt.ToString();
+        string finalText = rebuilt.ToString();
+        // 写入区间在最终文本中的起点即 head 长度；长度需扣除 head 与 tail。
+        return (finalText, head.Length, finalText.Length - head.Length - tail.Length);
     }
 
     private static bool EndsWithEol(string text) =>
@@ -1270,6 +1319,102 @@ public sealed class EditBatchTool : IToolHandler
         catch
         {
             return replacement;
+        }
+    }
+
+    /// <summary>写入某一步的事实；用于事后在最终文本上精确还原每个 edit 的落盘位置。</summary>
+    private sealed record WriteFact(
+        int Index, // 入参序号（回执保持入参顺序）
+        int OriginalStart, // 原文中的位置，仅用于按位置排序重算偏移
+        int WriteStartAtApply, // 应用时刻文本中的写入起点
+        int WrittenLength, // 写入文本长度（字符）
+        int ReplacedLines, // 被替换行数
+        int LengthDelta, // 该 edit 造成的文本长度净变化
+        string WrittenText // 实际写入文本（已转目标 EOL）
+    );
+
+    /// <summary>
+    /// 按位置序累加前置 edit 的长度变化，还原每个 edit 在最终文本中的起点，
+    /// 再按入参序号排序输出，保证 edits[i] 对应入参 i 且 at_lines 不串位。
+    /// </summary>
+    private static IReadOnlyList<EditReceiptBuilder.AppliedEdit> BuildAppliedEdits(
+        IReadOnlyList<WriteFact> facts,
+        string raw
+    )
+    {
+        var ordered = new List<(int Index, int FinalStart, WriteFact Fact)>();
+        int runningDelta = 0;
+        foreach (var f in facts.OrderBy(x => x.OriginalStart))
+        {
+            ordered.Add((f.Index, f.WriteStartAtApply + runningDelta, f));
+            runningDelta += f.LengthDelta;
+        }
+
+        return ordered
+            .OrderBy(t => t.Index)
+            .Select(t => new EditReceiptBuilder.AppliedEdit(
+                t.Index,
+                1,
+                t.FinalStart,
+                t.Fact.WrittenLength,
+                t.Fact.ReplacedLines,
+                t.Fact.WrittenText
+            ))
+            .ToList();
+    }
+
+    /// <summary>生成结构化回执与摘要；raw 仅用于替换行数口径，不改变落盘文本。</summary>
+    private static (string Digest, string PayloadJson) CreateReceipt(
+        string relative,
+        string mode,
+        bool dryRun,
+        string updated,
+        FileToolShared.DetectedText detected,
+        string hashAfter,
+        bool expectedHashChecked,
+        string? backup,
+        IReadOnlyList<WriteFact> facts,
+        string raw
+    )
+    {
+        var applied = BuildAppliedEdits(facts, raw);
+        var receipt = EditReceiptBuilder.Build(
+            relative,
+            mode,
+            dryRun,
+            updated,
+            detected,
+            hashAfter,
+            expectedHashChecked,
+            backup,
+            applied
+        );
+        return (EditReceiptBuilder.BuildDigest(receipt), receipt.ToJson());
+    }
+
+    /// <summary>默认不输出 diff（已被分块回执取代）；仅在显式 include_diff 时追加调试视图。</summary>
+    private static void AppendDebugDiff(
+        StringBuilder sb,
+        string diff,
+        bool diffTruncated,
+        bool includeDiff
+    )
+    {
+        if (!includeDiff || diff.Length == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine("```diff").Append(diff);
+        if (!diff.EndsWith('\n'))
+        {
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("```");
+        if (diffTruncated)
+        {
+            sb.AppendLine("[truncated: true] diff 已按预算截断，完整区间请用 read_file(offset, limit) 查看。");
         }
     }
 
