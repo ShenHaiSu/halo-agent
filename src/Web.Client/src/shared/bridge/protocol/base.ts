@@ -53,6 +53,30 @@ export interface StorageValidationResult {
   reasonCode?: string | null;
   message: string;
   availableFreeSpaceMb: number;
+  requiredSpaceMb: number;
+  targetNonEmpty: boolean;
+  riskCode?: string | null;
+}
+
+/** 单个受管子目录的存储占用明细。 */
+export interface StorageBreakdownItem {
+  name: string;
+  sizeBytes: number;
+  fileCount: number;
+}
+
+/** 数据根目录按子目录聚合的存储分布。 */
+export interface StorageBreakdown {
+  rootPath: string;
+  totalBytes: number;
+  items: StorageBreakdownItem[];
+}
+
+/** 持久化的存储事件记录（后端 jsonl 每行结构）。 */
+export interface StorageEventDto {
+  type: string;
+  payload: Record<string, unknown> | null;
+  timestamp: number;
 }
 
 export interface StorageMigrationResult {
