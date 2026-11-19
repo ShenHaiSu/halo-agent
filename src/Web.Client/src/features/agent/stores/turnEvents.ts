@@ -166,6 +166,12 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   }
   dirtyPersisted.value[sid] = false;
   await reloadNow(sid);
+  // 落盘对账完成后才允许稳态块上屏：只对进入交接窗的轮次置就绪。
+  // 失败重试 / 取消路径没有交接窗，必须保持未就绪，由常规路径直接渲染稳态。
+  if (willDefer) {
+    t.steadyReady = true;
+    touch(t);
+  }
   try {
     agentRuntime().reconcileTimes();
   } catch (e) {
@@ -189,6 +195,7 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     t.streamingReasoning = '';
     t.streamingActive = false;
     t.liveCompleting = false;
+    t.steadyReady = false;
     dropSegBuf(sid);
     touch(t);
   };

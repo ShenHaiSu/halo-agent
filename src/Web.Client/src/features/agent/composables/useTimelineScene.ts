@@ -102,6 +102,9 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
     get liveCompleting() {
       return !!t.liveCompleting;
     },
+    get steadyReady() {
+      return !!t.steadyReady;
+    },
     get handoffAnim() {
       return !!t.handoffAnim;
     },

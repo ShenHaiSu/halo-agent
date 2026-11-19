@@ -119,6 +119,7 @@ export function useTimelineViewModel() {
     need02Flags,
     need02Attr,
     liveCompleting: computed(() => turn.activeTurn?.liveCompleting === true),
+    steadyReady: computed(() => turn.activeTurn?.steadyReady === true),
     handoffAnim: computed(() => need02Flags.p3),
     noticeInTurn: computed(() => need02Flags.p4),
     isRunExpanded: expansion.isRunExpanded,

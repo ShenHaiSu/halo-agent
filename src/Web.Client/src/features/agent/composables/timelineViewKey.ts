@@ -65,6 +65,7 @@ export interface TimelineViewModel {
   streamMdKillSwitch: boolean;
   readingWindow: boolean;
   liveCompleting: boolean;
+  steadyReady: boolean;
   handoffAnim: boolean;
   singleProcess: boolean;
   noticeInTurn: boolean;
@@ -132,6 +133,7 @@ export function timelineViewFallback(): TimelineViewModel {
     streamMdKillSwitch: false,
     readingWindow: false,
     liveCompleting: false,
+    steadyReady: false,
     handoffAnim: true,
     singleProcess: true,
     noticeInTurn: false,
