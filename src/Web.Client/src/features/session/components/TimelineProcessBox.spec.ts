@@ -445,3 +445,63 @@ describe('盒内渲染序', () => {
     expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+describe('TimelineProcessBox 右键菜单事件', () => {
+  it('用户气泡右键 emit user-menu 并带 turnId', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ userContent: '这是用户消息' }) },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    const bubble = wrapper.find('.turn-user-slot > div');
+    expect(bubble.exists()).toBe(true);
+    await bubble.trigger('contextmenu');
+    const events = wrapper.emitted('user-menu');
+    expect(events).toBeTruthy();
+    expect((events![0] as unknown[])[1]).toBe('uturn-u1');
+  });
+
+  it('最终正文（markdown 形态）右键 emit assistant-menu', async () => {
+    getBlockContentsMock.mockResolvedValue({
+      items: {
+        bfinal1: { blockId: 'bfinal1', kind: 'text', tag: 'final', markdown: '```js\nconst a=1;\n```', preview: '', truncated: false },
+      },
+      missing: [],
+    });
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn() },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    const finalEl = wrapper.find('[data-testid="timeline-final-uturn-u1"]');
+    expect(finalEl.exists()).toBe(true);
+    await finalEl.trigger('contextmenu');
+    const events = wrapper.emitted('assistant-menu');
+    expect(events).toBeTruthy();
+    expect((events![0] as unknown[])[1]).toBe('uturn-u1');
+  });
+
+  it('最终正文（preview 形态）右键 emit assistant-menu', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '预览文本' }) },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    const finalEl = wrapper.find('[data-testid="timeline-final-uturn-u1"]');
+    expect(finalEl.exists()).toBe(true);
+    await finalEl.trigger('contextmenu');
+    const events = wrapper.emitted('assistant-menu');
+    expect(events).toBeTruthy();
+    expect((events![0] as unknown[])[1]).toBe('uturn-u1');
+  });
+
+  it('无正文态右键仍 emit assistant-menu', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    await wrapper.find('[data-testid="timeline-final-empty-uturn-u1"]').trigger('contextmenu');
+    expect(wrapper.emitted('assistant-menu')).toBeTruthy();
+  });
+});

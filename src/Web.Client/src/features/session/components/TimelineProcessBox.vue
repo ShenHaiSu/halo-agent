@@ -14,6 +14,7 @@
     <div v-if="turn.userContent || turn.userPreview" class="flex justify-end turn-user-slot">
       <div
         class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
+        @contextmenu.prevent="emit('user-menu', $event, turn.turnId)"
       >
         {{ turn.userContent || turn.userPreview }}
       </div>
@@ -88,6 +89,7 @@
       v-if="hasFinalBlock"
       class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
       :data-testid="`timeline-final-${turn.turnId}`"
+      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
     >
       <div v-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
         全文加载中…<span v-if="turn.finalPreview" class="opacity-70">{{ turn.finalPreview }}</span>
@@ -108,10 +110,16 @@
       v-else-if="turn.finalPreview"
       class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
       :data-testid="`timeline-final-${turn.turnId}`"
+      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
     >
       {{ turn.finalPreview }}
     </div>
-    <div v-else class="mt-1 text-[12px] text-secondary turn-final-slot" :data-testid="`timeline-final-empty-${turn.turnId}`">
+    <div
+      v-else
+      class="mt-1 text-[12px] text-secondary turn-final-slot"
+      :data-testid="`timeline-final-empty-${turn.turnId}`"
+      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
+    >
       本轮无正文，{{ turn.tools }} 个工具
     </div>
   </div>
@@ -141,6 +149,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'expand-change', turnId: string, expanded: boolean): void;
+  (e: 'user-menu', ev: MouseEvent, turnId: string): void;
+  (e: 'assistant-menu', ev: MouseEvent, turnId: string): void;
 }>();
 
 const expanded = ref(false);
