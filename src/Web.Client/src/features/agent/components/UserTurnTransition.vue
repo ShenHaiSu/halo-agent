@@ -26,14 +26,16 @@ const props = defineProps<{
   completing?: boolean;
   /** P3 开关（false = P2 硬切：直接切换，无动画）。readingWindow 期调用方直接传 false（暂停交接动画）。 */
   animOn?: boolean;
+  /** 稳态数据未就位时保持进行态可见且不淡出。 */
+  forceLive?: boolean;
 }>();
 
 /** 动画总开关（p3；false = P2 硬切：交接窗内直接切终态，不共存叠加）。缺省开。 */
 const animOnEff = computed(() => props.animOn !== false);
-/** 流容器可见性：运行中全程可见；交接窗内仅动画开时与终态共存做交叉淡出（P3 编排）。 */
-const showLive = computed(() => !!props.running || (!!props.completing && animOnEff.value));
-/** 淡入淡出类：仅 completing + 运行已熄 + 动画开（CSS 另以 [data-handoff=on] 双保险）。 */
-const isFading = computed(() => !!props.completing && !props.running && animOnEff.value);
+/** 流容器可见性：运行中全程可见；交接窗内仅动画开时与终态共存做交叉淡出；数据未就位时强制保持。 */
+const showLive = computed(() => !!props.running || (!!props.completing && animOnEff.value) || !!props.forceLive);
+/** 淡入淡出类：仅 completing + 运行已熄 + 动画开 + 数据已就位（CSS 另以 [data-handoff=on] 双保险）。 */
+const isFading = computed(() => !!props.completing && !props.running && animOnEff.value && !props.forceLive);
 </script>
 <style scoped>
 .uturn-handoff {

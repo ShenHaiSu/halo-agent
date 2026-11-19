@@ -1,6 +1,7 @@
 <template>
   <div class="turn-body turn-steady-stack min-w-0">
     <UserTurnSummary
+      v-if="hasSummary"
       class="turn-process-slot"
       :turn="turn"
       :expanded="expanded"
@@ -74,6 +75,7 @@ import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
 import ReasoningText from '@shared/ui/ReasoningText.vue';
 import { trimBlankEdges } from '@shared/utils/trimBlank';
 import UserTurnSteady from './UserTurnSteady.vue';
+import { steadyTurnHasContent } from '@features/agent/utils/steadyReady';
 import { timelineViewFallback, useTimelineViewOptional, type TimelineLiveSeg } from '@features/agent/composables/timelineViewKey';
 
 /** 稳态多步体：上折叠行 + 早轮列表 + 轮内流式尾槽 + 末段直出，工具卡经视图模型派生。 */
@@ -94,6 +96,8 @@ const emit = defineEmits<{
 
 const view = computed(() => useTimelineViewOptional() ?? timelineViewFallback());
 const readingWindow = computed(() => view.value.readingWindow);
+// 无可展开内容时不渲染折叠行（与流态空卡守卫同源），避免点开空白。
+const hasSummary = computed(() => steadyTurnHasContent(props.turn));
 const killSwitch = computed(() => view.value.streamMdKillSwitch);
 const showTail = computed(() => view.value.singleProcess && props.tailSegs.length > 0);
 

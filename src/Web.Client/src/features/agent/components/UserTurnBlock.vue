@@ -10,7 +10,12 @@
       />
     </div>
 
-    <UserTurnTransition :running="turn.isRunning && !readingWindow" :completing="completingEffective" :anim-on="handoffAnimOn">
+    <UserTurnTransition
+      :running="turn.isRunning && !readingWindow"
+      :completing="completingEffective"
+      :force-live="completingEffective && !steadyGateOpen"
+      :anim-on="handoffAnimOn"
+    >
       <template #live>
         <UserTurnLiveBody :segs="liveSegs" :is-generating="!!isGenerating" @link-click="emit('link-click', $event)" />
       </template>
@@ -43,6 +48,7 @@
 import { computed } from 'vue';
 import type { ChatImageRef } from '@shared/bridge/hostBridge';
 import { earlierSteps, isSingleFlatTurn, lastStepContent, type UserTurn } from '@features/session/utils/userTurn';
+import { steadyTurnHasContent } from '@features/agent/utils/steadyReady';
 import { pendingTailSlot } from '@features/session/utils/turnRender';
 import UserBubble from './userturn/UserBubble.vue';
 import UserTurnLiveBody from './userturn/UserTurnLiveBody.vue';
@@ -77,7 +83,10 @@ const readingWindow = computed(() => view.value.readingWindow);
 const isFlat = computed(() => isSingleFlatTurn(props.turn));
 const completingEffective = computed(() => !!props.liveCompleting && !readingWindow.value);
 const handoffAnimOn = computed(() => props.handoffAnim !== false);
-const showSteady = computed(() => !props.turn.isRunning || completingEffective.value || readingWindow.value);
+const steadyReady = computed(() => !!view.value.steadyReady);
+// 交接窗内必须等数据齐备且投影确有内容才切稳态，否则保持进行态摘要。
+const steadyGateOpen = computed(() => completingEffective.value && steadyReady.value && steadyTurnHasContent(props.turn));
+const showSteady = computed(() => !props.turn.isRunning || steadyGateOpen.value || readingWindow.value);
 const lastContent = computed(() => lastStepContent(props.turn));
 const earlier = computed(() => earlierSteps(props.turn));
 const liveSegs = computed<TimelineLiveSeg[]>(() => (Array.isArray(props.liveSegs) ? props.liveSegs : []));
