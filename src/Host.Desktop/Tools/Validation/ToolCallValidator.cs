@@ -262,7 +262,8 @@ public static partial class ToolCallValidator
                     S("allow_overwrite", "boolean"),
                     S("expected_hash"),
                     S("max_bytes", "integer", maximum: 1000000),
-                    S("dry_run", "boolean")
+                    S("dry_run", "boolean"),
+                    S("eol", enums: new[] { "auto", "crlf", "lf" })
                 ),
             },
             ["edit_batch"] = new ToolSchemaSpec

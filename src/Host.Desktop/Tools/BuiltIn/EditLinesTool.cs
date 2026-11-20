@@ -269,7 +269,7 @@ public sealed partial class EditLinesTool : IToolHandler
                 );
             }
 
-            string eol = blockEol ?? detected.NewLine;
+            string eol = detected.IsMixedEol ? detected.NewLine : (blockEol ?? detected.NewLine);
 
             bool needTrailingEol;
             if (tail.Length > 0)

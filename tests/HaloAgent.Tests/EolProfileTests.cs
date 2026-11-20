@@ -106,4 +106,50 @@ public sealed class EolProfileTests
         Assert.NotNull(warn);
         Assert.Contains("CRLF -> CRLF", warn!);
     }
+
+    [Fact]
+    public void DominantNewLine_MajorityCrlf_Wins()
+    {
+        var p = FileToolShared.EolProfile.Of("a\r\nb\r\nc\r\nd\ne\nf\n");
+        Assert.Equal("\r\n", p.DominantNewLine);
+        Assert.Equal("CRLF", p.DominantLabel);
+        Assert.True(p.IsMixed);
+    }
+
+    [Fact]
+    public void DominantNewLine_MajorityBareCr_Wins()
+    {
+        var p = FileToolShared.EolProfile.Of("a\rb\rc\rd\ne\n");
+        Assert.Equal("\r", p.DominantNewLine);
+        Assert.Equal("CR", p.DominantLabel);
+        Assert.True(p.IsMixed);
+    }
+
+    [Fact]
+    public void DominantNewLine_MajorityLf_Wins()
+    {
+        var p = FileToolShared.EolProfile.Of("a\r\nb\nc\nd\ne\nf\n");
+        Assert.Equal("\n", p.DominantNewLine);
+        Assert.Equal("LF", p.DominantLabel);
+        Assert.True(p.IsMixed);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("single line without break")]
+    public void DominantNewLine_NoNewLine_DefaultsToLf(string text)
+    {
+        var p = FileToolShared.EolProfile.Of(text);
+        Assert.Equal("\n", p.DominantNewLine);
+        Assert.Equal("LF", p.DominantLabel);
+        Assert.False(p.IsMixed);
+    }
+
+    [Fact]
+    public void DominantLabel_PureCr_IsCr()
+    {
+        var p = FileToolShared.EolProfile.Of("a\rb\r");
+        Assert.Equal("CR", p.DominantLabel);
+        Assert.False(p.IsMixed);
+    }
 }

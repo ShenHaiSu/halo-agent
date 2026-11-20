@@ -18,6 +18,7 @@ internal static class FileToolShared
         public string EncodingLabel { get; init; } = "UTF-8";
         public string NewLine { get; init; } = "\n";
         public string NewLineLabel { get; init; } = "LF";
+        public bool IsMixedEol { get; init; }
         public byte[] Preamble { get; init; } = Array.Empty<byte>();
     }
 
@@ -36,6 +37,36 @@ internal static class FileToolShared
                     : BareCr > 0
                         ? "CR"
                         : "LF";
+
+        /// <summary>
+        /// 多数票给出的主风格换行串；无换行时保持默认 LF，避免空文件或单行文件风格漂移。
+        /// </summary>
+        public string DominantNewLine
+        {
+            get
+            {
+                if (Crlf == 0 && BareLf == 0 && BareCr == 0)
+                {
+                    return "\n";
+                }
+
+                if (Crlf >= BareLf && Crlf >= BareCr)
+                {
+                    return "\r\n";
+                }
+
+                return BareLf >= BareCr ? "\n" : "\r";
+            }
+        }
+
+        /// <summary>主风格展示标签（三元化 CRLF / LF / CR）。</summary>
+        public string DominantLabel =>
+            DominantNewLine switch
+            {
+                "\r\n" => "CRLF",
+                "\r" => "CR",
+                _ => "LF",
+            };
 
         /// <summary>
         /// 扫描文本统计三类换行（CRLF 只计一次，不重复计入裸 CR / 裸 LF）。
@@ -140,14 +171,16 @@ internal static class FileToolShared
                 ? encoding.GetString(raw, contentOffset, raw.Length - contentOffset)
                 : encoding.GetString(raw);
 
-        string newLine = content.Contains("\r\n") ? "\r\n" : "\n";
+        EolProfile profile = EolProfile.Of(content);
+        string newLine = profile.DominantNewLine;
         return new DetectedText
         {
             Content = content,
             Encoding = encoding,
             EncodingLabel = label,
             NewLine = newLine,
-            NewLineLabel = newLine == "\r\n" ? "CRLF" : "LF",
+            NewLineLabel = profile.DominantLabel,
+            IsMixedEol = profile.IsMixed,
             Preamble = preamble,
         };
     }

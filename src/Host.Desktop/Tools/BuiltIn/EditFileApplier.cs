@@ -206,8 +206,9 @@ internal static class EditFileApplier
                 (int start, int end, string replacement) in edits.OrderByDescending(e => e.Start)
             )
             {
-                string eol =
-                    EditFileHelpers.DetectSpanEol(req.Raw, start, end) ?? req.Detected.NewLine;
+                string eol = req.Detected.IsMixedEol
+                    ? req.Detected.NewLine
+                    : (EditFileHelpers.DetectSpanEol(req.Raw, start, end) ?? req.Detected.NewLine);
                 string text = FileToolShared.ConvertNewLines(replacement, eol);
                 updated.Remove(start, end - start).Insert(start, text);
             }

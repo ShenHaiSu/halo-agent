@@ -1003,7 +1003,7 @@ public sealed class EditBatchTool : IToolHandler
 
             string? spanEol = EditFileHelpers.DetectSpanEol(raw, s, e);
             string fileEol = detected.NewLine;
-            string targetEol = spanEol ?? fileEol;
+            string targetEol = detected.IsMixedEol ? fileEol : (spanEol ?? fileEol);
             string converted = FileToolShared.ConvertNewLines(replacement, targetEol);
             int lengthDelta = converted.Length - (e - s);
             writeFacts.Add(
@@ -1251,7 +1251,7 @@ public sealed class EditBatchTool : IToolHandler
             blockEol = current.Substring(ln.Start + ln.ContentLength, ln.EolLength);
         }
 
-        string eol = blockEol ?? detected.NewLine;
+        string eol = detected.IsMixedEol ? detected.NewLine : (blockEol ?? detected.NewLine);
         bool needLeadingEol = startIdx >= totalLines && head.Length > 0 && !EndsWithEol(head);
         bool needTrailingEol;
         if (tail.Length > 0)

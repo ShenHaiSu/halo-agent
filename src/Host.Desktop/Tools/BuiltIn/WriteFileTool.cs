@@ -58,6 +58,12 @@ public sealed class WriteFileTool : IToolHandler
                 maximum: 1000000
             )
             .AddBoolean("dry_run", "If true, only validate and preview without writing.")
+            .AddString(
+                "eol",
+                "Newline style for a newly created file: auto (workspace convention, CRLF fallback), crlf, or lf. Overwrites always inherit the existing file style.",
+                enumValues: new[] { "auto", "crlf", "lf" },
+                defaultValue: "auto"
+            )
             .Build();
         return new(Name, Description, schema);
     }
@@ -78,6 +84,7 @@ public sealed class WriteFileTool : IToolHandler
             string? expectedHash = null;
             int? maxBytesReq = null;
             bool dryRun = false;
+            string? eolArg = null;
             try
             {
                 using var args = ToolArgs.Parse(call.ArgumentsJson);
@@ -111,6 +118,8 @@ public sealed class WriteFileTool : IToolHandler
                     {
                         dryRun = dry;
                     }
+
+                    eolArg = args.GetString("eol");
                 }
             }
             catch (JsonException ex)
@@ -276,8 +285,18 @@ public sealed class WriteFileTool : IToolHandler
             }
             else
             {
-                // 新建文件：仍受硬上限保护（防 OOM），默认上限不拦截新建以保持兼容
-                long contentBytes = Encoding.UTF8.GetByteCount(content);
+                // 新建文件：按目标风格归一化换行（auto 走工作区约定，兜底 CRLF）
+                string target = ResolveEolForNewFile(eolArg, workspaceRoot, detected: null);
+                payload = FileToolShared.ConvertNewLines(payload, target);
+                newLineLabel =
+                    target == "\r\n"
+                        ? "CRLF"
+                        : target == "\r"
+                            ? "CR"
+                            : "LF";
+
+                // 仍受硬上限保护（防 OOM），默认上限不拦截新建以保持兼容
+                long contentBytes = encoding.GetByteCount(payload);
                 if (contentBytes > HardMaxWriteBytes)
                 {
                     return Task.FromResult(
@@ -454,5 +473,181 @@ public sealed class WriteFileTool : IToolHandler
         catch { }
 
         return bakAbsPath;
+    }
+
+    /// <summary>
+    /// 解析新建文件的目标换行：显式 eol 优先；auto 时扫描工作区样本或读 .gitattributes，兜底 CRLF。
+    /// </summary>
+    internal static string ResolveEolForNewFile(
+        string? eolArg,
+        string workspaceRoot,
+        FileToolShared.DetectedText? detected
+    )
+    {
+        if (detected != null)
+        {
+            return detected.NewLine;
+        }
+
+        string requested = string.IsNullOrWhiteSpace(eolArg)
+            ? "auto"
+            : eolArg!.Trim().ToLowerInvariant();
+        switch (requested)
+        {
+            case "crlf":
+                return "\r\n";
+            case "lf":
+                return "\n";
+            case "cr":
+                return "\r";
+            default:
+                string fromWorkspace = DetectWorkspaceEol(workspaceRoot);
+                return string.IsNullOrEmpty(fromWorkspace) ? "\r\n" : fromWorkspace;
+        }
+    }
+
+    /// <summary>
+    /// 采样工作区文本文件推断主流换行；样本上限受控，无法判定返回空串交给调用方兜底。
+    /// </summary>
+    private static string DetectWorkspaceEol(string workspaceRoot)
+    {
+        const int SampleLimit = 64;
+        string fromAttributes = ReadEolFromGitAttributes(workspaceRoot);
+        if (!string.IsNullOrEmpty(fromAttributes))
+        {
+            return fromAttributes;
+        }
+
+        if (string.IsNullOrWhiteSpace(workspaceRoot) || !Directory.Exists(workspaceRoot))
+        {
+            return string.Empty;
+        }
+
+        string[] extensions = new[] { ".cs", ".ts", ".tsx", ".js", ".jsx", ".vue", ".json", ".py" };
+        int sampled = 0;
+        int crlf = 0;
+        int lf = 0;
+        int cr = 0;
+        try
+        {
+            foreach (
+                string file in Directory.EnumerateFiles(
+                    workspaceRoot,
+                    "*",
+                    SearchOption.TopDirectoryOnly
+                )
+            )
+            {
+                if (sampled >= SampleLimit)
+                {
+                    break;
+                }
+
+                string ext = Path.GetExtension(file);
+                if (Array.IndexOf(extensions, ext) < 0 || FileToolShared.LooksBinary(file))
+                {
+                    continue;
+                }
+
+                string text;
+                try
+                {
+                    text = File.ReadAllText(file);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var profile = FileToolShared.EolProfile.Of(text);
+                if (profile.Crlf + profile.BareLf + profile.BareCr == 0)
+                {
+                    continue;
+                }
+
+                sampled++;
+                crlf += profile.Crlf;
+                lf += profile.BareLf;
+                cr += profile.BareCr;
+            }
+        }
+        catch
+        {
+            return string.Empty;
+        }
+
+        if (sampled == 0)
+        {
+            return string.Empty;
+        }
+
+        return crlf >= lf && crlf >= cr
+            ? "\r\n"
+            : lf >= cr
+                ? "\n"
+                : "\r";
+    }
+
+    /// <summary>
+    /// 读取仓库根 .gitattributes 的全局 eol= 约定；只认作用于全部文本的规则，避免误伤例外文件。
+    /// </summary>
+    private static string ReadEolFromGitAttributes(string workspaceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            return string.Empty;
+        }
+
+        string path = Path.Combine(workspaceRoot, ".gitattributes");
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            foreach (string raw in File.ReadLines(path))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // 只解析 "* text=auto eol=..." 这类全局规则；带具体 glob 的例外跳过。
+                if (!line.StartsWith("* ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                int idx = line.IndexOf("eol=", StringComparison.OrdinalIgnoreCase);
+                if (idx < 0)
+                {
+                    continue;
+                }
+
+                string value = line.Substring(idx + "eol=".Length).Trim();
+                if (value.StartsWith("crlf", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "\r\n";
+                }
+
+                if (value.StartsWith("lf", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "\n";
+                }
+
+                if (value.StartsWith("cr", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "\r";
+                }
+            }
+        }
+        catch
+        {
+            return string.Empty;
+        }
+
+        return string.Empty;
     }
 }
