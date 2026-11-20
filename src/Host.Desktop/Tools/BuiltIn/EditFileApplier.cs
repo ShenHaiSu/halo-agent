@@ -213,6 +213,11 @@ internal static class EditFileApplier
             }
 
             string updatedText = updated.ToString();
+            string? eolWarn = FileToolShared.EolProfile.DescribeChange(
+                req.Raw,
+                updatedText,
+                req.Detected.NewLineLabel
+            );
             string newHashPreview = FileToolShared.ComputeTextHash(updatedText, req.Detected);
 
             var (diff, diffTruncated) = EditDiffBuilder.Build(
@@ -237,6 +242,11 @@ internal static class EditFileApplier
                     }
 
                     preview.AppendLine("```");
+                }
+
+                if (eolWarn != null)
+                {
+                    preview.AppendLine(eolWarn);
                 }
 
                 preview.Append("hash_preview: ").AppendLine(newHashPreview);
@@ -302,6 +312,11 @@ internal static class EditFileApplier
 
             // ---------- R4：成功回吐截断 ----------
             var sb = new StringBuilder();
+            if (eolWarn != null)
+            {
+                sb.AppendLine(eolWarn);
+            }
+
             if (req.ReplaceAll && matchCount >= EditFileHelpers.MaxBulkWarnThreshold)
             {
                 sb.Append("WARN_BULK_EDITS：本次替换 ").Append(matchCount).Append(" 处，请核对 diff。\n");

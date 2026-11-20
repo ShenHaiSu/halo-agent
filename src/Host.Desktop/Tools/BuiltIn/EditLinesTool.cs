@@ -319,6 +319,11 @@ public sealed partial class EditLinesTool : IToolHandler
 
             rebuilt.Append(tail);
             string updatedText = rebuilt.ToString();
+            string? eolWarn = FileToolShared.EolProfile.DescribeChange(
+                raw,
+                updatedText,
+                detected.NewLineLabel
+            );
 
             if (string.Equals(updatedText, raw, StringComparison.Ordinal))
             {
@@ -361,6 +366,11 @@ public sealed partial class EditLinesTool : IToolHandler
                     }
 
                     preview.AppendLine("```");
+                }
+
+                if (eolWarn != null)
+                {
+                    preview.AppendLine(eolWarn);
                 }
 
                 preview.Append("hash_preview: ").AppendLine(newHash);
@@ -422,6 +432,11 @@ public sealed partial class EditLinesTool : IToolHandler
             }
 
             var sb = new StringBuilder();
+            if (eolWarn != null)
+            {
+                sb.AppendLine(eolWarn);
+            }
+
             sb.Append("已按行号修改 '")
                 .Append(relative)
                 .Append("'（line ")

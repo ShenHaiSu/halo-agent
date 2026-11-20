@@ -22,6 +22,70 @@ internal static class FileToolShared
     }
 
     /// <summary>
+    /// 换行符画像：统计 CRLF / 裸 LF / 裸 CR 三类计数，用于写回前后对照与混合风格判定。
+    /// </summary>
+    internal readonly record struct EolProfile(int Crlf, int BareLf, int BareCr)
+    {
+        public bool IsMixed => (Crlf > 0 ? 1 : 0) + (BareLf > 0 ? 1 : 0) + (BareCr > 0 ? 1 : 0) > 1;
+
+        public string Label =>
+            IsMixed
+                ? $"Mixed(CRLF {Crlf}/LF {BareLf}/CR {BareCr})"
+                : Crlf > 0
+                    ? "CRLF"
+                    : BareCr > 0
+                        ? "CR"
+                        : "LF";
+
+        /// <summary>
+        /// 扫描文本统计三类换行（CRLF 只计一次，不重复计入裸 CR / 裸 LF）。
+        /// </summary>
+        public static EolProfile Of(string text)
+        {
+            int crlf = 0,
+                lf = 0,
+                cr = 0;
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] == '\r')
+                {
+                    if (i + 1 < text.Length && text[i + 1] == '\n')
+                    {
+                        crlf++;
+                        i++;
+                    }
+                    else
+                    {
+                        cr++;
+                    }
+                }
+                else if (text[i] == '\n')
+                {
+                    lf++;
+                }
+            }
+
+            return new EolProfile(crlf, lf, cr);
+        }
+
+        /// <summary>
+        /// 生成写回前后的换行风格变化告警；风格一致时返回 null。
+        /// </summary>
+        public static string? DescribeChange(
+            string beforeText,
+            string afterText,
+            string targetLabel
+        )
+        {
+            EolProfile before = Of(beforeText);
+            EolProfile after = Of(afterText);
+            return before.Equals(after)
+                ? null
+                : $"WARN_EOL_CHANGED: {before.Label} -> {after.Label}（目标 {targetLabel}）";
+        }
+    }
+
+    /// <summary>
     /// 读取全文并探测编码与换行符。调用方需先做二进制检测与存在性校验。
     /// </summary>
     internal static DetectedText ReadAllTextWithDetection(string fullPath)
