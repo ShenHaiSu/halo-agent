@@ -126,6 +126,8 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   const sid = (targetSessionId ?? activeSessionId.value).trim();
   if (!sid) return;
   const t = ensureTurn(sid);
+  const finishMark = turnStartMarks[sid] || 0;
+  const finishPendingId = String(t.pendingUser?.requestId || '');
   try {
     flushSegBufSync(sid);
   } catch (e) {
@@ -166,6 +168,33 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   }
   dirtyPersisted.value[sid] = false;
   await reloadNow(sid);
+  // 落盘对账完成后才允许稳态块上屏：只对进入交接窗的轮次置就绪。
+  // 失败重试 / 取消路径没有交接窗，必须保持未就绪，由常规路径直接渲染稳态。
+  if (willDefer) {
+    t.steadyReady = true;
+    touch(t);
+  }
+  // 轮末收口：稳态已就位，乐观发送态必多余，直接清理，避免常驻。
+  // 可重试失败保留失败态供重发；旧定时器不得清理新轮待发送态。
+  try {
+    if ((turnStartMarks[sid] || 0) === finishMark) {
+      const cur = t.pendingUser;
+      if (cur && (!finishPendingId || String(cur.requestId || '') === finishPendingId)) {
+        const keep = !!(opts?.keepOnFailure && t.lastErrorInfo?.retry);
+        if (!keep) {
+          t.pendingUser = null;
+          touch(t);
+          try {
+            need02Debug('pending-drop-finish', { requestId: finishPendingId });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch {
+    /* 清理永不阻断轮末 */
+  }
   try {
     agentRuntime().reconcileTimes();
   } catch (e) {
@@ -182,6 +211,7 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   // 交接埋点（DEV 限定，供量化）：handoff {requestId, liveMs, steadyMs}。
   const doClear = (): void => {
     t.toolCards = [];
+    t.graduatedCards = [];
     t.toolCardIndex = {};
     t.segs = [];
     t.curIteration = 0;
@@ -189,6 +219,7 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     t.streamingReasoning = '';
     t.streamingActive = false;
     t.liveCompleting = false;
+    t.steadyReady = false;
     dropSegBuf(sid);
     touch(t);
   };

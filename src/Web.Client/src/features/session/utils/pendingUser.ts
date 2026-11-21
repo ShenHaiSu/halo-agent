@@ -1,3 +1,4 @@
+// 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
 // need02-P1：乐观 user 纯函数（与 store 解耦，可单测；禁止调 bridge/DOM）。
 // 语义来源：docs/need-02/03 §3.1 + 04-P1 §对账规则 + 05 R2–R4。
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
@@ -140,28 +141,6 @@ export function matchConfirmedBySummary(
     }
   }
   return null;
-}
-
-/**
- * overlay 用合成消息（仅视图层，不写 jsonl）：
- * id = pending.key（timeline key `u-<key>` 全程稳定，DOM 不重建）；
- * images 原样带本地存根 + previews 供 thumb 直出。
- */
-export function toPendingMessage(pending: PendingUser): UnifiedChatMessage {
-  return {
-    id: pending.key,
-    role: 'user',
-    content: pending.content,
-    reasoningContent: null,
-    toolCalls: null,
-    toolCallId: null,
-    name: null,
-    inputTokens: null,
-    outputTokens: null,
-    cachedTokens: null,
-    createdAtUtc: pending.createdAtUtc,
-    images: pending.images.slice(),
-  } as UnifiedChatMessage;
 }
 
 /** pending 期缩略图直出（本地 dataURL），转正后走正常懒取。 */

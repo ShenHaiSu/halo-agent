@@ -127,7 +127,15 @@ public sealed partial class HostBridgeFacade
                     try
                     {
                         await AgentOrchestrator
-                            .RunAgentTurnAsync(wsId, sessId, prompt, provId, modId, cts.Token)
+                            .RunAgentTurnAsync(
+                                wsId,
+                                sessId,
+                                prompt,
+                                provId,
+                                modId,
+                                cts.Token,
+                                turnRequestId: turnRequestId
+                            )
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)

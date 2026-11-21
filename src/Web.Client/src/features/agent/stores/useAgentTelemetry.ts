@@ -1,13 +1,10 @@
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
 import { haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
-import { buildUserTurns, buildUserTurnsIncremental, createUserTurnsCache, type TimelineEntry } from '@shared/utils/turnGroup';
-import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import {
   activeSessionId,
   ensureSessionSync,
   ensureTurn,
-  persistedMessages,
   resolveTargetSession,
   touch,
   type AgentTelemetry,
@@ -56,39 +53,7 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
     },
   });
 
-  function persistedOf(): import('@shared/bridge/hostBridge').UnifiedChatMessage[] {
-    return persistedMessages.value || [];
-  }
-
-  const userTurnsCache = createUserTurnsCache();
-  const activeUserTurnEntries = computed<TimelineEntry[]>(() => {
-    const msgs = persistedOf();
-    let activeAssistantId: string | null = null;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (String((m as unknown as { role?: unknown }).role || '').toLowerCase() === 'assistant') {
-        activeAssistantId = String((m as unknown as { id?: unknown }).id || '');
-        break;
-      }
-    }
-    let isGenerating = false;
-    let liveTotalMs: number | null = null;
-    try {
-      const t = ensureTurn(activeSessionId.value);
-      isGenerating = t ? t.isGenerating === true : false;
-      const ms = t ? t.telemetry.totalMs : null;
-      liveTotalMs = typeof ms === 'number' ? ms : null;
-    } catch {
-      /* 读不到瞬态则按静态投影 */
-    }
-    const buildOpts = { activeAssistantId, isGenerating, liveTotalMs };
-    try {
-      if (isP4SubOn('proj')) return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
-    } catch {
-      /* 开关读取永不阻断投影 */
-    }
-    return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
-  });
+  // 主链纯 V2：目录已切摘要源，旧投影不再计算（子会话走独立小链，不经此处）。
 
   function bindTelemetry(): void {
     bindTelemetryListeners();
@@ -109,7 +74,6 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
 
   return {
     telemetry,
-    activeUserTurnEntries,
     bindTelemetry,
     recordPumpStats,
   };

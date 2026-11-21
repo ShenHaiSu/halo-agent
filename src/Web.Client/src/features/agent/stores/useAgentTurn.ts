@@ -40,8 +40,36 @@ import {
 } from './turnEvents';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
-import { makePendingUser, type PendingUser } from '@features/session/utils/pendingUser';
+import type { PendingUser } from './model';
 import type { ChatImageRef } from '@shared/bridge/hostBridge';
+
+function makePendingKey(requestId: string): string {
+  return `pending-${String(requestId || '').trim()}`;
+}
+
+function makePendingUser(args: {
+  requestId: string;
+  sessionId: string;
+  content: string;
+  images?: ChatImageRef[];
+  previews?: Record<string, string>;
+  createdAtUtc?: string;
+}): PendingUser {
+  const requestId = String(args.requestId || '').trim();
+  const sessionId = String(args.sessionId || '').trim();
+  return {
+    key: makePendingKey(requestId),
+    requestId,
+    sessionId,
+    content: String(args.content ?? ''),
+    images: Array.isArray(args.images) ? args.images.slice() : [],
+    previews: args.previews ? { ...args.previews } : {},
+    createdAtUtc: args.createdAtUtc || new Date().toISOString(),
+    status: 'sending',
+    errorCode: null,
+    confirmedId: null,
+  };
+}
 
 let listenersBound = false;
 

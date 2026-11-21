@@ -61,8 +61,8 @@
 import { computed, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue';
 import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { buildTimelineItems } from '@features/agent/composables/useTimelineGroups';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
+import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { useMessage } from 'naive-ui';
 
 const sub = useSubSessionStore();
@@ -83,6 +83,38 @@ const taskShort = computed(() => {
   return t.length > 80 ? t.slice(0, 80) + '…' : t;
 });
 const items = computed(() => buildTimelineItems(messages.value || []));
+function buildTimelineItems(msgs: UnifiedChatMessage[]): Array<{ key: string; kind: string; msg?: UnifiedChatMessage; group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] } }> {
+  // 子会话只读小链（豁免）：本地简单分组，不经主链投影。
+  const out: Array<{ key: string; kind: string; msg?: UnifiedChatMessage; group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] } }> = [];
+  let pendingAssistant: UnifiedChatMessage | null = null;
+  let pendingTools: UnifiedChatMessage[] = [];
+  const flush = (): void => {
+    if (!pendingAssistant) return;
+    out.push({
+      key: String(pendingAssistant.id || `g_${out.length}`),
+      kind: 'turn',
+      msg: pendingAssistant,
+      group: { key: String(pendingAssistant.id || ''), content: String(pendingAssistant.content || ''), toolMessages: pendingTools.slice() },
+    });
+    pendingAssistant = null;
+    pendingTools = [];
+  };
+  for (const m of msgs) {
+    const role = String(m.role || '').toLowerCase();
+    if (role === 'assistant') {
+      flush();
+      pendingAssistant = m;
+    } else if (role === 'tool') {
+      if (pendingAssistant) pendingTools.push(m);
+      else out.push({ key: String(m.id || `t_${out.length}`), kind: 'turn', msg: m, group: { key: String(m.id || ''), content: String(m.content || ''), toolMessages: [m] } });
+    } else if (role === 'user' || role === 'system') {
+      flush();
+      out.push({ key: String(m.id || `${role}_${out.length}`), kind: role, msg: m });
+    }
+  }
+  flush();
+  return out;
+}
 function setAnchor(key: string) {
   return (el: Element | ComponentPublicInstance | null) => {
     if (el instanceof HTMLElement) nav.register(key, el);

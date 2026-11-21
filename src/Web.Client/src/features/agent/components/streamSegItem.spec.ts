@@ -2,7 +2,14 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
-import type { DisplaySeg } from '@features/agent/composables/useTimeline';
+import type { AgentToolCard } from '@features/agent/stores/model';
+
+interface DisplaySeg {
+  kind: string;
+  key: string;
+  text: string;
+  card: AgentToolCard | null;
+}
 
 function toolSeg(card: Record<string, unknown>): DisplaySeg {
   return { kind: 'tool', key: 'seg-tool-1', text: '', card: card as unknown as DisplaySeg['card'] } as DisplaySeg;

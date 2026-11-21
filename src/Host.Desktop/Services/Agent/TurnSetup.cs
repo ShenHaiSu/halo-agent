@@ -24,7 +24,8 @@ public sealed partial class AgentOrchestrator
         string userText,
         string? providerId,
         string? modelId,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? turnRequestId = null
     )
     {
         TurnPrepared End(AgentTurnResult t) => new() { Terminal = t };
@@ -37,7 +38,6 @@ public sealed partial class AgentOrchestrator
             return End(AgentTurnResult.Failed("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空"));
         if (string.IsNullOrWhiteSpace(userText))
             return End(AgentTurnResult.Failed("EMPTY_PROMPT", "用户输入不能为空"));
-
         var ctx = new TurnContext
         {
             WorkspaceId = workspaceId,
@@ -46,6 +46,9 @@ public sealed partial class AgentOrchestrator
             ProviderId = providerId,
             ModelId = modelId,
             CancellationToken = cancellationToken,
+            TurnRequestId = string.IsNullOrWhiteSpace(turnRequestId)
+                ? string.Empty
+                : turnRequestId.Trim(),
         };
         try
         {

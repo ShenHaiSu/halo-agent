@@ -1,7 +1,7 @@
 import { inject, provide } from 'vue';
 import type { InjectionKey } from 'vue';
-import type { ChatImageRef, TurnSummary, UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import type { TimelineEntry, TurnGroup } from '@features/session/utils/turnGroup';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
+import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 
 /** 流式段最小形态（模板只读这四个字段）。 */
@@ -36,35 +36,18 @@ export interface TimelineMenuState {
  * 行 / 轮 / 卡叶子按需取用，不再经多层 props 转手。
  */
 export interface TimelineViewModel {
-  items: TimelineEntry[];
-  historyItems: TimelineEntry[] | null;
-  tailItems: TimelineEntry[] | null;
   summaryList: TurnSummary[] | null;
-  hideLegacyHistory: boolean;
+  pendingUser: import('@features/session/utils/pendingUser').PendingUser | null;
   hasActiveTurn: boolean;
   renderHtml: (text: string) => string;
   renderStream: (text: string) => string;
-  cardFor: (m: UnifiedChatMessage, g: TurnGroup) => AgentToolCard;
-  toolKey: (m: UnifiedChatMessage) => string;
-  msgImages: (msg: UnifiedChatMessage | undefined) => ChatImageRef[];
-  thumbOf: (img: ChatImageRef) => string;
-  hasLost: (msg: UnifiedChatMessage | undefined) => boolean;
-  imgLost: (img: ChatImageRef) => boolean;
-  isPending: (msg: UnifiedChatMessage | undefined) => boolean;
-  pendingStatus: (msg: UnifiedChatMessage | undefined) => string;
-  isExpanded: (key: string) => boolean;
-  isRunExpanded: (key: string) => boolean;
   anchorRef: (key: string) => (el: unknown) => void;
-  hasFailed: (g: TurnGroup) => boolean;
-  failedCount: (g: TurnGroup) => number;
-  showTelemetry: (g: TurnGroup) => boolean;
-  protocolOf: (g: TurnGroup) => string;
-  cacheLineOf: (g: TurnGroup) => string;
   liveSegsFor: (entry: TimelineEntry) => TimelineLiveSeg[];
   isGenerating: boolean;
   streamMdKillSwitch: boolean;
   readingWindow: boolean;
   liveCompleting: boolean;
+  steadyReady: boolean;
   handoffAnim: boolean;
   singleProcess: boolean;
   noticeInTurn: boolean;
@@ -96,42 +79,21 @@ function identityText(t: string): string {
   return String(t || '');
 }
 
-function emptyKey(m: UnifiedChatMessage): string {
-  return String(m?.id || '');
-}
-
 /** 无 provider 时的纯展示兜底：只读渲染不断言、不抛错。 */
 export function timelineViewFallback(): TimelineViewModel {
   return {
-    items: [],
-    historyItems: null,
-    tailItems: null,
     summaryList: null,
-    hideLegacyHistory: false,
+    pendingUser: null,
     hasActiveTurn: false,
     renderHtml: identityText,
     renderStream: identityText,
-    cardFor: (m: UnifiedChatMessage) => ({ callId: emptyKey(m), functionName: 'tool' }) as AgentToolCard,
-    toolKey: emptyKey,
-    msgImages: () => [],
-    thumbOf: () => '',
-    hasLost: () => false,
-    imgLost: (img: ChatImageRef) => img?.lost === true,
-    isPending: (msg) => String(msg?.id || '').startsWith('pending-'),
-    pendingStatus: (msg) => (String(msg?.id || '').startsWith('pending-') ? 'sending' : ''),
-    isExpanded: () => false,
-    isRunExpanded: () => false,
     anchorRef: () => () => undefined,
-    hasFailed: () => false,
-    failedCount: () => 0,
-    showTelemetry: () => false,
-    protocolOf: () => '',
-    cacheLineOf: () => '',
     liveSegsFor: () => [],
     isGenerating: false,
     streamMdKillSwitch: false,
     readingWindow: false,
     liveCompleting: false,
+    steadyReady: false,
     handoffAnim: true,
     singleProcess: true,
     noticeInTurn: false,

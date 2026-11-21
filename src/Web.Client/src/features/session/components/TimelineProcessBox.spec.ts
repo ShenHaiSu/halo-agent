@@ -279,6 +279,115 @@ describe('TimelineProcessBox history tool cards', () => {
     expect(getToolResultMock).toHaveBeenCalledWith('uturn-u1', 'call-3');
     expect(wrapper.find('[data-testid="tool-call-card"]').attributes('data-status')).toBe('error');
   });
+  it('keeps args from call block even when result block carries no args', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-call-4', 'b-result-4']);
+    getBlockContentsMock.mockImplementation(async () => ({
+      items: {
+        'b-call-4': {
+          blockId: 'b-call-4',
+          kind: 'tool_call',
+          tag: 'process',
+          callId: 'call-4',
+          functionName: 'exec_command',
+          argsJson: '{"command":"echo hi"}',
+          markdown: '{"command":"echo hi"}',
+          preview: '',
+          truncated: false,
+        },
+        'b-result-4': {
+          blockId: 'b-result-4',
+          kind: 'tool_result',
+          tag: 'process',
+          callId: 'call-4',
+          resultText: 'hi',
+          resultRef: null,
+          preview: '',
+          truncated: false,
+        },
+      },
+      missing: [],
+    }));
+    const fullStub = {
+      props: ['card'],
+      template:
+        '<div data-testid="tool-call-card" :data-tool="card.functionName" :data-args="card.argsJson" :data-result="card.resultText">{{ card.functionName }}</div>',
+    };
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: fullStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+    const card = wrapper.find('[data-testid="tool-call-card"]');
+    expect(card.exists()).toBe(true);
+    expect(card.attributes('data-tool')).toBe('exec_command');
+    expect(card.attributes('data-args')).toBe('{"command":"echo hi"}');
+    expect(card.attributes('data-result')).toBe('hi');
+  });
+
+  it('supports legacy tool kind for compatibility', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-call-legacy', 'b-result-legacy']);
+    getBlockContentsMock.mockImplementation(async () => ({
+      items: {
+        'b-call-legacy': {
+          blockId: 'b-call-legacy',
+          kind: 'tool',
+          tag: 'process',
+          callId: 'call-legacy',
+          functionName: 'read_file',
+          argsJson: '{"path":"a.txt"}',
+          markdown: '{"path":"a.txt"}',
+          preview: '',
+          truncated: false,
+        },
+        'b-result-legacy': {
+          blockId: 'b-result-legacy',
+          kind: 'tool_result',
+          tag: 'process',
+          callId: 'call-legacy',
+          resultText: 'ok',
+          resultRef: null,
+          preview: '',
+          truncated: false,
+        },
+      },
+      missing: [],
+    }));
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: toolCardStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+    expect(wrapper.find('[data-testid="timeline-tool-call-call-legacy"]').exists()).toBe(true);
+  });
+
+  it('orphan tool_result without call block builds no card', async () => {
+    getTurnBlockIdsMock.mockResolvedValue(['b-result-orphan']);
+    getBlockContentsMock.mockImplementation(async () => ({
+      items: {
+        'b-result-orphan': {
+          blockId: 'b-result-orphan',
+          kind: 'tool_result',
+          tag: 'process',
+          callId: 'call-orphan',
+          resultText: 'orphan',
+          resultRef: null,
+          preview: '',
+          truncated: false,
+        },
+      },
+      missing: [],
+    }));
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn({ finalBlockId: null, finalPreview: '' }) },
+      global: { plugins: [createPinia()], stubs: { ToolCallCard: toolCardStub } },
+    });
+    await wrapper.find('[data-testid="timeline-process-head-uturn-u1"]').trigger('click');
+    await flush();
+    expect(wrapper.find('[data-testid="timeline-tool-call-call-orphan"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="tool-call-card"]').exists()).toBe(false);
+  });
 });
 
 describe('TimelineProcessBox user slot', () => {
@@ -305,34 +414,6 @@ describe('TimelineProcessBox user slot', () => {
   });
 });
 
-describe('P007 TimelineProcessBox 压缩桩', () => {
-  it('T4：compact 轮不请求任何块内容，直接渲染分隔线', async () => {
-    const wrapper = mount(TimelineProcessBox, {
-      props: {
-        turn: makeTurn({
-          key: 'cturn-s1',
-          turnId: 'cturn-s1',
-          turnSeq: 9,
-          kind: 'compact',
-          removedMessages: 42,
-          userPreview: '上下文压缩',
-          userContent: '本轮摘要正文',
-          finalBlockId: null,
-          finalPreview: '',
-          blocks: 0,
-          tools: 0,
-        }),
-      },
-      global: { plugins: [createPinia()] },
-    });
-    await flush();
-    expect(getBlockContentsMock).not.toHaveBeenCalled();
-    expect(getTurnBlockIdsMock).not.toHaveBeenCalled();
-    expect(wrapper.find('[data-testid="compact-divider"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="timeline-process-box"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="compact-pill"]').text()).toContain('42');
-  });
-});
 describe('盒内渲染序', () => {
   const toolCardStub = {
     props: ['card'],

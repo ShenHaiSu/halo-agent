@@ -539,6 +539,11 @@ public sealed class EditBatchTool : IToolHandler
             );
         }
 
+        string? eolWarn = FileToolShared.EolProfile.DescribeChange(
+            raw,
+            updated,
+            detected.NewLineLabel
+        );
         string newHash = FileToolShared.ComputeTextHash(updated, detected);
         var spans = items
             .OrderBy(t => t.Offset)
@@ -569,6 +574,11 @@ public sealed class EditBatchTool : IToolHandler
                 .Append(detected.NewLineLabel)
                 .Append(", hash_preview: ")
                 .AppendLine(newHash);
+            if (eolWarn != null)
+            {
+                preview.AppendLine(eolWarn);
+            }
+
             var (dryDigest, dryJson) = CreateReceipt(
                 relative,
                 "lines",
@@ -636,6 +646,11 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         var sb = new StringBuilder();
+        if (eolWarn != null)
+        {
+            sb.AppendLine(eolWarn);
+        }
+
         sb.Append("已按行号批量修改 '")
             .Append(relative)
             .Append("'（")
@@ -988,7 +1003,7 @@ public sealed class EditBatchTool : IToolHandler
 
             string? spanEol = EditFileHelpers.DetectSpanEol(raw, s, e);
             string fileEol = detected.NewLine;
-            string targetEol = spanEol ?? fileEol;
+            string targetEol = detected.IsMixedEol ? fileEol : (spanEol ?? fileEol);
             string converted = FileToolShared.ConvertNewLines(replacement, targetEol);
             int lengthDelta = converted.Length - (e - s);
             writeFacts.Add(
@@ -1027,6 +1042,11 @@ public sealed class EditBatchTool : IToolHandler
             );
         }
 
+        string? eolWarn = FileToolShared.EolProfile.DescribeChange(
+            raw,
+            updated,
+            detected.NewLineLabel
+        );
         string newHash = FileToolShared.ComputeTextHash(updated, detected);
         var diffSpans = spans
             .OrderBy(t => t.Start)
@@ -1056,6 +1076,11 @@ public sealed class EditBatchTool : IToolHandler
                 .Append(detected.NewLineLabel)
                 .Append(", hash_preview: ")
                 .AppendLine(newHash);
+            if (eolWarn != null)
+            {
+                preview.AppendLine(eolWarn);
+            }
+
             var (dryDigest, dryJson) = CreateReceipt(
                 relative,
                 "text",
@@ -1123,6 +1148,11 @@ public sealed class EditBatchTool : IToolHandler
         }
 
         var sb = new StringBuilder();
+        if (eolWarn != null)
+        {
+            sb.AppendLine(eolWarn);
+        }
+
         sb.Append("已按锚点批量修改 '")
             .Append(relative)
             .Append("'（")
@@ -1221,7 +1251,7 @@ public sealed class EditBatchTool : IToolHandler
             blockEol = current.Substring(ln.Start + ln.ContentLength, ln.EolLength);
         }
 
-        string eol = blockEol ?? detected.NewLine;
+        string eol = detected.IsMixedEol ? detected.NewLine : (blockEol ?? detected.NewLine);
         bool needLeadingEol = startIdx >= totalLines && head.Length > 0 && !EndsWithEol(head);
         bool needTrailingEol;
         if (tail.Length > 0)

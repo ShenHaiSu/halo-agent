@@ -14,11 +14,10 @@ import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
-import { dropPendingUser, getTurn, turns } from '@features/agent/stores/model';
-import { isPendingForSession, matchConfirmed, matchConfirmedBySummary, toPendingMessage } from '@features/session/utils/pendingUser';
+import { dropPendingUser, turns } from '@features/agent/stores/model';
 import type { PendingUser } from '@features/session/utils/pendingUser';
+import { isPendingExpired, matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
-import { rememberPendingAlias } from '@features/session/utils/userTurn';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const configStore = useConfigStore();
@@ -41,26 +40,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const timelineSummaries = ref<TurnSummary[]>([]);
   const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
   const toolResultCache = ref<Record<string, TimelineToolResult>>({});
+  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
       return readNeed02Flags().p1;
     } catch {
       return true;
-    }
-  }
-  function activePendingFor(sid: string): import('@features/session/utils/pendingUser').PendingUser | null {
-    if (!isP1On()) return null;
-    const id = (sid || '').trim();
-    if (!id) return null;
-    try {
-      const t = turns.value[id] || getTurn(id);
-      const p = t?.pendingUser || null;
-      if (!p) return null;
-      if (!isPendingForSession(p, id)) return null;
-      return p;
-    } catch {
-      return null;
     }
   }
   /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
@@ -71,11 +57,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   });
   /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
   function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
-    try {
-      rememberPendingAlias(String(confirmedId || ''), String(p.key || ''));
-    } catch {
-      /* alias never blocks */
-    }
     need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
     dropPendingUser(sid);
   }
@@ -87,11 +68,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const t = turns.value[id];
       const p = t?.pendingUser;
       if (!p || p.status !== 'sending') return;
-      // jsonl 启发式保持第一优先级（v1 主路径）。
-      const hit = matchConfirmed(p, sessionMessages.value);
-      if (hit) {
-        confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
+      if (isPendingExpired(p)) {
+        try {
+          need02Debug('pending-expired-drop', { requestId: p.requestId });
+        } catch {
+          /* ignore */
+        }
+        dropPendingUser(id);
         return;
+      }
+      // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
+      if (!isV2Timeline.value) {
+        const hit = matchConfirmed(p, sessionMessages.value);
+        if (hit) {
+          confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
+          return;
+        }
       }
       // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
@@ -102,30 +94,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       /* 对账永不阻断 */
     }
   }
-  const pendingOverlayMessages = computed<UnifiedChatMessage[]>(() => {
-    const base = sessionMessages.value || [];
-    if (!isP1On()) return base;
-    const sid = activeSessionId.value || '';
-    const p = activePendingFor(sid);
-    if (!p) return base;
-    if (p.status === 'superseded') return base;
-    // 已被后端回包命中 → 只显示真实（避免双 user），并触发清理（下次即无 pending）。
-    try {
-      const hit = matchConfirmed(p, base);
-      if (hit) {
-        // computed 内不直接清（避免副作用循环），交由 loadSessionMessages 的 tryConfirmPending 清理；
-        // 这里先隐藏 pending，保证无闪烁双条。
-        return base;
-      }
-      // v2 下 jsonl 为空时走摘要源命中即隐藏，避免 user 双条 + sending 常亮。
-      if (matchConfirmedBySummary(p, timelineSummaries.value)) return base;
-    } catch {
-      /* fallthrough */
-    }
-    if (p.status !== 'sending' && p.status !== 'failed') return base;
-    // 同一 key 原位（id=pending-<requestId>），DOM 不重建。
-    return [...base, toPendingMessage(p)];
-  });
   const budgetStatus = ref<ContextBudgetStatusDto | null>(null);
   // need22-P3 G6：budget 失败显式角标（顶栏⚠），统一 {code,message}
   const budgetError = ref<{ code: string; message: string } | null>(null);
@@ -1041,8 +1009,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     isV2Timeline,
     sessionMessages,
     timelineSummaries,
-    /** need02-P1：含乐观 user 的视图层派生（不写 jsonl；p1 off 时恒等于 sessionMessages）。 */
-    pendingOverlayMessages,
     budgetStatus,
     budgetError,
     searchQuery,

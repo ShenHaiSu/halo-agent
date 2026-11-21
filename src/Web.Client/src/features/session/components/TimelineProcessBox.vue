@@ -1,16 +1,5 @@
 <template>
-  <!-- P007：桩不走过程内容盒，直接渲染通栏分隔线 -->
-  <CompactDivider
-    v-if="turn.kind === 'compact'"
-    :stub-id="turn.turnId"
-    :label="compactLabel"
-    :summary="compactSummary"
-    :summary-html="compactSummaryHtml"
-    :backup-file="null"
-    :expanded="compactExpanded"
-    @toggle="onCompactToggle"
-  />
-  <div v-else class="timeline-turn min-w-0" :data-turn-key="turn.turnId" :data-testid="`timeline-turn-${turn.turnId}`">
+  <div class="timeline-turn min-w-0" :data-turn-key="turn.turnId" :data-testid="`timeline-turn-${turn.turnId}`">
     <div v-if="turn.userContent || turn.userPreview" class="flex justify-end turn-user-slot">
       <div
         class="max-w-[85%] rounded-lg bg-elevated border border-subtle px-3.5 py-2.5 app-text-body text-primary whitespace-pre-wrap break-words select-text min-w-0"
@@ -135,13 +124,9 @@ import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlock
 import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
 import ReasoningText from '@shared/ui/ReasoningText.vue';
 import { trimBlankEdges } from '@shared/utils/trimBlank';
-import CompactDivider from './CompactDivider.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
-import { stubLabel } from '../utils/compactStub';
-import { renderHtmlSmart } from '../utils/markdownRender';
-import { buildHistoryItems, toAgentToolCard, type HistoryItem, type ToolGroup } from '../utils/historyToolCards';
 
 const props = defineProps<{
   turn: FlatTimelineTurn;
@@ -168,19 +153,6 @@ const ws = useWorkspaceStore();
 
 const badge = computed(() => statusBadge(props.turn.status));
 const label = computed(() => processBoxLabel(props.turn));
-/** P007：桩摘要走分隔线渲染，不请求任何块内容。 */
-const compactLabel = computed(() => stubLabel(props.turn.removedMessages));
-const compactSummary = computed(() => String(props.turn.userContent || props.turn.userPreview || ''));
-const compactSummaryHtml = computed(() => renderHtmlSmart(compactSummary.value, true));
-const compactExpanded = ref(false);
-function onCompactToggle(): void {
-  compactExpanded.value = !compactExpanded.value;
-  try {
-    setTurnExpanded(props.turn.turnId, compactExpanded.value);
-  } catch {
-    /* never blocks */
-  }
-}
 const emptyText = computed(() => {
   if (props.turn.tools > 0) return `共 ${props.turn.blocks} 个过程块，${props.turn.tools} 个工具调用。`;
   return '暂无过程内容。';
@@ -197,6 +169,80 @@ const orderedBlocks = computed<TimelineBlockContent[]>(() => {
 
 const historyItems = computed<HistoryItem[]>(() => buildHistoryItems(orderedBlocks.value));
 
+interface HistoryItem {
+  key: string;
+  kind: 'text' | 'reasoning' | 'tool' | 'tool_result';
+  block: TimelineBlockContent;
+  group: ToolGroup;
+}
+
+/** 工具声明块类型：生产真相为 tool_call，tool 仅兼容旧内存存根与旧单测。 */
+const TOOL_DECL_KINDS: ReadonlySet<string> = new Set(['tool_call', 'tool']);
+
+interface ToolGroup {
+  callId: string;
+  callBlock: TimelineBlockContent | null;
+  resultBlock: TimelineBlockContent | null;
+}
+
+function buildHistoryItems(blocks: TimelineBlockContent[]): HistoryItem[] {
+  const out: HistoryItem[] = [];
+  const callResult = new Map<string, TimelineBlockContent>();
+  for (const b of blocks) {
+    const kind = String((b as unknown as { kind?: unknown }).kind || 'text');
+    if (TOOL_DECL_KINDS.has(kind)) {
+      const callId = String((b as unknown as { callId?: unknown }).callId || (b as unknown as { blockId?: unknown }).blockId || '');
+      out.push({ key: `tool-${callId}`, kind: 'tool', block: b, group: { callId, callBlock: b, resultBlock: null } });
+      continue;
+    }
+    if (kind === 'tool_result') {
+      const callId = String((b as unknown as { callId?: unknown }).callId || '');
+      if (callId) callResult.set(callId, b);
+      continue;
+    }
+    if (kind === 'reasoning') {
+      out.push({
+        key: `reasoning-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`,
+        kind: 'reasoning',
+        block: b,
+        group: { callId: '', callBlock: null, resultBlock: null },
+      });
+      continue;
+    }
+    out.push({
+      key: `text-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`,
+      kind: 'text',
+      block: b,
+      group: { callId: '', callBlock: null, resultBlock: null },
+    } as HistoryItem);
+  }
+  for (const it of out) {
+    if (it.kind === 'tool') {
+      const res = callResult.get(it.group.callId);
+      if (res) it.group.resultBlock = res;
+    }
+  }
+  return out;
+}
+function toAgentToolCard(group: ToolGroup, turn: FlatTimelineTurn): AgentToolCard {
+  const call = group.callBlock as unknown as { functionName?: unknown; argsJson?: unknown; markdown?: unknown } | null;
+  const res = group.resultBlock as TimelineBlockContent | null;
+  const functionName = String(call?.functionName || (res as unknown as { functionName?: unknown })?.functionName || 'tool');
+  const argsJson = String(call?.argsJson || call?.markdown || '');
+  const resultText = String(res?.resultText || res?.markdown || res?.preview || '');
+  return {
+    callId: group.callId,
+    functionName,
+    argsJson,
+    status: 'done',
+    resultText,
+    exitCode: null,
+    durationMs: Number(turn.durationMs || 0) || null,
+    iteration: 0,
+    receivedBytes: 0,
+    images: [],
+  };
+}
 function plainTextOf(b: TimelineBlockContent): string {
   const s = trimBlankEdges(String(b.markdown || b.preview || ''));
   return s.length > 4000 ? s.slice(0, 4000) + '\n…（已截断，展开工具卡查看全文）' : s;

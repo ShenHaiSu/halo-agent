@@ -4,7 +4,21 @@
 import { ref } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
-import type { PendingUser } from '@features/session/utils/pendingUser';
+
+/** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
+export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
+export interface PendingUser {
+  key: string;
+  requestId: string;
+  sessionId: string;
+  content: string;
+  images: ChatImageRef[];
+  previews: Record<string, string>;
+  createdAtUtc: string;
+  status: AgentPendingStatus;
+  errorCode?: string | null;
+  confirmedId?: string | null;
+}
 
 export type StreamSegKind = 'text' | 'reasoning' | 'tool';
 export interface StreamSeg {
@@ -82,6 +96,8 @@ export interface AgentTurnState {
   streamingActive: boolean;
   isGenerating: boolean;
   toolCards: AgentToolCard[];
+  /** 已落盘轮次剪掉的工具卡终态快照：供流态装配继续渲染本轮历史；只追加、轮末随容器清空、有界。 */
+  graduatedCards: AgentToolCard[];
   telemetry: AgentTelemetry;
   turnNotice: string;
   lastError: string;
@@ -97,6 +113,8 @@ export interface AgentTurnState {
   pendingUser: PendingUser | null;
   /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
   liveCompleting: boolean;
+  /** 轮末对账（重新拉取落盘消息）已完成，稳态块可以上屏。 */
+  steadyReady: boolean;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -117,7 +135,9 @@ export interface TurnEventPayload {
 export const turns = ref<Record<string, AgentTurnState>>({});
 /** need04-03/04：本轮去重与归并快照 */
 export const dirtyPersisted = ref<Record<string, boolean>>({});
-export const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number; tags?: Record<string, string> }>>({});
+export const lastTurnSnapshot = ref<
+  Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number; tags?: Record<string, string> }>
+>({});
 /** need22-P2 F2：已见 requestId（后端回显去重；有界防涨） */
 export const seenRequestIds = ref<Record<string, number>>({});
 /** 当前会话（旧转发自 sessionStore 同步 + session:switched 事件；store 内只读此 ref）。 */
@@ -126,7 +146,7 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（旧转发自 workspaceStore.sessionMessages 同步；归并 getter 用，F04 改事件全量）。 */
+/** 持久消息投影（主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
 export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
@@ -154,6 +174,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     streamingActive: false,
     isGenerating: false,
     toolCards: [],
+    graduatedCards: [],
     telemetry: emptyTelemetry(protocol),
     turnNotice: '',
     lastError: '',
@@ -163,6 +184,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     lastAttachments: [],
     pendingUser: null,
     liveCompleting: false,
+    steadyReady: false,
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
     curIteration: 0,
@@ -265,14 +287,28 @@ function segKeyOf(sid: string, kind: string, iteration: number, n: number): stri
 export function tailSeg(t: AgentTurnState): StreamSeg | null {
   return t.segs.length ? t.segs[t.segs.length - 1] : null;
 }
-export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string, blockId?: string | null, seq?: number | null, tag?: string | null): void {
+export function pushTextSeg(
+  t: AgentTurnState,
+  kind: 'text' | 'reasoning',
+  chunk: string,
+  blockId?: string | null,
+  seq?: number | null,
+  tag?: string | null
+): void {
   // need02-P2：续写键放宽到 runId（= requestId，兼容旧 iteration 分节；05 R4 新轮新 requestId）。
   const runId = String(t.requestId || '');
   const tail = tailSeg(t);
   const tailBid = String(tail?.blockId || '');
   const curBid = String(blockId || '');
   const sameBlock = !tailBid || !curBid || tailBid === curBid;
-  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId && sameBlock) {
+  if (
+    tail &&
+    tail.kind === kind &&
+    tail.iteration === t.curIteration &&
+    !tail.persisted &&
+    String(tail.runId || '') === runId &&
+    sameBlock
+  ) {
     tail.text = (tail.text || '') + chunk;
     if (blockId && !tail.blockId) tail.blockId = blockId;
     if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
@@ -280,7 +316,16 @@ export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk
     return;
   }
   const n = t.segs.length;
-  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk, blockId: blockId ?? null, seq: seq ?? null, tag: tag ?? null });
+  t.segs.push({
+    key: segKeyOf(t.sessionId, kind, t.curIteration, n),
+    kind,
+    iteration: t.curIteration,
+    runId,
+    text: chunk,
+    blockId: blockId ?? null,
+    seq: seq ?? null,
+    tag: tag ?? null,
+  });
 }
 
 export function demotePending(t: AgentTurnState): void {
@@ -314,7 +359,16 @@ export function pushToolSeg(t: AgentTurnState, callId: string, blockId?: string 
     if (!tail.tag) tail.tag = 'process';
     return;
   }
-  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId, blockId: blockId ?? null, seq: seq ?? null, tag: 'process' });
+  t.segs.push({
+    key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length),
+    kind: 'tool',
+    iteration: t.curIteration,
+    runId,
+    callId,
+    blockId: blockId ?? null,
+    seq: seq ?? null,
+    tag: 'process',
+  });
 }
 /**
  * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。
@@ -361,9 +415,6 @@ export function setActiveWorkspaceId(wid: string): void {
 }
 export function setFallbackProtocol(p: string): void {
   if (p) fallbackProtocol.value = p;
-}
-export function setPersistedMessages(msgs: UnifiedChatMessage[]): void {
-  persistedMessages.value = Array.isArray(msgs) ? msgs : [];
 }
 let sessionSyncBound = false;
 /** 各小 store bind 时调用：订阅 session:switched（F04 起由 session 域 emit；当前由旧转发桥接 emit）。 */

@@ -51,7 +51,8 @@ public sealed partial class AgentOrchestrator
         string userText,
         string? providerId = null,
         string? modelId = null,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        string? turnRequestId = null
     )
     {
         var prep = await PrepareTurnAsync(
@@ -60,7 +61,8 @@ public sealed partial class AgentOrchestrator
                 userText,
                 providerId,
                 modelId,
-                cancellationToken
+                cancellationToken,
+                turnRequestId
             )
             .ConfigureAwait(false);
         if (prep.Terminal != null)

@@ -77,6 +77,12 @@ public sealed class TurnContext
     public List<UnifiedChatMessage> Budgeted { get; set; } = new();
     public List<UnifiedChatMessage> RequestMessages { get; set; } = new();
     public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 轮级幂等键：前端发送时生成的请求标识，原样透传，整轮不变。
+    /// 仅用于轮摘要对账，禁止参与网关请求关联、用量统计与工具块标识。
+    /// </summary>
+    public string TurnRequestId { get; set; } = string.Empty;
     public string LlmText { get; set; } = string.Empty;
     public string? LlmReasoning { get; set; }
     public List<UnifiedToolCall> CompletedCalls { get; set; } = new();

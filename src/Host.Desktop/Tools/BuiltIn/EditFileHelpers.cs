@@ -54,7 +54,8 @@ internal static class EditFileHelpers
         {
             if (raw[i] == '\n')
             {
-                return i > start && raw[i - 1] == '\r' ? "\r\n" : "\n";
+                bool isCrlf = i > 0 && raw[i - 1] == '\r';
+                return isCrlf ? "\r\n" : "\n";
             }
         }
 

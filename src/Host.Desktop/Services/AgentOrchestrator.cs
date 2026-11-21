@@ -24,7 +24,8 @@ public interface IAgentOrchestrator
         string userText,
         string? providerId = null,
         string? modelId = null,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        string? turnRequestId = null
     );
 }
 
@@ -112,7 +113,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         string userText,
         string? providerId = null,
         string? modelId = null,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        string? turnRequestId = null
     )
     {
         int turnTimeoutMs = ResolveTurnTimeoutMs();
@@ -123,7 +125,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     userText,
                     providerId,
                     modelId,
-                    cancellationToken
+                    cancellationToken,
+                    turnRequestId
                 )
                 .ConfigureAwait(false);
         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -143,7 +146,8 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
                     userText,
                     providerId,
                     modelId,
-                    turnCts.Token
+                    turnCts.Token,
+                    turnRequestId
                 )
                 .ConfigureAwait(false);
         }

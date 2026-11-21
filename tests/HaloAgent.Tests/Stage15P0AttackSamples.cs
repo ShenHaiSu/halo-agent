@@ -298,7 +298,16 @@ public sealed class Stage15P0AttackSamples : IDisposable
     {
         const string f = "undo_me.txt";
         const string orig = "original-undo-line\n";
-        var w = await Call("write_file", new { file_path = f, content = orig });
+        // 显式声明 LF，锁定本用例的精确找回语义；新建默认会按工作区约定归一化换行。
+        var w = await Call(
+            "write_file",
+            new
+            {
+                file_path = f,
+                content = orig,
+                eol = "lf"
+            }
+        );
         Assert.True(w.Success, w.Error);
         var e = await Call(
             "edit_file",
