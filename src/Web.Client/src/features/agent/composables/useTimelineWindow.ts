@@ -43,7 +43,11 @@ export function useTimelineWindow(deps: WindowDeps) {
   const visibleHistoryEntries = computed<TimelineEntry[]>(() => deps.historyEntries.value.slice(hiddenAbove.value));
   function weightOfItem(e: TimelineEntry): number {
     try {
-      const u = e as unknown as { kind?: string; turn?: { steps?: unknown[] } };
+      // 主链纯 V2：按摘要轮计权（blocks + tools），不再读 UserTurn.steps。
+      const u = e as unknown as { kind?: string; blocks?: unknown; tools?: unknown; turn?: { steps?: unknown[] } };
+      if (u && (u.kind === 'live' || typeof u.blocks !== 'undefined' || typeof u.tools !== 'undefined')) {
+        return 1 + Math.max(0, Number(u.blocks || 0)) + Math.max(0, Number(u.tools || 0));
+      }
       if (u && u.kind === 'user-turn') return 1 + (Array.isArray(u.turn?.steps) ? (u.turn as { steps: unknown[] }).steps.length : 0);
     } catch (e) {
       console.warn('[timeline:window] weight read failed:', e);

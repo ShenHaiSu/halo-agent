@@ -1,11 +1,8 @@
-import { computed } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
+import { computed } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
-import { buildUserTurns, buildUserTurnsIncremental, createUserTurnsCache } from '@features/session/utils/userTurn';
-import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import type { Need02Flags } from '@features/need02/utils/need02Flags';
-import { syncTranscriptProjection } from '@features/session/utils/transcriptCache';
 import { quotaLimit } from '@features/session/utils/timelineExpansion';
 import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
@@ -30,27 +27,9 @@ interface ProjectionDeps {
 export function useTimelineProjection(deps: ProjectionDeps) {
   const turn = useAgentTurn();
   const stream = useAgentStream();
-  const userTurnsCache = createUserTurnsCache();
-  const timelineItems = computed<TimelineEntry[]>(() => {
-    const msgs = deps.persistedMessages.value;
-    let liveTotalMs: number | null = null;
-    try {
-      const ms = turn.activeTurn?.telemetry?.totalMs;
-      liveTotalMs = typeof ms === 'number' ? ms : null;
-    } catch (e) {
-      console.warn('[timeline:projection] live total read failed:', e);
-    }
-    const buildOpts = {
-      activeAssistantId: deps.lastPersistedAssistantId.value,
-      isGenerating: turn.activeTurn?.isGenerating === true,
-      liveTotalMs,
-    };
-    if (isP4SubOn('proj', null, deps.need02Flags))
-      return buildUserTurnsIncremental(msgs, buildOpts, userTurnsCache).entries as unknown as TimelineEntry[];
-    return buildUserTurns(msgs, buildOpts) as unknown as TimelineEntry[];
-  });
+  // 主链纯 V2 过渡：投影计算已停用，返回空数组（C4 删除本文件）。
+  const timelineItems = computed<TimelineEntry[]>(() => []);
   const entryRefs = new Map<string, TimelineEntry>();
-  let projGeneration = 0;
   function reuseRef(e: TimelineEntry): TimelineEntry {
     const prev = entryRefs.get(e.key);
     if (!prev || prev.kind !== e.kind) {
@@ -120,11 +99,7 @@ export function useTimelineProjection(deps: ProjectionDeps) {
     const split = Math.max(0, all.length - TAIL_SIZE);
     const hist = all.slice(0, split).map(reuseRef);
     pruneRefs(all);
-    try {
-      syncTranscriptProjection(++projGeneration, hist, all.slice(split));
-    } catch (e) {
-      console.warn('[timeline:projection] cache sync failed:', e);
-    }
+    // 主链纯 V2：transcript 缓存调用已停用（文件删除是 F3），只保留投影计算供 C4 删除。
     return hist;
   });
   const tailEntries = computed<TimelineEntry[]>(() => timelineItems.value.slice(Math.max(0, timelineItems.value.length - TAIL_SIZE)));

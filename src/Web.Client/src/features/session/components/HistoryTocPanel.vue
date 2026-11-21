@@ -69,7 +69,6 @@ import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
-import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
@@ -84,7 +83,6 @@ const PAGE = 200;
 const ws = useWorkspaceStore();
 const sub = useSubSessionStore();
 const agentStream = useAgentStream();
-const agentTelemetry = useAgentTelemetry();
 const ui = useUiStore();
 const message = useMessage();
 const nav = useTimelineNav();
@@ -128,11 +126,10 @@ const roundHeadsOnly = computed({
 });
 
 const entries = computed<TimelineEntry[]>(() => {
-  if (isSub.value) {
-    const simple = buildTimelineItems(sub.messages || []);
-    return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
-  }
-  return (agentTelemetry as unknown as { activeUserTurnEntries: TimelineEntry[] }).activeUserTurnEntries;
+  // 主链纯 V2：目录只用摘要源，旧投影不再计算；子会话走独立小链。
+  if (!isSub.value) return [];
+  const simple = buildTimelineItems(sub.messages || []);
+  return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
 });
 
 const tocItems = computed<TocItem[]>(() =>
@@ -200,8 +197,8 @@ const summaryToc = computed<TocItem[]>(() => {
   });
   return out;
 });
-/** S3 增补 G-1：v2 目录数据源只用摘要（每轮用户项 + 过程项 + 末轮项），旧链仅 v1 保留。 */
-const displayTocItems = computed<TocItem[]>(() => (isV2Toc.value && !isSub.value ? summaryToc.value : tocItems.value));
+/** 主链纯 V2：目录只用摘要源；子会话保留旧链（豁免）。 */
+const displayTocItems = computed<TocItem[]>(() => (isSub.value ? tocItems.value : summaryToc.value));
 const totalCount = computed(() => displayTocItems.value.length);
 
 const activeKey = ref<string | null>(null);
