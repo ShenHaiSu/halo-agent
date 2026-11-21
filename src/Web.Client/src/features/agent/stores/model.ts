@@ -4,7 +4,21 @@
 import { ref } from 'vue';
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
-import type { PendingUser } from '@features/session/utils/pendingUser';
+
+/** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
+export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
+export interface PendingUser {
+  key: string;
+  requestId: string;
+  sessionId: string;
+  content: string;
+  images: ChatImageRef[];
+  previews: Record<string, string>;
+  createdAtUtc: string;
+  status: AgentPendingStatus;
+  errorCode?: string | null;
+  confirmedId?: string | null;
+}
 
 export type StreamSegKind = 'text' | 'reasoning' | 'tool';
 export interface StreamSeg {
@@ -119,7 +133,9 @@ export interface TurnEventPayload {
 export const turns = ref<Record<string, AgentTurnState>>({});
 /** need04-03/04：本轮去重与归并快照 */
 export const dirtyPersisted = ref<Record<string, boolean>>({});
-export const lastTurnSnapshot = ref<Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number; tags?: Record<string, string> }>>({});
+export const lastTurnSnapshot = ref<
+  Record<string, { toolCards: AgentToolCard[]; reasoning: string; text: string; at: number; tags?: Record<string, string> }>
+>({});
 /** need22-P2 F2：已见 requestId（后端回显去重；有界防涨） */
 export const seenRequestIds = ref<Record<string, number>>({});
 /** 当前会话（旧转发自 sessionStore 同步 + session:switched 事件；store 内只读此 ref）。 */
@@ -268,14 +284,28 @@ function segKeyOf(sid: string, kind: string, iteration: number, n: number): stri
 export function tailSeg(t: AgentTurnState): StreamSeg | null {
   return t.segs.length ? t.segs[t.segs.length - 1] : null;
 }
-export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk: string, blockId?: string | null, seq?: number | null, tag?: string | null): void {
+export function pushTextSeg(
+  t: AgentTurnState,
+  kind: 'text' | 'reasoning',
+  chunk: string,
+  blockId?: string | null,
+  seq?: number | null,
+  tag?: string | null
+): void {
   // need02-P2：续写键放宽到 runId（= requestId，兼容旧 iteration 分节；05 R4 新轮新 requestId）。
   const runId = String(t.requestId || '');
   const tail = tailSeg(t);
   const tailBid = String(tail?.blockId || '');
   const curBid = String(blockId || '');
   const sameBlock = !tailBid || !curBid || tailBid === curBid;
-  if (tail && tail.kind === kind && tail.iteration === t.curIteration && !tail.persisted && String(tail.runId || '') === runId && sameBlock) {
+  if (
+    tail &&
+    tail.kind === kind &&
+    tail.iteration === t.curIteration &&
+    !tail.persisted &&
+    String(tail.runId || '') === runId &&
+    sameBlock
+  ) {
     tail.text = (tail.text || '') + chunk;
     if (blockId && !tail.blockId) tail.blockId = blockId;
     if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
@@ -283,7 +313,16 @@ export function pushTextSeg(t: AgentTurnState, kind: 'text' | 'reasoning', chunk
     return;
   }
   const n = t.segs.length;
-  t.segs.push({ key: segKeyOf(t.sessionId, kind, t.curIteration, n), kind, iteration: t.curIteration, runId, text: chunk, blockId: blockId ?? null, seq: seq ?? null, tag: tag ?? null });
+  t.segs.push({
+    key: segKeyOf(t.sessionId, kind, t.curIteration, n),
+    kind,
+    iteration: t.curIteration,
+    runId,
+    text: chunk,
+    blockId: blockId ?? null,
+    seq: seq ?? null,
+    tag: tag ?? null,
+  });
 }
 
 export function demotePending(t: AgentTurnState): void {
@@ -317,7 +356,16 @@ export function pushToolSeg(t: AgentTurnState, callId: string, blockId?: string 
     if (!tail.tag) tail.tag = 'process';
     return;
   }
-  t.segs.push({ key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length), kind: 'tool', iteration: t.curIteration, runId, callId, blockId: blockId ?? null, seq: seq ?? null, tag: 'process' });
+  t.segs.push({
+    key: segKeyOf(t.sessionId, 'tool', t.curIteration, t.segs.length),
+    kind: 'tool',
+    iteration: t.curIteration,
+    runId,
+    callId,
+    blockId: blockId ?? null,
+    seq: seq ?? null,
+    tag: 'process',
+  });
 }
 /**
  * need23-R7：按 iteration 标记「正文/思考」段已落盘（工具段不动）。

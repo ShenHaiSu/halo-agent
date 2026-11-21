@@ -26,11 +26,9 @@ export function useTimelineViewModel() {
   const need02Flags = useNeed02Flags();
   const { budgetStatus } = storeToRefs(workspaceStore);
   const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
-  const budgetProtocol = computed<string>(() => String(budgetStatus.value?.protocol || telemetry.telemetry.protocol || 'chat'));
-  void budgetProtocol;
+  void budgetStatus;
   // C4：投影已删除，窗口改用空数组过渡。
   const emptyItems = computed(() => [] as TimelineEntry[]);
-  void emptyItems;
   const win = useTimelineWindow({ timelineItems: emptyItems, historyEntries: emptyItems, need02Flags, nav });
   const behavior = useTimelineBehavior({ win, projection: null, menu, nav });
   const need02Attr = computed<string>(() => buildAttr(need02Flags));
@@ -92,7 +90,10 @@ export function useTimelineViewModel() {
         return [];
       }
     }),
-    liveSegsFor: (entry: TimelineEntry, segs: { kind: string; key: string; text: string; card: unknown }[]): { kind: string; key: string; text: string; card: unknown }[] => {
+    liveSegsFor: (
+      entry: TimelineEntry,
+      segs: { kind: string; key: string; text: string; card: unknown }[]
+    ): { kind: string; key: string; text: string; card: unknown }[] => {
       try {
         // 直播挂载不需要轮容器：live 兜底条目直挂流段。
         if ((entry as TimelineEntry).kind === 'live') return Array.isArray(segs) ? segs : [];
