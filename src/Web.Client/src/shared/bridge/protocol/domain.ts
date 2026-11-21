@@ -150,6 +150,12 @@ export interface UnifiedChatMessage {
   /** P007：桩元数据 JSON 原文（前端仅在需要 removedCount 时解析）。 */
   metaJson?: string | null;
 }
+/** need03-03-B：标题链路首轮取数（后端 GetFirstRoundTexts 直读存储，v2 会话可用）。 */
+export interface FirstRoundTexts {
+  firstUser: string;
+  assistant: string;
+  userCount: number;
+}
 
 export interface ContextBudgetStatusDto {
   totalContextTokens: number;

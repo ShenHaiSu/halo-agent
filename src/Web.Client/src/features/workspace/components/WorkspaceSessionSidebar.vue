@@ -16,6 +16,7 @@
     :menu-id="s.openMenuSessionId"
     :now-tick="s.nowTick"
     :running-ids="s.runningIds"
+    :generating-ids="s.generatingIds"
     :ask-ids="s.askPendingIds"
     :editing-workspace-id="s.editingWorkspaceId"
     :workspace-draft="s.editingWorkspaceDraft"

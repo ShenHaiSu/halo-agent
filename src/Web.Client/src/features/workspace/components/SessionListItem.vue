@@ -28,7 +28,14 @@
             @blur="emit('rename-save', sess.id)"
           />
         </div>
-        <div v-else class="truncate font-medium" :title="sess.title" @dblclick="emit('rename-start', sess)">
+        <div
+          v-else
+          class="truncate font-medium"
+          :class="generating ? 'session-title-generating' : ''"
+          :title="sess.title"
+          :aria-busy="generating ? 'true' : 'false'"
+          @dblclick="generating ? undefined : emit('rename-start', sess)"
+        >
           {{ sess.title }}
         </div>
         <div
@@ -67,7 +74,8 @@
         :data-armed="armed ? 'true' : 'false'"
         :type="armed ? 'error' : 'default'"
         :loading="deleting"
-        :title="armed ? '再次点击确认删除（3s内有效）' : '删除会话'"
+        :disabled="generating"
+        :title="generating ? '标题生成中，请稍候' : armed ? '再次点击确认（3s内有效）' : '删除会话'"
         :class="armed ? '!bg-red-500/20 font-semibold' : ''"
         @click="emit('delete', sess.id)"
       >
@@ -79,10 +87,11 @@
         trigger="click"
         :options="menuOptions"
         :show="menuOpen"
+        :disabled="generating"
         @update:show="emit('menu', $event)"
         @select="(key: string | number) => emit('menu-select', String(key))"
       >
-        <n-button quaternary circle size="tiny" data-testid="session-more-btn" @click="emit('menu', !menuOpen)">
+        <n-button quaternary circle size="tiny" data-testid="session-more-btn" :disabled="generating" @click="emit('menu', !menuOpen)">
           <template #icon>
             <MoreVertical class="w-3.5 h-3.5" />
           </template>
@@ -93,7 +102,7 @@
 </template>
 <script setup lang="ts">
 import { computed, h } from 'vue';
-import { Trash2, MoreVertical, Edit3, Pin, Hash, Download } from 'lucide-vue-next';
+import { Trash2, MoreVertical, Edit3, Pin, Hash, Download, Sparkles } from 'lucide-vue-next';
 import type { SessionMetadata } from '@shared/bridge/hostBridge';
 import { formatSessionTime, formatRelativeTime, sessionTimeTitle, isBadTime } from '@shared/utils/timeFormat';
 
@@ -108,6 +117,7 @@ const props = defineProps<{
   deleting: boolean;
   menuOpen: boolean;
   nowTick: number;
+  generating: boolean;
 }>();
 const emit = defineEmits<{
   select: [id: string];
@@ -132,9 +142,40 @@ function relativeLabel(iso: string): string {
   return formatRelativeTime(iso);
 }
 const menuOptions = computed(() => [
-  { label: '重命名会话', key: 'rename', icon: () => h(Edit3, { class: 'w-4 h-4' }) },
+  { label: '重命名会话', key: 'rename', icon: () => h(Edit3, { class: 'w-4 h-4' }), disabled: props.generating },
+  {
+    label: '生成会话标题',
+    key: 'regenerate-title',
+    icon: () => h(Sparkles, { class: 'w-4 h-4' }),
+    disabled: props.generating,
+  },
   { label: props.sess.isPinned ? '取消置顶' : '置顶会话', key: 'pin', icon: () => h(Pin, { class: 'w-4 h-4' }) },
   { label: '复制会话 Hash', key: 'copy-hash', icon: () => h(Hash, { class: 'w-4 h-4' }) },
   { label: '导出为 Markdown', key: 'export-md', icon: () => h(Download, { class: 'w-4 h-4' }) },
 ]);
 </script>
+<style scoped>
+.session-title-generating {
+  position: relative;
+  overflow: hidden;
+  filter: blur(4px);
+  opacity: 0.85;
+  user-select: none;
+  pointer-events: none;
+}
+.session-title-generating::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
+  animation: session-title-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes session-title-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+</style>

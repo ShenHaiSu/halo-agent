@@ -166,6 +166,7 @@
               :active="sess.id === activeSessionId"
               :armed="armedId === sess.id"
               :running="runningIds.includes(sess.id)"
+              :generating="generatingIds.includes(sess.id)"
               :editing="editingId === sess.id"
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
@@ -195,6 +196,7 @@
               :active="sess.id === activeSessionId"
               :armed="armedId === sess.id"
               :running="runningIds.includes(sess.id)"
+              :generating="generatingIds.includes(sess.id)"
               :editing="editingId === sess.id"
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
@@ -273,6 +275,7 @@ defineProps<{
   menuId: string | null;
   nowTick: number;
   runningIds: string[];
+  generatingIds: string[];
   askIds: string[];
   editingWorkspaceId: string | null;
   workspaceDraft: string;

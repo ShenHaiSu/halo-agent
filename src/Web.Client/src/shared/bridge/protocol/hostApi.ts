@@ -21,6 +21,7 @@ import type {
   AgentConfigDocument,
   CompactionResultDto,
   ContextBudgetStatusDto,
+  FirstRoundTexts,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
   HistoryTruncateResultDto,
@@ -123,7 +124,15 @@ export interface HostBridgeApi {
   getSessionMessages: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
   appendSessionMessage: (workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) => Promise<BridgeResponse<boolean>>;
   updateSessionTitle: (workspaceId: string, sessionId: string, title: string) => Promise<BridgeResponse<boolean>>;
-  generateSessionTitle: (workspaceId: string, sessionId: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<string>>;
+  generateSessionTitle: (
+    workspaceId: string,
+    sessionId: string,
+    providerId?: string,
+    modelId?: string,
+    force?: boolean
+  ) => Promise<BridgeResponse<string>>;
+  /** need03-03-B：首轮取数直读（不受 HistoryVersion 守卫影响，标题链路共用）。 */
+  getFirstRoundTexts: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<FirstRoundTexts>>;
   setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
   exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;

@@ -386,6 +386,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           // 启动/工作区进入：同样做一次孤儿愈合，脏了才重拉
           if (await healSessionHistory()) await loadSessionMessages(activeSessionId.value);
           await refreshBudget();
+          maybeRefineTitleAfterLoad(activeSessionId.value);
         } else {
           sessionMessages.value = [];
           timelineSummaries.value = [];
@@ -410,6 +411,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
     if (await healSessionHistory({ signal, epoch })) await loadSessionMessages(sid, { signal, epoch });
     await refreshBudget({ signal, epoch });
+    if (sessionStore.isCurrent(epoch, signal) && sessionStore.activeSessionId === sid) {
+      maybeRefineTitleAfterLoad(sid);
+    }
     persistLastActive();
   }
 
@@ -734,27 +738,112 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (cur) cur.messageCount = sessionMessages.value.length;
     return true;
   }
+  // 首轮文本取数：以后端落盘为准（轮末重拉会同步清空内存视图），失败回退内存
+  async function resolveFirstRoundTexts(sid: string): Promise<{ firstUser: string; assistant: string; userCount: number }> {
+    let firstUser = '';
+    let assistant = '';
+    let userCount = 0;
+    let countedRemotely = false;
+    try {
+      const wid = activeWorkspaceId.value;
+      if (wid) {
+        const bridge = getHostBridge();
+        // need03-03-B：标题链路统一走后端直读（v2 会话 getSessionMessages 拒服 USE_TIMELINE_API，
+        // 老后端缺方法时 typeof 守卫回退旧链路）。
+        const directApi = bridge as unknown as {
+          getFirstRoundTexts?: (
+            w: string,
+            s: string
+          ) => Promise<{
+            ok: boolean;
+            code?: string;
+            message?: string;
+            data?: { firstUser?: unknown; assistant?: unknown; userCount?: unknown };
+          }>;
+        };
+        if (typeof directApi.getFirstRoundTexts === 'function') {
+          const direct = await directApi.getFirstRoundTexts(wid, sid);
+          if (direct && direct.ok && direct.data) {
+            firstUser = String(direct.data.firstUser ?? '');
+            assistant = String(direct.data.assistant ?? '');
+            const n = Number(direct.data.userCount ?? 0);
+            userCount = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+            countedRemotely = true;
+            // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+            console.debug('[title-debug] firstRound via getFirstRoundTexts', {
+              sid,
+              userCount,
+              firstLen: firstUser.trim().length,
+              assistantLen: assistant.trim().length,
+            });
+          } else if (direct && !direct.ok) {
+            // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+            console.debug('[title-debug] getFirstRoundTexts not ok, fallback legacy', { sid, code: direct.code, message: direct.message });
+          }
+        }
+        if (!countedRemotely) {
+          const remoteApi = bridge as unknown as {
+            getSessionMessages?: (w: string, s: string) => Promise<{ ok: boolean; data?: UnifiedChatMessage[] }>;
+          };
+          if (typeof remoteApi.getSessionMessages === 'function') {
+            const remote = await bridge.getSessionMessages(wid, sid);
+            if (remote && remote.ok && Array.isArray(remote.data)) {
+              const msgs = remote.data as UnifiedChatMessage[];
+              const remoteUsers = msgs.filter((m) => m.role === 'user');
+              userCount = remoteUsers.length;
+              countedRemotely = true;
+              const firstRemote = remoteUsers[0];
+              if (firstRemote) {
+                firstUser = String(firstRemote.content || '');
+                const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+                assistant = String(lastAssistant?.content || '');
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      /* 落盘读取失败则回退内存计数 */
+    }
+    if (!countedRemotely) {
+      const memUsers = sessionMessages.value.filter((m) => m.role === 'user');
+      userCount = memUsers.length;
+      const firstMem = memUsers[0];
+      if (firstMem) {
+        firstUser = String(firstMem.content || '');
+        const lastAssistant = [...sessionMessages.value].reverse().find((m) => m.role === 'assistant');
+        assistant = String(lastAssistant?.content || '');
+      }
+    }
+    return { firstUser, assistant, userCount };
+  }
   // need03-03 T2：首轮响应结束后精炼一次（同模型小请求优先，失败则本地精炼兜底；手动锁/已生成/生成中直接跳过）
   async function generateTitleAfterFirstRound(sessionId: string): Promise<void> {
     const sid = (sessionId || '').trim();
     if (!sid || titleLocked.value[sid] || autoTitleDone.value[sid] || titleGenerating.value[sid]) return;
     const sess = sessions.value.find((s) => s.id === sid);
     if (!sess) return;
-    // 仅首轮：当前内存消息中 user 条数须为 1（后台会话消息未加载时跳过，避免误覆）
+    // 子会话标题由后端锁定展示，不参与自动精炼
+    const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+    if (sessRole === 'sub') return;
+    // 仅当前会话触发，跨会话事件丢弃，避免后台覆盖当前视图
     if (sid !== activeSessionId.value) return;
-    const users = sessionMessages.value.filter((m) => m.role === 'user');
-    if (users.length !== 1) {
-      // 非首轮或空：若标题仍是新建会话则不处理；否则标记完成以冻结
+    // 轮末重拉会同步清空内存视图，计数以后端落盘为准，避免把“没数到”误判成非首轮
+    const { firstUser: firstUserText, assistant: assistantText, userCount } = await resolveFirstRoundTexts(sid);
+    if (userCount === 0) {
+      // 视图尚未就位或落盘尚未可见：跳过本次不冻结，等待下次进入补跑
+      return;
+    }
+    if (userCount > 1) {
+      // 真多轮才冻结，此后不再尝试
       if (sess.title && sess.title !== '新建会话') autoTitleDone.value[sid] = true;
       return;
     }
     titleGenerating.value[sid] = true;
     try {
-      const firstUser = String(users[0].content || '');
-      const firstAssistant = [...sessionMessages.value].reverse().find((m) => m.role === 'assistant');
-      const assistantText = String(firstAssistant?.content || '');
+      const firstUser = firstUserText;
       const t1 = instantTitleFromUserText(firstUser);
-      // 后端同模型小请求优先（无工具/maxTokens 50/20s 熔断，后端已持久化+置锁）；失败则本地精炼兜底
+      // 后端同模型小请求优先（无工具/maxTokens 10000/20s 熔断，后端已持久化+置锁）；失败则本地精炼兜底
       let backendTitle = '';
       try {
         backendTitle = await requestTitleViaLlm(sid, 20000);
@@ -791,14 +880,110 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       titleGenerating.value[sid] = false;
     }
   }
-  // need03-03 T2 后端标题通道：generateSessionTitle（同模型/temperature 0.2/maxTokens 50/20s 熔断在后端内聚）
-  async function requestTitleViaLlm(sessionId: string, timeoutMs: number): Promise<string> {
+  // 会话就位后补跑一次精炼：仅当标题仍是首条即时形态时触发，门闩与后端冻结码天然去重
+  function maybeRefineTitleAfterLoad(sessionId: string): void {
+    try {
+      const sid = (sessionId || '').trim();
+      if (!sid || !activeWorkspaceId.value) return;
+      if (titleLocked.value[sid] || autoTitleDone.value[sid] || titleGenerating.value[sid]) return;
+      const sess = sessions.value.find((s) => s.id === sid);
+      if (!sess) return;
+      const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+      if (sessRole === 'sub') return;
+      if (sid !== activeSessionId.value) return;
+      const title = String(sess.title || '').trim();
+      const isBlank = !title || title === '新建会话' || title === '初始会话';
+      if (!isBlank) {
+        const memUsers = sessionMessages.value.filter((m) => m.role === 'user');
+        if (memUsers.length === 0) {
+          // 消息尚未落盘可见时仍给一次机会，计数以后端为准
+        } else {
+          const expected = instantTitleFromUserText(String(memUsers[0].content || ''));
+          if (title !== expected) return;
+        }
+      }
+      void generateTitleAfterFirstRound(sid).catch(() => undefined);
+    } catch {
+      /* 补跑永不阻断会话切换 */
+    }
+  }
+  // 列表手动触发：显式覆盖已锁标题（force），允许反复跑、多轮也跑；空/sub/生成中由调用方前置拦截
+  async function regenerateTitleManually(sessionId: string): Promise<boolean> {
+    const sid = (sessionId || '').trim();
+    if (!sid || !activeWorkspaceId.value) return false;
+    if (titleGenerating.value[sid]) return false;
+    const sess = sessions.value.find((s) => s.id === sid);
+    if (!sess) return false;
+    const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+    if (sessRole === 'sub') return false;
+    titleGenerating.value[sid] = true;
+    try {
+      const { firstUser, assistant, userCount } = await resolveFirstRoundTexts(sid);
+      // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+      console.debug('[title-debug] resolve', { sid, userCount, firstLen: firstUser.trim().length, assistantLen: assistant.trim().length });
+      if (userCount === 0 || !firstUser.trim()) {
+        console.debug('[title-debug] early-return: 无可概括内容', { sid, userCount });
+        return false;
+      }
+      const t1 = instantTitleFromUserText(firstUser);
+      let backendTitle = '';
+      try {
+        backendTitle = await requestTitleViaLlm(sid, 20000, true);
+      } catch (e) {
+        // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+        console.debug('[title-debug] backendTitle failed', {
+          sid,
+          titleCode: (e as { titleCode?: string } | null)?.titleCode,
+          message: e instanceof Error ? e.message : String(e),
+        });
+        backendTitle = '';
+      }
+      console.debug('[title-debug] backendTitle result', {
+        sid,
+        len: backendTitle.trim().length,
+        preview: backendTitle.trim().slice(0, 20),
+      });
+      if (backendTitle) {
+        const parsed = parseTitleResult(backendTitle, t1) || backendTitle;
+        const item = sessions.value.find((s) => s.id === sid);
+        if (!item) return false;
+        // 手动显式覆盖：已锁也直接替换（后端 force 已跳锁，回写后保持锁定）
+        item.title = parsed;
+        titleLocked.value[sid] = true;
+        autoTitleDone.value[sid] = true;
+        return true;
+      }
+      const parsed = refineTitleLocal(assistant, firstUser);
+      // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+      console.debug('[title-debug] local refine', { sid, parsed, titleLocked: !!titleLocked.value[sid] });
+      if (!parsed) return false;
+      if (titleLocked.value[sid]) {
+        const item = sessions.value.find((s) => s.id === sid);
+        if (!item) return false;
+        item.title = parsed;
+        autoTitleDone.value[sid] = true;
+        return true;
+      }
+      const still = sessions.value.find((s) => s.id === sid);
+      if (!still) return false;
+      const ok = await renameSession(sid, parsed, { manual: false });
+      if (ok) autoTitleDone.value[sid] = true;
+      return ok;
+    } catch (err) {
+      console.warn('[workspaceStore] regenerateTitleManually skipped:', err);
+      return false;
+    } finally {
+      titleGenerating.value[sid] = false;
+    }
+  }
+  // need03-03 T2 后端标题通道：generateSessionTitle（同模型/temperature 0.2/maxTokens 10000/20s 熔断在后端内聚）
+  async function requestTitleViaLlm(sessionId: string, timeoutMs: number, force = false): Promise<string> {
     const bridge = getHostBridge();
     const wid = activeWorkspaceId.value;
     if (!wid || !sessionId) throw new Error('no-workspace-session');
     const pId = configStore.activeProvider?.id || '';
     const mId = configStore.activeModel?.id || '';
-    const call = bridge.generateSessionTitle(wid, sessionId, pId, mId);
+    const call = bridge.generateSessionTitle(wid, sessionId, pId, mId, force);
     const timeout = new Promise<never>((_, reject) =>
       window.setTimeout(() => reject(new Error('title-timeout')), Math.max(1000, timeoutMs))
     );
@@ -1048,6 +1233,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     appendMessage,
     mergePersistedMessage,
     generateTitleAfterFirstRound,
+    maybeRefineTitleAfterLoad,
+    regenerateTitleManually,
     requestTitleViaLlm,
     titleLocked,
     autoTitleDone,

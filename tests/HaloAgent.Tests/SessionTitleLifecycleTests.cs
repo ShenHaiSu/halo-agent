@@ -187,7 +187,7 @@ public sealed class SessionTitleLifecycleTests : IDisposable
         Assert.True(titleCount > 0, "应有一条 source=title 的用量记录，证明 LLM 小请求真的发出");
     }
 
-    [Fact(DisplayName = "ParseSessionTitle：去噪、钳 12 字、surrogate 安全，行为不变")]
+    [Fact(DisplayName = "ParseSessionTitle：去噪、钳 15 字、surrogate 安全，行为不变")]
     public void ParseSessionTitle_Pure_Behavior()
     {
         var method = typeof(HostBridgeFacade).GetMethod(
@@ -199,8 +199,8 @@ public sealed class SessionTitleLifecycleTests : IDisposable
 
         Assert.Equal("我的测试标题", Invoke("标题：我的测试标题"));
         Assert.Equal("", Invoke("！。？"));
-        // 钳 12 个码点
-        Assert.Equal(12, Invoke("一二三四五六七八九十甲乙丙丁").Length);
+        // 钳 15 个码点
+        Assert.Equal(15, Invoke("一二三四五六七八九十甲乙丙丁戊").Length);
         // surrogate pair（emoji）按码点计，不被截断成半个代理项
         string longWithEmoji = "标题😀😀😀😀😀😀😀😀😀😀😀😀😀😀";
         string parsed = Invoke(longWithEmoji);

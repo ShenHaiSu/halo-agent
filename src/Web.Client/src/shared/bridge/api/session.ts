@@ -6,6 +6,7 @@ import type {
   ContextBudgetStatusDto,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
+  FirstRoundTexts,
   HistoryTruncateResultDto,
   HostBridgeApi,
   SessionGoalDto,
@@ -35,6 +36,7 @@ export function createSessionApi(
   | 'appendSessionMessage'
   | 'updateSessionTitle'
   | 'generateSessionTitle'
+  | 'getFirstRoundTexts'
   | 'setSessionPinned'
   | 'deleteSession'
   | 'exportSessionMarkdown'
@@ -93,9 +95,15 @@ export function createSessionApi(
     async updateSessionTitle(workspaceId: string, sessionId: string, title: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('updateSessionTitle', workspaceId, sessionId, title));
     },
-    async generateSessionTitle(workspaceId: string, sessionId: string, providerId?: string, modelId?: string) {
+    async generateSessionTitle(workspaceId: string, sessionId: string, providerId?: string, modelId?: string, force?: boolean) {
       return normalizeBridgePayload<BridgeResponse<string>>(
-        await t.call('generateSessionTitle', workspaceId, sessionId, providerId ?? '', modelId ?? '')
+        await t.call('generateSessionTitle', workspaceId, sessionId, providerId ?? '', modelId ?? '', force ?? false)
+      );
+    },
+    /** need03-03-B：首轮取数直读（v2 会话可用；老后端缺方法时抛 BRIDGE_NOT_CONNECTED 由调用方回退）。 */
+    async getFirstRoundTexts(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<FirstRoundTexts>>(
+        await t.call('getFirstRoundTexts', workspaceId ?? '', sessionId ?? '')
       );
     },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
@@ -279,13 +287,19 @@ export function createSessionApi(
       return normalizeBridgePayload<BridgeResponse<TurnSummary[]>>(await t.call('getTimelineSummary', workspaceId ?? '', sessionId ?? ''));
     },
     async getBlockContents(workspaceId: string, sessionId: string, blockIds: string[]) {
-      return normalizeBridgePayload<BridgeResponse<TimelineBlockContentsResponse>>(await t.call('getBlockContents', workspaceId ?? '', sessionId ?? '', blockIds ?? []));
+      return normalizeBridgePayload<BridgeResponse<TimelineBlockContentsResponse>>(
+        await t.call('getBlockContents', workspaceId ?? '', sessionId ?? '', blockIds ?? [])
+      );
     },
     async getToolResult(workspaceId: string, sessionId: string, turnId: string, callId: string) {
-      return normalizeBridgePayload<BridgeResponse<TimelineToolResult>>(await t.call('getToolResult', workspaceId ?? '', sessionId ?? '', turnId ?? '', callId ?? ''));
+      return normalizeBridgePayload<BridgeResponse<TimelineToolResult>>(
+        await t.call('getToolResult', workspaceId ?? '', sessionId ?? '', turnId ?? '', callId ?? '')
+      );
     },
     async getTurnBlockIds(workspaceId: string, sessionId: string, turnId: string) {
-      return normalizeBridgePayload<BridgeResponse<string[]>>(await t.call('getTurnBlockIds', workspaceId ?? '', sessionId ?? '', turnId ?? ''));
+      return normalizeBridgePayload<BridgeResponse<string[]>>(
+        await t.call('getTurnBlockIds', workspaceId ?? '', sessionId ?? '', turnId ?? '')
+      );
     },
   };
 }

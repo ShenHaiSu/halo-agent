@@ -161,7 +161,7 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       return { ok: false, message: '会话不存在', data: false };
     },
     // need03-03 T2 Mock：固定精炼标题短路，保证 Web 调试同样走两阶段
-    async generateSessionTitle(workspaceId: string, sessionId: string) {
+    async generateSessionTitle(workspaceId: string, sessionId: string, _providerId?: string, _modelId?: string, _force?: boolean) {
       const list = s.mockSessions[workspaceId] || [];
       const sess = list.find((s) => s.id === sessionId);
       if (!sess) return { ok: false, message: '会话不存在', data: '' };
@@ -181,6 +181,20 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       sess.title = title;
       sess.updatedAtUtc = new Date().toISOString();
       return { ok: true, data: title };
+    },
+    // need03-03-B Mock：首轮取数直读短路（与后端 GetFirstRoundTexts 同语义；v2 会话同样返回）。
+    async getFirstRoundTexts(_workspaceId: string, sessionId: string) {
+      const msgs = s.mockMessages[sessionId] || [];
+      const users = msgs.filter((m) => m.role === 'user');
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+      return {
+        ok: true,
+        data: {
+          firstUser: String(users[0]?.content || ''),
+          assistant: String(lastAssistant?.content || ''),
+          userCount: users.length,
+        },
+      };
     },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
       const list = s.mockSessions[workspaceId] || [];

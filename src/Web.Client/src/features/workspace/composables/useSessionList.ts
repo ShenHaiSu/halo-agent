@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useMessage } from 'naive-ui';
+import { useDialog, useMessage } from 'naive-ui';
 import { getHostBridge, type SessionMetadata } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
@@ -8,11 +8,22 @@ import { useAskUserStore } from '@/stores/askUserStore';
 
 export function useSessionList() {
   const message = useMessage();
+  const dialog = useDialog();
   const workspaceStore = useWorkspaceStore();
   const agentTurn = useAgentTurn();
   const askUserStore = useAskUserStore();
-  const { workspaces, activeWorkspaceId, activeWorkspace, sessions, activeSessionId, searchQuery, pinnedSessions, unpinnedSessions } =
-    storeToRefs(workspaceStore);
+  const {
+    workspaces,
+    activeWorkspaceId,
+    activeWorkspace,
+    sessions,
+    activeSessionId,
+    searchQuery,
+    pinnedSessions,
+    unpinnedSessions,
+    titleGenerating,
+  } = storeToRefs(workspaceStore);
+  const generatingIds = computed(() => Object.keys(titleGenerating.value).filter((k) => titleGenerating.value[k]));
   const runningSessionIdSet = computed(() => new Set(agentTurn.runningSessionIds));
   const askPendingIds = computed(() => {
     try {
@@ -160,16 +171,76 @@ export function useSessionList() {
   }
   async function handleSaveRename(sessionId: string): Promise<void> {
     if (editingSessionId.value !== sessionId) return;
+    if (titleGenerating.value[sessionId]) {
+      message.warning('标题生成中，请稍候');
+      return;
+    }
     const newTitle = editingTitleDraft.value.trim();
     if (newTitle) await workspaceStore.renameSession(sessionId, newTitle);
     editingSessionId.value = null;
     editingTitleDraft.value = '';
   }
+  function isBlankTitle(title: string): boolean {
+    const t = (title || '').trim();
+    return !t || t === '新建会话' || t === '初始会话';
+  }
+  async function handleRegenerateTitle(sess: SessionMetadata): Promise<void> {
+    const sid = (sess.id || '').trim();
+    if (!sid) return;
+    if (titleGenerating.value[sid]) {
+      message.info('标题生成中，请稍候');
+      return;
+    }
+    const role = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+    if (role === 'sub') {
+      message.warning('子会话标题由系统管理，不可重新生成');
+      return;
+    }
+    if ((sess.messageCount ?? 0) <= 0) {
+      message.warning('暂无可概括的对话内容');
+      return;
+    }
+    const current = String(sess.title || '').trim();
+    if (!isBlankTitle(current)) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        let done = false;
+        const finish = (v: boolean): void => {
+          if (done) return;
+          done = true;
+          resolve(v);
+        };
+        try {
+          dialog.warning({
+            title: '覆盖当前标题？',
+            content: `将用新生成的标题覆盖「${current}」，继续吗？`,
+            positiveText: '继续生成',
+            negativeText: '取消',
+            onPositiveClick: () => finish(true),
+            onNegativeClick: () => finish(false),
+            onClose: () => finish(false),
+          });
+        } catch {
+          finish(true);
+        }
+      });
+      if (!confirmed) return;
+    }
+    openMenuSessionId.value = null;
+    const ok = await workspaceStore.regenerateTitleManually(sid);
+    if (ok) message.success('标题已重新生成');
+    else message.error('标题生成失败，请稍后重试');
+  }
   async function handleSessionMenuSelect(key: string, sess: SessionMetadata): Promise<void> {
     if (isArmed(sess.id)) cancelDeleteConfirm();
     if (key === 'rename') {
+      if (titleGenerating.value[sess.id]) {
+        message.warning('标题生成中，请稍候');
+        return;
+      }
       openMenuSessionId.value = null;
       startInlineRename(sess);
+    } else if (key === 'regenerate-title') {
+      await handleRegenerateTitle(sess);
     } else if (key === 'pin') {
       await workspaceStore.togglePinSession(sess.id, !sess.isPinned);
       message.success(sess.isPinned ? '已取消置顶' : '已置顶会话');
@@ -227,6 +298,7 @@ export function useSessionList() {
     pinnedSessions,
     unpinnedSessions,
     runningIds,
+    generatingIds,
     askPendingIds,
     showWorkspacePopover,
     editingSessionId,
@@ -258,6 +330,7 @@ export function useSessionList() {
     handleSelectSession,
     startInlineRename,
     handleSaveRename,
+    handleRegenerateTitle,
     handleSessionMenuSelect,
   };
 }
