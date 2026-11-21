@@ -176,23 +176,23 @@ interface HistoryItem {
   group: ToolGroup;
 }
 
+/** 工具声明块类型：生产真相为 tool_call，tool 仅兼容旧内存存根与旧单测。 */
+const TOOL_DECL_KINDS: ReadonlySet<string> = new Set(['tool_call', 'tool']);
+
 interface ToolGroup {
   callId: string;
+  callBlock: TimelineBlockContent | null;
   resultBlock: TimelineBlockContent | null;
 }
 
 function buildHistoryItems(blocks: TimelineBlockContent[]): HistoryItem[] {
   const out: HistoryItem[] = [];
-  const callName = new Map<string, string>();
-  const callArgs = new Map<string, string>();
   const callResult = new Map<string, TimelineBlockContent>();
   for (const b of blocks) {
     const kind = String((b as unknown as { kind?: unknown }).kind || 'text');
-    if (kind === 'tool') {
+    if (TOOL_DECL_KINDS.has(kind)) {
       const callId = String((b as unknown as { callId?: unknown }).callId || (b as unknown as { blockId?: unknown }).blockId || '');
-      callName.set(callId, String((b as unknown as { functionName?: unknown }).functionName || 'tool'));
-      callArgs.set(callId, String((b as unknown as { argsJson?: unknown }).argsJson || (b as unknown as { markdown?: unknown }).markdown || ''));
-      out.push({ key: `tool-${callId}`, kind: 'tool', block: b, group: { callId, resultBlock: b } });
+      out.push({ key: `tool-${callId}`, kind: 'tool', block: b, group: { callId, callBlock: b, resultBlock: null } });
       continue;
     }
     if (kind === 'tool_result') {
@@ -201,17 +201,23 @@ function buildHistoryItems(blocks: TimelineBlockContent[]): HistoryItem[] {
       continue;
     }
     if (kind === 'reasoning') {
-      out.push({ key: `reasoning-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`, kind: 'reasoning', block: b, group: { callId: '', resultBlock: null } });
+      out.push({
+        key: `reasoning-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`,
+        kind: 'reasoning',
+        block: b,
+        group: { callId: '', callBlock: null, resultBlock: null },
+      });
       continue;
     }
-    out.push({ key: `text-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`, kind: 'text', block: b, group: { callId: '', resultBlock: null } });
+    out.push({
+      key: `text-${String((b as unknown as { blockId?: unknown }).blockId || out.length)}`,
+      kind: 'text',
+      block: b,
+      group: { callId: '', callBlock: null, resultBlock: null },
+    } as HistoryItem);
   }
   for (const it of out) {
     if (it.kind === 'tool') {
-      const name = callName.get(it.group.callId);
-      if (name) (it.block as unknown as { functionName?: string }).functionName = name;
-      const args = callArgs.get(it.group.callId);
-      if (args) (it.block as unknown as { argsJson?: string }).argsJson = args;
       const res = callResult.get(it.group.callId);
       if (res) it.group.resultBlock = res;
     }
@@ -219,10 +225,11 @@ function buildHistoryItems(blocks: TimelineBlockContent[]): HistoryItem[] {
   return out;
 }
 function toAgentToolCard(group: ToolGroup, turn: FlatTimelineTurn): AgentToolCard {
-  const block = group.resultBlock;
-  const resultText = String(block?.resultText || block?.markdown || block?.preview || '');
-  const functionName = String((block as unknown as { functionName?: unknown })?.functionName || 'tool');
-  const argsJson = String((block as unknown as { argsJson?: unknown })?.argsJson || '');
+  const call = group.callBlock as unknown as { functionName?: unknown; argsJson?: unknown; markdown?: unknown } | null;
+  const res = group.resultBlock as TimelineBlockContent | null;
+  const functionName = String(call?.functionName || (res as unknown as { functionName?: unknown })?.functionName || 'tool');
+  const argsJson = String(call?.argsJson || call?.markdown || '');
+  const resultText = String(res?.resultText || res?.markdown || res?.preview || '');
   return {
     callId: group.callId,
     functionName,
@@ -236,7 +243,6 @@ function toAgentToolCard(group: ToolGroup, turn: FlatTimelineTurn): AgentToolCar
     images: [],
   };
 }
-
 function plainTextOf(b: TimelineBlockContent): string {
   const s = trimBlankEdges(String(b.markdown || b.preview || ''));
   return s.length > 4000 ? s.slice(0, 4000) + '\n…（已截断，展开工具卡查看全文）' : s;

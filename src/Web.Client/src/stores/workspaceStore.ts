@@ -15,8 +15,8 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, turns } from '@features/agent/stores/model';
-import { matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import type { PendingUser } from '@features/session/utils/pendingUser';
+import { isPendingExpired, matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -68,6 +68,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const t = turns.value[id];
       const p = t?.pendingUser;
       if (!p || p.status !== 'sending') return;
+      if (isPendingExpired(p)) {
+        try {
+          need02Debug('pending-expired-drop', { requestId: p.requestId });
+        } catch {
+          /* ignore */
+        }
+        dropPendingUser(id);
+        return;
+      }
       // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
       if (!isV2Timeline.value) {
         const hit = matchConfirmed(p, sessionMessages.value);

@@ -126,6 +126,8 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   const sid = (targetSessionId ?? activeSessionId.value).trim();
   if (!sid) return;
   const t = ensureTurn(sid);
+  const finishMark = turnStartMarks[sid] || 0;
+  const finishPendingId = String(t.pendingUser?.requestId || '');
   try {
     flushSegBufSync(sid);
   } catch (e) {
@@ -171,6 +173,27 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   if (willDefer) {
     t.steadyReady = true;
     touch(t);
+  }
+  // 轮末收口：稳态已就位，乐观发送态必多余，直接清理，避免常驻。
+  // 可重试失败保留失败态供重发；旧定时器不得清理新轮待发送态。
+  try {
+    if ((turnStartMarks[sid] || 0) === finishMark) {
+      const cur = t.pendingUser;
+      if (cur && (!finishPendingId || String(cur.requestId || '') === finishPendingId)) {
+        const keep = !!(opts?.keepOnFailure && t.lastErrorInfo?.retry);
+        if (!keep) {
+          t.pendingUser = null;
+          touch(t);
+          try {
+            need02Debug('pending-drop-finish', { requestId: finishPendingId });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch {
+    /* 清理永不阻断轮末 */
   }
   try {
     agentRuntime().reconcileTimes();

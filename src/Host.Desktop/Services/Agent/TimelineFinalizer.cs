@@ -123,7 +123,9 @@ public static class TimelineFinalizer
             DurationMs = 0,
             Chars = chars,
             Status = endedStatus,
-            LastRequestId = ctx.RequestId ?? string.Empty,
+            LastRequestId = !string.IsNullOrWhiteSpace(ctx.TurnRequestId)
+                ? ctx.TurnRequestId
+                : (ctx.RequestId ?? string.Empty),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
             AnchorKey = turnId,

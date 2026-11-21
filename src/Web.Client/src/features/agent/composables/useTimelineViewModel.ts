@@ -65,27 +65,57 @@ export function useTimelineViewModel() {
     clearReadingWindow: win.clearReadingWindow,
     liveInclusiveSegs: computed(() => {
       try {
-        const segs = (turn.activeTurn?.segs || []) as Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown }>;
-        return segs.map((s, i) => ({
-          kind: String((s as { kind?: unknown }).kind || ''),
-          key: String((s as { key?: unknown }).key || `live-${i}`),
-          text: String((s as { text?: unknown }).text || ''),
-          card:
-            String((s as { kind?: unknown }).kind || '') === 'tool'
-              ? {
-                  callId: String((s as { callId?: unknown }).callId || ''),
-                  functionName: 'tool',
-                  argsJson: '',
-                  status: 'running' as const,
-                  resultText: '',
-                  exitCode: null,
-                  durationMs: null,
-                  iteration: 0,
-                  receivedBytes: 0,
-                  images: [],
-                }
-              : null,
-        }));
+        type LiveToolCard = {
+          callId: string;
+          functionName: string;
+          argsJson: string;
+          status: 'running' | 'done' | 'error';
+          resultText: string;
+          exitCode: number | null;
+          durationMs: number | null;
+          iteration: number;
+          receivedBytes: number;
+          images: [];
+        };
+        const turnState = turn.activeTurn as unknown as
+          | {
+              segs?: Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown }>;
+              toolCards?: LiveToolCard[];
+            }
+          | null
+          | undefined;
+        const segs = (turnState?.segs || []) as Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown }>;
+        const byCall = new Map<string, LiveToolCard>();
+        for (const c of turnState?.toolCards || []) {
+          const id = String((c as { callId?: unknown })?.callId || '').trim();
+          if (id && !byCall.has(id)) byCall.set(id, c as never);
+        }
+        return segs.map((s, i) => {
+          const kind = String((s as { kind?: unknown }).kind || '');
+          const key = String((s as { key?: unknown }).key || `live-${i}`);
+          const text = String((s as { text?: unknown }).text || '');
+          if (kind !== 'tool') return { kind, key, text, card: null };
+          const callId = String((s as { callId?: unknown }).callId || '');
+          const real = byCall.get(callId);
+          if (real) return { kind, key, text, card: { ...real } };
+          return {
+            kind,
+            key,
+            text,
+            card: {
+              callId,
+              functionName: 'tool',
+              argsJson: '',
+              status: 'running' as const,
+              resultText: '',
+              exitCode: null,
+              durationMs: null,
+              iteration: 0,
+              receivedBytes: 0,
+              images: [],
+            },
+          };
+        });
       } catch {
         return [];
       }
