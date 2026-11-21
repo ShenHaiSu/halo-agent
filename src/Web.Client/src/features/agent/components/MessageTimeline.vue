@@ -2,16 +2,12 @@
   <KeepAlive :max="3">
     <div v-show="paneActive" :aria-hidden="paneActive ? undefined : 'true'" class="flex-1 min-h-0 min-w-0 flex flex-col">
       <TimelineView
-        :items="t.timelineItems"
-        :history-items="t.visibleHistoryEntries"
-        :tail-items="t.tailEntries"
         :is-empty="isEmpty"
         :show-jump-btn="!!t.showJump"
         :reading-window="!!t.readingWindow"
         :chat-width-mode="t.chatWidthMode"
         :need02-attr="t.need02Attr"
         @ready="onReady"
-        @toggle="rowActions.onToggle($event)"
         @user-menu="(e, item) => rowActions.onUserMenu(e, item)"
         @assistant-menu="(e, item) => rowActions.onAssistantMenu(e, item)"
         @link-click="t.onMarkdownLinkClick($event)"
@@ -33,7 +29,7 @@ import { computed, onUnmounted, reactive, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import TimelineView from './TimelineView.vue';
-import { useTimeline } from '../composables/useTimeline';
+import { useTimelineViewModel } from '../composables/useTimelineViewModel';
 import { renderHtmlSmart, renderStreamingText } from '@features/session/utils/markdownRender';
 import { bindCodeCopyDelegation } from '@features/session/utils/codeCopyDelegation';
 import { isP4SubOn, useP02Flags } from '@features/need02/utils/need02Flags';
@@ -41,7 +37,7 @@ import { provideTimelineScene } from '../composables/useTimelineScene';
 import { useTimelineRowActions } from '../composables/useTimelineRowActions';
 
 /** 装配器：组装视图模型并提供，模板只做数据下发与事件转发。 */
-const rawTimeline = useTimeline();
+const rawTimeline = useTimelineViewModel();
 const t = reactive(rawTimeline);
 const workspaceSnapshot = useWorkspaceStore();
 const { timelineSummaries } = storeToRefs(workspaceSnapshot);
@@ -61,8 +57,6 @@ function renderHtml(s: string): string {
 
 const rowActions = useTimelineRowActions({
   menu: rawTimeline.menu,
-  toggleTurn: rawTimeline.toggleTurn,
-  toggleRun: rawTimeline.toggleRun,
   retryTurn: () => {
     void rawTimeline.onRetryTurn();
   },
@@ -82,8 +76,6 @@ provideTimelineScene(t, {
   renderHtml,
   renderStream: renderStreamingText,
   summaryList,
-  // 主链纯 V2：历史开关恒真（子会话不受影响，走独立小链）。
-  hideLegacyHistory: computed(() => true),
   singleProcess: renderGate.singleProcess,
 });
 

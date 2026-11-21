@@ -1,14 +1,10 @@
-/** 主链退役冻结守卫：遗留投影入口已标废弃，禁止新增引用；新代码走摘要源。 */
+/** 主链退役完成守卫：V1 投影整组已删除，禁止回潮；子会话只读链豁免。 */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(__dirname, '..', '..', '..', '..');
 const SRC = join(ROOT, 'src');
-
-function read(rel: string): string {
-  return readFileSync(join(ROOT, rel), 'utf8');
-}
 
 function listFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -24,49 +20,37 @@ function listFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const FREEZE_PHRASE = '主链退役中，禁止新增引用';
-
-describe('legacyEntryPointsAreMarkedDeprecated', () => {
-  it('遗留入口文件头含冻结语', () => {
-    const guarded = [
-      'src/features/session/utils/turnGroup.ts',
-      'src/features/agent/composables/useTimelineGroups.ts',
-      'src/features/session/utils/pendingUser.ts',
-      'src/stores/workspaceStore.ts',
-    ];
-    for (const rel of guarded) {
-      expect(read(rel), rel).toContain(FREEZE_PHRASE);
-    }
-  });
-
-  it('主链不再新增旧投影引用（白名单外零新增）', () => {
-    const allowed = new Set(
-      [
-        'src/features/agent/composables/useTimelineProjection.ts',
-        'src/features/agent/composables/useTimelineRowActions.ts',
-        'src/features/agent/components/UserTurnBlock.vue',
-        'src/features/agent/components/UserTurnSummary.vue',
-        'src/features/agent/components/userturn/UserTurnProcessBody.vue',
-        'src/features/agent/utils/steadyReady.ts',
-        'src/features/session/components/HistoryTocPanel.vue',
-        'src/shared/utils/turnGroup.ts',
-        'src/stores/workspaceStore.ts',
-        'src/stores/agentWiring.ts',
-        'src/features/agent/stores/useAgentTelemetry.ts',
-        'src/features/agent/stores/model.ts',
-      ].map((r) => join(ROOT, r).toLowerCase())
-    );
+describe('noLegacyProjectionSymbolsRemain', () => {
+  it('主链无旧投影符号残留（子会话豁免路径除外）', () => {
     const offenders: string[] = [];
     for (const f of listFiles(SRC)) {
+      const lower = f.toLowerCase();
+      if (lower.includes('subhistoryview') || lower.includes('usetimelinegroups') || lower.includes('subsession')) continue;
+      if (lower.endsWith('historytocpanel.vue') || lower.endsWith('historytoc.ts')) continue;
+      if (lower.endsWith('stores/model.ts') || lower.endsWith('stores/useagentelemetry.ts')) continue;
+      if (lower.endsWith('session/utils/pendinguser.ts') || lower.endsWith('stores/workspacestore.ts')) continue;
+      if (lower.endsWith('stores/agentwiring.ts') || lower.endsWith('stores/runtime.ts')) continue;
       const text = readFileSync(f, 'utf8');
-      if (!text.includes("@features/session/utils/userTurn'") && !text.includes('@features/session/utils/userTurn"')) continue;
-      if (allowed.has(f.toLowerCase())) continue;
-      // 子会话只读链与旧单测豁免：单测文件不参与源码门（由 C4 统一删除/迁移）。
-      if (f.toLowerCase().endsWith('.spec.ts')) continue;
-      if (f.toLowerCase().includes('subhistoryview') || f.toLowerCase().includes('usetimelinegroups')) continue;
-      offenders.push(f.slice(ROOT.length + 1));
+      if (text.includes('buildUserTurns') || text.includes('buildUserTurnsIncremental') || text.includes('createUserTurnsCache')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:buildUserTurns`);
+      }
+      if (text.includes('toPendingMessage(')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:toPending`);
+      }
+      // V1 会话只读降级保留 jsonl 启发式对账（matchConfirmed），仅主链新增引用才算回潮。
+      if (text.includes('pendingOverlayMessages')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:overlay`);
+      }
+      if (text.includes('activeUserTurnEntries') || text.includes('buildTimelineItems')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:directory`);
+      }
+      if (text.includes('TranscriptHistory') || text.includes('TranscriptTail')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:transcript`);
+      }
+      if (text.includes('hideLegacyHistory')) {
+        offenders.push(`${f.slice(ROOT.length + 1)}:switch`);
+      }
     }
-    // 当前基线：转接层与行组件仍在白名单内；白名单外出现即视为新增引用。
-    expect(offenders, `新增旧投影引用: ${offenders.join(', ')}`).toEqual([]);
+    expect(offenders, `旧投影残留: ${offenders.join(', ')}`).toEqual([]);
   });
 });

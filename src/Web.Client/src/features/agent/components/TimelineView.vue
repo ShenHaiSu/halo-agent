@@ -64,11 +64,8 @@ import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/c
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 
-/** 滚动容器 + 历史/尾部分片 + 全局区；行内派生全部经视图模型取用。 */
+/** 滚动容器 + 摘要区 + Live 条 + 全局区；行内派生全部经视图模型取用。 */
 const props = defineProps<{
-  items: TimelineEntry[];
-  historyItems?: TimelineEntry[] | null;
-  tailItems?: TimelineEntry[] | null;
   isEmpty?: boolean;
   showJumpBtn?: boolean;
   readingWindow?: boolean;
@@ -78,7 +75,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   ready: [el: HTMLElement | null];
-  toggle: [key: string];
   'user-menu': [e: MouseEvent, item: TimelineEntry];
   'assistant-menu': [e: MouseEvent, item: TimelineEntry];
   'link-click': [e: MouseEvent];
@@ -113,7 +109,6 @@ const liveTelemetry = computed(() => view.value.liveTelemetry);
 const menu = computed(() => view.value.menu);
 
 const rowHandlers = {
-  toggle: (key: string) => emit('toggle', key),
   'user-menu': (e: MouseEvent, item: TimelineEntry) => emit('user-menu', e, item),
   'assistant-menu': (e: MouseEvent, item: TimelineEntry) => emit('assistant-menu', e, item),
   'link-click': (e: MouseEvent) => emit('link-click', e),

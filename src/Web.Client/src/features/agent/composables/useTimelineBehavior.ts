@@ -5,12 +5,11 @@ import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { useTimelineMenu } from './useTimelineMenu';
 import type { useTimelineWindow } from './useTimelineWindow';
-import type { useTimelineProjection } from './useTimelineProjection';
 import type { TimelineNav } from './useTimelineNav';
 
 interface BehaviorDeps {
   win: ReturnType<typeof useTimelineWindow>;
-  projection: ReturnType<typeof useTimelineProjection>;
+  projection: { timelineItems: { value: Array<{ key: string }> } } | null;
   menu: ReturnType<typeof useTimelineMenu>;
   nav: TimelineNav;
 }
@@ -20,7 +19,7 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
   const turn = useAgentTurn();
   const stream = useAgentStream();
   const workspaceStore = useWorkspaceStore();
-  const { win, projection, menu, nav } = deps;
+  const { win, menu, nav } = deps;
 
   async function onMarkdownLinkClick(e: MouseEvent): Promise<void> {
     const el = e.target as HTMLElement | null;
@@ -57,7 +56,7 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
     win.scrollEl.value = el;
     try {
       nav.setContainer(el);
-      nav.setOrder(projection.timelineItems.value.map((i) => i.key));
+      nav.setOrder(deps.projection?.timelineItems.value.map((i) => i.key) ?? []);
     } catch (e) {
       console.warn('[timeline] nav init failed:', e);
     }
@@ -90,7 +89,7 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
     }
   );
   watch(
-    () => projection.timelineItems.value.length,
+    () => deps.projection?.timelineItems.value.length ?? 0,
     () => {
       if (sessionSwitchGuard) {
         sessionSwitchGuard = false;
@@ -100,7 +99,7 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
       }
       if (!win.paneVisible.value || !win.follow.pinnedRef.value) return;
       void nextTick(() => win.pin.scheduleToBottom());
-    }
+    },
   );
   watch(
     () => (stream.streamingText?.length || 0) + (stream.streamingReasoning?.length || 0),
@@ -118,7 +117,7 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
     }
   );
   watch(
-    () => projection.timelineItems.value.map((i) => i.key),
+    () => deps.projection?.timelineItems.value.map((i) => i.key) ?? [],
     (keys) => {
       try {
         nav.setOrder(keys);
@@ -126,13 +125,13 @@ export function useTimelineBehavior(deps: BehaviorDeps) {
         console.warn('[timeline] nav order failed:', e);
       }
     },
-    { immediate: true }
+    { immediate: true },
   );
   onMounted(() => {
     if (win.paneVisible.value && win.follow.pinnedRef.value) void nextTick(() => win.pin.scheduleToBottom());
     menu.bindMenuGlobalClose();
     try {
-      nav.setOrder(projection.timelineItems.value.map((i) => i.key));
+      nav.setOrder(deps.projection?.timelineItems.value.map((i) => i.key) ?? []);
     } catch (e) {
       console.warn('[timeline] nav init failed:', e);
     }

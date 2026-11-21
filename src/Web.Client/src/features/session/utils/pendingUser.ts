@@ -143,28 +143,6 @@ export function matchConfirmedBySummary(
   return null;
 }
 
-/**
- * overlay 用合成消息（仅视图层，不写 jsonl）：
- * id = pending.key（timeline key `u-<key>` 全程稳定，DOM 不重建）；
- * images 原样带本地存根 + previews 供 thumb 直出。
- */
-export function toPendingMessage(pending: PendingUser): UnifiedChatMessage {
-  return {
-    id: pending.key,
-    role: 'user',
-    content: pending.content,
-    reasoningContent: null,
-    toolCalls: null,
-    toolCallId: null,
-    name: null,
-    inputTokens: null,
-    outputTokens: null,
-    cachedTokens: null,
-    createdAtUtc: pending.createdAtUtc,
-    images: pending.images.slice(),
-  } as UnifiedChatMessage;
-}
-
 /** pending 期缩略图直出（本地 dataURL），转正后走正常懒取。 */
 export function pendingPreviewOf(pending: PendingUser | null | undefined, imageId: string): string {
   if (!pending) return '';

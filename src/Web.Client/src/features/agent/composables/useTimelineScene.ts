@@ -11,25 +11,14 @@ export interface SceneOpts {
   renderHtml: (text: string) => string;
   renderStream: (text: string) => string;
   summaryList: ComputedRef<TurnSummary[] | null>;
-  hideLegacyHistory: ComputedRef<boolean>;
   singleProcess: boolean;
 }
 
 /**
- * 装配视图模型：把聚合状态映射为行/轮/卡叶子契约并逐层提供。
- * 纯映射层，不新增数据源；派生语义与旧模板逐一绑定完全一致。
+ * 装配视图模型：纯 V2 映射，只供摘要区 + Live 条 + 全局区。
  */
 export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineViewModel {
   const viewModel = {
-    get items() {
-      return t.timelineItems;
-    },
-    get historyItems() {
-      return t.visibleHistoryEntries;
-    },
-    get tailItems() {
-      return t.tailEntries;
-    },
     get summaryList() {
       return opts.summaryList.value;
     },
@@ -40,61 +29,13 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
         return null;
       }
     },
-    get hideLegacyHistory() {
-      return opts.hideLegacyHistory.value;
-    },
     get hasActiveTurn() {
       return !!t.stream.hasActiveTurn;
     },
     renderHtml: opts.renderHtml,
     renderStream: opts.renderStream,
-    get cardFor() {
-      return t.toCard;
-    },
-    get toolKey() {
-      return t.toolKeyOf;
-    },
-    get msgImages() {
-      return t.msgImages;
-    },
-    get thumbOf() {
-      return t.thumbOf;
-    },
-    get hasLost() {
-      return t.hasLostImage;
-    },
-    get imgLost() {
-      return t.isImageLost;
-    },
-    get isPending() {
-      return t.isPendingMessage;
-    },
-    get pendingStatus() {
-      return t.pendingStatusOf;
-    },
-    get isExpanded() {
-      return t.isTurnExpanded;
-    },
-    get isRunExpanded() {
-      return t.isRunExpanded;
-    },
     get anchorRef() {
       return t.setAnchor;
-    },
-    get hasFailed() {
-      return t.hasFailedTool;
-    },
-    get failedCount() {
-      return t.failedToolCount;
-    },
-    get showTelemetry() {
-      return t.hasTelemetryGroup;
-    },
-    get protocolOf() {
-      return t.protocolOf;
-    },
-    get cacheLineOf() {
-      return t.cacheLineOf;
     },
     liveSegsFor: (entry: Parameters<typeof t.liveSegsFor>[0]) => t.liveSegsFor(entry, t.liveInclusiveSegs),
     get isGenerating() {

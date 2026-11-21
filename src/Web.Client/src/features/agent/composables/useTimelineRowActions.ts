@@ -1,116 +1,47 @@
-import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
 import { summaryAnchorIds, summaryCopyText } from '@features/session/utils/summaryMenu';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { trimBlankEdges } from '@shared/utils/trimBlank';
-import type { UserTurn } from '@features/session/utils/userTurn';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import type { TimelineMenu } from './useTimelineMenu';
 
 interface RowActionDeps {
   menu: TimelineMenu;
-  toggleTurn: (key: string) => void;
-  toggleRun: (key: string) => void;
   retryTurn: () => void;
   findSummary?: (turnId: string) => TurnSummary | null;
   getBlockMarkdown?: (blockId: string) => Promise<string>;
 }
 
 /**
- * 轮级行行为：展开分流、轮级菜单（复制/重放/分支/删除整轮）、失败重发。
- * 纯行为层，不持有任何渲染状态，装配层调用后只转发事件。
+ * 摘要源行行为：复制/重放/分支/删除按轮锚点，不再经 V1 轮容器。
  */
 export function useTimelineRowActions(deps: RowActionDeps) {
-  /** 合并舱与普通轮共用同一条 toggle 事件，按 key 前缀分流。 */
-  function onToggle(key: string): void {
-    if (key.startsWith('run-') || key.startsWith('uturn-')) deps.toggleRun(key);
-    else deps.toggleTurn(key);
-  }
-
-  function turnOf(item: TimelineEntry): UserTurn | null {
-    try {
-      const u = item as unknown as { kind?: string; turn?: UserTurn };
-      if (u && u.kind === 'user-turn' && u.turn) return u.turn;
-    } catch (e) {
-      console.warn('[timeline] turn resolve failed:', e);
-    }
-    return null;
-  }
-
-  /** 轮级菜单：复制整轮（全文展开），重放/分支/删除按轮锚点。 */
+  /** 用户区右键：摘要用户全文直复制。 */
   function onUserMenu(e: MouseEvent, item: TimelineEntry): void {
-    // 直播条与摘要源直连：不再造 V1 兜底 entry 复用旧通路。
-    if ((item as TimelineEntry).kind === 'live' && deps.findSummary) {
-      const turnId = String(item.key || '').replace(/^live-/, '');
-      const summary = deps.findSummary(turnId);
-      if (summary) {
-        const anchors = summaryAnchorIds(summary);
-        const text = summaryCopyText(summary, '');
-        deps.menu.openTurnMenu(e, { kind: 'user', id: anchors.userId, text, turnLabel: '整轮' });
-        return;
-      }
-    }
-    const turn = turnOf(item);
-    if (turn) {
-      const anchor = turnReplayAnchor(turn);
-      const ids = turnMessageIds(turn);
-      deps.menu.openTurnMenu(e, {
-        kind: 'user',
-        id: anchor ? anchor.id : String(turn.userId || ''),
-        text: turnCopyText(turn),
-        turnIds: ids,
-        turnLabel: `整轮（${ids.length}条）`,
-      });
+    const turnId = String(item.key || '').replace(/^live-/, '');
+    const summary = deps.findSummary?.(turnId) ?? null;
+    if (summary) {
+      const anchors = summaryAnchorIds(summary);
+      const text = summaryCopyText(summary, '');
+      deps.menu.openTurnMenu(e, { kind: 'user', id: anchors.userId, text, turnLabel: '整轮' });
       return;
     }
     deps.menu.openMenu(e, { kind: 'user', id: String(item.msg?.id || ''), text: trimBlankEdges(String(item.msg?.content || '')) });
   }
 
-  /** 助手区右键同样按轮（锚点取本轮末 assistant，重放/分支/删除整轮）。 */
+  /** 助手区右键：按块拉正文全文直复制。 */
   async function onAssistantMenu(e: MouseEvent, item: TimelineEntry): Promise<void> {
-    // 直播条与摘要源直连：不再造 V1 兜底 entry 复用旧通路。
-    if ((item as TimelineEntry).kind === 'live' && deps.findSummary) {
-      const turnId = String(item.key || '').replace(/^live-/, '');
-      const summary = deps.findSummary(turnId);
-      if (summary) {
-        const anchors = summaryAnchorIds(summary);
-        let blocksMarkdown = '';
-        try {
-          if (anchors.assistantId && deps.getBlockMarkdown) blocksMarkdown = await deps.getBlockMarkdown(anchors.assistantId);
-        } catch {
-          /* 拉块失败降级用预览 */
-        }
-        const text = summaryCopyText(summary, blocksMarkdown);
-        deps.menu.openTurnMenu(e, { kind: 'assistant', id: anchors.assistantId, text, turnLabel: '整轮' });
-        return;
+    const turnId = String(item.key || '').replace(/^live-/, '');
+    const summary = deps.findSummary?.(turnId) ?? null;
+    if (summary) {
+      const anchors = summaryAnchorIds(summary);
+      let blocksMarkdown = '';
+      try {
+        if (anchors.assistantId && deps.getBlockMarkdown) blocksMarkdown = await deps.getBlockMarkdown(anchors.assistantId);
+      } catch {
+        /* 拉块失败降级用预览 */
       }
-    }
-    const turn = turnOf(item);
-    if (turn) {
-      let assistantId = '';
-      for (let i = turn.steps.length - 1; i >= 0; i--) {
-        const sid = String(turn.steps[i]?.assistantId || '');
-        if (sid) {
-          assistantId = sid;
-          break;
-        }
-      }
-      const anchor = turnReplayAnchor(turn);
-      const ids = turnMessageIds(turn);
-      deps.menu.openTurnMenu(e, {
-        kind: 'assistant',
-        id: assistantId || (anchor ? anchor.id : String(turn.userId || '')),
-        text: turnCopyText(turn),
-        turnIds: ids,
-        turnLabel: `整轮（${ids.length}条）`,
-      });
-      return;
-    }
-    if ((item as { kind?: string }).kind === 'turn') {
-      deps.menu.openMenu(e, {
-        kind: 'assistant',
-        id: String(item.group?.assistantId || item.group?.key || ''),
-        text: trimBlankEdges(String(item.group?.content || '')),
-      });
+      const text = summaryCopyText(summary, blocksMarkdown);
+      deps.menu.openTurnMenu(e, { kind: 'assistant', id: anchors.assistantId, text, turnLabel: '整轮' });
       return;
     }
     deps.menu.openMenu(e, {
@@ -125,7 +56,7 @@ export function useTimelineRowActions(deps: RowActionDeps) {
     deps.retryTurn();
   }
 
-  return { onToggle, onUserMenu, onAssistantMenu, onRetryPending };
+  return { onUserMenu, onAssistantMenu, onRetryPending };
 }
 
 export type TimelineRowActions = ReturnType<typeof useTimelineRowActions>;

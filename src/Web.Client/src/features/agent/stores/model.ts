@@ -128,7 +128,7 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（旧转发自 workspaceStore.sessionMessages 同步；归并 getter 用，F04 改事件全量）。 */
+/** 持久消息投影（C4 已删除：主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
 export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
@@ -364,9 +364,6 @@ export function setActiveWorkspaceId(wid: string): void {
 }
 export function setFallbackProtocol(p: string): void {
   if (p) fallbackProtocol.value = p;
-}
-export function setPersistedMessages(msgs: UnifiedChatMessage[]): void {
-  persistedMessages.value = Array.isArray(msgs) ? msgs : [];
 }
 let sessionSyncBound = false;
 /** 各小 store bind 时调用：订阅 session:switched（F04 起由 session 域 emit；当前由旧转发桥接 emit）。 */

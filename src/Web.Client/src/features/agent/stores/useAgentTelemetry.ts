@@ -54,8 +54,6 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
   });
 
   // 主链纯 V2：目录已切摘要源，旧投影不再计算（子会话走独立小链，不经此处）。
-  // 过渡：保留空数组符号供旧单测（C4 删除符号与旧单测）。
-  const activeUserTurnEntries = computed(() => [] as never[]);
 
   function bindTelemetry(): void {
     bindTelemetryListeners();
@@ -76,7 +74,6 @@ export const useAgentTelemetry = defineStore('agent-telemetry', () => {
 
   return {
     telemetry,
-    activeUserTurnEntries,
     bindTelemetry,
     recordPumpStats,
   };

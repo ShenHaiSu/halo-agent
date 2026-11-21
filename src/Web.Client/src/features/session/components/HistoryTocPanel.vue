@@ -24,7 +24,7 @@
       点击气泡跳转到对应消息；点击外部不会关闭本栏，请点右上角 ✕ 关闭。
       <n-button size="tiny" quaternary @click="dismissHint">知道了</n-button>
     </div>
-    <div v-if="summaryToc.length > 0 && !isV2Toc" class="toc-summary" data-testid="toc-summary">
+    <div v-if="summaryToc.length > 0" class="toc-summary" data-testid="toc-summary">
       <div class="toc-summary-title">时间轴摘要 · {{ summaryToc.length }} 项</div>
       <div v-for="item in summaryToc" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
         <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
@@ -71,10 +71,8 @@ import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
-import type { TimelineEntry } from '@features/session/utils/turnGroup';
-import { buildTimelineItems } from '@features/agent/composables/useTimelineGroups';
 import { flatBlocks, processBoxLabel, summaryAnchorKeys } from '@features/session/utils/timelineSummary';
-import { buildHistoryToc, type TocItem } from '@features/session/utils/historyToc';
+import type { TocItem } from '@features/session/utils/historyToc';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import HistoryBubble from './HistoryBubble.vue';
 
@@ -95,12 +93,6 @@ const isHistoryReadonly = computed(() => {
   if (!s) return false;
   const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
   return v !== 2;
-});
-/** S3 增补 G-1 门控：v2 目录只用摘要源（TurnSummary 直出），旧链计算仅 v1 兼容保留。 */
-const isV2Toc = computed(() => {
-  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
-  if (!s) return false;
-  return (s.historyVersion ?? 0) === 2;
 });
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
@@ -125,20 +117,7 @@ const roundHeadsOnly = computed({
   },
 });
 
-const entries = computed<TimelineEntry[]>(() => {
-  // 主链纯 V2：目录只用摘要源，旧投影不再计算；子会话走独立小链。
-  if (!isSub.value) return [];
-  const simple = buildTimelineItems(sub.messages || []);
-  return simple.map((s) => ({ key: s.key, kind: s.kind, msg: s.msg, group: s.group as unknown as TimelineEntry['group'] }));
-});
-
-const tocItems = computed<TocItem[]>(() =>
-  buildHistoryToc(entries.value, {
-    role: ui.tocRole,
-    roundHeadsOnly: ui.tocRoundHeadsOnly,
-    skipSystem: ui.tocSkipSystem,
-  })
-);
+const tocItems = computed<TocItem[]>(() => []);
 const summaryToc = computed<TocItem[]>(() => {
   if (isSub.value) return [];
   const summaries = ws.timelineSummaries as TurnSummary[];

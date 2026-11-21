@@ -1,16 +1,11 @@
-import type { UserTurn } from '@features/session/utils/userTurn';
-import { lastStepContent } from '@features/session/utils/userTurn';
+import type { FlatTimelineTurn } from '@features/session/utils/timelineSummary';
 
-/** 投影出的稳态轮是否确有可展示内容：末段正文，或任一步的正文/思考/工具回包。 */
-export function steadyTurnHasContent(turn: UserTurn | null | undefined): boolean {
+/** 摘要轮是否确有可展示内容：用户文、过程块、工具数、正文预览任一非空。 */
+export function steadyTurnHasContent(turn: FlatTimelineTurn | null | undefined): boolean {
   if (!turn) return false;
-  if (String(lastStepContent(turn) ?? '').trim()) return true;
-  const steps = Array.isArray((turn as { steps?: unknown[] }).steps) ? (turn as { steps: any[] }).steps : [];
-  for (const st of steps) {
-    if (String((st as { content?: unknown }).content ?? '').trim()) return true;
-    if (String((st as { reasoning?: unknown }).reasoning ?? '').trim()) return true;
-    const tools = (st as { toolMessages?: unknown[] }).toolMessages;
-    if (Array.isArray(tools) && tools.length > 0) return true;
-  }
+  if (String(turn.userContent || turn.userPreview || '').trim()) return true;
+  if (String(turn.finalPreview || '').trim()) return true;
+  if (Number(turn.blocks || 0) > 0) return true;
+  if (Number(turn.tools || 0) > 0) return true;
   return false;
 }

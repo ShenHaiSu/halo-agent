@@ -32,7 +32,14 @@
  * （后者要求每个子节点是单一组件），所以把「三种 seg 的分支渲染」收进这里。
  */
 import { computed } from 'vue';
-import type { DisplaySeg } from '../composables/useTimelineProjection';
+import type { AgentToolCard } from '@features/agent/stores/model';
+
+interface DisplaySeg {
+  kind: string;
+  key: string;
+  text: string;
+  card: AgentToolCard | null;
+}
 import ToolCallCard from './ToolCallCard.vue';
 import ReasoningText from '@shared/ui/ReasoningText.vue';
 import MarkdownStreamBlocks from './MarkdownStreamBlocks.vue';

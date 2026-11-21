@@ -4,11 +4,23 @@ import type { ComponentPublicInstance } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import { createBottomPin, PIN_TOLERANCE_PX, useFollowMode } from './useTimelineNav';
 import type { TimelineNav } from './useTimelineNav';
-import { INITIAL_MOUNT, STEP, WINDOW_MIN, hiddenAboveByWeight, isNearTop } from '@features/session/utils/transcriptWindow';
 import { isP4SubOn } from '@features/need02/utils/need02Flags';
 import type { Need02Flags } from '@features/need02/utils/need02Flags';
 import { useUiStore } from '@/stores/uiStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
+
+const INITIAL_MOUNT = 15;
+const WINDOW_MIN = 60;
+const STEP = 40;
+const NEAR_TOP_PX = 240;
+
+function isNearTop(scrollTop: number, threshold = NEAR_TOP_PX): boolean {
+  return Math.max(0, scrollTop) <= threshold;
+}
+
+function hiddenAboveByWeight(count: number, budget = 32): number {
+  return Math.max(0, count - budget);
+}
 
 interface WindowDeps {
   timelineItems: ComputedRef<TimelineEntry[]> | Ref<TimelineEntry[]>;
@@ -41,28 +53,13 @@ export function useTimelineWindow(deps: WindowDeps) {
   const transcriptRunning = computed(() => stream.isGenerating && !readingWindow.value);
   const hiddenAbove = ref(0);
   const visibleHistoryEntries = computed<TimelineEntry[]>(() => deps.historyEntries.value.slice(hiddenAbove.value));
-  function weightOfItem(e: TimelineEntry): number {
-    try {
-      // 主链纯 V2：按摘要轮计权（blocks + tools），不再读 UserTurn.steps。
-      const u = e as unknown as { kind?: string; blocks?: unknown; tools?: unknown; turn?: { steps?: unknown[] } };
-      if (u && (u.kind === 'live' || typeof u.blocks !== 'undefined' || typeof u.tools !== 'undefined')) {
-        return 1 + Math.max(0, Number(u.blocks || 0)) + Math.max(0, Number(u.tools || 0));
-      }
-      if (u && u.kind === 'user-turn') return 1 + (Array.isArray(u.turn?.steps) ? (u.turn as { steps: unknown[] }).steps.length : 0);
-    } catch (e) {
-      console.warn('[timeline:window] weight read failed:', e);
-    }
+  function weightOfItem(_e: TimelineEntry): number {
+    // 主链纯 V2：Live 条恒为 1，不再读轮 steps。
     return 1;
   }
   function resetMountWindow(): void {
     if (isP4SubOn('window', null, deps.need02Flags)) {
-      hiddenAbove.value = hiddenAboveByWeight(
-        deps.timelineItems.value.map((e) => ({
-          key: e.key,
-          kind: String((e as unknown as { kind?: string }).kind || ''),
-          steps: weightOfItem(e) - 1,
-        }))
-      );
+      hiddenAbove.value = hiddenAboveByWeight(deps.timelineItems.value.length);
     } else hiddenAbove.value = Math.max(0, deps.timelineItems.value.length - INITIAL_MOUNT);
   }
   function ensureMountWindow(): void {

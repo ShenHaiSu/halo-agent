@@ -11,7 +11,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useAskUserStore } from '@/stores/askUserStore';
-import { setActiveSessionId, setActiveWorkspaceId, setFallbackProtocol, setPersistedMessages } from '@features/agent/stores/model';
+import { setActiveSessionId, setActiveWorkspaceId, setFallbackProtocol } from '@features/agent/stores/model';
 import { registerAgentRuntimeContext } from '@features/agent/stores/runtime';
 
 let wiringDone = false;
@@ -57,11 +57,6 @@ export function ensureAgentWiring(): void {
     haloEventBus.emitLocal('session:switched', { sessionId: sid, workspaceId: wid() });
   };
   syncSession();
-  setPersistedMessages([...(ws.sessionMessages || [])]);
   watch(() => session.activeSessionId, syncSession);
   watch(() => ws.activeSessionId, syncSession);
-  watch(
-    () => ws.sessionMessages,
-    (msgs) => setPersistedMessages(msgs || [])
-  );
 }

@@ -10,8 +10,8 @@ import {
   makePendingKey,
   makePendingUser,
   matchConfirmed,
+  matchConfirmedBySummary,
   pendingPreviewOf,
-  toPendingMessage,
 } from '@features/session/utils/pendingUser';
 
 function userMsg(id: string, content: string, createdAtUtc: string, extra?: Partial<UnifiedChatMessage>): UnifiedChatMessage {
@@ -38,10 +38,10 @@ describe('makePendingKey key 稳定', () => {
     expect(makePendingKey('abc123')).toBe(makePendingKey('abc123'));
   });
 
-  it('toPendingMessage id 即 pending.key（timeline `u-<key>` 全程稳定）', () => {
+  it('摘要源精确命中即转正（V2 主路径）', () => {
     const p = makePendingUser({ requestId: 'r1', sessionId: 's1', content: 'hi' });
     expect(p.key).toBe('pending-r1');
-    expect(toPendingMessage(p).id).toBe('pending-r1');
+    expect(matchConfirmedBySummary(p, [{ lastRequestId: 'r1' }])).not.toBeNull();
   });
 });
 
@@ -82,7 +82,6 @@ describe('图片占位', () => {
       previews: { att_1: 'data:image/png;base64,AAA' },
     });
     expect(p.content).toContain('[image:att_1]');
-    expect(toPendingMessage(p).content).toContain('[image:att_1]');
     expect(pendingPreviewOf(p, 'att_1')).toBe('data:image/png;base64,AAA');
   });
 

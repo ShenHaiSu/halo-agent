@@ -6,7 +6,7 @@ import type { TimelineEntry } from '@features/session/utils/turnGroup';
  * 展开态：用户轮显式展开 + 运行态合并舱展开。
  * 真相源为 timelineItems 的运行态推导，显式选择覆盖默认。
  */
-export function useTimelineExpansion(timelineItems: Ref<TimelineEntry[]> | Readonly<Ref<TimelineEntry[]>>) {
+export function useTimelineExpansion(_timelineItems?: Ref<TimelineEntry[]> | Readonly<Ref<TimelineEntry[]>>) {
   const expandedTurns = reactive<Record<string, boolean>>({});
   const isTurnExpanded = (key: string): boolean => expandedTurns[key] === true;
   function toggleTurn(key: string): void {
@@ -14,14 +14,8 @@ export function useTimelineExpansion(timelineItems: Ref<TimelineEntry[]> | Reado
   }
 
   const runByKey = computed<Map<string, { key: string; isRunning: boolean }>>(() => {
-    const m = new Map<string, { key: string; isRunning: boolean }>();
-    for (const e of timelineItems.value) {
-      if (e.kind === 'user-turn' && (e as unknown as { turn?: unknown }).turn) {
-        const t = (e as unknown as { turn: { key: string; isRunning: boolean } }).turn;
-        m.set(e.key, { key: String(t.key || e.key), isRunning: t.isRunning === true });
-      }
-    }
-    return m;
+    // C4：旧轮容器已删除，无运行态推导，返回空映射。
+    return new Map<string, { key: string; isRunning: boolean }>();
   });
 
   const runExplicit = reactive<Record<string, boolean>>({});

@@ -1,7 +1,8 @@
-/** 过渡动画：轮内 live 渲染 + 流式光标（§3.1）。轴尾容器已收敛进轮内，断言随之更新。 */
+/** 过渡动画：Live 行直挂流段 + 流式光标。旧轮容器已删除，断言随之更新。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
+import { createPinia, setActivePinia } from 'pinia';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import TimelineView from '@features/agent/components/TimelineView.vue';
@@ -12,18 +13,12 @@ const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: nul
 const TIMELINE_SFC = (): string => readFileSync(resolve(process.cwd(), 'src/features/agent/components/TimelineView.vue'), 'utf8');
 
 function mountTimeline(liveSegs: unknown[]) {
-  const turn = {
-    key: 'uturn-u1',
-    userId: 'u1',
-    userMsg: { id: 'u1', role: 'user', content: 'hi', createdAtUtc: '' },
-    steps: [],
-    stepCount: 0,
-    toolCount: 0,
-    isRunning: true,
-  };
-  const item = { key: 'uturn-u1', kind: 'user-turn', turn };
+  setActivePinia(createPinia());
   const stub = {
     ...timelineViewFallback(),
+    summaryList: [],
+    pendingUser: null,
+    hasActiveTurn: true,
     liveSegsFor: () => liveSegs as never[],
     renderHtml: (t: string) => t,
     renderStream: (t: string) => t,
@@ -33,9 +28,6 @@ function mountTimeline(liveSegs: unknown[]) {
   return mount(TimelineView, {
     props: {
       isEmpty: false,
-      items: [item] as never[],
-      historyItems: [],
-      tailItems: [item] as never[],
       chatWidthMode: 'centered',
     },
     global: {
@@ -59,10 +51,9 @@ function cursorOf(isTail: boolean) {
 }
 
 describe('轮内过渡', () => {
-  it('live 段收敛进轮内渲染（user-turn-live），不再有轴尾容器', () => {
+  it('live 段直挂 Live 行，不再经轮容器', () => {
     const wrapper = mountTimeline([seg('s1', '第一段'), seg('s2', '第二段')]);
-    expect(wrapper.find('[data-testid="user-turn-live"]').exists()).toBe(true);
-    expect(wrapper.findAll('[data-seg]')).toHaveLength(2);
+    expect(wrapper.find('[data-testid="live-row"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(false);
   });
 

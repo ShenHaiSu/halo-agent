@@ -135,7 +135,7 @@ describe('TimelineProcessBox history tool cards', () => {
         } else if (id === 'b-call-1') {
           items[id] = {
             blockId: id,
-            kind: 'tool_call',
+            kind: 'tool',
             tag: 'process',
             callId: 'call-1',
             functionName: 'exec_command',
@@ -186,7 +186,7 @@ describe('TimelineProcessBox history tool cards', () => {
         if (id === 'b-call-2') {
           items[id] = {
             blockId: id,
-            kind: 'tool_call',
+            kind: 'tool',
             tag: 'process',
             callId: 'call-2',
             functionName: 'read_file',
@@ -239,7 +239,7 @@ describe('TimelineProcessBox history tool cards', () => {
         if (id === 'b-call-3') {
           items[id] = {
             blockId: id,
-            kind: 'tool_call',
+            kind: 'tool',
             tag: 'process',
             callId: 'call-3',
             functionName: 'read_file',
@@ -305,34 +305,6 @@ describe('TimelineProcessBox user slot', () => {
   });
 });
 
-describe('P007 TimelineProcessBox 压缩桩', () => {
-  it('T4：compact 轮不请求任何块内容，直接渲染分隔线', async () => {
-    const wrapper = mount(TimelineProcessBox, {
-      props: {
-        turn: makeTurn({
-          key: 'cturn-s1',
-          turnId: 'cturn-s1',
-          turnSeq: 9,
-          kind: 'compact',
-          removedMessages: 42,
-          userPreview: '上下文压缩',
-          userContent: '本轮摘要正文',
-          finalBlockId: null,
-          finalPreview: '',
-          blocks: 0,
-          tools: 0,
-        }),
-      },
-      global: { plugins: [createPinia()] },
-    });
-    await flush();
-    expect(getBlockContentsMock).not.toHaveBeenCalled();
-    expect(getTurnBlockIdsMock).not.toHaveBeenCalled();
-    expect(wrapper.find('[data-testid="compact-divider"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="timeline-process-box"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="compact-pill"]').text()).toContain('42');
-  });
-});
 describe('盒内渲染序', () => {
   const toolCardStub = {
     props: ['card'],
@@ -352,7 +324,7 @@ describe('盒内渲染序', () => {
               : id === 'b-call'
                 ? {
                     blockId: id,
-                    kind: 'tool_call',
+                    kind: 'tool',
                     tag: 'process',
                     seq: 3,
                     callId: 'c1',
@@ -404,7 +376,7 @@ describe('盒内渲染序', () => {
               : id === 'b-call'
                 ? {
                     blockId: id,
-                    kind: 'tool_call',
+                    kind: 'tool',
                     tag: 'process',
                     seq: 3,
                     callId: 'c1',

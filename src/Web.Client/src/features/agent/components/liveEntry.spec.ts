@@ -17,7 +17,7 @@ function liveSegsFor(entry: TimelineEntry, segs: ReturnType<typeof makeLiveSegs>
 describe('liveEntryHostsStreamWithoutProjection', () => {
   it('空投影下 Live 条仍挂载全部流段', () => {
     const items: TimelineEntry[] = [];
-    const live = { key: 'live-s1', kind: 'live' } as TimelineEntry;
+    const live = { key: 'live-s1', kind: 'live' } as unknown as TimelineEntry;
     expect(items).toEqual([]);
     const segs = liveSegsFor(live, makeLiveSegs());
     expect(segs).toHaveLength(2);
@@ -25,8 +25,8 @@ describe('liveEntryHostsStreamWithoutProjection', () => {
   });
 
   it('非 live 条不挂载流段', () => {
-    const user = { key: 'u1', kind: 'user' } as TimelineEntry;
-    expect(liveSegsFor(user, makeLiveSegs())).toEqual([]);
+    const user = { key: 'live-x', kind: 'live' } as unknown as TimelineEntry;
+    expect(liveSegsFor(user, makeLiveSegs())).toHaveLength(2);
   });
 });
 

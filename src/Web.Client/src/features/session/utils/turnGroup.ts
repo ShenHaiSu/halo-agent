@@ -1,5 +1,4 @@
 import type { UnifiedChatMessage, ChatImageRef } from '@shared/bridge/hostBridge';
-import { dividerMarkdown, isCompactStub, metaOf, stubLabel, summaryBodyOf } from './compactStub';
 
 export interface TurnToolRef {
   id: string;
@@ -63,16 +62,8 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
 
 export interface TimelineEntry {
   key: string;
-  kind: 'user' | 'system' | 'turn' | 'user-turn' | 'compact' | 'live'; // 直播挂载不需要轮容器，live 兜底条目直挂流段
+  kind: 'live';
   msg?: UnifiedChatMessage;
-  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
-  /** @deprecated 主时间轴不再产生旧轮次条目，仅子会话目录兼容保留。 */
-  group?: TurnGroup;
-  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
-  /** @deprecated 合并舱已删除，仅类型兼容保留。 */
-  run?: unknown;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  turn?: any;
 }
 
 export function blockHash(s: string): string {
@@ -88,12 +79,6 @@ export function blockHash(s: string): string {
 export function exportSessionMarkdown(messages: UnifiedChatMessage[]): string {
   const lines: string[] = [];
   for (const msg of messages) {
-    // P007：桩走分隔文案导出，与后端同文案。
-    if (isCompactStub(msg)) {
-      const meta = metaOf(msg);
-      lines.push(dividerMarkdown(stubLabel(meta.removedCount), summaryBodyOf(msg), meta.backupFile ?? null), '');
-      continue;
-    }
     const role = String(msg.role || '').toLowerCase();
     const head =
       role === 'user'
