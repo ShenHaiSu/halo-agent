@@ -96,6 +96,8 @@ export interface AgentTurnState {
   streamingActive: boolean;
   isGenerating: boolean;
   toolCards: AgentToolCard[];
+  /** 已落盘轮次剪掉的工具卡终态快照：供流态装配继续渲染本轮历史；只追加、轮末随容器清空、有界。 */
+  graduatedCards: AgentToolCard[];
   telemetry: AgentTelemetry;
   turnNotice: string;
   lastError: string;
@@ -172,6 +174,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     streamingActive: false,
     isGenerating: false,
     toolCards: [],
+    graduatedCards: [],
     telemetry: emptyTelemetry(protocol),
     turnNotice: '',
     lastError: '',

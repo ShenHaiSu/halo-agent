@@ -211,6 +211,7 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   // 交接埋点（DEV 限定，供量化）：handoff {requestId, liveMs, steadyMs}。
   const doClear = (): void => {
     t.toolCards = [];
+    t.graduatedCards = [];
     t.toolCardIndex = {};
     t.segs = [];
     t.curIteration = 0;

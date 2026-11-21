@@ -79,16 +79,29 @@ export function useTimelineViewModel() {
         };
         const turnState = turn.activeTurn as unknown as
           | {
-              segs?: Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown }>;
+              segs?: Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown; persisted?: unknown }>;
               toolCards?: LiveToolCard[];
+              graduatedCards?: LiveToolCard[];
             }
           | null
           | undefined;
-        const segs = (turnState?.segs || []) as Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown }>;
+        // 本轮分段全量参与流态装配（含已落盘轮次，稳态接手前流态是唯一展示位）。
+        // 装配顺序：活卡优先，快照补缺，缺失回退占位（参数尚未到达的窗口期）。
+        const segs = (turnState?.segs || []) as Array<{
+          key?: unknown;
+          kind?: unknown;
+          text?: unknown;
+          callId?: unknown;
+          persisted?: unknown;
+        }>;
         const byCall = new Map<string, LiveToolCard>();
         for (const c of turnState?.toolCards || []) {
           const id = String((c as { callId?: unknown })?.callId || '').trim();
-          if (id && !byCall.has(id)) byCall.set(id, c as never);
+          if (id && !byCall.has(id)) byCall.set(id, { ...(c as LiveToolCard) });
+        }
+        for (const g of turnState?.graduatedCards || []) {
+          const id = String((g as { callId?: unknown })?.callId || '').trim();
+          if (id && !byCall.has(id)) byCall.set(id, { ...(g as LiveToolCard) });
         }
         return segs.map((s, i) => {
           const kind = String((s as { kind?: unknown }).kind || '');

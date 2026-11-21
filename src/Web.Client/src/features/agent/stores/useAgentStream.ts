@@ -133,9 +133,14 @@ function bindStreamListeners(): void {
     }
     if (it > 0) t.curIteration = it;
     else if (t.curIteration <= 0) t.curIteration = 1;
-    // need23-R7：上一 iteration 中已落盘的工具卡直接移除（内容已在稳态折叠栏里），
-    // 避免 toolCards 跨轮无限累积（会污染"本轮 N 个工具"计数与去重集合）。
+    // 迭代切换剪掉已落盘卡片前，先把终态浅拷存入快照（流态本轮历史继续用它渲染）：
+    // 活卡表保持干净（计数与去重集合不受跨轮累积污染），已毕业分段走快照补缺。
     if (t.toolCards.some((c) => c.persisted)) {
+      for (const c of t.toolCards) {
+        if (c.persisted && !t.graduatedCards.some((g) => g.callId === c.callId)) {
+          t.graduatedCards.push({ ...c });
+        }
+      }
       t.toolCards = t.toolCards.filter((c) => !c.persisted);
       rebuildIndex(t);
     }
