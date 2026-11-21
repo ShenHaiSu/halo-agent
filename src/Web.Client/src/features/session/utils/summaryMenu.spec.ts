@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
-import { summaryAnchorIds, summaryCopyText } from './summaryMenu';
+import { summaryAnchorIds, summaryAssistantText, summaryCopyText, summaryUserText } from './summaryMenu';
 
 function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
   return {
@@ -19,6 +19,23 @@ describe('summaryMenuCopiesFullTurnWithoutEntryHack', () => {
     expect(text).toContain('用户全文');
     expect(text).toContain('正文块全文');
     expect(text.indexOf('用户全文')).toBeLessThan(text.indexOf('正文块全文'));
+  });
+
+  it('复制此提问仅含用户单条，不含正文', () => {
+    expect(summaryUserText(makeSummary())).toBe('用户全文');
+    expect(summaryUserText(makeSummary())).not.toContain('正文块全文');
+    expect(summaryUserText(null)).toBe('');
+  });
+
+  it('复制此回复仅含正文块，回落预览', () => {
+    expect(summaryAssistantText(makeSummary(), '# 标题\n\n正文块全文')).toBe('# 标题\n\n正文块全文');
+    expect(summaryAssistantText(makeSummary(), '')).toBe('正文预览');
+    expect(summaryAssistantText(makeSummary(), '')).not.toContain('用户全文');
+  });
+
+  it('复制整轮问答为单条拼接（回归 B 方案口径）', () => {
+    const turn = summaryCopyText(makeSummary({ finalPreview: '' }), '# 标题\n\n正文块全文');
+    expect(turn).toBe(`用户全文\n\n# 标题\n\n正文块全文`);
   });
 
   it('空摘要时直接返回块文本裁边', () => {

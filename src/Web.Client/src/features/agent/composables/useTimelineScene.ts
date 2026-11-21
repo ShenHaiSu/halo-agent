@@ -90,6 +90,8 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
         y: t.menu.menuState.y,
         busy: t.menu.menuBusy,
         canCopy: t.menu.menuCanCopy,
+        canCopyTurn: t.menu.menuCanCopyTurn,
+        copyLabel: t.menu.menuCopyLabel,
       };
     },
   } as TimelineViewModel;

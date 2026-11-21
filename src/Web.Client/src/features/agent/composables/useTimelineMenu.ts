@@ -10,6 +10,10 @@ export interface TurnMenuTarget extends HistoryTarget {
   turnIds?: string[];
   /** 整轮标签（删除确认文案用，如“整轮（5条）”）。 */
   turnLabel?: string;
+  /** 整轮文本（复制整轮问答用；单条仍走 text）。 */
+  turnText?: string;
+  /** 复制此消息按钮文案（按 kind 区分：复制此提问 / 复制此回复）。 */
+  copyLabel?: string;
 }
 
 export function useTimelineMenu() {
@@ -28,10 +32,12 @@ export function useTimelineMenu() {
     return stream.isGenerating || stream.streamingActive || (sid ? turn.isCompacting(sid) : false);
   });
   const menuCanCopy = computed(() => String(menuState.target?.text || '').length > 0);
-  function openMenu(e: MouseEvent, target: HistoryTarget): void {
+  const menuCanCopyTurn = computed(() => String(menuState.target?.turnText || '').length > 0);
+  const menuCopyLabel = computed(() => String(menuState.target?.copyLabel || '复制此消息').trim() || '复制此消息');
+  function openMenu(e: MouseEvent, target: TurnMenuTarget): void {
     openTurnMenu(e, target);
   }
-  /** need02-P4（P4b#5）：轮级菜单入口（复制=整轮全文，重放/分支=轮锚点，删除=整轮逐条）。 */
+  /** need02-P4（P4b#5）：轮级菜单入口（复制此消息=单条，重放/分支=轮锚点，删除=整轮逐条；另有复制整轮问答）。 */
   function openTurnMenu(e: MouseEvent, target: TurnMenuTarget): void {
     if (!target.id && !target.text) return;
     menuState.x = Math.max(8, Math.min(e.clientX, window.innerWidth - 200));
@@ -55,6 +61,20 @@ export function useTimelineMenu() {
       /* ignore */
     }
     if (ok === false) console.warn('[history] copy failed');
+  }
+  async function onMenuCopyTurn(): Promise<void> {
+    const target = menuState.target;
+    closeMenu();
+    if (!target?.turnText) return;
+    const ok = await copyTextToClipboard(target.turnText);
+    try {
+      (window as unknown as { $message?: { success: (s: string) => void; error: (s: string) => void } }).$message?.[
+        ok ? 'success' : 'error'
+      ]?.(ok ? '已复制整轮' : '复制失败');
+    } catch {
+      /* ignore */
+    }
+    if (ok === false) console.warn('[history] copy turn failed');
   }
   async function onMenuReplay(): Promise<void> {
     const target = menuState.target;
@@ -125,10 +145,13 @@ export function useTimelineMenu() {
     menuState,
     menuBusy,
     menuCanCopy,
+    menuCanCopyTurn,
+    menuCopyLabel,
     openMenu,
     openTurnMenu,
     closeMenu,
     onMenuCopy,
+    onMenuCopyTurn,
     onMenuReplay,
     onMenuBranch,
     onMenuDelete,

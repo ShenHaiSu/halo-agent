@@ -15,6 +15,7 @@
         @retry-pending="rowActions.onRetryPending()"
         @dismiss="t.onDismissError()"
         @menu-copy="t.menu.onMenuCopy()"
+        @menu-copy-turn="t.menu.onMenuCopyTurn()"
         @menu-replay="t.menu.onMenuReplay()"
         @menu-branch="t.menu.onMenuBranch()"
         @menu-delete="t.menu.onMenuDelete()"

@@ -29,6 +29,8 @@ export interface TimelineMenuState {
   y: number;
   busy: boolean;
   canCopy: boolean;
+  canCopyTurn: boolean;
+  copyLabel: string;
 }
 
 /**
@@ -101,6 +103,6 @@ export function timelineViewFallback(): TimelineViewModel {
     lastError: '',
     showRetry: false,
     liveTelemetry: null,
-    menu: { visible: false, x: 0, y: 0, busy: false, canCopy: false },
+    menu: { visible: false, x: 0, y: 0, busy: false, canCopy: false, canCopyTurn: false, copyLabel: '复制此消息' },
   };
 }

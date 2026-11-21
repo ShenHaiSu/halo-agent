@@ -41,7 +41,10 @@
           :y="menu.y"
           :busy="menu.busy"
           :can-copy="menu.canCopy"
+          :can-copy-turn="menu.canCopyTurn"
+          :copy-label="menu.copyLabel"
           @copy="emit('menu-copy')"
+          @copy-turn="emit('menu-copy-turn')"
           @replay="emit('menu-replay')"
           @branch="emit('menu-branch')"
           @delete="emit('menu-delete')"
@@ -62,7 +65,6 @@ import TimelineSummarySection from '@features/session/components/TimelineSummary
 import MessageContextMenu from './MessageContextMenu.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 /** 滚动容器 + 摘要区 + Live 条 + 全局区；行内派生全部经视图模型取用。 */
 const props = defineProps<{
@@ -81,6 +83,7 @@ const emit = defineEmits<{
   retry: [];
   dismiss: [];
   'menu-copy': [];
+  'menu-copy-turn': [];
   'menu-replay': [];
   'menu-branch': [];
   'menu-delete': [];
@@ -117,45 +120,20 @@ const rowHandlers = {
   dismiss: () => emit('dismiss'),
 };
 
-/** 按 turnId 从摘要列表取对应条目：V2 稳态下摘要是唯一携带原文的数据源。 */
-function findSummary(turnId: string): TurnSummary | null {
-  return summaryList.value.find((s) => String(s.turnId) === turnId) ?? null;
-}
-
 /**
- * V2 摘要区右键桥接：纯转发 turnId，菜单内容组装走摘要源，不再造 V1 兜底 entry。
+ * V2 摘要区右键桥接：纯转发 turnId，菜单内容组装走 useTimelineRowActions（摘要源唯一组装点）。
  */
 async function onSummaryUserMenu(ev: MouseEvent, turnId: string): Promise<void> {
-  const summary = findSummary(turnId);
-  if (!summary) return;
-  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
-  const anchors = summaryAnchorIds(summary);
-  const text = summaryCopyText(summary, '');
   rowHandlers['user-menu'](ev, {
     kind: 'live',
     key: `live-${turnId}`,
-    msg: { id: anchors.userId, content: text },
   } as unknown as TimelineEntry);
 }
 
 async function onSummaryAssistantMenu(ev: MouseEvent, turnId: string): Promise<void> {
-  const summary = findSummary(turnId);
-  if (!summary) return;
-  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
-  const anchors = summaryAnchorIds(summary);
-  const finalBlockId = String(summary?.finalBlockId || '').trim();
-  let text = '';
-  if (finalBlockId) {
-    const { items } = await useWorkspaceStore().getBlockContents([finalBlockId]);
-    const block = items[finalBlockId];
-    text = String(block?.markdown || block?.preview || '');
-  }
-  if (!text) text = String(summary?.finalPreview || '');
-  void summaryCopyText;
   rowHandlers['assistant-menu'](ev, {
     kind: 'live',
     key: `live-${turnId}`,
-    msg: { id: anchors.assistantId, content: text },
   } as unknown as TimelineEntry);
 }
 
