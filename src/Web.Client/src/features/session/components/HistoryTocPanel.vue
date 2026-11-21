@@ -11,24 +11,12 @@
         data-testid="toc-role-filter"
         aria-label="过滤角色"
       />
-      <n-tooltip trigger="hover" placement="top">
-        <template #trigger>
-          <n-switch v-model:value="roundHeadsOnly" size="small" data-testid="toc-round-heads-switch" aria-label="只看每轮末条" />
-        </template>
-        只看每轮末条
-      </n-tooltip>
       <n-button size="tiny" quaternary title="置顶" data-testid="toc-to-top" @click="toTop">⇡</n-button>
       <n-button size="tiny" quaternary title="置底" data-testid="toc-to-bottom" @click="toBottom">⇣</n-button>
     </div>
     <div v-if="hintBar" class="toc-hint" data-testid="toc-hint-bar">
       点击气泡跳转到对应消息；点击外部不会关闭本栏，请点右上角 ✕ 关闭。
       <n-button size="tiny" quaternary @click="dismissHint">知道了</n-button>
-    </div>
-    <div v-if="summaryToc.length > 0" class="toc-summary" data-testid="toc-summary">
-      <div class="toc-summary-title">时间轴摘要 · {{ summaryToc.length }} 项</div>
-      <div v-for="item in summaryToc" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
-        <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
-      </div>
     </div>
     <div v-if="loading" class="toc-list" aria-busy="true">
       <div v-for="i in 5" :key="i" class="toc-skeleton" />
@@ -106,13 +94,6 @@ const roleFilter = computed({
   get: () => ui.tocRole,
   set: (v: 'all' | 'user' | 'assistant') => {
     ui.tocRole = v;
-    resetWindow();
-  },
-});
-const roundHeadsOnly = computed({
-  get: () => ui.tocRoundHeadsOnly,
-  set: (v: boolean) => {
-    ui.tocRoundHeadsOnly = v;
     resetWindow();
   },
 });
@@ -359,18 +340,6 @@ watch(activeSessionId, () => {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.toc-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 2px 8px;
-  border-bottom: 1px dashed var(--border-subtle);
-  margin-bottom: 4px;
-}
-.toc-summary-title {
-  font-size: 11px;
-  color: var(--text-secondary);
 }
 .toc-list {
   flex: 1 1 auto;

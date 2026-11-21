@@ -18,7 +18,6 @@ export interface Persisted {
   width: number;
   hintShown: boolean;
   tocRole: TocRoleFilter;
-  tocRoundHeadsOnly: boolean;
   tocSkipSystem: boolean;
 }
 
@@ -30,8 +29,11 @@ function clampWidth(v: unknown): number {
 
 function loadPersisted(): Persisted {
   const fallback: Persisted = {
-    tab: 'toc', width: 360, hintShown: false,
-    tocRole: 'all', tocRoundHeadsOnly: false, tocSkipSystem: true,
+    tab: 'toc',
+    width: 360,
+    hintShown: false,
+    tocRole: 'all',
+    tocSkipSystem: true,
   };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -42,7 +44,6 @@ function loadPersisted(): Persisted {
       width: clampWidth(o.width),
       hintShown: o.hintShown === true,
       tocRole: o.tocRole === 'user' || o.tocRole === 'assistant' ? o.tocRole : 'all',
-      tocRoundHeadsOnly: o.tocRoundHeadsOnly === true,
       tocSkipSystem: o.tocSkipSystem !== false,
     };
   } catch {
@@ -61,7 +62,6 @@ export const useUiStore = defineStore('ui', () => {
 
   /** 目录过滤 */
   const tocRole = ref<TocRoleFilter>(persisted.tocRole);
-  const tocRoundHeadsOnly = ref(persisted.tocRoundHeadsOnly);
   const tocSkipSystem = ref(persisted.tocSkipSystem);
 
   /** 跳转锁：performance.now() 时间戳；期内禁止“新消息自动滚到底” */
@@ -71,43 +71,64 @@ export const useUiStore = defineStore('ui', () => {
     if (tab) rightRailTab.value = tab;
     rightRailOpen.value = true;
   }
-  function close(): void { rightRailOpen.value = false; }
+  function close(): void {
+    rightRailOpen.value = false;
+  }
   function toggle(tab?: RightRailTab): void {
-    if (rightRailOpen.value && (!tab || tab === rightRailTab.value)) { close(); return; }
+    if (rightRailOpen.value && (!tab || tab === rightRailTab.value)) {
+      close();
+      return;
+    }
     open(tab);
   }
-  function setWidth(w: number): void { rightRailWidth.value = clampWidth(w); }
-  function lockJump(ms = 1500): void { jumpLockUntil.value = performance.now() + ms; }
-  function releaseJumpLock(): void { jumpLockUntil.value = 0; }
-  function markHintShown(): void { hintShown.value = true; }
+  function setWidth(w: number): void {
+    rightRailWidth.value = clampWidth(w);
+  }
+  function lockJump(ms = 1500): void {
+    jumpLockUntil.value = performance.now() + ms;
+  }
+  function releaseJumpLock(): void {
+    jumpLockUntil.value = 0;
+  }
+  function markHintShown(): void {
+    hintShown.value = true;
+  }
 
   // 节流持久化（100ms），避免拖拽时每帧写 localStorage
   let timer: number | null = null;
-  watch(
-    [rightRailTab, rightRailWidth, hintShown, tocRole, tocRoundHeadsOnly, tocSkipSystem],
-    () => {
-      if (timer !== null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = null;
-        try {
-          const data: Persisted = {
-            tab: rightRailTab.value,
-            width: rightRailWidth.value,
-            hintShown: hintShown.value,
-            tocRole: tocRole.value,
-            tocRoundHeadsOnly: tocRoundHeadsOnly.value,
-            tocSkipSystem: tocSkipSystem.value,
-          };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        } catch { /* 隐私模式/配额满：仅本次会话内有效 */ }
-      }, 100);
-    }
-  );
+  watch([rightRailTab, rightRailWidth, hintShown, tocRole, tocSkipSystem], () => {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = null;
+      try {
+        const data: Persisted = {
+          tab: rightRailTab.value,
+          width: rightRailWidth.value,
+          hintShown: hintShown.value,
+          tocRole: tocRole.value,
+          tocSkipSystem: tocSkipSystem.value,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch {
+        /* 隐私模式/配额满：仅本次会话内有效 */
+      }
+    }, 100);
+  });
 
   return {
-    rightRailOpen, rightRailTab, rightRailWidth, hintShown,
-    tocRole, tocRoundHeadsOnly, tocSkipSystem,
+    rightRailOpen,
+    rightRailTab,
+    rightRailWidth,
+    hintShown,
+    tocRole,
+    tocSkipSystem,
     jumpLockUntil,
-    open, close, toggle, setWidth, lockJump, releaseJumpLock, markHintShown,
+    open,
+    close,
+    toggle,
+    setWidth,
+    lockJump,
+    releaseJumpLock,
+    markHintShown,
   };
 });
