@@ -51,7 +51,8 @@ public sealed class ToolPipeline
     public static (bool Allowed, string? Code, string? Message) CheckSafety(
         string toolName,
         string normalizedJson,
-        string workspaceRoot
+        string workspaceRoot,
+        IEnumerable<string>? readAllowedRoots = null
     )
     {
         if (!FileTools.Contains(toolName))
@@ -89,9 +90,10 @@ public sealed class ToolPipeline
                 || toolName.Equals("delete_file", StringComparison.OrdinalIgnoreCase);
             foreach (var raw in found)
             {
+                // 会话输出目录只读豁免仅进读分支，写分支永不传入。
                 var (allowed, error, _, _) = isWrite
                     ? PathSafetyValidator.ValidateWrite(workspaceRoot, raw)
-                    : PathSafetyValidator.ValidateRead(workspaceRoot, raw);
+                    : PathSafetyValidator.ValidateRead(workspaceRoot, raw, readAllowedRoots);
                 if (!allowed)
                 {
                     string code = (error ?? string.Empty).Contains(
@@ -205,7 +207,8 @@ public sealed class ToolPipeline
         var safety = CheckSafety(
             toolName,
             validation.NormalizedJson ?? "{}",
-            context.WorkspaceRoot
+            context.WorkspaceRoot,
+            SessionOutputRoots.GetSessionReadAllowedRoots(context)
         );
         if (!safety.Allowed)
         {

@@ -125,9 +125,11 @@ public sealed class GrepSearchTool : IToolHandler
             // need22-P0 S1：检索起点强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
             string startPath;
             {
+                // 会话输出目录只读豁免：落盘关键字可直接检索。
                 var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
                     workspaceRoot,
-                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg
+                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg,
+                    SessionOutputRoots.GetSessionReadAllowedRoots(context)
                 );
                 if (!ok)
                 {
