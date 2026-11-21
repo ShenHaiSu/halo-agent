@@ -1,11 +1,5 @@
 <template>
   <section v-if="flatTurns.length > 0 || pending" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
-    <PendingBubble
-      v-if="pending"
-      :pending="pending"
-      @user-menu="emit('user-menu', $event, pendingKey)"
-      @retry-pending="emit('retry-pending')"
-    />
     <TimelineProcessBox
       v-for="turn in flatTurns"
       :key="turn.key"
@@ -13,6 +7,12 @@
       @expand-change="onExpandChange"
       @user-menu="(ev, id) => emit('user-menu', ev, id)"
       @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
+    />
+    <PendingBubble
+      v-if="pending"
+      :pending="pending"
+      @user-menu="emit('user-menu', $event, pendingKey)"
+      @retry-pending="emit('retry-pending')"
     />
   </section>
 </template>
