@@ -27,7 +27,7 @@ export function useTimelineViewModel() {
   const { budgetStatus } = storeToRefs(workspaceStore);
   const chatWidthMode = computed(() => appearanceStore.chatWidthMode);
   void budgetStatus;
-  // C4：投影已删除，窗口改用空数组过渡。
+  // 主链纯 V2：窗口改用空数组过渡。
   const emptyItems = computed(() => [] as TimelineEntry[]);
   const win = useTimelineWindow({ timelineItems: emptyItems, historyEntries: emptyItems, need02Flags, nav });
   const behavior = useTimelineBehavior({ win, projection: null, menu, nav });

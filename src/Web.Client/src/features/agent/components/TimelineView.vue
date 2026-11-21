@@ -14,7 +14,7 @@
         <template v-for="entry in liveList" :key="entry.key">
           <TimelineRow :item="entry" :is-last="true" v-on="rowHandlers" />
         </template>
-        <!-- 主链纯 V2：历史/尾部分片已下线（C3 停用，C4 删除文件），只留摘要区 + Live 条 + 全局区。 -->
+        <!-- 主链纯 V2：只留摘要区 + Live 条 + 全局区。 -->
         <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
           {{ turnNotice }}
         </n-alert>

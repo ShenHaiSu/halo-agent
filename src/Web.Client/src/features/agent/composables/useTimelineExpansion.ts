@@ -14,7 +14,7 @@ export function useTimelineExpansion(_timelineItems?: Ref<TimelineEntry[]> | Rea
   }
 
   const runByKey = computed<Map<string, { key: string; isRunning: boolean }>>(() => {
-    // C4：旧轮容器已删除，无运行态推导，返回空映射。
+    // 主链纯 V2：旧轮容器已删除，无运行态推导，返回空映射。
     return new Map<string, { key: string; isRunning: boolean }>();
   });
 

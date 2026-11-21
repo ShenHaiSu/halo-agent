@@ -144,7 +144,7 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（C4 已删除：主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
+/** 持久消息投影（主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
 export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
