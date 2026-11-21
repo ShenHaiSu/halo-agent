@@ -1,6 +1,7 @@
 import { computed, type Ref } from 'vue';
 import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 
+// 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
 export interface TimelineGroup {
   key: string;
   assistantId: string;

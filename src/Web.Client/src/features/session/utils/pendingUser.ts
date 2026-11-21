@@ -1,3 +1,4 @@
+// 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
 // need02-P1：乐观 user 纯函数（与 store 解耦，可单测；禁止调 bridge/DOM）。
 // 语义来源：docs/need-02/03 §3.1 + 04-P1 §对账规则 + 05 R2–R4。
 import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';

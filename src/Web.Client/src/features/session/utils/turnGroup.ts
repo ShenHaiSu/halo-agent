@@ -63,10 +63,12 @@ export function mergeKeyOf(msg: UnifiedChatMessage): string {
 
 export interface TimelineEntry {
   key: string;
-  kind: 'user' | 'system' | 'turn' | 'user-turn' | 'compact'; // P007：压缩桩独立 entry
+  kind: 'user' | 'system' | 'turn' | 'user-turn' | 'compact' | 'live'; // 直播挂载不需要轮容器，live 兜底条目直挂流段
   msg?: UnifiedChatMessage;
+  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** @deprecated 主时间轴不再产生旧轮次条目，仅子会话目录兼容保留。 */
   group?: TurnGroup;
+  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** @deprecated 合并舱已删除，仅类型兼容保留。 */
   run?: unknown;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

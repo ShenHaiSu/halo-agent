@@ -3,22 +3,18 @@
     <div ref="scroll" class="flex-1 min-h-0 overflow-y-auto min-w-0 max-w-full overflow-x-hidden transcript-scroll">
       <div :class="chatWidthMode === 'full' ? 'chat-timeline-full px-4 py-4 space-y-4' : 'chat-timeline-centered px-4 py-4 space-y-4'">
         <TimelineSummarySection
-          v-if="summaryList.length > 0"
+          v-if="summaryList.length > 0 || pendingUser"
           :summaries="summaryList"
+          :pending="pendingUser"
           @user-menu="onSummaryUserMenu"
           @assistant-menu="onSummaryAssistantMenu"
+          @retry-pending="emit('retry-pending', liveList[0] ?? ({ key: 'live-pending', kind: 'live' } as TimelineEntry))"
         />
         <TimelineEmptyState v-if="isEmpty" />
-        <TranscriptHistory :entries="historyList">
-          <template #default="{ entry }">
-            <TimelineRow :item="entry as TimelineEntry" :is-last="false" v-on="rowHandlers" />
-          </template>
-        </TranscriptHistory>
-        <TranscriptTail :entries="tailList">
-          <template #default="{ entry, isLast }">
-            <TimelineRow :item="entry as TimelineEntry" :is-last="!!isLast" v-on="rowHandlers" />
-          </template>
-        </TranscriptTail>
+        <template v-for="entry in liveList" :key="entry.key">
+          <TimelineRow :item="entry" :is-last="true" v-on="rowHandlers" />
+        </template>
+        <!-- 主链纯 V2：历史/尾部分片已下线（C3 停用，C4 删除文件），只留摘要区 + Live 条 + 全局区。 -->
         <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
           {{ turnNotice }}
         </n-alert>
@@ -63,11 +59,8 @@ import TimelineRow from './TimelineRow.vue';
 import TimelineEmptyState from './timeline/TimelineEmptyState.vue';
 import TimelineJumpButton from './timeline/TimelineJumpButton.vue';
 import TimelineSummarySection from '@features/session/components/TimelineSummarySection.vue';
-import TranscriptHistory from './TranscriptHistory.vue';
-import TranscriptTail from './TranscriptTail.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
-import { findTurnEntry } from '@features/session/utils/turnAnchorMatch';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 
@@ -101,40 +94,15 @@ const emit = defineEmits<{
 
 const view = computed(() => useTimelineViewOptional() ?? timelineViewFallback());
 
-const TAIL_SIZE = 8;
-
-const allItems = computed(() => props.items ?? view.value.items);
 const summaryList = computed(() => view.value.summaryList ?? []);
-const hideLegacy = computed(() => view.value.hideLegacyHistory);
+const pendingUser = computed(() => view.value.pendingUser ?? null);
 const hasActiveTurn = computed(() => view.value.hasActiveTurn);
 
-const historyList = computed<TimelineEntry[]>(() => {
-  if (hideLegacy.value) return [];
-  if (props.historyItems) return props.historyItems;
-  return allItems.value.slice(0, Math.max(0, allItems.value.length - TAIL_SIZE));
-});
-
-const tailList = computed<TimelineEntry[]>(() => {
-  const raw: TimelineEntry[] = (() => {
-    if (props.tailItems) return props.tailItems;
-    if (props.historyItems) return [];
-    return allItems.value.slice(Math.max(0, allItems.value.length - TAIL_SIZE));
-  })();
-  if (!hideLegacy.value) return raw;
-  if (hasActiveTurn.value) return raw;
-  try {
-    return raw.filter((e) => {
-      try {
-        const msg = (e as unknown as { msg?: Parameters<typeof view.value.isPending>[0] }).msg;
-        if (msg && view.value.isPending(msg)) return true;
-      } catch {
-        /* ignore */
-      }
-      return view.value.liveSegsFor(e).length > 0;
-    });
-  } catch {
-    return [];
-  }
+// 直播挂载不需要轮容器：有活跃轮即新建 live 兜底条目直挂流段，key 绑定会话切会话即换。
+const liveList = computed<TimelineEntry[]>(() => {
+  if (!hasActiveTurn.value) return [];
+  const sid = String(useWorkspaceStore().activeSessionId || 'active');
+  return [{ key: `live-${sid}`, kind: 'live' }];
 });
 
 const noticeInTurn = computed(() => view.value.noticeInTurn);
@@ -160,34 +128,26 @@ function findSummary(turnId: string): TurnSummary | null {
 }
 
 /**
- * V2 摘要区右键桥接。投影条目命中时走完整轮次 handler（复制整轮全文）；
- * 未命中（V2 稳态投影为空）时从摘要补出可复制文本：
- * - 用户气泡：摘要 userContent 即用户原文全文，同步可得；
- * - 最终正文：按 finalBlockId 拉正文块 markdown 全文（B 方案），命中缓存时近乎瞬时。
- * 两者都塞进兜底 entry 的 content 字段，复用既有 openMenu→menuCanCopy 通路，不改状态机。
+ * V2 摘要区右键桥接：纯转发 turnId，菜单内容组装走摘要源，不再造 V1 兜底 entry。
  */
-function onSummaryUserMenu(ev: MouseEvent, turnId: string): void {
-  const entry = findTurnEntry(allItems.value, turnId);
-  if (entry) {
-    rowHandlers['user-menu'](ev, entry);
-    return;
-  }
+async function onSummaryUserMenu(ev: MouseEvent, turnId: string): Promise<void> {
   const summary = findSummary(turnId);
-  const text = String(summary?.userContent || summary?.userPreview || '');
+  if (!summary) return;
+  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
+  const anchors = summaryAnchorIds(summary);
+  const text = summaryCopyText(summary, '');
   rowHandlers['user-menu'](ev, {
-    kind: 'user',
-    key: turnId,
-    msg: { id: turnId, content: text },
+    kind: 'live',
+    key: `live-${turnId}`,
+    msg: { id: anchors.userId, content: text },
   } as unknown as TimelineEntry);
 }
 
 async function onSummaryAssistantMenu(ev: MouseEvent, turnId: string): Promise<void> {
-  const entry = findTurnEntry(allItems.value, turnId);
-  if (entry) {
-    rowHandlers['assistant-menu'](ev, entry);
-    return;
-  }
   const summary = findSummary(turnId);
+  if (!summary) return;
+  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
+  const anchors = summaryAnchorIds(summary);
   const finalBlockId = String(summary?.finalBlockId || '').trim();
   let text = '';
   if (finalBlockId) {
@@ -196,10 +156,11 @@ async function onSummaryAssistantMenu(ev: MouseEvent, turnId: string): Promise<v
     text = String(block?.markdown || block?.preview || '');
   }
   if (!text) text = String(summary?.finalPreview || '');
+  void summaryCopyText;
   rowHandlers['assistant-menu'](ev, {
-    kind: 'turn',
-    key: turnId,
-    group: { assistantId: finalBlockId || turnId, key: turnId, content: text },
+    kind: 'live',
+    key: `live-${turnId}`,
+    msg: { id: anchors.assistantId, content: text },
   } as unknown as TimelineEntry);
 }
 

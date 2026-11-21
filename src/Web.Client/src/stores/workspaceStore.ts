@@ -41,6 +41,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const timelineSummaries = ref<TurnSummary[]>([]);
   const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
   const toolResultCache = ref<Record<string, TimelineToolResult>>({});
+  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -87,11 +88,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const t = turns.value[id];
       const p = t?.pendingUser;
       if (!p || p.status !== 'sending') return;
-      // jsonl 启发式保持第一优先级（v1 主路径）。
-      const hit = matchConfirmed(p, sessionMessages.value);
-      if (hit) {
-        confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
-        return;
+      // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
+      if (!isV2Timeline.value) {
+        const hit = matchConfirmed(p, sessionMessages.value);
+        if (hit) {
+          confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
+          return;
+        }
       }
       // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
@@ -105,6 +108,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const pendingOverlayMessages = computed<UnifiedChatMessage[]>(() => {
     const base = sessionMessages.value || [];
     if (!isP1On()) return base;
+    // 过渡：V2 下恒等于 sessionMessages（摘要区直渲染，不再伪装消息）；V1 会话保留旧 overlay。
+    if (isV2Timeline.value) return base;
     const sid = activeSessionId.value || '';
     const p = activePendingFor(sid);
     if (!p) return base;
