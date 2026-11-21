@@ -40,6 +40,7 @@ export interface TimelineViewModel {
   historyItems: TimelineEntry[] | null;
   tailItems: TimelineEntry[] | null;
   summaryList: TurnSummary[] | null;
+  pendingUser: import('@features/session/utils/pendingUser').PendingUser | null;
   hideLegacyHistory: boolean;
   hasActiveTurn: boolean;
   renderHtml: (text: string) => string;
@@ -108,7 +109,9 @@ export function timelineViewFallback(): TimelineViewModel {
     historyItems: null,
     tailItems: null,
     summaryList: null,
-    hideLegacyHistory: false,
+    pendingUser: null,
+    // 主链纯 V2：历史开关恒真，直挂单测默认即纯摘要。
+    hideLegacyHistory: true,
     hasActiveTurn: false,
     renderHtml: identityText,
     renderStream: identityText,

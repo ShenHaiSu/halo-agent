@@ -1,4 +1,6 @@
 import { turnCopyText, turnMessageIds, turnReplayAnchor } from '@features/session/utils/userTurn';
+import { summaryAnchorIds, summaryCopyText } from '@features/session/utils/summaryMenu';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { trimBlankEdges } from '@shared/utils/trimBlank';
 import type { UserTurn } from '@features/session/utils/userTurn';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
@@ -9,6 +11,8 @@ interface RowActionDeps {
   toggleTurn: (key: string) => void;
   toggleRun: (key: string) => void;
   retryTurn: () => void;
+  findSummary?: (turnId: string) => TurnSummary | null;
+  getBlockMarkdown?: (blockId: string) => Promise<string>;
 }
 
 /**
@@ -34,6 +38,17 @@ export function useTimelineRowActions(deps: RowActionDeps) {
 
   /** 轮级菜单：复制整轮（全文展开），重放/分支/删除按轮锚点。 */
   function onUserMenu(e: MouseEvent, item: TimelineEntry): void {
+    // 直播条与摘要源直连：不再造 V1 兜底 entry 复用旧通路。
+    if ((item as TimelineEntry).kind === 'live' && deps.findSummary) {
+      const turnId = String(item.key || '').replace(/^live-/, '');
+      const summary = deps.findSummary(turnId);
+      if (summary) {
+        const anchors = summaryAnchorIds(summary);
+        const text = summaryCopyText(summary, '');
+        deps.menu.openTurnMenu(e, { kind: 'user', id: anchors.userId, text, turnLabel: '整轮' });
+        return;
+      }
+    }
     const turn = turnOf(item);
     if (turn) {
       const anchor = turnReplayAnchor(turn);
@@ -51,7 +66,24 @@ export function useTimelineRowActions(deps: RowActionDeps) {
   }
 
   /** 助手区右键同样按轮（锚点取本轮末 assistant，重放/分支/删除整轮）。 */
-  function onAssistantMenu(e: MouseEvent, item: TimelineEntry): void {
+  async function onAssistantMenu(e: MouseEvent, item: TimelineEntry): Promise<void> {
+    // 直播条与摘要源直连：不再造 V1 兜底 entry 复用旧通路。
+    if ((item as TimelineEntry).kind === 'live' && deps.findSummary) {
+      const turnId = String(item.key || '').replace(/^live-/, '');
+      const summary = deps.findSummary(turnId);
+      if (summary) {
+        const anchors = summaryAnchorIds(summary);
+        let blocksMarkdown = '';
+        try {
+          if (anchors.assistantId && deps.getBlockMarkdown) blocksMarkdown = await deps.getBlockMarkdown(anchors.assistantId);
+        } catch {
+          /* 拉块失败降级用预览 */
+        }
+        const text = summaryCopyText(summary, blocksMarkdown);
+        deps.menu.openTurnMenu(e, { kind: 'assistant', id: anchors.assistantId, text, turnLabel: '整轮' });
+        return;
+      }
+    }
     const turn = turnOf(item);
     if (turn) {
       let assistantId = '';

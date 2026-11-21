@@ -76,11 +76,12 @@ export function useTimelineViewModel() {
   return {
     chatWidthMode,
     persistedMessages,
-    timelineItems: projection.timelineItems,
-    historyEntries: projection.historyEntries,
-    tailEntries: projection.tailEntries,
-    visibleHistoryEntries: win.visibleHistoryEntries,
-    hiddenAbove: win.hiddenAbove,
+    // 主链纯 V2 过渡：V1 派生返回空数组（C3 停用调用，C4 删除符号）。
+    timelineItems: computed(() => [] as TimelineEntry[]),
+    historyEntries: computed(() => [] as TimelineEntry[]),
+    tailEntries: computed(() => [] as TimelineEntry[]),
+    visibleHistoryEntries: computed(() => [] as TimelineEntry[]),
+    hiddenAbove: computed(() => 0),
     resetMountWindow: win.resetMountWindow,
     ensureMountWindow: win.ensureMountWindow,
     growWindowTop: win.growWindowTop,
@@ -105,6 +106,8 @@ export function useTimelineViewModel() {
     liveInclusiveSegs: projection.liveInclusiveSegs,
     liveSegsFor: (entry: TimelineEntry, segs: DisplaySeg[]): DisplaySeg[] => {
       try {
+        // 直播挂载不需要轮容器：live 兜底条目直挂流段；旧轮分支保留给 V1 兼容，C4 随 V1 删除。
+        if ((entry as TimelineEntry).kind === 'live') return Array.isArray(segs) ? segs : [];
         if (!isLiveOwner(entry, projection.timelineItems.value)) return [];
         return Array.isArray(segs) ? segs : [];
       } catch (e) {

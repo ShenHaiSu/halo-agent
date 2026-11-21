@@ -44,10 +44,13 @@ import { useTimelineRowActions } from '../composables/useTimelineRowActions';
 const rawTimeline = useTimeline();
 const t = reactive(rawTimeline);
 const workspaceSnapshot = useWorkspaceStore();
-const { timelineSummaries, isV2Timeline } = storeToRefs(workspaceSnapshot);
+const { timelineSummaries } = storeToRefs(workspaceSnapshot);
 const summaryList = computed(() => timelineSummaries.value ?? []);
-const isV2WithSummary = computed(() => isV2Timeline?.value === true && summaryList.value.length > 0);
-const isEmpty = computed(() => t.persistedMessages.length === 0 && summaryList.value.length === 0 && !t.stream.hasActiveTurn);
+const isEmpty = computed(
+  () =>
+    // 主链纯 V2：persistedMessages 退出判据，只看摘要 + 活跃 + 乐观。
+    summaryList.value.length === 0 && !t.stream.hasActiveTurn && !t.turn.activeTurn?.pendingUser
+);
 
 /** 渲染开关一次快照（后续只读）。 */
 const renderGate = useP02Flags();
@@ -63,13 +66,24 @@ const rowActions = useTimelineRowActions({
   retryTurn: () => {
     void rawTimeline.onRetryTurn();
   },
+  findSummary: (turnId: string) => summaryList.value.find((s) => String(s.turnId) === String(turnId)) ?? null,
+  getBlockMarkdown: async (blockId: string) => {
+    try {
+      const { items } = await workspaceSnapshot.getBlockContents([blockId]);
+      const block = items[blockId];
+      return String(block?.markdown || block?.preview || '');
+    } catch {
+      return '';
+    }
+  },
 });
 
 provideTimelineScene(t, {
   renderHtml,
   renderStream: renderStreamingText,
   summaryList,
-  hideLegacyHistory: isV2WithSummary,
+  // 主链纯 V2：历史开关恒真（子会话不受影响，走独立小链）。
+  hideLegacyHistory: computed(() => true),
   singleProcess: renderGate.singleProcess,
 });
 

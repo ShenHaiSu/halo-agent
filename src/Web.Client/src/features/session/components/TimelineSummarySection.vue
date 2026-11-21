@@ -1,5 +1,11 @@
 <template>
-  <section v-if="flatTurns.length > 0" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
+  <section v-if="flatTurns.length > 0 || pending" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
+    <PendingBubble
+      v-if="pending"
+      :pending="pending"
+      @user-menu="emit('user-menu', $event, pendingKey)"
+      @retry-pending="emit('retry-pending')"
+    />
     <TimelineProcessBox
       v-for="turn in flatTurns"
       :key="turn.key"
@@ -16,21 +22,26 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
 import TimelineProcessBox from './TimelineProcessBox.vue';
+import PendingBubble from './PendingBubble.vue';
+import type { PendingUser } from '../utils/pendingUser';
 import { setTurnExpanded } from '../utils/timelineExpansion';
 import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
 
 const props = defineProps<{
   summaries: TurnSummary[];
+  pending?: PendingUser | null;
 }>();
 
 const emit = defineEmits<{
   (e: 'user-menu', ev: MouseEvent, turnId: string): void;
   (e: 'assistant-menu', ev: MouseEvent, turnId: string): void;
+  (e: 'retry-pending'): void;
 }>();
 
 const nav = useTimelineNav();
 const rootRef = ref<HTMLElement | null>(null);
 const flatTurns = computed(() => flatBlocks(props.summaries));
+const pendingKey = computed(() => String(props.pending?.requestId || props.pending?.key || 'pending'));
 const registered = ref<string[]>([]);
 
 function onExpandChange(turnId: string, expanded: boolean): void {

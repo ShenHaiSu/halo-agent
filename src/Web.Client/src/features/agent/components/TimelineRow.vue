@@ -37,6 +37,24 @@
       @dismiss="emit('dismiss')"
     />
   </div>
+  <div v-else-if="item.kind === 'live'" :ref="anchor(item.key)">
+    <UserTurnTransition :running="generating" :completing="completing" :anim-on="handoff">
+      <template #live>
+        <UserTurnLiveBody :segs="liveSegs" :is-generating="generating" @link-click="emit('link-click', $event)" />
+      </template>
+      <template #default>
+        <div class="min-h-0" />
+      </template>
+    </UserTurnTransition>
+    <TimelineAlerts
+      v-if="isLast && noticeOn && (noticeText || lastErrorText)"
+      :notice="noticeText"
+      :error="lastErrorText"
+      :show-retry="retryOn"
+      @retry="emit('retry')"
+      @dismiss="emit('dismiss')"
+    />
+  </div>
   <div v-else-if="item.kind === 'compact'" :ref="anchor(item.key)" class="w-full">
     <CompactDivider
       :stub-id="String(item.msg?.id || '')"
@@ -63,6 +81,8 @@ import { computed } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import UserBubble from './userturn/UserBubble.vue';
 import UserTurnBlock from './UserTurnBlock.vue';
+import UserTurnLiveBody from './userturn/UserTurnLiveBody.vue';
+import UserTurnTransition from './UserTurnTransition.vue';
 import CompactDivider from '@features/session/components/CompactDivider.vue';
 import TimelineAlerts from './timeline/TimelineAlerts.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';

@@ -33,6 +33,13 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
     get summaryList() {
       return opts.summaryList.value;
     },
+    get pendingUser() {
+      try {
+        return t.turn.activeTurn?.pendingUser ?? null;
+      } catch {
+        return null;
+      }
+    },
     get hideLegacyHistory() {
       return opts.hideLegacyHistory.value;
     },
