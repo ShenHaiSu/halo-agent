@@ -10,6 +10,7 @@ import {
   type AgentTelemetry,
   type TurnEventPayload,
 } from './model';
+import { agentRuntime } from './runtime';
 
 let listenersBound = false;
 
@@ -27,6 +28,11 @@ function bindTelemetryListeners(): void {
     t.telemetry.outputTokens = evt.usage.outputTokens || 0;
     t.telemetry.cachedTokens = evt.usage.cachedInputTokens || 0;
     t.telemetry.liveEst = 0;
+    try {
+      agentRuntime().applyUsagePatch(sid, evt.usage);
+    } catch {
+      /* 补丁永不阻断遥测 */
+    }
     touch(t);
   });
   haloEventBus.on<TurnEventPayload>('agent:turn-event', (evt) => {

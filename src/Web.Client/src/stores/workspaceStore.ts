@@ -527,7 +527,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false;
   }
 
-  async function loadSessionMessages(sessionId: string, opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
+  async function loadSessionMessages(
+    sessionId: string,
+    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean }
+  ): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
       timelineSummaries.value = [];
@@ -543,11 +546,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
-    // A全量：await 之前同步清空，视图立即进空态，切会话不闪旧历史
+    // 发送链保留旧预算，切会话仍清空：消息列表照旧清空防闪旧历史
     sessionMessages.value = [];
     timelineSummaries.value = [];
-    budgetStatus.value = null;
-    budgetError.value = null;
+    if (!opts?.preserveBudget) {
+      budgetStatus.value = null;
+      budgetError.value = null;
+    }
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
@@ -1034,6 +1039,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return '';
   }
 
+  function applyUsagePatch(sid: string, usage: { inputTokens: number; outputTokens?: number; cachedInputTokens?: number | null }): void {
+    if ((sid || '').trim() !== activeSessionId.value) return;
+    const cur = budgetStatus.value;
+    if (!cur) return;
+    const input = Math.trunc(Number(usage?.inputTokens) || 0);
+    if (input <= 0) return;
+    if (String(cur.occupancyBaseline || 'exact') === 'compact-estimate') return;
+    const cachedRaw = usage?.cachedInputTokens;
+    const cached = cachedRaw === null || cachedRaw === undefined ? null : Math.max(0, Math.trunc(Number(cachedRaw) || 0));
+    const total = Math.max(1, cur.totalContextTokens || 128000);
+    const maxOut = cur.maxOutputTokens || 4096;
+    const safety = cur.safetyBuffer || 1024;
+    budgetStatus.value = {
+      ...cur,
+      usedInputTokens: input,
+      lastPromptTokens: input,
+      lastCachedTokens: cached,
+      cacheHitRate: cached === null || input <= 0 ? null : Math.min(1, Math.max(0, cached / input)),
+      usedInputIsEstimated: false,
+      occupancyBaseline: 'exact',
+      occupancyState: 'known',
+      usagePercentage: Math.min(100, Math.round((input / total) * 1000) / 10),
+      availableInputTokens: Math.max(0, total - maxOut - safety - input),
+    };
+  }
+
   async function refreshBudget(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
     if (!activeWorkspaceId.value || !activeSessionId.value) {
       budgetStatus.value = null;
@@ -1241,6 +1272,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     titleGenerating,
     exportSessionMarkdown,
     compactSession,
+    applyUsagePatch,
     refreshBudget,
   };
 });

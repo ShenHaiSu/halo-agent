@@ -13,7 +13,8 @@ export interface AgentRuntimeContext {
     msgId: string,
     removeAnchor: boolean
   ): Promise<{ ok: boolean; replayText: string }>;
-  loadSessionMessages(sessionId: string): Promise<void>;
+  loadSessionMessages(sessionId: string, opts?: { preserveBudget?: boolean }): Promise<void>;
+  applyUsagePatch(sessionId: string, usage: { inputTokens: number; cachedInputTokens?: number | null }): void;
   refreshBudget(): Promise<void>;
   touchSessionTime(sessionId: string, iso?: string): void;
   generateTitle(sessionId: string): void;
@@ -31,6 +32,7 @@ const noopRuntime: AgentRuntimeContext = {
   findMessageContent: () => '',
   truncateHistory: () => Promise.resolve({ ok: false, replayText: '' }),
   loadSessionMessages: () => Promise.resolve(),
+  applyUsagePatch: () => undefined,
   refreshBudget: () => Promise.resolve(),
   touchSessionTime: () => undefined,
   generateTitle: () => undefined,

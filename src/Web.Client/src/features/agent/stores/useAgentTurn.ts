@@ -269,7 +269,8 @@ export const useAgentTurn = defineStore('agent-turn', () => {
         return false;
       }
       // 乐观回显用户消息，等待 TurnCompleted 后与 jsonl 对账
-      await rt.loadSessionMessages(sessionId);
+      // 发送链保留旧预算，切会话仍清空
+      await rt.loadSessionMessages(sessionId, { preserveBudget: true });
       return true;
     } catch (err) {
       console.error('[agent-turn] sendPrompt failed:', err);

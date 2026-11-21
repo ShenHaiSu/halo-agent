@@ -33,7 +33,8 @@ export function ensureAgentWiring(): void {
       const r = await getHostBridge().truncateSessionHistory(w, s, mid, rm);
       return { ok: r.ok && !!r.data, replayText: String((r.data as unknown as { replayText?: unknown })?.replayText || '') };
     },
-    loadSessionMessages: (sid) => ws.loadSessionMessages(sid),
+    loadSessionMessages: (sid, opts) => ws.loadSessionMessages(sid, opts),
+    applyUsagePatch: (sid, usage) => ws.applyUsagePatch(sid, usage),
     refreshBudget: () => ws.refreshBudget(),
     touchSessionTime: (sid, iso) => ws.touchSessionTime(sid, iso),
     generateTitle: (sid) => {
