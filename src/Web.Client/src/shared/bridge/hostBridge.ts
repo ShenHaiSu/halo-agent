@@ -196,6 +196,7 @@ export { normalizeGlobalProxyMode, normalizeProviderProxyMode, normalizeLlmProto
 export { normalizeVisionFlag } from './protocol/types';
 export type {
   AgentConfigDocument,
+  AppearanceSettingsDto,
   BridgeResponse,
   ChatImageRef,
   CompactionResultDto,

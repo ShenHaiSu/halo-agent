@@ -493,3 +493,16 @@ export interface UiActiveState {
   workspaceId: string | null;
   sessionId: string | null;
 }
+// 外观设置真相源（后端 config/appearance.json）。字段与 shared/ui/appearance.ts 的
+// AppearanceSettings 严格对齐；dev(http://localhost:5173)/release(app://local) 的
+// localStorage 按 origin 隔离，故不再由浏览器 localStorage 充当真相源。
+export interface AppearanceSettingsDto {
+  themeMode: 'dark' | 'light';
+  themeColor: string;
+  fontSize: number;
+  chineseFont: string;
+  englishFont: string;
+  monoFont: string;
+  chatWidthMode: 'centered' | 'full';
+  sendKeyMode: 'enter' | 'ctrl-enter';
+}

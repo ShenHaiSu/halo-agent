@@ -19,6 +19,7 @@ import type {
 import type { UnifiedLlmRequestDto } from './llm';
 import type {
   AgentConfigDocument,
+  AppearanceSettingsDto,
   CompactionResultDto,
   ContextBudgetStatusDto,
   FirstRoundTexts,
@@ -238,4 +239,6 @@ export interface HostBridgeApi {
   getTurnBlockIds: (workspaceId: string, sessionId: string, turnId: string) => Promise<BridgeResponse<string[]>>;
   getLastActive: () => Promise<BridgeResponse<UiActiveState>>;
   setLastActive: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
+  getAppearance: () => Promise<BridgeResponse<AppearanceSettingsDto>>;
+  setAppearance: (settingsJson: string) => Promise<BridgeResponse<boolean>>;
 }

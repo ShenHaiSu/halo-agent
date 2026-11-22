@@ -1,5 +1,6 @@
 /** need22-P5 J4：Mock 业务域方法（workspace/session/history/goal/sub/skill/usage；原 createBrowserMockBridge 后半，行为不变）。 */
 import { haloEventBus } from '@shared/bridge/events';
+import { DEFAULT_APPEARANCE } from '@shared/ui/appearance';
 import { buildMockPreview } from './mockState';
 import type { MockState } from './mockState';
 import type {
@@ -684,5 +685,20 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
     async setLastActive() {
       return { ok: true, data: true };
     },
+    async getAppearance() {
+      return { ok: true, data: { ...mockAppearance } };
+    },
+    async setAppearance(settingsJson: string) {
+      try {
+        const parsed = JSON.parse(settingsJson) as Partial<typeof mockAppearance>;
+        mockAppearance = { ...mockAppearance, ...parsed };
+      } catch {
+        /* mock：坏 JSON 静默忽略 */
+      }
+      return { ok: true, data: true };
+    },
   };
 }
+
+/** 外观配置 mock 内存态：让 ?mock 模式下 set/get 往返可验证（真实实现落后端 appearance.json）。 */
+let mockAppearance: typeof DEFAULT_APPEARANCE = { ...DEFAULT_APPEARANCE };

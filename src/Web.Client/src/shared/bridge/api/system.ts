@@ -1,6 +1,7 @@
 /** need21-F02: 系统域 API（旧 client.ts wrapNativeHostBridge 系统/存储/技能/用量/活跃态方法迁移，签名不变）。 */
 import type { BridgeTransport } from '../transport/transport';
 import type {
+  AppearanceSettingsDto,
   BridgeResponse,
   HostBridgeApi,
   SkillMemoryDetail,
@@ -58,6 +59,8 @@ export function createSystemApi(
   | 'getUsageDbStatus'
   | 'getLastActive'
   | 'setLastActive'
+  | 'getAppearance'
+  | 'setAppearance'
 > {
   return {
     async getSystemInfo() {
@@ -270,6 +273,24 @@ export function createSystemApi(
       } catch (e) {
         console.warn('[bridge] UISTATE_UNSUPPORTED:', (e as Error)?.message ?? e);
         return { ok: false, code: 'USAGE_UNSUPPORTED', message: '活跃状态通道不可用' };
+      }
+    },
+    async getAppearance() {
+      try {
+        if (!t.supports('getAppearance')) return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<AppearanceSettingsDto>>(await t.call('getAppearance'));
+      } catch (e) {
+        console.warn('[bridge] APPEARANCE_UNSUPPORTED:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+      }
+    },
+    async setAppearance(settingsJson: string) {
+      try {
+        if (!t.supports('setAppearance')) return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('setAppearance', settingsJson));
+      } catch (e) {
+        console.warn('[bridge] APPEARANCE_UNSUPPORTED:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
       }
     },
   };

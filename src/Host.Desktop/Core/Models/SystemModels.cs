@@ -46,6 +46,26 @@ public sealed class UiActiveStateDto
 }
 
 /// <summary>
+/// 位于 &lt;DataRootPath&gt;\config\appearance.json 的前端外观真相源。
+/// 独立文件：dev(http://localhost:5173) 与 release(app://local) 的 localStorage 按 origin 隔离，
+/// 故外观配置不再以浏览器 localStorage 为真相源，统一落到后端数据根，两种模式共享。
+/// 默认值与前端 shared/ui/appearance.ts 的 DEFAULT_APPEARANCE 严格对齐。
+/// </summary>
+public sealed class AppearanceState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string ThemeMode { get; set; } = "dark";
+    public string ThemeColor { get; set; } = "#3b82f6";
+    public int FontSize { get; set; } = 13;
+    public string ChineseFont { get; set; } = "Microsoft YaHei UI";
+    public string EnglishFont { get; set; } = "Segoe UI";
+    public string MonoFont { get; set; } = "Consolas";
+    public string ChatWidthMode { get; set; } = "centered";
+    public string SendKeyMode { get; set; } = "enter";
+    public string LastUpdatedUtc { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+}
+
+/// <summary>
 /// 宿主系统运行环境与诊断信息 DTO。
 /// </summary>
 public sealed class SystemRuntimeInfo

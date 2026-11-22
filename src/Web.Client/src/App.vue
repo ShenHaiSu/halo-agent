@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { darkTheme, zhCN, dateZhCN } from 'naive-ui';
 import { Monitor, HardDrive, Network, Hash } from 'lucide-vue-next';
 import { buildHaloThemeOverrides } from '@shared/ui/appearance';
@@ -147,6 +147,14 @@ async function onBridgeRetry(): Promise<void> {
     refreshBridgeMockFlag();
   }
 }
+/** 页面隐藏/关闭时立即落盘外观配置，避免 300ms debounce 窗口内关窗口丢配置。 */
+function flushAppearance(): void {
+  void appearanceStore.flush();
+}
+function onVisibilityHidden(): void {
+  if (document.visibilityState === 'hidden') flushAppearance();
+}
+
 const MIN_VEIL_MS = 800; // 初始化过快时的最小展示时长，避免闪屏
 
 /** 淡出并移除静态 veil；幂等，多次调用安全。 */
@@ -160,8 +168,10 @@ function finishBoot(): void {
 onMounted(async () => {
   const startedAt = performance.now();
   try {
-    appearanceStore.loadAndApply();
+    await appearanceStore.loadAndApply();
     systemStore.setupEventListeners();
+    document.addEventListener('visibilitychange', onVisibilityHidden);
+    window.addEventListener('pagehide', flushAppearance);
     // 启动即异步预取工具 preset（不阻塞首屏，失败静默回退 coding）
     try {
       useAgentConfigStore().watchStorageChange();
@@ -178,5 +188,10 @@ onMounted(async () => {
     const rest = Math.max(0, MIN_VEIL_MS - (performance.now() - startedAt));
     window.setTimeout(finishBoot, rest);
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityHidden);
+  window.removeEventListener('pagehide', flushAppearance);
 });
 </script>

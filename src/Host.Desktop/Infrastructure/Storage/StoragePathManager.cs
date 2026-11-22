@@ -138,6 +138,9 @@ public sealed partial class StoragePathManager
     /// <summary>UI 活跃状态文件（独立于 app-settings，避免多写者读-改-写覆盖；随数据根迁移）。</summary>
     public string UiStateFilePath => Path.Combine(ConfigDirectory, "ui-state.json");
 
+    /// <summary>外观配置真相源文件（dev/release 共用同一数据根，规避 localStorage 按 origin 隔离）。</summary>
+    public string AppearanceFilePath => Path.Combine(ConfigDirectory, "appearance.json");
+
     private StoragePathManager(
         string bootstrapFilePath,
         string defaultDataRootPath,
@@ -360,6 +363,22 @@ public sealed partial class StoragePathManager
         state.LastActiveAtUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         await AtomicFileWriter
             .WriteJsonAtomicAsync(UiStateFilePath, state, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>读取外观配置（无文件/空/坏 JSON 一律回默认，永不抛）。</summary>
+    public AppearanceState LoadAppearance()
+    {
+        var state = AtomicFileWriter.ReadJsonOrDefault<AppearanceState>(AppearanceFilePath);
+        return state ?? new AppearanceState();
+    }
+
+    /// <summary>保存外观配置（原子落盘）。</summary>
+    public async Task SaveAppearanceAsync(AppearanceState state, CancellationToken ct = default)
+    {
+        state.LastUpdatedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        await AtomicFileWriter
+            .WriteJsonAtomicAsync(AppearanceFilePath, state, ct)
             .ConfigureAwait(false);
     }
 
