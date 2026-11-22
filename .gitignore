@@ -77,5 +77,6 @@ plugins/
 # needXX / develop / toolDocs 属于过程文档，落地完即删，不进版本历史。
 /docs/*
 !/docs/CEFSHARP_ARCHITECTURE_STANDARD.md
+!/docs/ROADMAP.md
 !/docs/pitfalls/
 !/docs/pitfalls/**
