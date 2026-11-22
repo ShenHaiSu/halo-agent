@@ -67,6 +67,12 @@ export const useUiStore = defineStore('ui', () => {
   /** 跳转锁：performance.now() 时间戳；期内禁止“新消息自动滚到底” */
   const jumpLockUntil = ref(0);
 
+  /**
+   * 交接锁：轮末 300ms 交接窗内为真。
+   * 语义是「禁止几何变化自动解除跟随」，不是禁止用户滚动——用户 wheel/touch/keydown 立即解锁。
+   */
+  const handoffLocked = ref(false);
+
   function open(tab?: RightRailTab): void {
     if (tab) rightRailTab.value = tab;
     rightRailOpen.value = true;
@@ -89,6 +95,14 @@ export const useUiStore = defineStore('ui', () => {
   }
   function releaseJumpLock(): void {
     jumpLockUntil.value = 0;
+    // 用户手势（wheel/touch/keydown）走这里：用户意图最高，一并让出交接锁。
+    handoffLocked.value = false;
+  }
+  function lockHandoff(): void {
+    handoffLocked.value = true;
+  }
+  function releaseHandoffLock(): void {
+    handoffLocked.value = false;
   }
   function markHintShown(): void {
     hintShown.value = true;
@@ -123,12 +137,15 @@ export const useUiStore = defineStore('ui', () => {
     tocRole,
     tocSkipSystem,
     jumpLockUntil,
+    handoffLocked,
     open,
     close,
     toggle,
     setWidth,
     lockJump,
     releaseJumpLock,
+    lockHandoff,
+    releaseHandoffLock,
     markHintShown,
   };
 });

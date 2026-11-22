@@ -4,12 +4,14 @@ import type { TurnSummary } from '@shared/bridge/hostBridge';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import type { AgentToolCard } from '@features/agent/stores/model';
 
-/** 流式段最小形态（模板只读这四个字段）。 */
+/** 流式段最小形态（模板只读这几个字段）。tag 是正文/过程分组的真相源，投影必须透传。 */
 export interface TimelineLiveSeg {
   kind: string;
   key: string;
   text: string;
   card: AgentToolCard | null;
+  /** seg 的落盘标签：final=末轮正文，process=过程内容；用于交接期分组。 */
+  tag: string | null;
 }
 
 /** 轮末遥测条（无活跃遥测时为 null，不渲染）。 */
@@ -51,6 +53,12 @@ export interface TimelineViewModel {
   liveCompleting: boolean;
   steadyReady: boolean;
   handoffAnim: boolean;
+  /** 交接窗是否激活：已进入交接且正文预取就位，此时正文只保留 Live 一份。 */
+  handoffActive: boolean;
+  /** 交接期 Live 正文文本，用作稳态盒首帧的 markdown 种子，换手不闪 preview。 */
+  handoffFinalText: string;
+  /** 过程段是否做高度收缩（体验增强开关）；关闭时交接仍不双份、不跳，只是硬切。 */
+  handoffReduceHeight: boolean;
   singleProcess: boolean;
   noticeInTurn: boolean;
   turnNotice: string;
@@ -97,6 +105,9 @@ export function timelineViewFallback(): TimelineViewModel {
     liveCompleting: false,
     steadyReady: false,
     handoffAnim: true,
+    handoffActive: false,
+    handoffFinalText: '',
+    handoffReduceHeight: false,
     singleProcess: true,
     noticeInTurn: false,
     turnNotice: '',

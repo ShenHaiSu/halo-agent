@@ -79,7 +79,7 @@ export function useTimelineViewModel() {
         };
         const turnState = turn.activeTurn as unknown as
           | {
-              segs?: Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown; persisted?: unknown }>;
+              segs?: Array<{ key?: unknown; kind?: unknown; text?: unknown; callId?: unknown; persisted?: unknown; tag?: unknown }>;
               toolCards?: LiveToolCard[];
               graduatedCards?: LiveToolCard[];
             }
@@ -93,6 +93,7 @@ export function useTimelineViewModel() {
           text?: unknown;
           callId?: unknown;
           persisted?: unknown;
+          tag?: unknown;
         }>;
         const byCall = new Map<string, LiveToolCard>();
         for (const c of turnState?.toolCards || []) {
@@ -107,14 +108,16 @@ export function useTimelineViewModel() {
           const kind = String((s as { kind?: unknown }).kind || '');
           const key = String((s as { key?: unknown }).key || `live-${i}`);
           const text = String((s as { text?: unknown }).text || '');
-          if (kind !== 'tool') return { kind, key, text, card: null };
+          const tag = String((s as { tag?: unknown }).tag || '') || null;
+          if (kind !== 'tool') return { kind, key, text, card: null, tag };
           const callId = String((s as { callId?: unknown }).callId || '');
           const real = byCall.get(callId);
-          if (real) return { kind, key, text, card: { ...real } };
+          if (real) return { kind, key, text, card: { ...real }, tag };
           return {
             kind,
             key,
             text,
+            tag,
             card: {
               callId,
               functionName: 'tool',

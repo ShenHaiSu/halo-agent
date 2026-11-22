@@ -1,8 +1,9 @@
 import type { ComputedRef, UnwrapNestedRefs } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { provideTimelineView } from './timelineViewKey';
-import type { TimelineViewModel } from './timelineViewKey';
+import type { TimelineLiveSeg, TimelineViewModel } from './timelineViewKey';
 import type { TimelineViewModelState } from './useTimelineViewModel';
+import { isHandoffEnabled, splitHandoffSegs } from '@features/agent/utils/handoffGrouping';
 
 /** 装配源：聚合状态经响应式解包后的形态（与装配层本地读取一致）。 */
 export type SceneSource = UnwrapNestedRefs<TimelineViewModelState>;
@@ -55,6 +56,20 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
     },
     get handoffAnim() {
       return !!t.handoffAnim;
+    },
+    get handoffActive() {
+      // 交接窗 = 稳态已对账落屏 + Live 容器还在；热降级开关一票否决。
+      return isHandoffEnabled() && !!t.liveCompleting && !!t.steadyReady;
+    },
+    get handoffFinalText() {
+      // 正文全程用 Live 那一份；稳态盒首帧用同一文本作 markdown 种子，换手不闪 preview。
+      const segs = (t.liveInclusiveSegs || []) as unknown as TimelineLiveSeg[];
+      const { final } = splitHandoffSegs(segs);
+      const body = final.map((s) => String(s.text || '')).join('');
+      return body || String(t.stream.streamingText || '');
+    },
+    get handoffReduceHeight() {
+      return isHandoffEnabled() && !!t.handoffAnim;
     },
     get singleProcess() {
       return opts.singleProcess;

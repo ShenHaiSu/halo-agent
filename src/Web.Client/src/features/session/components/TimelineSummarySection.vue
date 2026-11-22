@@ -4,6 +4,8 @@
       v-for="turn in flatTurns"
       :key="turn.key"
       :turn="turn"
+      :hide-final="handoffActive && turn.key === lastTurnKey"
+      :initial-markdown="handoffActive && turn.key === lastTurnKey ? handoffFinalText : ''"
       @expand-change="onExpandChange"
       @user-menu="(ev, id) => emit('user-menu', ev, id)"
       @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
@@ -30,6 +32,10 @@ import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
 const props = defineProps<{
   summaries: TurnSummary[];
   pending?: PendingUser | null;
+  /** 交接窗激活：隐藏刚完成轮在摘要区的正文，正文唯一实例由 Live 交接容器承担。 */
+  handoffActive?: boolean;
+  /** 交接期 Live 正文文本，喂给稳态盒作首帧 markdown 种子。 */
+  handoffFinalText?: string;
 }>();
 
 const emit = defineEmits<{
@@ -41,6 +47,9 @@ const emit = defineEmits<{
 const nav = useTimelineNav();
 const rootRef = ref<HTMLElement | null>(null);
 const flatTurns = computed(() => flatBlocks(props.summaries));
+// 交接窗里刚完成轮必是摘要最后一条（pendingUser 已在 finishTurn 清理），
+// 只对这一条隐藏正文；历史轮正文照常显示。
+const lastTurnKey = computed(() => flatTurns.value[flatTurns.value.length - 1]?.key ?? '');
 const pendingKey = computed(() => String(props.pending?.requestId || props.pending?.key || 'pending'));
 const registered = ref<string[]>([]);
 
@@ -100,7 +109,7 @@ function collectAnchors(): void {
 onMounted(() => {
   void nextTick(collectAnchors);
 });
-watch(flatTurns, () => {
+watch([flatTurns, () => props.handoffActive], () => {
   void nextTick(collectAnchors);
 });
 onUnmounted(releaseAnchors);

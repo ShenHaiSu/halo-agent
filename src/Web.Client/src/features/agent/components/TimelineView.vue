@@ -6,13 +6,30 @@
           v-if="summaryList.length > 0 || pendingUser"
           :summaries="summaryList"
           :pending="pendingUser"
+          :handoff-active="showLiveHandoff"
+          :handoff-final-text="handoffFinalText"
           @user-menu="onSummaryUserMenu"
           @assistant-menu="onSummaryAssistantMenu"
           @retry-pending="emit('retry-pending', liveList[0] ?? ({ key: 'live-pending', kind: 'live' } as TimelineEntry))"
         />
         <TimelineEmptyState v-if="isEmpty" />
         <template v-for="entry in liveList" :key="entry.key">
-          <TimelineRow :item="entry" :is-last="true" v-on="rowHandlers" />
+          <TurnHandoff
+            v-if="showLiveHandoff"
+            :segs="view.liveSegsFor(entry)"
+            :completing="showLiveHandoff"
+            :reduce-height="handoffReduceHeight"
+            @handoff-done="onHandoffDone"
+          />
+          <TimelineRow v-else-if="!handoffActive" :item="entry" :is-last="true" v-on="rowHandlers" />
+          <TimelineAlerts
+            v-if="showLiveHandoff && noticeInTurn && (turnNotice || lastError)"
+            :notice="turnNotice"
+            :error="lastError"
+            :show-retry="showRetry"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
+          />
         </template>
         <!-- 主链纯 V2：只留摘要区 + Live 条 + 全局区。 -->
         <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
@@ -56,9 +73,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, useTemplateRef } from 'vue';
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import TimelineRow from './TimelineRow.vue';
+import TurnHandoff from './userturn/TurnHandoff.vue';
+import TimelineAlerts from './timeline/TimelineAlerts.vue';
 import TimelineEmptyState from './timeline/TimelineEmptyState.vue';
 import TimelineJumpButton from './timeline/TimelineJumpButton.vue';
 import TimelineSummarySection from '@features/session/components/TimelineSummarySection.vue';
@@ -96,6 +115,19 @@ const view = computed(() => useTimelineViewOptional() ?? timelineViewFallback())
 const summaryList = computed(() => view.value.summaryList ?? []);
 const pendingUser = computed(() => view.value.pendingUser ?? null);
 const hasActiveTurn = computed(() => view.value.hasActiveTurn);
+
+// 交接窗：正文全程单份且满高。收缩完成后原子换手——撤 Live 容器、显稳态正文，两件事同一帧。
+const handoffActive = computed(() => !!view.value.handoffActive);
+const handoffFinalText = computed(() => view.value.handoffFinalText || '');
+const handoffReduceHeight = computed(() => !!view.value.handoffReduceHeight);
+const handoffDone = ref(false);
+watch(handoffActive, (v) => {
+  if (!v) handoffDone.value = false;
+});
+const showLiveHandoff = computed(() => handoffActive.value && !handoffDone.value);
+function onHandoffDone(): void {
+  handoffDone.value = true;
+}
 
 // 直播挂载不需要轮容器：有活跃轮即新建 live 兜底条目直挂流段，key 绑定会话切会话即换。
 const liveList = computed<TimelineEntry[]>(() => {
@@ -149,53 +181,5 @@ onUnmounted(() => emit('ready', null));
 .transcript-scroll {
   overflow-anchor: auto;
   scrollbar-gutter: stable;
-}
-/* 过渡动画核心约束：高度不做任何动画；leave 必须 absolute 脱流，
-   否则段毕业时会「下移（leaving 仍占位）→ 上移（移除）」两次抖动，比不加动画更糟。 */
-.live-turn-enter-active {
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-.live-turn-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.live-turn-leave-active {
-  transition: opacity 0.14s ease;
-}
-.live-turn-leave-to {
-  opacity: 0;
-}
-.seg-list {
-  /* TransitionGroup 的 leave 元素 absolute 化后需要一个定位容器 */
-  position: relative;
-}
-.seg-enter-active {
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-.seg-enter-from {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-.seg-leave-active {
-  position: absolute;
-  left: 0;
-  right: 0;
-  transition: opacity 0.12s ease;
-  pointer-events: none;
-}
-.seg-leave-to {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .live-turn-enter-active,
-  .live-turn-leave-active,
-  .seg-enter-active,
-  .seg-leave-active {
-    transition: none;
-  }
 }
 </style>

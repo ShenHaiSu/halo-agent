@@ -586,3 +586,46 @@ describe('TimelineProcessBox 右键菜单事件', () => {
     expect(wrapper.emitted('assistant-menu')).toBeTruthy();
   });
 });
+
+describe('交接期稳态正文预取与单份', () => {
+  it('传入 initialMarkdown 时首帧即全文 markdown，不闪「全文加载中」纯文本', async () => {
+    // 后端取块故意返回空：种子文本必须自己撑起首帧，不依赖异步请求。
+    getBlockContentsMock.mockResolvedValue({ items: {}, missing: ['bfinal1'] });
+    const seeded = '# 交接种子\n\n- 第一条\n- 第二条';
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn(), initialMarkdown: seeded },
+      global: { plugins: [createPinia()] },
+    });
+    await nextTick();
+    expect(wrapper.find('[data-testid="timeline-final-loading-uturn-u1"]').exists()).toBe(false);
+    const block = wrapper.find('[data-testid="timeline-final-uturn-u1"] .stream-block');
+    expect(block.exists()).toBe(true);
+    expect(block.text()).toContain('交接种子');
+    expect(getBlockContentsMock).not.toHaveBeenCalledWith(['bfinal1']);
+  });
+
+  it('种子后到（盒先挂载、交接窗后开）也能同步落位', async () => {
+    // 取块悬而未决：模拟交接窗开启时异步请求还没回来，种子必须立刻接管。
+    getBlockContentsMock.mockReturnValue(new Promise(() => undefined));
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn(), initialMarkdown: '' },
+      global: { plugins: [createPinia()] },
+    });
+    await flush();
+    expect(wrapper.find('[data-testid="timeline-final-loading-uturn-u1"]').exists()).toBe(true);
+    await wrapper.setProps({ initialMarkdown: '# 后到种子' });
+    await nextTick();
+    expect(wrapper.find('[data-testid="timeline-final-loading-uturn-u1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="timeline-final-uturn-u1"] .stream-block').text()).toContain('后到种子');
+  });
+
+  it('hideFinal 时整段 final 槽不渲染，正文唯一实例交给 Live 容器', async () => {
+    const wrapper = mount(TimelineProcessBox, {
+      props: { turn: makeTurn(), hideFinal: true, initialMarkdown: '不应显示' },
+      global: { plugins: [createPinia()] },
+    });
+    await nextTick();
+    expect(wrapper.findAll('[data-testid^="timeline-final-"]').length).toBe(0);
+    expect(wrapper.find('.turn-final-slot').exists()).toBe(false);
+  });
+});

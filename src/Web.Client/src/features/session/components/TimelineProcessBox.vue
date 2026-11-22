@@ -74,43 +74,45 @@
       :data-testid="`timeline-process-placeholder-${turn.turnId}`"
       aria-hidden="true"
     />
-    <div
-      v-if="hasFinalBlock"
-      class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
-      :data-testid="`timeline-final-${turn.turnId}`"
-      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
-    >
-      <div v-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
-        全文加载中…<span v-if="turn.finalPreview" class="opacity-70">{{ turn.finalPreview }}</span>
+    <template v-if="!hideFinal">
+      <div
+        v-if="hasFinalBlock"
+        class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
+        :data-testid="`timeline-final-${turn.turnId}`"
+        @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
+      >
+        <div v-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
+          全文加载中…<span v-if="turn.finalPreview" class="opacity-70">{{ turn.finalPreview }}</span>
+        </div>
+        <div v-else-if="finalError" class="text-[11px] text-secondary" :data-testid="`timeline-final-error-${turn.turnId}`">
+          {{ finalError }}
+          <button class="underline ml-1" :data-testid="`timeline-final-retry-${turn.turnId}`" @click.stop="reloadFinal">重试</button>
+        </div>
+        <div v-else-if="finalMissing" class="text-[11px] text-secondary opacity-70" :data-testid="`timeline-final-missing-${turn.turnId}`">
+          正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span
+          ><span v-else>（无摘要）</span>
+        </div>
+        <MarkdownStreamBlocks v-else-if="finalMarkdown" :text="finalMarkdown" :cache-key="finalCacheKey" />
+        <div v-else-if="turn.finalPreview" class="whitespace-pre-wrap">{{ turn.finalPreview }}</div>
+        <div v-else class="text-[12px] text-secondary">本轮无正文，{{ turn.tools }} 个工具</div>
       </div>
-      <div v-else-if="finalError" class="text-[11px] text-secondary" :data-testid="`timeline-final-error-${turn.turnId}`">
-        {{ finalError }}
-        <button class="underline ml-1" :data-testid="`timeline-final-retry-${turn.turnId}`" @click.stop="reloadFinal">重试</button>
+      <div
+        v-else-if="turn.finalPreview"
+        class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
+        :data-testid="`timeline-final-${turn.turnId}`"
+        @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
+      >
+        {{ turn.finalPreview }}
       </div>
-      <div v-else-if="finalMissing" class="text-[11px] text-secondary opacity-70" :data-testid="`timeline-final-missing-${turn.turnId}`">
-        正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span
-        ><span v-else>（无摘要）</span>
+      <div
+        v-else
+        class="mt-1 text-[12px] text-secondary turn-final-slot"
+        :data-testid="`timeline-final-empty-${turn.turnId}`"
+        @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
+      >
+        本轮无正文，{{ turn.tools }} 个工具
       </div>
-      <MarkdownStreamBlocks v-else-if="finalMarkdown" :text="finalMarkdown" :cache-key="finalCacheKey" />
-      <div v-else-if="turn.finalPreview" class="whitespace-pre-wrap">{{ turn.finalPreview }}</div>
-      <div v-else class="text-[12px] text-secondary">本轮无正文，{{ turn.tools }} 个工具</div>
-    </div>
-    <div
-      v-else-if="turn.finalPreview"
-      class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
-      :data-testid="`timeline-final-${turn.turnId}`"
-      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
-    >
-      {{ turn.finalPreview }}
-    </div>
-    <div
-      v-else
-      class="mt-1 text-[12px] text-secondary turn-final-slot"
-      :data-testid="`timeline-final-empty-${turn.turnId}`"
-      @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
-    >
-      本轮无正文，{{ turn.tools }} 个工具
-    </div>
+    </template>
   </div>
 </template>
 
@@ -130,6 +132,10 @@ import { setTurnExpanded } from '../utils/timelineExpansion';
 
 const props = defineProps<{
   turn: FlatTimelineTurn;
+  /** 交接期 Live 正文已在场，稳态盒首帧隐藏 final 槽，避免同一份正文渲染两遍。 */
+  hideFinal?: boolean;
+  /** 交接期由 Live 正文直接喂入的 markdown 种子；有值时不再异步取，首帧即全文。 */
+  initialMarkdown?: string;
 }>();
 
 const emit = defineEmits<{
@@ -367,8 +373,20 @@ function resetFinal(): void {
   finalMissing.value = false;
 }
 
+function seedMarkdown(): string {
+  return String(props.initialMarkdown || '');
+}
+
 async function reloadFinal(): Promise<void> {
   if (props.turn.kind === 'compact') return; // P007：桩无正文块，不请求内容
+  const seeded = seedMarkdown();
+  if (seeded) {
+    finalMarkdown.value = seeded;
+    finalLoading.value = false;
+    finalError.value = '';
+    finalMissing.value = false;
+    return;
+  }
   const fid = (props.turn.finalBlockId || '').trim();
   if (!fid) {
     resetFinal();
@@ -415,6 +433,20 @@ watch(
   () => {
     resetFinal();
     void reloadFinal();
+  }
+);
+
+// 交接种子到达时同步落位：稳态盒在 reloadNow 时已挂载，交接窗稍后才置位，
+// 必须在换手前把全文 markdown 铺好，避免首帧出现「全文加载中…/finalPreview」pure text。
+watch(
+  () => props.initialMarkdown,
+  (v) => {
+    const seeded = String(v || '');
+    if (!seeded) return;
+    finalMarkdown.value = seeded;
+    finalLoading.value = false;
+    finalError.value = '';
+    finalMissing.value = false;
   }
 );
 
