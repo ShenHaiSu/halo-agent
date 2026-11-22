@@ -154,11 +154,12 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
         ok: true,
         data: {
           rootPath: s.mockDataRoot,
-          totalBytes: 7936,
+          totalBytes: 8960,
           items: [
             { name: 'sessions', sizeBytes: 2048, fileCount: 8 },
             { name: 'config', sizeBytes: 1024, fileCount: 4 },
             { name: 'logs', sizeBytes: 4096, fileCount: 2 },
+            { name: 'backups', sizeBytes: 1024, fileCount: 3 },
             { name: 'attachments', sizeBytes: 512, fileCount: 2 },
             { name: 'other', sizeBytes: 256, fileCount: 1 },
           ],

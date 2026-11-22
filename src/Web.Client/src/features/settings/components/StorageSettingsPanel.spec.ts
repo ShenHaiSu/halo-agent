@@ -196,6 +196,22 @@ describe('StorageSettingsPanel（存储与日志面板展示增强）', () => {
     expect(wrapper.find('[data-testid="storage-breakdown"]').text()).toContain('logs');
   });
 
+  it('存储分布数值列在大文件数下仍单行不换行', async () => {
+    bridgeStub.getStorageBreakdown.mockResolvedValue({
+      ok: true,
+      data: {
+        rootPath: 'D:\\HaloAgentData',
+        totalBytes: 4096,
+        items: [{ name: 'backups', sizeBytes: 4096, fileCount: 123456 }],
+      },
+    });
+    const wrapper = await mountPanel(pinia);
+    const value = wrapper.find('[data-testid="breakdown-value-backups"]');
+    expect(value.exists()).toBe(true);
+    expect(value.classes()).toContain('whitespace-nowrap');
+    expect(value.text()).toContain('123456 个');
+  });
+
   it('用量库不支持时整卡显示提示，不崩溃', async () => {
     bridgeStub.getUsageDbStatus.mockResolvedValue({ ok: false, code: 'USAGE_UNSUPPORTED', message: '通道不可用' });
     const wrapper = await mountPanel(pinia);

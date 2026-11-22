@@ -23,7 +23,8 @@ public sealed partial class StoragePathManager
         "cef-cache",
         "skills",
         "memory",
-        "metrics"
+        "metrics",
+        "backups"
     };
 
     private static readonly string[] MigratableSubDirectories =
@@ -34,7 +35,8 @@ public sealed partial class StoragePathManager
         "logs",
         "skills",
         "memory",
-        "metrics"
+        "metrics",
+        "backups"
     };
 
     private readonly object _stateLock = new();

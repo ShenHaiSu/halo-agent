@@ -85,9 +85,18 @@
             存储分布：<span class="font-mono break-all">{{ breakdown.rootPath }}</span>
           </div>
           <div v-for="item in breakdown.items" :key="item.name" class="flex items-center gap-2">
-            <span class="w-20 shrink-0 text-[11px] font-mono text-secondary">{{ item.name }}</span>
-            <n-progress type="line" :percentage="breakdownPercent(item.sizeBytes)" :height="10" :show-indicator="false" class="flex-1" />
-            <span class="w-28 shrink-0 text-right text-[11px] font-mono">
+            <span class="w-20 shrink-0 whitespace-nowrap text-[11px] font-mono text-secondary">{{ item.name }}</span>
+            <n-progress
+              type="line"
+              :percentage="breakdownPercent(item.sizeBytes)"
+              :height="10"
+              :show-indicator="false"
+              class="min-w-12 flex-1"
+            />
+            <span
+              :data-testid="`breakdown-value-${item.name}`"
+              class="shrink-0 whitespace-nowrap text-right text-[11px] font-mono tabular-nums"
+            >
               {{ formatBytes(item.sizeBytes) }} / {{ item.fileCount }} 个
             </span>
           </div>
