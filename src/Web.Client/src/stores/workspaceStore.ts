@@ -122,11 +122,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const wid = activeWorkspaceId.value || '';
         const sid = activeSessionId.value || '';
         if (!wid) return;
-        void getHostBridge()
-          .setLastActive(wid, sid)
-          .catch(() => {
-            /* 静默：持久失败不阻断 */
-          });
+        // Promise.resolve 包裹：桥被 mock 或异常实现返回非 Promise 时，
+        // 直接 .catch 会在 teardown 后的 timer 里抛未捕获异常（全量并发下已复现）。
+        void Promise.resolve(getHostBridge().setLastActive(wid, sid)).catch(() => {
+          /* 静默：持久失败不阻断 */
+        });
       }, 300);
     } catch {
       /* ignore */
