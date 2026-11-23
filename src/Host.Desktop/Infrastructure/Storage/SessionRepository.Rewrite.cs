@@ -113,7 +113,13 @@ public sealed partial class SessionRepository : ISessionRepository
             }
         }
         catch { }
-        var messages = await GetMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        var messages = new List<UnifiedChatMessage>();
+        await foreach (
+            var streamed in StreamMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
+        )
+        {
+            messages.Add(streamed);
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine($"# {meta?.Title ?? "会话记录"}");
@@ -168,7 +174,13 @@ public sealed partial class SessionRepository : ISessionRepository
             sb.AppendLine();
             sb.AppendLine("---");
             sb.AppendLine();
-            var dbMsgs = await store.GetMessagesAsync(workspaceId, sid, ct).ConfigureAwait(false);
+            var dbMsgs = new List<UnifiedChatMessage>();
+            await foreach (
+                var streamedMsg in StreamMessagesAsync(workspaceId, sid, ct).ConfigureAwait(false)
+            )
+            {
+                dbMsgs.Add(streamedMsg);
+            }
             var users = dbMsgs
                 .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
                 .ToList();

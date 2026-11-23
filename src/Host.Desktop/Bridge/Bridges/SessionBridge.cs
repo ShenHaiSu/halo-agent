@@ -167,6 +167,7 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    /// <summary>读取链路切换过渡期保留：仅内部兼容旧前端，禁止新增调用，收尾阶段随旧消息文件一并删除。</summary>
     public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(
         string workspaceId,
         string sessionId
@@ -195,6 +196,46 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error($"GetSessionMessages failed for session '{sessionId}'", ex);
             return BridgeResponse<List<UnifiedChatMessage>>.Fail(ex.Message, "SESSION_ERROR");
+        }
+    }
+
+    /// <summary>标题链专用：按回合取指定回合的用户全文，摘要层直读，与消息门无关。</summary>
+    public async Task<BridgeResponse<string>> GetTurnUserContent(
+        string workspaceId,
+        string sessionId,
+        string turnId
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
+            }
+
+            var store = new WorkspaceSessionStore(_storageManager, _sessionRepository);
+            string content;
+            try
+            {
+                content = await store
+                    .GetUserContentAsync(workspaceId, sessionId, turnId ?? string.Empty)
+                    .ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<string>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<string>.Fail("UNSUPPORTED_FORMAT", unsupported.Message);
+            }
+
+            return BridgeResponse<string>.Success(content ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"GetTurnUserContent failed for session '{sessionId}'", ex);
+            return BridgeResponse<string>.Fail(ex.Message, "SESSION_ERROR");
         }
     }
 

@@ -7,6 +7,11 @@ namespace Host.Desktop.Bridge;
 /// <summary>Timeline summary bridge: directory and process box counts come straight from the timeline store.</summary>
 public sealed partial class HostBridgeFacade
 {
+    private WorkspaceSessionStore CreateWorkspaceStore()
+    {
+        return new WorkspaceSessionStore(_storageManager, _sessionRepository);
+    }
+
     public async Task<BridgeResponse<List<TurnSummary>>> GetTimelineSummary(
         string workspaceId,
         string sessionId
@@ -22,16 +27,25 @@ public sealed partial class HostBridgeFacade
                 );
             }
 
-            var store = new SessionHistoryStore(_storageManager);
+            var probe = new SessionHistoryStore(_storageManager);
             try
             {
-                await store.CheckOnceAsync(workspaceId, sessionId).ConfigureAwait(false);
+                await probe.CheckOnceAsync(workspaceId, sessionId).ConfigureAwait(false);
             }
             catch { }
+            var store = CreateWorkspaceStore();
             var summaries = await store
-                .GetTimelineSummaryAsync(workspaceId, sessionId)
+                .GetSummaryAsync(workspaceId, sessionId)
                 .ConfigureAwait(false);
             return BridgeResponse<List<TurnSummary>>.Success(summaries);
+        }
+        catch (LegacySessionFormatException ex)
+        {
+            return BridgeResponse<List<TurnSummary>>.Fail("LEGACY_SESSION", ex.Message);
+        }
+        catch (UnsupportedFormatException ex)
+        {
+            return BridgeResponse<List<TurnSummary>>.Fail("UNSUPPORTED_FORMAT", ex.Message);
         }
         catch (Exception ex)
         {
@@ -55,8 +69,27 @@ public sealed partial class HostBridgeFacade
                     "Workspace and session must not be empty."
                 );
             }
-            var store = new SessionHistoryStore(_storageManager);
-            var (items, missing) = await store
+            var store = CreateWorkspaceStore();
+            try
+            {
+                await store.GetSummaryAsync(workspaceId, sessionId).ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException ex)
+            {
+                return BridgeResponse<TimelineBlockContentsResponse>.Fail(
+                    "LEGACY_SESSION",
+                    ex.Message
+                );
+            }
+            catch (UnsupportedFormatException ex)
+            {
+                return BridgeResponse<TimelineBlockContentsResponse>.Fail(
+                    "UNSUPPORTED_FORMAT",
+                    ex.Message
+                );
+            }
+            var probe = new SessionHistoryStore(_storageManager);
+            var (items, missing) = await probe
                 .GetBlockContentsAsync(workspaceId, sessionId, blockIds ?? Array.Empty<string>())
                 .ConfigureAwait(false);
             return BridgeResponse<TimelineBlockContentsResponse>.Success(
@@ -86,15 +119,27 @@ public sealed partial class HostBridgeFacade
                     "Workspace and session must not be empty."
                 );
             }
-            var store = new SessionHistoryStore(_storageManager);
-            var result = await store
-                .GetToolResultAsync(
-                    workspaceId,
-                    sessionId,
-                    turnId ?? string.Empty,
-                    callId ?? string.Empty
-                )
-                .ConfigureAwait(false);
+            var store = CreateWorkspaceStore();
+            TimelineToolResult? result;
+            try
+            {
+                result = await store
+                    .GetToolResultAsync(
+                        workspaceId,
+                        sessionId,
+                        turnId ?? string.Empty,
+                        callId ?? string.Empty
+                    )
+                    .ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException ex)
+            {
+                return BridgeResponse<TimelineToolResult>.Fail("LEGACY_SESSION", ex.Message);
+            }
+            catch (UnsupportedFormatException ex)
+            {
+                return BridgeResponse<TimelineToolResult>.Fail("UNSUPPORTED_FORMAT", ex.Message);
+            }
             if (result == null)
             {
                 return BridgeResponse<TimelineToolResult>.Fail(
@@ -126,10 +171,30 @@ public sealed partial class HostBridgeFacade
                     "Workspace and session must not be empty."
                 );
             }
-            var store = new SessionHistoryStore(_storageManager);
-            var ids = await store
-                .GetBlockIdsByTurnAsync(workspaceId, sessionId, turnId ?? string.Empty)
-                .ConfigureAwait(false);
+            var store = CreateWorkspaceStore();
+            List<TimelineBlockContent> blocks;
+            try
+            {
+                blocks = await store
+                    .GetBlockIdsAsync(workspaceId, sessionId, turnId ?? string.Empty)
+                    .ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException ex)
+            {
+                return BridgeResponse<List<string>>.Fail("LEGACY_SESSION", ex.Message);
+            }
+            catch (UnsupportedFormatException ex)
+            {
+                return BridgeResponse<List<string>>.Fail("UNSUPPORTED_FORMAT", ex.Message);
+            }
+            var ids = new List<string>(blocks.Count);
+            foreach (var block in blocks)
+            {
+                if (block != null && !string.IsNullOrWhiteSpace(block.BlockId))
+                {
+                    ids.Add(block.BlockId);
+                }
+            }
             return BridgeResponse<List<string>>.Success(ids);
         }
         catch (Exception ex)

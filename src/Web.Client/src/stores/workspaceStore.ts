@@ -556,19 +556,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
-      const res = await bridge.getSessionMessages(activeWorkspaceId.value, sid);
+      const api = bridge as unknown as { getTimelineSummary?: (w: string, s: string) => Promise<{ ok: boolean; data?: TurnSummary[] }> };
+      const res =
+        typeof api.getTimelineSummary === 'function'
+          ? await api.getTimelineSummary(activeWorkspaceId.value, sid)
+          : { ok: false as const, data: undefined };
       if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
         sessionStore.discardStale(`loadSessionMessages(${sid.slice(-6)})`);
         return;
       }
-      if (res.ok && res.data) {
-        sessionMessages.value = res.data;
+      if (res.ok && Array.isArray(res.data)) {
+        timelineSummaries.value = res.data;
       } else {
-        sessionMessages.value = [];
+        timelineSummaries.value = [];
       }
-      // 首次回包对账转正（key 不变，只换 id/时间；v2 摘要源二次对账在摘要回包后）。
-      tryConfirmPending(sid);
-      await loadTimelineSummary(sid);
+      // 首屏摘要直达：不再拉全量消息；旧全量字段保留为待删死代码，收尾阶段统一清理。
+      sessionMessages.value = [];
+      // 首次回包对账转正（key 不变，只换 id/时间；摘要回包后直接对账）。
       tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {

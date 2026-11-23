@@ -36,34 +36,54 @@ public sealed class CompactionRestore
         );
         if (!File.Exists(bakPath))
             return HistoryRestoreResult.Fail("BACKUP_NOT_FOUND");
-        // P007 运维步骤 1：读 bak（压缩前全量快照，顺序即当时顺序）。
+        // 读恢复源：优先工作区库在线备份分区（与压缩备份同源），缺失时回退旧 jsonl 快照（过渡期）。
         var listA = new List<UnifiedChatMessage>();
+        bool loadedFromWorkspaceBackup = false;
         try
         {
-            string[] lines = await File.ReadAllLinesAsync(bakPath, ct).ConfigureAwait(false);
-            foreach (string line in lines)
+            string workspaceBakPath = _service.SessionRepository.Storage.GetWorkspaceBackupPath(
+                workspaceId
+            );
+            if (File.Exists(workspaceBakPath))
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-                try
+                var fromBak = ReadMessagesFromBackupLibrary(workspaceBakPath, sessionId);
+                if (fromBak.Count > 0)
                 {
-                    var m = JsonSerializer.Deserialize<UnifiedChatMessage>(
-                        line,
-                        HaloJsonOptions.CompactCamelCase
-                    );
-                    if (m != null && !string.IsNullOrWhiteSpace(m.Id))
-                        listA.Add(m);
+                    listA.AddRange(fromBak);
+                    loadedFromWorkspaceBackup = true;
                 }
-                catch { }
             }
         }
-        catch (OperationCanceledException)
+        catch { }
+        if (!loadedFromWorkspaceBackup)
         {
-            throw;
-        }
-        catch
-        {
-            return HistoryRestoreResult.Fail("BACKUP_NOT_FOUND");
+            try
+            {
+                string[] lines = await File.ReadAllLinesAsync(bakPath, ct).ConfigureAwait(false);
+                foreach (string line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+                    try
+                    {
+                        var m = JsonSerializer.Deserialize<UnifiedChatMessage>(
+                            line,
+                            HaloJsonOptions.CompactCamelCase
+                        );
+                        if (m != null && !string.IsNullOrWhiteSpace(m.Id))
+                            listA.Add(m);
+                    }
+                    catch { }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return HistoryRestoreResult.Fail("BACKUP_NOT_FOUND");
+            }
         }
         // P007 运维步骤 2：读当前全量。
         var listB =
@@ -175,5 +195,64 @@ public sealed class CompactionRestore
         }
         // P007 运维步骤 9：返回恢复量。
         return HistoryRestoreResult.Ok(missing.Count, merged.Count);
+    }
+
+    private static List<UnifiedChatMessage> ReadMessagesFromBackupLibrary(
+        string backupDbPath,
+        string sessionId
+    )
+    {
+        var result = new List<UnifiedChatMessage>();
+        try
+        {
+            using var conn = SessionHistoryDb.OpenConnection(backupDbPath);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
+                + " FROM messages WHERE session_id = $sid ORDER BY seq;";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                try
+                {
+                    string id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(id))
+                        continue;
+                    var msg = new UnifiedChatMessage { Id = id };
+                    msg.Role = reader.IsDBNull(1) ? "assistant" : reader.GetString(1);
+                    msg.Content = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    msg.ReasoningContent = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    if (!reader.IsDBNull(4))
+                    {
+                        try
+                        {
+                            msg.ToolCalls = JsonSerializer.Deserialize<
+                                List<LlmGateway.Models.UnifiedToolCall>
+                            >(reader.GetString(4), HaloJsonOptions.CompactCamelCase);
+                        }
+                        catch { }
+                    }
+                    if (!reader.IsDBNull(5))
+                        msg.ToolCallId = reader.GetString(5);
+                    if (!reader.IsDBNull(6))
+                        msg.Name = reader.GetString(6);
+                    if (!reader.IsDBNull(8))
+                        msg.InputTokens = reader.GetInt64(8);
+                    if (!reader.IsDBNull(9))
+                        msg.OutputTokens = reader.GetInt64(9);
+                    if (!reader.IsDBNull(10))
+                        msg.CachedTokens = reader.GetInt64(10);
+                    if (!reader.IsDBNull(11))
+                        msg.Kind = reader.GetString(11);
+                    if (!reader.IsDBNull(12))
+                        msg.MetaJson = reader.GetString(12);
+                    result.Add(msg);
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return result;
     }
 }

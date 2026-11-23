@@ -146,12 +146,47 @@ public sealed partial class SessionRepository : ISessionRepository
         [EnumeratorCancellation] CancellationToken ct = default
     )
     {
+        bool yieldedFromDb = false;
+        string dbPath = _storageManager.GetWorkspaceDbPath(workspaceId);
+        if (File.Exists(dbPath))
+        {
+            List<UnifiedChatMessage> buffered = new();
+            try
+            {
+                var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+                var dbMsgs = await store
+                    .GetMessagesAsync(workspaceId, sessionId, ct)
+                    .ConfigureAwait(false);
+                foreach (var m in dbMsgs)
+                {
+                    MarkMissingImages(workspaceId, sessionId, m);
+                    buffered.Add(m);
+                }
+            }
+            catch
+            {
+                buffered.Clear();
+            }
+            if (buffered.Count > 0)
+            {
+                foreach (var m in buffered)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    yield return m;
+                }
+                yieldedFromDb = true;
+                yield break;
+            }
+        }
+        if (yieldedFromDb)
+        {
+            yield break;
+        }
         string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
         if (!File.Exists(jsonlPath))
         {
             yield break;
         }
-
         var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -182,7 +217,6 @@ public sealed partial class SessionRepository : ISessionRepository
                         $"Failed to deserialize message line in session '{sessionId}': {ex.Message}"
                     );
                 }
-
                 if (msg != null)
                 {
                     MarkMissingImages(workspaceId, sessionId, msg);
