@@ -171,40 +171,25 @@ public sealed partial class StoragePathManager
     public static StoragePathManager Initialize(
         string? customBootstrapFilePath = null,
         string? customDefaultDataRoot = null,
-        string? customFallbackDataRoot = null
+        string? customFallbackDataRoot = null,
+        string? exeDirectory = null
     )
     {
-        var localAppData = Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData
+        var location = ResolveDataLocation(
+            customBootstrapFilePath,
+            customDefaultDataRoot,
+            customFallbackDataRoot,
+            exeDirectory
         );
-        var haloLocalAppDataDir = Path.Combine(localAppData, "HaloAgent");
-
-        var envBootstrap = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
-        var bootstrapPath = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customBootstrapFilePath)
-                ? customBootstrapFilePath
-                : !string.IsNullOrWhiteSpace(envBootstrap)
-                    ? envBootstrap
-                    : Path.Combine(haloLocalAppDataDir, "bootstrap.json")
-        );
-
-        var defaultRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customDefaultDataRoot)
-                ? customDefaultDataRoot
-                : DefaultCDriveDataRoot
-        );
-
-        var fallbackRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customFallbackDataRoot)
-                ? customFallbackDataRoot
-                : Path.Combine(haloLocalAppDataDir, "Data")
-        );
+        var bootstrapPath = location.BootstrapPath;
+        var defaultRoot = location.DataRootPath;
+        var fallbackRoot = location.FallbackDataRootPath;
 
         Directory.CreateDirectory(Path.GetDirectoryName(bootstrapPath)!);
 
-        var existingBootstrap = AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(
-            bootstrapPath
-        );
+        var existingBootstrap = location.IsPortable
+            ? null
+            : AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(bootstrapPath);
         var preferredPath = !string.IsNullOrWhiteSpace(existingBootstrap?.DataRootPath)
             ? existingBootstrap!.DataRootPath
             : defaultRoot;

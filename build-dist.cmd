@@ -83,8 +83,14 @@ echo [ERROR] Copy to dist failed ^(robocopy exit %COPY_CODE%^).
 exit /b 1
 )
 
+echo {"useLocalData": true} > "%DIST_DIR%\portable.data.json"
+if errorlevel 1 (
+echo [ERROR] Failed to write %DIST_DIR%\portable.data.json.
+exit /b 1
+)
 echo.
 echo [OK] Done. Test binary is in .\%DIST_DIR%\ ^(%RUNTIME%^).
 echo      Example: .\%DIST_DIR%\Host.Desktop.exe
+echo      Data will be stored in .\%DIST_DIR%\.local-data\Data.
 endlocal
 pause
