@@ -166,13 +166,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
 
-  /** S3 F4：历史版本只读（v1 HistoryVersion !== 2，不可继续/截断/压缩，可分支；v2 全放行）。 */
-  const isHistoryReadonly = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
-    return v !== 2;
-  });
+  /** 历史只读横幅已随统一仓储退役：现全部会话可写，旧格式由打开时错误码提示。 */
+  const isHistoryReadonly = computed<boolean>(() => false);
 
   const filteredSessions = computed<SessionMetadata[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();

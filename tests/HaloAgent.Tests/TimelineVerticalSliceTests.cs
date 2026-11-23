@@ -372,10 +372,10 @@ public sealed class TimelineVerticalSliceTests : IDisposable
         {
             Id = sess,
             WorkspaceId = ws,
-            HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
         };
         await repository.SaveSessionMetaAsync(ws, meta);
-        string dbPath = _storageManager.GetHistoryDbPath(ws, sess);
+        string dbPath = _storageManager.GetWorkspaceDbPath(ws);
         Assert.True(File.Exists(dbPath));
         using var conn = SessionHistoryDb.OpenConnection(dbPath);
         using var tableCmd = conn.CreateCommand();

@@ -151,7 +151,7 @@ public sealed partial class AgentOrchestrator
                         call.ArgumentsJson,
                         errorCode
                     );
-            // need22-P1 T6：大 toolOutput（>64KB）先落盘 fileRef{path,size}，content 只留前 4K 预览（messages.jsonl 信封格式不变）。
+            // 大工具输出先落盘再引用，消息区只留前 4K 预览，统一信封格式不变。
             toolText = SpillLargeToolOutput(
                 toolText,
                 ctx.DataRoot,

@@ -30,23 +30,10 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    private static bool IsHistoryReadonly(SessionMetadata? meta) =>
-        meta != null && meta.HistoryVersion != 2;
+    private static bool IsHistoryReadonly(SessionMetadata? meta) => false;
 
-    private async Task<bool> IsHistoryReadonlyAsync(string workspaceId, string sessionId)
-    {
-        try
-        {
-            var meta = await _workspaceSessionService
-                .GetSessionAsync(workspaceId, sessionId)
-                .ConfigureAwait(false);
-            return IsHistoryReadonly(meta);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private Task<bool> IsHistoryReadonlyAsync(string workspaceId, string sessionId) =>
+        Task.FromResult(false);
 
     public async Task<BridgeResponse<HistoryTruncateResult>> TruncateSessionHistory(
         string workspaceId,
@@ -228,22 +215,15 @@ public sealed partial class HostBridgeFacade
                             .ConfigureAwait(false);
                         if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0))
                             healedSessions++;
-                        // S3 M9：启动 GC 孤儿 tool-outputs（仅 v2，且失败不计入 healed）
+                        // 启动 GC 孤儿 tool-outputs（工作区单库统一执行，失败不计入 healed）
                         try
                         {
-                            if (sess.HistoryVersion == 2)
-                            {
-                                var gcStore = new Infrastructure.Storage.SessionHistoryStore(
-                                    new Infrastructure.Storage.SessionHistoryDb(_storageManager)
-                                );
-                                await gcStore
-                                    .CollectOrphanToolOutputsAsync(
-                                        ws.Id,
-                                        sess.Id,
-                                        cancellationToken
-                                    )
-                                    .ConfigureAwait(false);
-                            }
+                            var gcStore = new Infrastructure.Storage.SessionHistoryStore(
+                                new Infrastructure.Storage.SessionHistoryDb(_storageManager)
+                            );
+                            await gcStore
+                                .CollectOrphanToolOutputsAsync(ws.Id, sess.Id, cancellationToken)
+                                .ConfigureAwait(false);
                         }
                         catch { }
                     }

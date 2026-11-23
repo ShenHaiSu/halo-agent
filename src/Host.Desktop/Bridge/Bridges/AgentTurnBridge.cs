@@ -55,8 +55,6 @@ public sealed partial class HostBridgeFacade
                         sessionId?.Trim() ?? string.Empty
                     )
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<string>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
                 if (
                     meta != null
                     && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)

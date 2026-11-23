@@ -183,12 +183,15 @@ public sealed class CompactStubStorageTests : IDisposable
         Assert.Equal(CompactMode.Stub, sessMeta!.CompactMode);
         Assert.Equal(beforeCount + 1, sessMeta.MessageCount);
 
-        // jsonl 末行与 DB 桩行一致
-        string wsDir = _repository.GetWorkspaceDirectory(wsId);
-        string jsonlPath = Path.Combine(wsDir, sessId, "messages.jsonl");
-        string last = File.ReadLines(jsonlPath).Last();
-        Assert.Contains("\"kind\":\"compact_stub\"", last);
-        Assert.Contains("\"metaJson\"", last);
+        // 桩行经 DB 落盘：条数 +1 且末行即桩（user/compact_stub）
+        var dbMsgs = await new SessionHistoryStore(
+            new SessionHistoryDb(_storageManager)
+        ).GetMessagesAsync(wsId, sessId);
+        Assert.Equal(beforeCount + 1, dbMsgs.Count);
+        var dbLast = dbMsgs[^1];
+        Assert.Equal(stub!.Id, dbLast.Id);
+        Assert.Equal(MessageKind.CompactStub, dbLast.Kind);
+        Assert.Equal("user", dbLast.Role);
     }
 
     [Fact(DisplayName = "P007-M1: 桩 turn kind=compact，seq=MAX+1")]

@@ -115,32 +115,6 @@ public sealed partial class StoragePathManager
     public string GetWorkspaceBackupPath(string workspaceId) =>
         GetWorkspaceDbPath(workspaceId) + ".bak";
 
-    /// <summary>过渡期保留的每会话库路径：仅供历史读取链路兼容，新建库一律走工作区单库；待读写切换收尾时随旧消息文件一并移除。</summary>
-    public string GetHistoryDbPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db"
-        );
-
-    /// <summary>过渡期保留的每会话库附属路径：仅供历史读取链路兼容；待读写切换收尾时随旧消息文件一并移除。</summary>
-    public string GetHistoryDbWalPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-wal";
-
-    /// <summary>过渡期保留的每会话库附属路径：仅供历史读取链路兼容；待读写切换收尾时随旧消息文件一并移除。</summary>
-    public string GetHistoryDbShmPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-shm";
-
-    /// <summary>过渡期保留的每会话库备份路径：仅供历史读取链路兼容；待读写切换收尾时随旧消息文件一并移除。</summary>
-    public string GetHistoryBackupPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db.bak"
-        );
-
     public string GetSessionToolOutputsDir(string workspaceId, string sessionId) =>
         Path.Combine(GetSessionDirectory(workspaceId, sessionId), "tool-outputs");
 

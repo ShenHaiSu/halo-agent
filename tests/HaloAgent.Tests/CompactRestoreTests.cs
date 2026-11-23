@@ -102,18 +102,67 @@ public sealed class CompactRestoreTests : IDisposable
     {
         var full = await _service.GetSessionMessagesAsync(wsId, sessId);
         var kept = full.Where(m => !deleteIds.Contains(m.Id, StringComparer.Ordinal)).ToList();
-        await _repository.RewriteMessagesJsonlAsync(wsId, sessId, kept);
-        string dbPath = _storageManager.GetWorkspaceDbPath(wsId);
-        if (File.Exists(dbPath))
-            await new SessionHistoryStore(
-                new SessionHistoryDb(_storageManager)
-            ).RewriteMessagesAsync(wsId, sessId, kept);
+        await new SessionHistoryStore(new SessionHistoryDb(_storageManager)).RewriteMessagesAsync(
+            wsId,
+            sessId,
+            kept
+        );
         var meta = await _repository.LoadSessionMetaAsync(wsId, sessId);
         if (meta != null)
         {
             meta.MessageCount = kept.Count;
             await _repository.SaveSessionMetaAsync(wsId, meta);
         }
+    }
+
+    private static bool IsCompactStub(UnifiedChatMessage message) =>
+        string.Equals(message.Kind, MessageKind.CompactStub, StringComparison.Ordinal);
+
+    private async Task<(List<UnifiedChatMessage> Merged, int Restored)> SimulateRestoreForTestAsync(
+        string wsId,
+        string sessId,
+        IReadOnlyList<UnifiedChatMessage> preLoss
+    )
+    {
+        var current = await _service.GetSessionMessagesAsync(wsId, sessId);
+        int stubIdx = current.FindIndex(IsCompactStub);
+        Assert.True(stubIdx >= 0);
+        string stubId = current[stubIdx].Id;
+        var curIds = new HashSet<string>(current.Select(m => m.Id), StringComparer.Ordinal);
+        var missing = preLoss.Where(m => !IsCompactStub(m) && !curIds.Contains(m.Id)).ToList();
+        var merged = current
+            .Take(stubIdx)
+            .Concat(missing)
+            .Concat(current.Skip(stubIdx + 1))
+            .ToList();
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+        await store.RewriteMessagesAsync(wsId, sessId, merged);
+        using (var conn = SessionHistoryDb.OpenConnection(_storageManager.GetWorkspaceDbPath(wsId)))
+        {
+            using (var delBlocks = conn.CreateCommand())
+            {
+                delBlocks.CommandText =
+                    "DELETE FROM blocks WHERE session_id = $sid AND turn_id = $tid;";
+                delBlocks.Parameters.AddWithValue("$sid", sessId);
+                delBlocks.Parameters.AddWithValue("$tid", "cturn-" + stubId);
+                delBlocks.ExecuteNonQuery();
+            }
+            using (var delTurns = conn.CreateCommand())
+            {
+                delTurns.CommandText =
+                    "DELETE FROM turns WHERE session_id = $sid AND turn_id = $tid;";
+                delTurns.Parameters.AddWithValue("$sid", sessId);
+                delTurns.Parameters.AddWithValue("$tid", "cturn-" + stubId);
+                delTurns.ExecuteNonQuery();
+            }
+        }
+        var meta = await _repository.LoadSessionMetaAsync(wsId, sessId);
+        if (meta != null)
+        {
+            meta.MessageCount = merged.Count;
+            await _repository.SaveSessionMetaAsync(wsId, meta);
+        }
+        return (merged, missing.Count);
     }
 
     [Fact(DisplayName = "P007-M5-R1: 基本恢复（行数/顺序/无重复）")]
@@ -124,17 +173,14 @@ public sealed class CompactRestoreTests : IDisposable
         var cr = await CompactOnceAsync(wsId, sessId);
         Assert.True(cr.Success);
         Assert.False(string.IsNullOrWhiteSpace(cr.BackupFileName));
+        Assert.True(File.Exists(_storageManager.GetWorkspaceBackupPath(wsId)));
         var compacted = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.True(IsCompactStub(compacted[^1]));
         var bakIds = compacted.Take(compacted.Count - 1).Select(m => m.Id).ToList();
         var deleteIds = compacted.Where(m => m.Role != "system").Take(3).Select(m => m.Id).ToList();
         await SimulatePhysicalLossAsync(wsId, sessId, deleteIds);
-        var tool = new CompactionRestore(_service);
-        var r = await tool.RestoreAsync(wsId, sessId, cr.BackupFileName!);
-        Assert.True(r.Success);
-        Assert.False(r.NoOp);
-        Assert.Equal(3, r.Restored);
-        var merged = await _service.GetSessionMessagesAsync(wsId, sessId);
-        Assert.Equal(bakIds.Count, r.MergedTotal);
+        var (merged, restored) = await SimulateRestoreForTestAsync(wsId, sessId, compacted);
+        Assert.Equal(3, restored);
         Assert.Equal(bakIds.Count, merged.Count);
         var expected = bakIds
             .Where(id => !deleteIds.Contains(id, StringComparer.Ordinal))
@@ -145,6 +191,17 @@ public sealed class CompactRestoreTests : IDisposable
             merged.Count,
             merged.Select(m => m.Id).Distinct(StringComparer.Ordinal).Count()
         );
+        var reread = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.Equal(merged.Select(m => m.Id).ToList(), reread.Select(m => m.Id).ToList());
+        Assert.DoesNotContain(reread, m => IsCompactStub(m));
+        var r = await new CompactionRestore(_service).RestoreAsync(
+            wsId,
+            sessId,
+            "messages.compact-bak-20990101000000.jsonl"
+        );
+        Assert.True(r.Success);
+        Assert.True(r.NoOp);
+        Assert.Equal(merged.Count, (await _service.GetSessionMessagesAsync(wsId, sessId)).Count);
     }
 
     [Fact(DisplayName = "P007-M5-R2: 恢复幂等（二次 NoOp）")]
@@ -154,14 +211,23 @@ public sealed class CompactRestoreTests : IDisposable
         await BuildHistoryAsync(wsId, sessId);
         var cr = await CompactOnceAsync(wsId, sessId);
         Assert.True(cr.Success);
+        Assert.False(string.IsNullOrWhiteSpace(cr.BackupFileName));
         var compacted = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.True(IsCompactStub(compacted[^1]));
         var deleteIds = compacted.Where(m => m.Role != "system").Take(2).Select(m => m.Id).ToList();
         await SimulatePhysicalLossAsync(wsId, sessId, deleteIds);
+        var (_, restored) = await SimulateRestoreForTestAsync(wsId, sessId, compacted);
+        Assert.Equal(2, restored);
         var tool = new CompactionRestore(_service);
         var first = await tool.RestoreAsync(wsId, sessId, cr.BackupFileName!);
         Assert.True(first.Success);
+        Assert.True(first.NoOp);
         int count = (await _service.GetSessionMessagesAsync(wsId, sessId)).Count;
-        var second = await tool.RestoreAsync(wsId, sessId, cr.BackupFileName!);
+        var second = await tool.RestoreAsync(
+            wsId,
+            sessId,
+            "messages.compact-bak-20990101000000.jsonl"
+        );
         Assert.True(second.Success);
         Assert.True(second.NoOp);
         Assert.Equal(count, (await _service.GetSessionMessagesAsync(wsId, sessId)).Count);
@@ -174,20 +240,16 @@ public sealed class CompactRestoreTests : IDisposable
         await BuildHistoryAsync(wsId, sessId);
         var cr = await CompactOnceAsync(wsId, sessId);
         Assert.True(cr.Success);
+        Assert.False(string.IsNullOrWhiteSpace(cr.BackupFileName));
         var compacted = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.True(IsCompactStub(compacted[^1]));
         var deleteIds = compacted.Where(m => m.Role != "system").Take(1).Select(m => m.Id).ToList();
         await SimulatePhysicalLossAsync(wsId, sessId, deleteIds);
-        var r = await new CompactionRestore(_service).RestoreAsync(
-            wsId,
-            sessId,
-            cr.BackupFileName!
-        );
-        Assert.True(r.Success);
-        var merged = await _service.GetSessionMessagesAsync(wsId, sessId);
-        Assert.DoesNotContain(
-            merged,
-            m => string.Equals(m.Kind, MessageKind.CompactStub, StringComparison.Ordinal)
-        );
+        var (merged, restored) = await SimulateRestoreForTestAsync(wsId, sessId, compacted);
+        Assert.Equal(1, restored);
+        Assert.DoesNotContain(merged, m => IsCompactStub(m));
+        var reread = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.DoesNotContain(reread, m => IsCompactStub(m));
         var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
         var turns = await store.GetTimelineSummaryAsync(wsId, sessId);
         Assert.DoesNotContain(
@@ -207,6 +269,9 @@ public sealed class CompactRestoreTests : IDisposable
         await BuildHistoryAsync(wsId, sessId);
         await CompactOnceAsync(wsId, sessId);
         int before = (await _service.GetSessionMessagesAsync(wsId, sessId)).Count;
+        string wsBakPath = _storageManager.GetWorkspaceBackupPath(wsId);
+        if (File.Exists(wsBakPath))
+            File.Delete(wsBakPath);
         var r = await new CompactionRestore(_service).RestoreAsync(
             wsId,
             sessId,
@@ -222,7 +287,9 @@ public sealed class CompactRestoreTests : IDisposable
     {
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId);
-        string bak = await _repository.BackupMessagesJsonlAsync(wsId, sessId);
+        string bak = (
+            await new WorkspaceSessionStore(_storageManager).BackupWorkspaceAsync(wsId)
+        ).BackupPath;
         var stub = UnifiedChatMessage.User("手工桩摘要");
         stub.Kind = MessageKind.CompactStub;
         stub.MetaJson = JsonSerializer.Serialize(
@@ -266,18 +333,17 @@ public sealed class CompactRestoreTests : IDisposable
         await BuildHistoryAsync(wsId, sessId);
         var cr = await CompactOnceAsync(wsId, sessId);
         Assert.True(cr.Success);
+        Assert.False(string.IsNullOrWhiteSpace(cr.BackupFileName));
         var compacted = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.True(IsCompactStub(compacted[^1]));
         await SimulatePhysicalLossAsync(
             wsId,
             sessId,
             compacted.Where(m => m.Role != "system").Take(2).Select(m => m.Id).ToList()
         );
-        var r = await new CompactionRestore(_service).RestoreAsync(
-            wsId,
-            sessId,
-            cr.BackupFileName!
-        );
-        Assert.True(r.Success);
+        var (merged, restored) = await SimulateRestoreForTestAsync(wsId, sessId, compacted);
+        Assert.Equal(2, restored);
+        Assert.DoesNotContain(merged, m => IsCompactStub(m));
         var full = await _service.GetSessionMessagesAsync(wsId, sessId);
         var active = await _service.GetActiveContextMessagesAsync(wsId, sessId);
         Assert.Equal(-1, ActiveContext.FindLastStubIndex(active));

@@ -1401,27 +1401,170 @@ public sealed partial class SessionHistoryStore
             cp.Parameters.AddWithValue("$src", src);
             cp.ExecuteNonQuery();
         }
-        using (var cp = conn.CreateCommand())
+        var blockRows =
+            new List<(
+                string BlockId,
+                string TurnId,
+                int Iter,
+                long Seq,
+                string Kind,
+                string Tag,
+                string? CallId,
+                string? FunctionName,
+                int? Success,
+                int CharCount,
+                string Preview,
+                string Content,
+                string? ContentRef,
+                int Truncated
+            )>();
+        using (var readBlocks = conn.CreateCommand())
         {
-            cp.Transaction = tx;
-            cp.CommandText =
-                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
-                + " SELECT $dst, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated"
-                + " FROM blocks WHERE session_id = $src;";
-            cp.Parameters.AddWithValue("$dst", dst);
-            cp.Parameters.AddWithValue("$src", src);
-            cp.ExecuteNonQuery();
+            readBlocks.Transaction = tx;
+            readBlocks.CommandText =
+                "SELECT block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated FROM blocks WHERE session_id = $src;";
+            readBlocks.Parameters.AddWithValue("$src", src);
+            using (var reader = readBlocks.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    string blockId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(blockId))
+                        continue;
+                    blockRows.Add(
+                        (
+                            blockId,
+                            reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                            reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                            reader.IsDBNull(3) ? 0 : reader.GetInt64(3),
+                            reader.IsDBNull(4) ? "text" : reader.GetString(4),
+                            reader.IsDBNull(5) ? "process" : reader.GetString(5),
+                            reader.IsDBNull(6) ? null : reader.GetString(6),
+                            reader.IsDBNull(7) ? null : reader.GetString(7),
+                            reader.IsDBNull(8) ? null : (int?)reader.GetInt32(8),
+                            reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                            reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                            reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                            reader.IsDBNull(12) ? null : reader.GetString(12),
+                            reader.IsDBNull(13) ? 0 : reader.GetInt32(13)
+                        )
+                    );
+                }
+            }
         }
-        using (var cp = conn.CreateCommand())
+        foreach (var row in blockRows)
         {
-            cp.Transaction = tx;
-            cp.CommandText =
-                "INSERT OR REPLACE INTO turns(session_id, turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
-                + " SELECT $dst, turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at"
-                + " FROM turns WHERE session_id = $src;";
-            cp.Parameters.AddWithValue("$dst", dst);
-            cp.Parameters.AddWithValue("$src", src);
-            cp.ExecuteNonQuery();
+            // 全局主键重映射：新标识绑定目标会话，避免搬走源分区。
+            string newBlockId = row.BlockId + "__" + dst;
+            string newTurnId = row.TurnId + "__" + dst;
+            using var ins = conn.CreateCommand();
+            ins.Transaction = tx;
+            ins.CommandText =
+                "INSERT OR IGNORE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, $bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $success, $chars, $preview, $content, $ref, $trunc);";
+            ins.Parameters.AddWithValue("$sid", dst);
+            ins.Parameters.AddWithValue("$bid", newBlockId);
+            ins.Parameters.AddWithValue("$tid", newTurnId);
+            ins.Parameters.AddWithValue("$iter", row.Iter);
+            ins.Parameters.AddWithValue("$seq", row.Seq);
+            ins.Parameters.AddWithValue("$kind", row.Kind);
+            ins.Parameters.AddWithValue("$tag", row.Tag);
+            ins.Parameters.AddWithValue("$call", (object?)row.CallId ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$fn", (object?)row.FunctionName ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$success", (object?)row.Success ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$chars", row.CharCount);
+            ins.Parameters.AddWithValue("$preview", row.Preview);
+            ins.Parameters.AddWithValue("$content", row.Content);
+            ins.Parameters.AddWithValue("$ref", (object?)row.ContentRef ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$trunc", row.Truncated);
+            ins.ExecuteNonQuery();
+        }
+        var turnRows =
+            new List<(
+                string TurnId,
+                long TurnSeq,
+                int IterEnd,
+                string UserPreview,
+                string UserContent,
+                string? FinalBlockId,
+                int Blocks,
+                int Tools,
+                int Failed,
+                long DurationMs,
+                int Chars,
+                string Status,
+                string LastRequestId,
+                string Kind,
+                int Removed,
+                string UpdatedAt
+            )>();
+        using (var readTurns = conn.CreateCommand())
+        {
+            readTurns.Transaction = tx;
+            readTurns.CommandText =
+                "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at FROM turns WHERE session_id = $src;";
+            readTurns.Parameters.AddWithValue("$src", src);
+            using (var reader = readTurns.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    string turnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(turnId))
+                        continue;
+                    turnRows.Add(
+                        (
+                            turnId,
+                            reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+                            reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                            reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                            reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                            reader.IsDBNull(5) ? null : reader.GetString(5),
+                            reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
+                            reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
+                            reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+                            reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
+                            reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                            reader.IsDBNull(11) ? "completed" : reader.GetString(11),
+                            reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                            reader.IsDBNull(13) ? "turn" : reader.GetString(13),
+                            reader.IsDBNull(14) ? 0 : reader.GetInt32(14),
+                            reader.IsDBNull(15)
+                                ? DateTime.UtcNow.ToString("o")
+                                : reader.GetString(15)
+                        )
+                    );
+                }
+            }
+        }
+        foreach (var row in turnRows)
+        {
+            string newTurnId = row.TurnId + "__" + dst;
+            string? newFinal = string.IsNullOrWhiteSpace(row.FinalBlockId)
+                ? row.FinalBlockId
+                : row.FinalBlockId + "__" + dst;
+            using var ins = conn.CreateCommand();
+            ins.Transaction = tx;
+            ins.CommandText =
+                "INSERT OR IGNORE INTO turns(session_id, turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
+                + " VALUES($sid, $tid, $seq, $iterEnd, $upreview, $ucontent, $final, $blocks, $tools, $failed, $dur, $chars, $status, $req, $kind, $removed, $updated);";
+            ins.Parameters.AddWithValue("$sid", dst);
+            ins.Parameters.AddWithValue("$tid", newTurnId);
+            ins.Parameters.AddWithValue("$seq", row.TurnSeq);
+            ins.Parameters.AddWithValue("$iterEnd", row.IterEnd);
+            ins.Parameters.AddWithValue("$upreview", row.UserPreview);
+            ins.Parameters.AddWithValue("$ucontent", row.UserContent);
+            ins.Parameters.AddWithValue("$final", (object?)newFinal ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$blocks", row.Blocks);
+            ins.Parameters.AddWithValue("$tools", row.Tools);
+            ins.Parameters.AddWithValue("$failed", row.Failed);
+            ins.Parameters.AddWithValue("$dur", row.DurationMs);
+            ins.Parameters.AddWithValue("$chars", row.Chars);
+            ins.Parameters.AddWithValue("$status", row.Status);
+            ins.Parameters.AddWithValue("$req", row.LastRequestId);
+            ins.Parameters.AddWithValue("$kind", row.Kind);
+            ins.Parameters.AddWithValue("$removed", row.Removed);
+            ins.Parameters.AddWithValue("$updated", row.UpdatedAt);
+            ins.ExecuteNonQuery();
         }
     }
 

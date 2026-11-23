@@ -167,37 +167,7 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    /// <summary>读取链路切换过渡期保留：仅内部兼容旧前端，禁止新增调用，收尾阶段随旧消息文件一并删除。</summary>
-    public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(
-        string workspaceId,
-        string sessionId
-    )
-    {
-        try
-        {
-            try
-            {
-                var meta = await _workspaceSessionService
-                    .GetSessionAsync(workspaceId, sessionId)
-                    .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion == 2)
-                    return BridgeResponse<List<UnifiedChatMessage>>.Fail(
-                        "USE_TIMELINE_API",
-                        "请使用 getTimelineSummary/getBlockContents"
-                    );
-            }
-            catch { }
-            var messages = await _workspaceSessionService
-                .GetSessionMessagesAsync(workspaceId, sessionId)
-                .ConfigureAwait(false);
-            return BridgeResponse<List<UnifiedChatMessage>>.Success(messages);
-        }
-        catch (Exception ex)
-        {
-            HaloLogger.App.Error($"GetSessionMessages failed for session '{sessionId}'", ex);
-            return BridgeResponse<List<UnifiedChatMessage>>.Fail(ex.Message, "SESSION_ERROR");
-        }
-    }
+    /// <summary>旧全量消息直读入口已随统一仓储切换删除，请使用时间轴摘要接口。</summary>
 
     /// <summary>标题链专用：按回合取指定回合的用户全文，摘要层直读，与消息门无关。</summary>
     public async Task<BridgeResponse<string>> GetTurnUserContent(
@@ -252,8 +222,6 @@ public sealed partial class HostBridgeFacade
                 var meta = await _workspaceSessionService
                     .GetSessionAsync(workspaceId, sessionId)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<bool>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
                 if (
                     meta != null
                     && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)

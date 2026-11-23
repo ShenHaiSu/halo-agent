@@ -15,7 +15,7 @@ namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
 /// 多工作区与多会话持久化仓储服务。
-/// 管理 workspaces-index.json、sessions-index.json、meta.json 以及 messages.jsonl。
+/// 管理 workspaces-index.json、sessions-index.json 以及 meta.json，消息真相源为工作区单库。
 /// </summary>
 public sealed partial class SessionRepository : ISessionRepository
 {
@@ -46,9 +46,6 @@ public sealed partial class SessionRepository : ISessionRepository
 
     public string GetSessionMetaPath(string workspaceId, string sessionId) =>
         Path.Combine(_storageManager.SessionsDirectory, workspaceId, sessionId, "meta.json");
-
-    public string GetMessagesJsonlPath(string workspaceId, string sessionId) =>
-        Path.Combine(_storageManager.SessionsDirectory, workspaceId, sessionId, "messages.jsonl");
 
     /// <summary>need09-05：会话附件根目录。</summary>
     public string GetAttachmentsDirectory(string workspaceId, string sessionId) =>
@@ -361,22 +358,7 @@ public sealed partial class SessionRepository : ISessionRepository
                     );
                 }
             }
-            else if (meta.HistoryVersion == 2)
-            {
-                try
-                {
-                    var timelineDb = new SessionHistoryDb(_storageManager);
-                    timelineDb.EnsureDatabase(workspaceId, meta.Id);
-                    timelineDb.Checkpoint(workspaceId, meta.Id);
-                }
-                catch (Exception ex)
-                {
-                    HaloLogger.App.Warn(
-                        "[SessionRepository] timeline database bootstrap failed, meta save continues: "
-                            + ex.Message
-                    );
-                }
-            }
+            // 旧每会话库分支已随写入切换删除，仅保留工作区单库引导。
         }
         finally
         {

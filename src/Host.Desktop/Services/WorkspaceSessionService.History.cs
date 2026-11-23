@@ -15,7 +15,7 @@ namespace Host.Desktop.Services;
 
 public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
-    /// <summary>need07：分支。前缀复制建新会话，原会话不动。</summary>
+    /// <summary>分支：以前缀复制建新会话，原会话不动。</summary>
     public async Task<SessionMetadata> BranchSessionAsync(
         string workspaceId,
         string sourceSessionId,
@@ -51,13 +51,13 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             end = t - 1;
         }
         var prefixRaw = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
-        // FIX(tool-400)：分支前缀同样可能劈开 assistant→tool 块，复制前内存愈合。
+        // 分支前缀同样可能劈开问答与工具回包的组合，复制前先在内存里愈合补齐。
         var (prefix, _, _) = RebuildHealedHistory(prefixRaw);
         string title =
             string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话"
                 ? "新建会话"
                 : srcMeta.Title + "·分支";
-        // need13：分支永远是新 main，不继承父子链（CreateSessionAsync 委托 parent=null 即 main）
+        // 分支永远建为主会话，不继承父子链。
         var created = await CreateSessionAsync(
                 workspaceId,
                 title,
@@ -66,180 +66,53 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 ct
             )
             .ConfigureAwait(false);
-        var cloned = prefix
-            .Select(m => new UnifiedChatMessage
-            {
-                Role = m.Role,
-                Content = m.Content,
-                ReasoningContent = m.ReasoningContent,
-                ToolCalls = m.ToolCalls != null ? new List<UnifiedToolCall>(m.ToolCalls) : null,
-                ToolCallId = m.ToolCallId,
-                Name = m.Name,
-                InputTokens = m.InputTokens,
-                OutputTokens = m.OutputTokens,
-                CachedTokens = m.CachedTokens,
-                Images = m.Images != null ? new List<ChatImageRef>(m.Images) : null,
-            })
-            .ToList();
-        await _sessionRepository
-            .RewriteMessagesJsonlAsync(workspaceId, created.Id, cloned, ct)
-            .ConfigureAwait(false);
-        bool srcIsV2 = (srcMeta.HistoryVersion == 2);
-        // S3 v2: v1->v2 合成（09 §9.8）或 v2->v2 文件拷贝后按前缀截断
-        if (!srcIsV2)
+        var branchStore = new SessionHistoryStore(new SessionHistoryDb(_sessionRepository.Storage));
+        // 库内分区复制：消息可按原标识共存，多轮与文本块复制时重映射全局标识，避免搬走源分区；落盘的超长工具输出随复制同步搬运。
+        try
         {
+            RemapCopyPartitionForBranch(
+                _sessionRepository.Storage,
+                workspaceId,
+                sourceSessionId,
+                created.Id
+            );
+        }
+        catch { }
+        await branchStore
+            .RewriteMessagesAsync(workspaceId, created.Id, prefix, ct)
+            .ConfigureAwait(false);
+        // 复制后按前缀截断目标库后缀轮次，只留分支锚点之前的内容。
+        try
+        {
+            var keptIds = new HashSet<string>(prefix.Select(m => m.Id), StringComparer.Ordinal);
+            var dstSummaries = await branchStore
+                .GetTimelineSummaryAsync(workspaceId, created.Id, ct)
+                .ConfigureAwait(false);
+            long minDoomed = long.MaxValue;
+            foreach (var s in dstSummaries)
+            {
+                string tid = s.TurnId ?? string.Empty;
+                const string turnPrefix = "uturn-";
+                string suffix = tid.StartsWith(turnPrefix, StringComparison.Ordinal)
+                    ? tid.Substring(turnPrefix.Length)
+                    : tid;
+                int branchSep = suffix.IndexOf(":branch:", StringComparison.Ordinal);
+                if (branchSep >= 0)
+                    suffix = suffix.Substring(0, branchSep);
+                if (!keptIds.Contains(suffix) && s.TurnSeq < minDoomed)
+                    minDoomed = s.TurnSeq;
+            }
+            if (minDoomed != long.MaxValue)
+                await branchStore
+                    .TruncateFromTurnSeqAsync(workspaceId, created.Id, minDoomed, ct)
+                    .ConfigureAwait(false);
             try
             {
-                var synthStore = new SessionHistoryStore(
-                    new SessionHistoryDb(_sessionRepository.Storage)
-                );
-                await synthStore
-                    .SynthesizeV2FromMessagesAsync(workspaceId, created.Id, prefix, ct)
+                await branchStore
+                    .CollectOrphanToolOutputsAsync(workspaceId, created.Id, ct)
                     .ConfigureAwait(false);
             }
             catch { }
-        }
-        try
-        {
-            string srcDir = _sessionRepository.GetSessionDirectory(workspaceId, sourceSessionId);
-            string dstDir = _sessionRepository.GetSessionDirectory(workspaceId, created.Id);
-            string srcDb = System.IO.Path.Combine(srcDir, "history.db");
-            if (srcIsV2 && System.IO.File.Exists(srcDb))
-            {
-                try
-                {
-                    using var ckConn = new Microsoft.Data.Sqlite.SqliteConnection(
-                        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-                        {
-                            DataSource = srcDb,
-                            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
-                            Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
-                            Pooling = false,
-                        }.ToString()
-                    );
-                    ckConn.Open();
-                    using var ckCmd = ckConn.CreateCommand();
-                    ckCmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-                    ckCmd.ExecuteNonQuery();
-                }
-                catch { }
-                string dstDb = System.IO.Path.Combine(dstDir, "history.db");
-                System.IO.Directory.CreateDirectory(dstDir);
-                System.IO.File.Copy(srcDb, dstDb, overwrite: true);
-                try
-                {
-                    var refs = new List<string>();
-                    using var qConn = new Microsoft.Data.Sqlite.SqliteConnection(
-                        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-                        {
-                            DataSource = dstDb,
-                            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
-                            Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
-                            Pooling = false,
-                        }.ToString()
-                    );
-                    qConn.Open();
-                    using var qCmd = qConn.CreateCommand();
-                    qCmd.CommandText =
-                        "SELECT DISTINCT content_ref FROM blocks WHERE content_ref IS NOT NULL;";
-                    using var qReader = qCmd.ExecuteReader();
-                    while (qReader.Read())
-                    {
-                        if (!qReader.IsDBNull(0))
-                        {
-                            string v = qReader.GetString(0);
-                            if (!string.IsNullOrWhiteSpace(v))
-                            {
-                                refs.Add(v);
-                            }
-                        }
-                    }
-                    string srcOutputs = System.IO.Path.Combine(srcDir, "tool-outputs");
-                    string dstOutputs = System.IO.Path.Combine(dstDir, "tool-outputs");
-                    foreach (string contentRef in refs)
-                    {
-                        string rel = contentRef.Trim();
-                        const string fileRefPrefix = "fileRef:";
-                        if (rel.StartsWith(fileRefPrefix, StringComparison.OrdinalIgnoreCase))
-                        {
-                            rel = rel.Substring(fileRefPrefix.Length).Trim().Trim('"');
-                            int sp = rel.IndexOf(" size=", StringComparison.OrdinalIgnoreCase);
-                            if (sp > 0)
-                            {
-                                rel = rel.Substring(0, sp).Trim().Trim('"');
-                            }
-                        }
-                        rel = rel.Replace('\\', '/').Trim();
-                        string fileName = System.IO.Path.GetFileName(rel);
-                        if (string.IsNullOrWhiteSpace(fileName))
-                        {
-                            continue;
-                        }
-                        string srcFile = System.IO.Path.Combine(srcOutputs, fileName);
-                        if (!System.IO.File.Exists(srcFile))
-                        {
-                            string alt = System.IO.Path.Combine(
-                                srcDir,
-                                rel.Replace('/', System.IO.Path.DirectorySeparatorChar)
-                            );
-                            if (System.IO.File.Exists(alt))
-                            {
-                                srcFile = alt;
-                            }
-                        }
-                        if (!System.IO.File.Exists(srcFile))
-                        {
-                            continue;
-                        }
-                        System.IO.Directory.CreateDirectory(dstOutputs);
-                        string dstFile = System.IO.Path.Combine(dstOutputs, fileName);
-                        System.IO.File.Copy(srcFile, dstFile, overwrite: true);
-                    }
-                }
-                catch { }
-                // S3 v2->v2: 拷贝后按前缀截断目的库（只留 prefix，删后缀轮 + 同步 messages + GC）
-                try
-                {
-                    var branchStore = new SessionHistoryStore(
-                        new SessionHistoryDb(_sessionRepository.Storage)
-                    );
-                    await branchStore
-                        .RewriteMessagesAsync(workspaceId, created.Id, prefix, ct)
-                        .ConfigureAwait(false);
-                    var keptIds = new HashSet<string>(
-                        prefix.Select(m => m.Id),
-                        StringComparer.Ordinal
-                    );
-                    var dstSummaries = await branchStore
-                        .GetTimelineSummaryAsync(workspaceId, created.Id, ct)
-                        .ConfigureAwait(false);
-                    long minDoomed = long.MaxValue;
-                    foreach (var s in dstSummaries)
-                    {
-                        string tid = s.TurnId ?? string.Empty;
-                        string suffix = tid.StartsWith("uturn-", StringComparison.Ordinal)
-                            ? tid.Substring(6)
-                            : tid;
-                        if (!keptIds.Contains(suffix))
-                        {
-                            if (s.TurnSeq < minDoomed)
-                                minDoomed = s.TurnSeq;
-                        }
-                    }
-                    if (minDoomed != long.MaxValue)
-                        await branchStore
-                            .TruncateFromTurnSeqAsync(workspaceId, created.Id, minDoomed, ct)
-                            .ConfigureAwait(false);
-                    try
-                    {
-                        await branchStore
-                            .CollectOrphanToolOutputsAsync(workspaceId, created.Id, ct)
-                            .ConfigureAwait(false);
-                    }
-                    catch { }
-                }
-                catch { }
-            }
         }
         catch { }
         var newMeta = await _sessionRepository
@@ -247,8 +120,8 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             .ConfigureAwait(false);
         if (newMeta != null)
         {
-            newMeta.MessageCount = cloned.Count;
-            var lastSnap = cloned.LastOrDefault(m =>
+            newMeta.MessageCount = prefix.Count;
+            var lastSnap = prefix.LastOrDefault(m =>
                 m.InputTokens.HasValue && m.InputTokens.Value > 0
             );
             newMeta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
@@ -273,7 +146,7 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                         sourceSessionId,
                         anchorMessageId,
                         copiedAtUtc = DateTime.UtcNow,
-                        copiedMessages = cloned.Count
+                        copiedMessages = prefix.Count
                     }
                 );
                 await System
@@ -284,13 +157,236 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             try
             {
                 Infrastructure.Logging.HaloLogger.App.Info(
-                    $"[History] branch ws={workspaceId} src={sourceSessionId} anchor={anchorMessageId} new={created.Id} copied={cloned.Count}"
+                    $"[History] branch ws={workspaceId} src={sourceSessionId} anchor={anchorMessageId} new={created.Id} copied={prefix.Count}"
                 );
             }
             catch { }
             return newMeta;
         }
         return created;
+    }
+
+    /// <summary>分支复制：把源会话的多轮与文本块复制到目标分区并重映射全局标识，同时搬运落盘的超长工具输出。</summary>
+    private static void RemapCopyPartitionForBranch(
+        StoragePathManager storage,
+        string workspaceId,
+        string sourceSessionId,
+        string targetSessionId
+    )
+    {
+        var db = new SessionHistoryDb(storage);
+        db.EnsureWorkspaceDatabase(workspaceId);
+        string marker = ":branch:" + (targetSessionId ?? string.Empty);
+        var turnIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var blockIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var contentRefs = new List<string>();
+        var turnRows = new List<object?[]>();
+        var blockRows = new List<object?[]>();
+        using (var conn = db.OpenWorkspace(workspaceId))
+        {
+            using (var q = conn.CreateCommand())
+            {
+                q.CommandText =
+                    "SELECT turn_id, turn_seq, iter_end, user_preview, user_content,"
+                    + " final_block_id, blocks, tools, failed, duration_ms, chars, status,"
+                    + " last_request_id, kind, removed_messages, updated_at"
+                    + " FROM turns WHERE session_id = $sid ORDER BY turn_seq;";
+                q.Parameters.AddWithValue("$sid", sourceSessionId ?? string.Empty);
+                using var reader = q.ExecuteReader();
+                while (reader.Read())
+                {
+                    string oldTurnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(oldTurnId))
+                        continue;
+                    turnIdMap[oldTurnId] = oldTurnId + marker;
+                    var row = new object?[16];
+                    for (int c = 0; c < 16; c++)
+                        row[c] = reader.IsDBNull(c) ? null : reader.GetValue(c);
+                    turnRows.Add(row);
+                }
+            }
+            using (var q = conn.CreateCommand())
+            {
+                q.CommandText =
+                    "SELECT block_id, turn_id, iter, seq, kind, tag, call_id, function_name,"
+                    + " success, char_count, preview, content, content_ref, truncated"
+                    + " FROM blocks WHERE session_id = $sid ORDER BY seq;";
+                q.Parameters.AddWithValue("$sid", sourceSessionId ?? string.Empty);
+                using var reader = q.ExecuteReader();
+                while (reader.Read())
+                {
+                    string oldBlockId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(oldBlockId))
+                        continue;
+                    blockIdMap[oldBlockId] = oldBlockId + marker;
+                    if (!reader.IsDBNull(12))
+                    {
+                        string contentRef = reader.GetString(12);
+                        if (!string.IsNullOrWhiteSpace(contentRef))
+                            contentRefs.Add(contentRef);
+                    }
+                    var row = new object?[14];
+                    for (int c = 0; c < 14; c++)
+                        row[c] = reader.IsDBNull(c) ? null : reader.GetValue(c);
+                    blockRows.Add(row);
+                }
+            }
+            using var tx = conn.BeginTransaction();
+            foreach (var row in turnRows)
+            {
+                string oldTurnId = (row[0] as string) ?? string.Empty;
+                if (!turnIdMap.TryGetValue(oldTurnId, out string? newTurnId))
+                    continue;
+                string finalBlockId = (row[5] as string) ?? string.Empty;
+                if (
+                    !string.IsNullOrEmpty(finalBlockId)
+                    && blockIdMap.TryGetValue(finalBlockId, out string? mappedFinal)
+                )
+                    finalBlockId = mappedFinal;
+                using var ins = conn.CreateCommand();
+                ins.Transaction = tx;
+                ins.CommandText =
+                    "INSERT OR IGNORE INTO turns(session_id, turn_id, turn_seq, iter_end,"
+                    + " user_preview, user_content, final_block_id, blocks, tools, failed,"
+                    + " duration_ms, chars, status, last_request_id, kind, removed_messages,"
+                    + " updated_at) VALUES($sid, $tid, $seq, $iterEnd, $userPreview,"
+                    + " $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars,"
+                    + " $status, $req, $kind, $removed, $updated);";
+                ins.Parameters.AddWithValue("$sid", targetSessionId ?? string.Empty);
+                ins.Parameters.AddWithValue("$tid", newTurnId);
+                AddCopyParam(ins, "$seq", row[1]);
+                AddCopyParam(ins, "$iterEnd", row[2]);
+                AddCopyParam(ins, "$userPreview", row[3]);
+                AddCopyParam(ins, "$userContent", row[4]);
+                ins.Parameters.AddWithValue(
+                    "$finalBid",
+                    string.IsNullOrEmpty(finalBlockId) ? (object)DBNull.Value : finalBlockId
+                );
+                AddCopyParam(ins, "$blocks", row[6]);
+                AddCopyParam(ins, "$tools", row[7]);
+                AddCopyParam(ins, "$failed", row[8]);
+                AddCopyParam(ins, "$dur", row[9]);
+                AddCopyParam(ins, "$chars", row[10]);
+                AddCopyParam(ins, "$status", row[11]);
+                AddCopyParam(ins, "$req", row[12]);
+                AddCopyParam(ins, "$kind", row[13]);
+                AddCopyParam(ins, "$removed", row[14]);
+                AddCopyParam(ins, "$updated", row[15]);
+                ins.ExecuteNonQuery();
+            }
+            foreach (var row in blockRows)
+            {
+                string oldBlockId = (row[0] as string) ?? string.Empty;
+                if (!blockIdMap.TryGetValue(oldBlockId, out string? newBlockId))
+                    continue;
+                string oldTurnId = (row[1] as string) ?? string.Empty;
+                if (!turnIdMap.TryGetValue(oldTurnId, out string? newTurnId))
+                    newTurnId = oldTurnId + marker;
+                using var ins = conn.CreateCommand();
+                ins.Transaction = tx;
+                ins.CommandText =
+                    "INSERT OR IGNORE INTO blocks(session_id, block_id, turn_id, iter, seq,"
+                    + " kind, tag, call_id, function_name, success, char_count, preview,"
+                    + " content, content_ref, truncated)"
+                    + " VALUES($sid, $bid, $tid, $iter, $seq, $kind, $tag, $call, $fn,"
+                    + " $success, $chars, $preview, $content, $ref, $trunc);";
+                ins.Parameters.AddWithValue("$sid", targetSessionId ?? string.Empty);
+                ins.Parameters.AddWithValue("$bid", newBlockId);
+                ins.Parameters.AddWithValue("$tid", newTurnId);
+                AddCopyParam(ins, "$iter", row[2]);
+                AddCopyParam(ins, "$seq", row[3]);
+                AddCopyParam(ins, "$kind", row[4]);
+                AddCopyParam(ins, "$tag", row[5]);
+                AddCopyParam(ins, "$call", row[6]);
+                AddCopyParam(ins, "$fn", row[7]);
+                AddCopyParam(ins, "$success", row[8]);
+                AddCopyParam(ins, "$chars", row[9]);
+                AddCopyParam(ins, "$preview", row[10]);
+                AddCopyParam(ins, "$content", row[11]);
+                AddCopyParam(ins, "$ref", row[12]);
+                AddCopyParam(ins, "$trunc", row[13]);
+                ins.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        CopyBranchToolOutputFiles(
+            storage,
+            workspaceId,
+            sourceSessionId,
+            targetSessionId,
+            contentRefs
+        );
+    }
+
+    private static void AddCopyParam(
+        Microsoft.Data.Sqlite.SqliteCommand cmd,
+        string name,
+        object? value
+    )
+    {
+        cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+    }
+
+    /// <summary>分支复制落盘文件：按引用解析文件名，从源会话输出目录复制到目标会话输出目录。</summary>
+    private static void CopyBranchToolOutputFiles(
+        StoragePathManager storage,
+        string workspaceId,
+        string sourceSessionId,
+        string targetSessionId,
+        List<string> contentRefs
+    )
+    {
+        try
+        {
+            string srcDir = storage.GetSessionDirectory(workspaceId, sourceSessionId);
+            string srcOutputs = storage.GetSessionToolOutputsDir(workspaceId, sourceSessionId);
+            string dstOutputs = storage.GetSessionToolOutputsDir(workspaceId, targetSessionId);
+            var fileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string contentRef in contentRefs)
+            {
+                string? fileName = ExtractToolOutputFileName(contentRef);
+                if (!string.IsNullOrWhiteSpace(fileName))
+                    fileNames.Add(fileName!);
+            }
+            if (fileNames.Count == 0)
+                return;
+            System.IO.Directory.CreateDirectory(dstOutputs);
+            foreach (string fileName in fileNames)
+            {
+                try
+                {
+                    string srcFile = System.IO.Path.Combine(srcOutputs, fileName);
+                    if (!System.IO.File.Exists(srcFile))
+                    {
+                        string alt = System.IO.Path.Combine(srcDir, "tool-outputs", fileName);
+                        if (System.IO.File.Exists(alt))
+                            srcFile = alt;
+                    }
+                    if (!System.IO.File.Exists(srcFile))
+                        continue;
+                    string dstFile = System.IO.Path.Combine(dstOutputs, fileName);
+                    System.IO.File.Copy(srcFile, dstFile, overwrite: true);
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static string? ExtractToolOutputFileName(string? contentRef)
+    {
+        if (string.IsNullOrWhiteSpace(contentRef))
+            return null;
+        string rel = contentRef.Trim();
+        const string fileRefPrefix = "fileRef:";
+        if (rel.StartsWith(fileRefPrefix, StringComparison.OrdinalIgnoreCase))
+            rel = rel.Substring(fileRefPrefix.Length).Trim().Trim('"');
+        int sp = rel.IndexOf(" size=", StringComparison.OrdinalIgnoreCase);
+        if (sp > 0)
+            rel = rel.Substring(0, sp).Trim().Trim('"');
+        rel = rel.Replace('\\', '/').Trim();
+        string fileName = System.IO.Path.GetFileName(rel);
+        return string.IsNullOrWhiteSpace(fileName) ? null : fileName;
     }
 
     /// <summary>synthetic cancelled tool 回包前缀（前端/导出可据此识别为中断补位，非真实工具输出）。</summary>
@@ -466,39 +562,40 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 .GetMessagesAsync(workspaceId, sessionId, ct)
                 .ConfigureAwait(false);
             var (fixed_, synthetic, removed) = RebuildHealedHistory(messages);
-            // S3 v2: DB 完整性校验（integrity_check + 组完整性），损坏仅打点不阻断 jsonl 愈合
-            if (meta.HistoryVersion == 2)
-            {
-                try
-                {
-                    var integrityStore = new SessionHistoryStore(
-                        new SessionHistoryDb(_sessionRepository.Storage)
-                    );
-                    var (ok, detail) = await integrityStore
-                        .CheckIntegrityAsync(workspaceId, sessionId, ct)
-                        .ConfigureAwait(false);
-                    if (!ok)
-                    {
-                        try
-                        {
-                            Infrastructure.Logging.HaloLogger.App.Warn(
-                                $"[History] integrity fail ws={workspaceId} sess={sessionId} detail={detail}"
-                            );
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-            if (synthetic == 0 && removed == 0)
-                return HistoryHealResult.Clean(messages.Count);
-            string bak = await _sessionRepository
-                .BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.heal-bak-", ct)
-                .ConfigureAwait(false);
+            // 库完整性校验：损坏只打点，不阻断愈合写入。
             try
             {
-                await _sessionRepository
-                    .RewriteMessagesJsonlAsync(workspaceId, sessionId, fixed_, ct)
+                var integrityStore = new SessionHistoryStore(
+                    new SessionHistoryDb(_sessionRepository.Storage)
+                );
+                var (ok, detail) = await integrityStore
+                    .CheckIntegrityAsync(workspaceId, sessionId, ct)
+                    .ConfigureAwait(false);
+                if (!ok)
+                {
+                    try
+                    {
+                        Infrastructure.Logging.HaloLogger.App.Warn(
+                            $"[History] integrity fail ws={workspaceId} sess={sessionId} detail={detail}"
+                        );
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            if (synthetic == 0 && removed == 0)
+                return HistoryHealResult.Clean(messages.Count);
+            var workspaceStore = new WorkspaceSessionStore(_sessionRepository.Storage);
+            string bak = (
+                await workspaceStore.BackupWorkspaceAsync(workspaceId, ct).ConfigureAwait(false)
+            ).BackupPath;
+            try
+            {
+                var healStore = new SessionHistoryStore(
+                    new SessionHistoryDb(_sessionRepository.Storage)
+                );
+                await healStore
+                    .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
                     .ConfigureAwait(false);
             }
             catch
@@ -515,19 +612,6 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
             meta.UpdatedAtUtc = DateTime.UtcNow;
             await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
-            if (meta.HistoryVersion == 2)
-            {
-                try
-                {
-                    var healStore = new SessionHistoryStore(
-                        new SessionHistoryDb(_sessionRepository.Storage)
-                    );
-                    await healStore
-                        .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
-                        .ConfigureAwait(false);
-                }
-                catch { }
-            }
             try
             {
                 Infrastructure.Logging.HaloLogger.App.Info(
@@ -574,73 +658,62 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 return HistoryDeleteResult.Fail("MESSAGE_NOT_FOUND");
             var kept = messages.Where((_, i) => i != idx).ToList();
             var (fixed_, synthetic, removed) = RebuildHealedHistory(kept);
-            string bak = await _sessionRepository
-                .BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.delete-bak-", ct)
-                .ConfigureAwait(false);
+            // 先做工作区库在线快照，快照路径随结果返回。
+            var deleteStore = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
+            var deleteWorkspaceStore = new WorkspaceSessionStore(_sessionRepository.Storage);
+            string bak = (
+                await deleteWorkspaceStore
+                    .BackupWorkspaceAsync(workspaceId, ct)
+                    .ConfigureAwait(false)
+            ).BackupPath;
             try
             {
-                await _sessionRepository
-                    .RewriteMessagesJsonlAsync(workspaceId, sessionId, fixed_, ct)
+                await deleteStore
+                    .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
                     .ConfigureAwait(false);
             }
             catch
             {
                 return HistoryDeleteResult.Fail("REWRITE_ERROR");
             }
-            // S3 v2: DB 同步（messages 重写；若删的是 user 轮首条则连带删 turn/blocks）
-            if (meta.HistoryVersion == 2)
+            // 同步多轮与文本块：删的是用户轮首条则连带截断该轮，否则只删单行，最后清理孤儿落盘文件。
+            try
             {
-                try
+                var doomed = messages[idx];
+                if (string.Equals(doomed.Role, "user", StringComparison.OrdinalIgnoreCase))
                 {
-                    var store = new SessionHistoryStore(
-                        new SessionHistoryDb(_sessionRepository.Storage)
-                    );
-                    await store
-                        .RewriteMessagesAsync(workspaceId, sessionId, fixed_, ct)
-                        .ConfigureAwait(false);
-                    var doomed = messages[idx];
-                    if (string.Equals(doomed.Role, "user", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            var summaries = await store
-                                .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
-                                .ConfigureAwait(false);
-                            var hit = summaries.FirstOrDefault(s =>
-                                string.Equals(
-                                    s.TurnId,
-                                    "uturn-" + doomed.Id,
-                                    StringComparison.Ordinal
-                                )
-                            );
-                            if (hit != null)
-                                await store
-                                    .TruncateFromTurnSeqAsync(
-                                        workspaceId,
-                                        sessionId,
-                                        hit.TurnSeq,
-                                        ct
-                                    )
-                                    .ConfigureAwait(false);
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        await store
-                            .DeleteMessageRowAsync(workspaceId, sessionId, messageId, ct)
-                            .ConfigureAwait(false);
-                    }
                     try
                     {
-                        await store
-                            .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                        var summaries = await deleteStore
+                            .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
                             .ConfigureAwait(false);
+                        var hit = summaries.FirstOrDefault(s =>
+                            string.Equals(s.TurnId, "uturn-" + doomed.Id, StringComparison.Ordinal)
+                        );
+                        if (hit != null)
+                            await deleteStore
+                                .TruncateFromTurnSeqAsync(workspaceId, sessionId, hit.TurnSeq, ct)
+                                .ConfigureAwait(false);
                     }
                     catch { }
                 }
+                else
+                {
+                    await deleteStore
+                        .DeleteMessageRowAsync(workspaceId, sessionId, messageId, ct)
+                        .ConfigureAwait(false);
+                }
+                try
+                {
+                    await deleteStore
+                        .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
                 catch { }
             }
+            catch { }
             meta.MessageCount = fixed_.Count;
             var lastSnap = fixed_.LastOrDefault(m =>
                 string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)

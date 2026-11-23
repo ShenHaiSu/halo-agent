@@ -52,7 +52,7 @@ export interface AgentToolCard {
   /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
   fileBytes?: number | null;
   images?: ChatImageRef[];
-  /** need23-R1：该工具消息在 messages.jsonl 中的 id（空=尚未落盘）。 */
+  /** 该工具消息在统一仓储中的标识（空=尚未落盘）。 */
   messageId?: string;
   /** need23-R1：结果是否已落盘（ToolMessagePersisted 到达后为 true）。 */
   persisted?: boolean;

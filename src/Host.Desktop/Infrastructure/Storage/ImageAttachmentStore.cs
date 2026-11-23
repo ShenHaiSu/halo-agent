@@ -14,8 +14,8 @@ using Host.Desktop.Infrastructure.Logging;
 namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
-/// need09-05：会话图片附件存储（引用落 messages.jsonl，字节落 attachments/；sha16 去重；只存引用不存 base64）。
-/// 由 SessionRepository / ViewImageTool / Bridge 共享；Orchestrator 不直接依赖。
+/// 会话图片附件存储（引用落消息区，字节落 attachments/；按内容去重；只存引用不存原文）。
+/// 由仓储与图片工具共享。
 /// </summary>
 public static class ImageAttachmentStore
 {

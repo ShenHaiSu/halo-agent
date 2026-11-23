@@ -136,11 +136,11 @@ public sealed partial class HostBridgeFacade
                 var meta = await _workspaceSessionService
                     .GetSessionAsync(wsId, sessId)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<CompactionResult>.Fail(
-                        "HISTORY_READONLY",
-                        "历史版本只读，不可压缩，可分支"
-                    );
+                if (
+                    meta != null
+                    && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
+                )
+                    return BridgeResponse<CompactionResult>.Fail("SUB_READONLY", "子会话只读，不可压缩");
             }
             catch { }
             string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
@@ -285,22 +285,16 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    /// <summary>need05-03：列出压缩备份文件名（审计用），返回 JSON 数组字符串。</summary>
+    /// <summary>列出工作区库快照备份（审计用），返回 JSON 数组字符串。</summary>
     public Task<BridgeResponse<string>> GetCompactBackupList(string workspaceId, string sessionId)
     {
         try
         {
-            string sessionDir = _sessionRepository.GetSessionDirectory(workspaceId, sessionId);
             var names = new List<string>();
-            if (Directory.Exists(sessionDir))
+            string backupPath = _storageManager.GetWorkspaceBackupPath(workspaceId);
+            if (File.Exists(backupPath))
             {
-                names = Directory
-                    .GetFiles(sessionDir, "messages.compact-bak-*.jsonl")
-                    .Select(Path.GetFileName)
-                    .Where(n => !string.IsNullOrEmpty(n))
-                    .Select(n => n!)
-                    .OrderByDescending(n => n, StringComparer.Ordinal)
-                    .ToList();
+                names.Add(Path.GetFileName(backupPath));
             }
             string json = JsonSerializer.Serialize(names, HaloJsonOptions.IndentedCamelCase);
             return Task.FromResult(BridgeResponse<string>.Success(json));

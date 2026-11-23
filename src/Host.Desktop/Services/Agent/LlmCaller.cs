@@ -427,28 +427,6 @@ public sealed partial class AgentOrchestrator
 
         if (cancellationToken.IsCancellationRequested || streamCancelled)
         {
-            if ((textAcc.Length > 0 || reasoningAcc.Length > 0) && ctx.Session?.HistoryVersion != 2)
-            {
-                try
-                {
-                    var partial = UnifiedChatMessage.Assistant(
-                        textAcc.Length > 0 ? textAcc.ToString() : null,
-                        null,
-                        reasoningAcc.Length > 0 ? reasoningAcc.ToString() : null
-                    );
-                    await _sessionService
-                        .AppendSessionMessageAsync(
-                            workspaceId,
-                            sessionId,
-                            partial,
-                            CancellationToken.None
-                        )
-                        .ConfigureAwait(false);
-                }
-                catch
-                { /* 取消路径下持久化失败不掩盖取消语义 */
-                }
-            }
             PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
             // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本），保证取消不低估。
             UsageRecorder.CollectAuto(
@@ -547,8 +525,8 @@ public sealed partial class AgentOrchestrator
         return (PhaseOutcome.Continue(), state);
     }
 
-    /// <summary>need22-P1 T6：大 toolOutput（>64KB 按 UTF-8 字节）先落盘再引用 fileRef{path,size}，content 只留前 4K 预览。
-    /// 落盘失败回退为 8K 截断；messages.jsonl 信封格式不变（仍是 tool 文本消息）。</summary>
+    /// <summary>大 toolOutput（超 64KB 按字节）先落盘再引用，content 只留前 4K 预览。
+    /// 落盘失败回退为 8K 截断；统一消息信封格式不变（仍是 tool 文本消息）。</summary>
     internal const long ToolOutputSpillThresholdBytes = 64L * 1024;
     internal const int ToolOutputPreviewChars = 4096;
 }

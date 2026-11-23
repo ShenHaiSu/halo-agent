@@ -131,8 +131,6 @@ public sealed class SessionMetadata
 
     public string? TaskPrompt { get; set; }
 
-    public int HistoryVersion { get; set; }
-
     /// <summary>存储格式版本（三态）：null=未标注老会话，3=工作区单库，其余=数据异常。元数据权威源，新会话由创建路径显式写入。</summary>
     public int? StorageFormatVersion { get; set; } = null;
 
@@ -144,7 +142,7 @@ public sealed class SessionMetadata
 }
 
 /// <summary>
-/// need09-05：会话内图片引用（messages.jsonl 只存引用不存 base64；字节落盘 attachments/）。
+/// 会话内图片引用（消息区只存引用不存 base64；字节落盘 attachments/）。
 /// </summary>
 public sealed class ChatImageRef
 {

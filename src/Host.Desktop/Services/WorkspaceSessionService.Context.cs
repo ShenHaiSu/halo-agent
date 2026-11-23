@@ -26,31 +26,29 @@ public sealed partial class WorkspaceSessionService
             .ConfigureAwait(false);
 
         long turnSeq = 0;
-        // v2 才有 turns/DB；v1 纯 jsonl 会话跳过 DB（jsonl 已由 AppendMessageAsync 落盘）。
-        bool isV2 = meta != null && meta.HistoryVersion == 2;
-        if (isV2)
+        try
+        {
+            var store = new SessionHistoryStore(new SessionHistoryDb(_sessionRepository.Storage));
+            turnSeq = await store
+                .InsertCompactStubAsync(workspaceId, sessionId, stubMessage, stubTurn, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
         {
             try
             {
-                var store = new SessionHistoryStore(
-                    new SessionHistoryDb(_sessionRepository.Storage)
+                Infrastructure.Logging.HaloLogger.App.Error(
+                    "[Compact] InsertCompactStub failed ws="
+                        + workspaceId
+                        + " sess="
+                        + sessionId
+                        + ": "
+                        + ex.Message,
+                    ex
                 );
-                turnSeq = await store
-                    .InsertCompactStubAsync(workspaceId, sessionId, stubMessage, stubTurn, ct)
-                    .ConfigureAwait(false);
             }
-            catch (Exception ex)
-            {
-                try
-                {
-                    Infrastructure.Logging.HaloLogger.App.Error(
-                        $"[Compact] InsertCompactStub failed ws={workspaceId} sess={sessionId}: {ex.Message}",
-                        ex
-                    );
-                }
-                catch { }
-                throw;
-            }
+            catch { }
+            throw;
         }
 
         if (meta != null)

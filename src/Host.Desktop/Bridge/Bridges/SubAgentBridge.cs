@@ -224,10 +224,8 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<SubSessionDetailDto>.Fail("NOT_A_SUB", "该会话不是子会话");
             try
             {
-                WorkspaceHistorySchema.EnsureSupportedFormat(
-                    meta.StorageFormatVersion,
-                    subSessionId
-                );
+                var formatStore = new WorkspaceSessionStore(_storageManager);
+                await formatStore.GetSummaryAsync(workspaceId, subSessionId).ConfigureAwait(false);
             }
             catch (LegacySessionFormatException legacy)
             {
@@ -319,10 +317,8 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<List<UnifiedChatMessage>>.Fail("NOT_A_SUB", "该会话不是子会话");
             try
             {
-                WorkspaceHistorySchema.EnsureSupportedFormat(
-                    meta.StorageFormatVersion,
-                    subSessionId
-                );
+                var formatStore = new WorkspaceSessionStore(_storageManager);
+                await formatStore.GetSummaryAsync(workspaceId, subSessionId).ConfigureAwait(false);
             }
             catch (LegacySessionFormatException legacy)
             {

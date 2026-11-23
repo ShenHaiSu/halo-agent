@@ -29,7 +29,7 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // 1. 追加写至 messages.jsonl
+            // 1. 追加写至工作区单库
             await _sessionRepository
                 .AppendMessageAsync(workspaceId, sessionId, message, ct)
                 .ConfigureAwait(false);
@@ -321,95 +321,90 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             int removed = messages.Count - keptRaw.Count;
             // FIX(tool-400)：截断切面可能劈开 assistant→tool 块，落盘前内存愈合，保证尾部配对完整。
             var (kept, synthetic, orphans) = RebuildHealedHistory(keptRaw);
-            string bak = await _sessionRepository
-                .BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.replay-bak-", ct)
-                .ConfigureAwait(false);
+            var workspaceStore = new WorkspaceSessionStore(_sessionRepository.Storage);
+            string bak;
             try
             {
-                await _sessionRepository
-                    .RewriteMessagesJsonlAsync(workspaceId, sessionId, kept, ct)
+                var backupInfo = await workspaceStore
+                    .BackupWorkspaceAsync(workspaceId, ct)
                     .ConfigureAwait(false);
+                bak = backupInfo.BackupPath;
             }
             catch
             {
                 return HistoryTruncateResult.Fail("REWRITE_ERROR");
             }
-            // S3 v2: DB 同步（messages 重写 + turns/blocks 按 turn_seq 切 + GC）
-            if (meta.HistoryVersion == 2)
+            try
             {
+                var store = new SessionHistoryStore(
+                    new SessionHistoryDb(_sessionRepository.Storage)
+                );
+                await store
+                    .RewriteMessagesAsync(workspaceId, sessionId, kept, ct)
+                    .ConfigureAwait(false);
+                long cutSeq = -1;
                 try
                 {
-                    var store = new SessionHistoryStore(
-                        new SessionHistoryDb(_sessionRepository.Storage)
-                    );
-                    await store
-                        .RewriteMessagesAsync(workspaceId, sessionId, kept, ct)
+                    var summaries = await store
+                        .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
                         .ConfigureAwait(false);
-                    // 按 turn_seq 切：找首个被删 user 轮的 turn_seq
-                    long cutSeq = -1;
-                    try
+                    string? cutUserId = null;
+                    if (cut < messages.Count)
                     {
-                        var summaries = await store
-                            .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
-                            .ConfigureAwait(false);
-                        // cut 指向首条被删消息；在 keptRaw 尾部回找 user
-                        string? cutUserId = null;
-                        if (cut < messages.Count)
+                        for (int k = cut; k >= 0; k--)
                         {
-                            for (int k = cut; k >= 0; k--)
-                            {
-                                var cand = k < messages.Count ? messages[k] : null;
-                                if (
-                                    cand != null
-                                    && string.Equals(
-                                        cand.Role,
-                                        "user",
-                                        StringComparison.OrdinalIgnoreCase
-                                    )
-                                )
-                                {
-                                    cutUserId = cand.Id;
-                                    break;
-                                }
-                                if (k == 0)
-                                    break;
-                                // 若 anchor 自身是 user 且 removeAnchor=false，cut 指向 anchor 下一条，仍以前一条 user 为准
-                            }
-                            // 若 cut 处即 user，直接用它
+                            var cand = k < messages.Count ? messages[k] : null;
                             if (
-                                cut < messages.Count
+                                cand != null
                                 && string.Equals(
-                                    messages[cut].Role,
+                                    cand.Role,
                                     "user",
                                     StringComparison.OrdinalIgnoreCase
                                 )
                             )
-                                cutUserId = messages[cut].Id;
+                            {
+                                cutUserId = cand.Id;
+                                break;
+                            }
+                            if (k == 0)
+                                break;
                         }
-                        if (!string.IsNullOrWhiteSpace(cutUserId))
-                        {
-                            string want = "uturn-" + cutUserId;
-                            var hit = summaries.FirstOrDefault(s =>
-                                string.Equals(s.TurnId, want, StringComparison.Ordinal)
-                            );
-                            if (hit != null)
-                                cutSeq = hit.TurnSeq;
-                        }
+                        if (
+                            cut < messages.Count
+                            && string.Equals(
+                                messages[cut].Role,
+                                "user",
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                            cutUserId = messages[cut].Id;
                     }
-                    catch { }
-                    if (cutSeq > 0)
-                        await store
-                            .TruncateFromTurnSeqAsync(workspaceId, sessionId, cutSeq, ct)
-                            .ConfigureAwait(false);
-                    try
+                    if (!string.IsNullOrWhiteSpace(cutUserId))
                     {
-                        await store
-                            .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
-                            .ConfigureAwait(false);
+                        string want = "uturn-" + cutUserId;
+                        var hit = summaries.FirstOrDefault(s =>
+                            string.Equals(s.TurnId, want, StringComparison.Ordinal)
+                        );
+                        if (hit != null)
+                            cutSeq = hit.TurnSeq;
                     }
-                    catch { }
                 }
                 catch { }
+                if (cutSeq > 0)
+                    await store
+                        .TruncateFromTurnSeqAsync(workspaceId, sessionId, cutSeq, ct)
+                        .ConfigureAwait(false);
+                try
+                {
+                    await store
+                        .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch { }
+            }
+            catch
+            {
+                return HistoryTruncateResult.Fail("REWRITE_ERROR");
             }
             meta.MessageCount = kept.Count;
             var lastSnap = kept.LastOrDefault(m =>

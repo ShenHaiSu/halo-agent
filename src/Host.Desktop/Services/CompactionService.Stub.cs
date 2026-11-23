@@ -171,7 +171,6 @@ public sealed partial class CompactionService
             null
         );
         var reduced = CompactionSummaryInput.ReduceSummaryInput(inputMessages);
-        bool isV2 = sessionMeta != null && sessionMeta.HistoryVersion == 2;
         var body = new StringBuilder();
         foreach (var m in reduced)
         {
@@ -181,7 +180,7 @@ public sealed partial class CompactionService
             string role = (m.Role ?? string.Empty).ToLowerInvariant();
             if (string.Equals(role, "tool", StringComparison.Ordinal))
                 body.AppendLine("[工具结果折叠：1条过程块，计数保留，原文不展开]");
-            else if (isV2 && string.Equals(role, "assistant", StringComparison.Ordinal))
+            else if (string.Equals(role, "assistant", StringComparison.Ordinal))
             {
                 if (m.ToolCalls != null && m.ToolCalls.Count > 0)
                 {

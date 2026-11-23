@@ -186,70 +186,54 @@ public sealed class TimelineUserContentTests : IDisposable
     {
         string ws = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string sess = "sess_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
 
         string userId = "u-" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string turnId = "uturn-" + userId;
         string full = LongUserText();
 
-        using (var conn = SessionHistoryDb.OpenConnection(dbPath))
-        {
-            using (var drop = conn.CreateCommand())
+        await _store.AppendTurnAsync(
+            ws,
+            sess,
+            new List<UnifiedChatMessage>
             {
-                drop.CommandText = "DROP TABLE turns;";
-                drop.ExecuteNonQuery();
-            }
-            using (var create = conn.CreateCommand())
+                new UnifiedChatMessage
+                {
+                    Id = userId,
+                    Role = "user",
+                    Content = full
+                },
+            },
+            new List<TimelineBlock>(),
+            new TurnSummary
             {
-                create.CommandText =
-                    "CREATE TABLE turns("
-                    + "turn_id TEXT PRIMARY KEY,"
-                    + "turn_seq INTEGER NOT NULL UNIQUE,"
-                    + "iter_end INT NOT NULL,"
-                    + "user_preview TEXT NOT NULL DEFAULT '',"
-                    + "final_block_id TEXT,"
-                    + "blocks INT NOT NULL DEFAULT 0,"
-                    + "tools INT NOT NULL DEFAULT 0,"
-                    + "failed INT NOT NULL DEFAULT 0,"
-                    + "duration_ms INT NOT NULL DEFAULT 0,"
-                    + "chars INT NOT NULL DEFAULT 0,"
-                    + "status TEXT NOT NULL DEFAULT 'completed',"
-                    + "last_request_id TEXT NOT NULL DEFAULT '',"
-                    + "updated_at TEXT NOT NULL"
-                    + ");";
-                create.ExecuteNonQuery();
+                TurnId = turnId,
+                TurnSeq = 0,
+                IterEnd = 1,
+                UserPreview = TimelineBlockTracker.BuildPreview(full, 15),
+                UserContent = full,
+                Status = TimelineTurnStatus.Completed,
+                UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
             }
-            using (var msg = conn.CreateCommand())
+        );
+        await _store.AppendTurnAsync(
+            ws,
+            sess,
+            new List<UnifiedChatMessage>(),
+            new List<TimelineBlock>(),
+            new TurnSummary
             {
-                msg.CommandText =
-                    "INSERT OR IGNORE INTO messages(id, role, content, created_utc) VALUES($id, 'user', $content, $utc);";
-                msg.Parameters.AddWithValue("$id", userId);
-                msg.Parameters.AddWithValue("$content", full);
-                msg.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("o"));
-                msg.ExecuteNonQuery();
+                TurnId = "uturn-orphan-miss",
+                TurnSeq = 0,
+                IterEnd = 1,
+                UserPreview = "o",
+                UserContent = string.Empty,
+                Status = TimelineTurnStatus.Completed,
+                UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
             }
-            using (var turn = conn.CreateCommand())
-            {
-                turn.CommandText =
-                    "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, updated_at) VALUES($tid, 1, 1, $preview, $utc);";
-                turn.Parameters.AddWithValue("$tid", turnId);
-                turn.Parameters.AddWithValue(
-                    "$preview",
-                    TimelineBlockTracker.BuildPreview(full, 15)
-                );
-                turn.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("o"));
-                turn.ExecuteNonQuery();
-            }
-            using (var miss = conn.CreateCommand())
-            {
-                miss.CommandText =
-                    "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, updated_at) VALUES('uturn-orphan-miss', 2, 1, 'o', $utc);";
-                miss.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("o"));
-                miss.ExecuteNonQuery();
-            }
-        }
+        );
 
-        _db.EnsureDatabase(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
 
         using (var check = SessionHistoryDb.OpenConnection(dbPath))
         {
