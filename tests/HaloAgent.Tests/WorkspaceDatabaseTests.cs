@@ -175,6 +175,35 @@ public sealed class WorkspaceDatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task SameTurnAndBlockIdAcrossSessionsIsOverwriteNotIsolated()
+    {
+        string ws = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        const string sharedTurn = "uturn-shared";
+        const string sharedBlock = "b-shared";
+        await _store.AppendTurnAsync(
+            ws,
+            "sess_one",
+            new List<UnifiedChatMessage>(),
+            new[] { MakeBlock(sharedBlock, sharedTurn) },
+            MakeTurn(sharedTurn)
+        );
+        await _store.AppendTurnAsync(
+            ws,
+            "sess_two",
+            new List<UnifiedChatMessage>(),
+            new[] { MakeBlock(sharedBlock, sharedTurn) },
+            MakeTurn(sharedTurn)
+        );
+        using var conn = _db.OpenWorkspace(ws);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM turns WHERE turn_id = 'uturn-shared';";
+        Assert.Equal(1, Convert.ToInt32(cmd.ExecuteScalar()));
+        using var cmd2 = conn.CreateCommand();
+        cmd2.CommandText = "SELECT COUNT(*) FROM blocks WHERE block_id = 'b-shared';";
+        Assert.Equal(1, Convert.ToInt32(cmd2.ExecuteScalar()));
+    }
+
+    [Fact]
     public async Task RegisterAndReconcileRepairsRegistryFromMeta()
     {
         string ws = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 8);

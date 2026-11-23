@@ -8,8 +8,8 @@ using Microsoft.Data.Sqlite;
 namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
-/// Per-session timeline write and summary read.
-/// Single writer per session, short-lived connections, full single-transaction turn commit.
+/// Workspace timeline write and summary read.
+/// Single writer per workspace, short-lived connections, full single-transaction turn commit.
 /// </summary>
 public sealed partial class SessionHistoryStore
 {
@@ -27,10 +27,20 @@ public sealed partial class SessionHistoryStore
     public SessionHistoryStore(StoragePathManager storage)
         : this(new SessionHistoryDb(storage)) { }
 
+    private static bool IsDatabaseBusy(Exception ex)
+    {
+        return ex is SqliteException sql
+            && (
+                sql.SqliteErrorCode == 5
+                || sql.SqliteExtendedErrorCode == 5
+                || sql.SqliteExtendedErrorCode == 262
+                || sql.SqliteExtendedErrorCode == 517
+            );
+    }
+
     private SemaphoreSlim GetWriteLock(string workspaceId, string sessionId)
     {
-        string key =
-            (workspaceId ?? string.Empty).Trim() + "/" + (sessionId ?? string.Empty).Trim();
+        string key = "ws:" + (workspaceId ?? string.Empty).Trim().ToLowerInvariant();
         return _writeLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
     }
 
@@ -50,15 +60,28 @@ public sealed partial class SessionHistoryStore
         {
             _db.EnsureWorkspaceDatabase(workspaceId);
             ApplyLargeBlockPolicy(workspaceId, sessionId, blocks);
-            using var conn = _db.OpenWorkspace(workspaceId);
-            ApplyFullSynchronous(conn);
-            using var tx = conn.BeginTransaction();
-            long turnSeq = ResolveTurnSeq(conn, tx, sessionId, turn);
-            FlipStaleFinal(conn, tx, sessionId, turn.TurnId, ResolveNewIter(blocks, turn));
-            InsertMessages(conn, tx, sessionId, messages);
-            InsertBlocks(conn, tx, sessionId, blocks);
-            UpsertTurn(conn, tx, sessionId, turn, turnSeq);
-            tx.Commit();
+            long turnSeq = 0;
+            const int maxAttempts = 6;
+            for (int attempt = 1; ; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    using var conn = _db.OpenWorkspace(workspaceId);
+                    using var tx = conn.BeginTransaction();
+                    turnSeq = ResolveTurnSeq(conn, tx, sessionId, turn);
+                    FlipStaleFinal(conn, tx, sessionId, turn.TurnId, ResolveNewIter(blocks, turn));
+                    InsertMessages(conn, tx, sessionId, messages);
+                    InsertBlocks(conn, tx, sessionId, blocks);
+                    UpsertTurn(conn, tx, sessionId, turn, turnSeq);
+                    tx.Commit();
+                    break;
+                }
+                catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+                {
+                    await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+                }
+            }
             watch.Stop();
             try
             {
@@ -1309,6 +1332,7 @@ public sealed partial class SessionHistoryStore
         return "main";
     }
 
+    // 分区分发：同库复制沿用源标识；块与轮次主键全局唯一，调用方须保证源标识全局不碰撞，否则按覆盖处理。
     private void CopySessionPartition(
         string srcWorkspaceId,
         string srcSessionId,

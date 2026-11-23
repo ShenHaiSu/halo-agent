@@ -343,6 +343,8 @@ public sealed partial class SessionRepository : ISessionRepository
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            string path = GetSessionMetaPath(workspaceId, meta.Id);
+            await AtomicFileWriter.WriteJsonAtomicAsync(path, meta, ct).ConfigureAwait(false);
             if (meta.StorageFormatVersion == WorkspaceHistorySchema.CurrentFormatVersion)
             {
                 try
@@ -375,8 +377,6 @@ public sealed partial class SessionRepository : ISessionRepository
                     );
                 }
             }
-            string path = GetSessionMetaPath(workspaceId, meta.Id);
-            await AtomicFileWriter.WriteJsonAtomicAsync(path, meta, ct).ConfigureAwait(false);
         }
         finally
         {

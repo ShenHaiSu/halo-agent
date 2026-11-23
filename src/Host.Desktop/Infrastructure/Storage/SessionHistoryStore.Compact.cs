@@ -176,7 +176,7 @@ public sealed partial class SessionHistoryStore
         {
             _db.EnsureWorkspaceDatabase(ws);
             using var conn = _db.OpenWorkspace(ws);
-            ApplyFullSynchronous(conn);
+            // 工作区库写依赖 WAL + busy_timeout；不再强制 FULL，避免放大持有窗口。
             using var tx = conn.BeginTransaction();
             InsertMessages(conn, tx, sess, new[] { stubMessage });
             long turnSeq = ResolveTurnSeq(conn, tx, sess, stubTurn);

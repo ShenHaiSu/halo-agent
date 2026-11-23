@@ -411,7 +411,16 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 )
                 .ConfigureAwait(false);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            try
+            {
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    "[Workspace] registry sync failed sess=" + sessionId + ": " + ex.Message
+                );
+            }
+            catch { }
+        }
 
         try
         {
@@ -423,7 +432,7 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         return meta;
     }
 
-    /// <summary>工作区库注册表启动对账：按元数据文件补齐派生缓存，老会话不进表，三业务表只读不写。</summary>
+    /// <summary>工作区库注册表启动对账：逐目录读元数据文件补齐派生缓存，老会话不进表，三业务表只读不写；仅统计真实修复数。</summary>
     public async Task<int> ReconcileWorkspaceRegistryAsync(
         string workspaceId,
         CancellationToken ct = default
@@ -436,42 +445,108 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         int fixedCount = 0;
         try
         {
-            var metas = await _sessionRepository
-                .LoadSessionsIndexAsync(workspaceId, ct)
-                .ConfigureAwait(false);
-            var registry = new SessionHistoryStore(
-                new SessionHistoryDb(_sessionRepository.Storage)
+            string wsDir = Path.Combine(
+                _sessionRepository.Storage.SessionsDirectory,
+                workspaceId.Trim()
             );
-            foreach (var item in metas)
+            if (!Directory.Exists(wsDir))
+            {
+                return 0;
+            }
+            var db = new SessionHistoryDb(_sessionRepository.Storage);
+            try
+            {
+                db.EnsureWorkspaceDatabase(workspaceId);
+            }
+            catch { }
+            var registry = new SessionHistoryStore(db);
+            string[] sessionDirs;
+            try
+            {
+                sessionDirs = Directory.GetDirectories(wsDir);
+            }
+            catch
+            {
+                return 0;
+            }
+            foreach (string dir in sessionDirs)
             {
                 ct.ThrowIfCancellationRequested();
-                if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                string sessionId = Path.GetFileName(
+                    dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                );
+                if (string.IsNullOrWhiteSpace(sessionId))
                 {
                     continue;
                 }
-                if (item.StorageFormatVersion != WorkspaceHistorySchema.CurrentFormatVersion)
+                SessionMetadata? meta;
+                try
+                {
+                    meta = await _sessionRepository
+                        .LoadSessionMetaAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    continue;
+                }
+                if (meta == null || string.IsNullOrWhiteSpace(meta.Id))
+                {
+                    continue;
+                }
+                if (meta.StorageFormatVersion != WorkspaceHistorySchema.CurrentFormatVersion)
                 {
                     continue;
                 }
                 string kind = string.Equals(
-                    item.SessionKind,
+                    meta.SessionKind,
                     "sub",
                     StringComparison.OrdinalIgnoreCase
                 )
                     ? "sub"
                     : string.Equals(
-                        item.SessionKind,
+                        meta.SessionKind,
                         "archived",
                         StringComparison.OrdinalIgnoreCase
                     )
                         ? "archived"
                         : "main";
+                bool needsFix = true;
+                try
+                {
+                    using var conn = db.OpenWorkspace(workspaceId);
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        "SELECT storage_format, session_kind FROM sessions WHERE session_id = $sid;";
+                    cmd.Parameters.AddWithValue("$sid", meta.Id);
+                    using var reader = cmd.ExecuteReader();
+                    if (reader.Read())
+                    {
+                        int fmt = reader.IsDBNull(0) ? -1 : reader.GetInt32(0);
+                        string regKind = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                        if (
+                            fmt == WorkspaceHistorySchema.CurrentFormatVersion
+                            && string.Equals(regKind, kind, StringComparison.Ordinal)
+                        )
+                        {
+                            needsFix = false;
+                        }
+                    }
+                }
+                catch
+                {
+                    needsFix = true;
+                }
+                if (!needsFix)
+                {
+                    continue;
+                }
                 try
                 {
                     await registry
                         .RegisterSessionAsync(
                             workspaceId,
-                            item.Id,
+                            meta.Id,
                             WorkspaceHistorySchema.CurrentFormatVersion,
                             kind,
                             ct
@@ -479,7 +554,16 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                         .ConfigureAwait(false);
                     fixedCount++;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        HaloLogger.App.Warn(
+                            "[Workspace] reconcile failed sess=" + meta.Id + ": " + ex.Message
+                        );
+                    }
+                    catch { }
+                }
             }
         }
         catch { }

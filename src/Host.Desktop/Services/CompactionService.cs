@@ -506,7 +506,7 @@ public sealed partial class CompactionService : ICompactionService
             var m0 = await service
                 .GetSessionAsync(workspaceId, sessionId, ct)
                 .ConfigureAwait(false);
-            isV2 = m0 != null && m0.HistoryVersion == 2;
+            isV2 = m0 != null && m0.HistoryVersion == 2; // 工作区单库建成后读写切换收尾前路由暂沿用旧标识，格式断言收敛时再统一切换。
             if (isV2)
             {
                 var storage = repository.Storage;
@@ -522,7 +522,30 @@ public sealed partial class CompactionService : ICompactionService
                 {
                     try
                     {
-                        File.Copy(dbPath, dbBakPath, overwrite: true);
+                        string tmpBak = dbBakPath + "." + DateTime.UtcNow.Ticks + ".tmp";
+                        try
+                        {
+                            foreach (
+                                var stale in Directory.GetFiles(
+                                    Path.GetDirectoryName(dbBakPath)!,
+                                    Path.GetFileName(dbBakPath) + ".*.tmp"
+                                )
+                            )
+                            {
+                                try
+                                {
+                                    File.Delete(stale);
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+                        using var conn = SessionHistoryDb.OpenConnection(dbPath);
+                        using var vacuum = conn.CreateCommand();
+                        vacuum.CommandText = "VACUUM INTO $tmp;";
+                        vacuum.Parameters.AddWithValue("$tmp", tmpBak);
+                        vacuum.ExecuteNonQuery();
+                        File.Move(tmpBak, dbBakPath, overwrite: true);
                     }
                     catch
                     {
@@ -530,7 +553,9 @@ public sealed partial class CompactionService : ICompactionService
                     }
                 }
                 else
+                {
                     dbBakPath = null;
+                }
                 v2store = new SessionHistoryStore(db);
             }
         }

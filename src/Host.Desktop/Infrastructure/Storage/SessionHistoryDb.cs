@@ -81,7 +81,7 @@ public sealed class SessionHistoryDb
         + "CREATE INDEX IF NOT EXISTS ix_blocks_call ON blocks(call_id) WHERE call_id IS NOT NULL;"
         + "CREATE INDEX IF NOT EXISTS ix_messages_kind ON messages(kind) WHERE kind IS NOT NULL;";
 
-    /// <summary>过渡期保留的每会话建库入口：仅供历史链路兼容，新建库一律走工作区单库；迁移完成后移除。</summary>
+    /// <summary>过渡期保留的每会话建库入口：仅供历史链路兼容，新建库一律走工作区单库；待读写切换收尾时随旧消息文件一并移除。</summary>
     public string EnsureDatabase(string workspaceId, string sessionId)
     {
         string dbPath = GetDbPath(workspaceId, sessionId);
