@@ -133,6 +133,12 @@ public sealed class SessionMetadata
 
     public int HistoryVersion { get; set; }
 
+    /// <summary>存储格式版本（三态）：null=未标注老会话，3=工作区单库，其余=数据异常。元数据权威源，新会话由创建路径显式写入。</summary>
+    public int? StorageFormatVersion { get; set; } = null;
+
+    /// <summary>会话语义：main|sub|archived，与存储格式正交。</summary>
+    public string SessionKind { get; set; } = "main";
+
     /// <summary>P007：会话级压缩模型冻结：null = 继承全局；首次写桩后固化为 stub。</summary>
     public string? CompactMode { get; set; }
 }

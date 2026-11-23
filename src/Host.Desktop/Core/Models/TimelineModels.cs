@@ -70,6 +70,10 @@ public sealed class TurnSummary
     public string UserContent { get; set; } = string.Empty;
     public string? FinalBlockId { get; set; }
     public string FinalPreview { get; set; } = string.Empty;
+
+    /// <summary>末轮正文全文：摘要层一次返回，首屏零额外请求；超限转外置引用，仅回预览。</summary>
+    public string FinalContent { get; set; } = string.Empty;
+
     public int Blocks { get; set; }
     public int Tools { get; set; }
     public int Failed { get; set; }
