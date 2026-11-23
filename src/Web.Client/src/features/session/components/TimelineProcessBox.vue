@@ -117,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { FlatTimelineTurn } from '@features/session/utils/timelineSummary';
 import { processBoxLabel, statusBadge } from '@features/session/utils/timelineSummary';
 import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
@@ -127,7 +127,6 @@ import ToolCallCard from '@features/agent/components/ToolCallCard.vue';
 import ReasoningText from '@shared/ui/ReasoningText.vue';
 import { trimBlankEdges } from '@shared/utils/trimBlank';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { markBlockDirty } from '@features/session/utils/markdownDirty';
 import { setTurnExpanded } from '../utils/timelineExpansion';
 
 const props = defineProps<{
@@ -304,6 +303,24 @@ async function ensureToolResult(group: ToolGroup): Promise<void> {
   }
 }
 
+// 折叠缓存按“展开期 + 关闭后 3 秒宽限”失效（TTL）：关闭启动 3 秒倒计时，3 秒内重开复用缓存；
+// 超 3 秒清空过程缓存，下次展开重拉。后端无状态，无需失效逻辑。本组件选用 TTL，与标脏二选一。
+let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+function clearCollapseTimer(): void {
+  if (collapseTimer) {
+    clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
+}
+function clearProcessCache(): void {
+  blockMap.value = {};
+  blockOrder.value = [];
+  missing.value = [];
+  loadedResultText.value = {};
+  loadedResultSuccess.value = {};
+  pendingToolFetch.value = {};
+  loadedOnce = false;
+}
 async function toggle(): Promise<void> {
   expanded.value = !expanded.value;
   try {
@@ -312,26 +329,13 @@ async function toggle(): Promise<void> {
     /* quota counter never blocks */
   }
   emit('expand-change', props.turn.turnId, expanded.value);
-  if (expanded.value && !loadedOnce) {
-    await reload();
+  if (expanded.value) {
+    clearCollapseTimer();
+    if (!loadedOnce) await reload();
+    return;
   }
-  if (!expanded.value) {
-    for (const id of blockOrder.value) {
-      try {
-        markBlockDirty(id);
-      } catch {
-        /* dirty mark never blocks collapse */
-      }
-    }
-    const fid = (props.turn.finalBlockId || '').trim();
-    if (fid) {
-      try {
-        markBlockDirty(fid);
-      } catch {
-        /* dirty mark never blocks collapse */
-      }
-    }
-  }
+  clearCollapseTimer();
+  collapseTimer = setTimeout(clearProcessCache, 3000);
 }
 
 async function reload(): Promise<void> {
@@ -415,6 +419,7 @@ async function reloadFinal(): Promise<void> {
 watch(
   () => props.turn.turnId,
   () => {
+    clearCollapseTimer();
     loadedOnce = false;
     blockMap.value = {};
     blockOrder.value = [];
@@ -449,10 +454,10 @@ watch(
     finalMissing.value = false;
   }
 );
-
 onMounted(() => {
   void reloadFinal();
 });
+onUnmounted(() => clearCollapseTimer());
 </script>
 
 <style scoped>
