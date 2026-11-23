@@ -324,18 +324,18 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     touch(t);
   }
 
-  // need07：重放 user（截断→重载→同文复发，避免双 user）
+  // 重放 user：截断优先，后端按仓储主键返回复发原文（重放归一由仓储主键保障，不再经消息内容反查）。
   async function replayUserMessage(msgId: string): Promise<boolean> {
     const rt = agentRuntime();
     const sid = (activeSessionId.value || '').trim();
-    if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
+    const mid = (msgId || '').trim();
+    if (!sid || !mid || isBusyForHistory(sid) || isCompacting(sid)) return false;
     clearPending(sid);
-    const text = rt.findMessageContent(sid, msgId).trim();
-    if (!text) return false;
     try {
-      const res = await rt.truncateHistory(rt.workspaceId(), sid, msgId, true);
+      const res = await rt.truncateHistory(rt.workspaceId(), sid, mid, true);
       if (!res.ok) return false;
-      const replayText = String(res.replayText || text);
+      const replayText = String(res.replayText || '').trim();
+      if (!replayText) return false;
       await rt.loadSessionMessages(sid);
       await rt.refreshBudget();
       return await sendPrompt(replayText);

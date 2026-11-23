@@ -2,7 +2,7 @@
  * 4 小 store 与旧转发共用同一份 state，响应式语义与旧 agentStore.ts 一致；跨 store 读经此处参数/事件，不直 import 其他 store。
  */
 import { ref } from 'vue';
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
+import type { ChatImageRef } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
 
 /** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
@@ -146,8 +146,6 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
-export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
 

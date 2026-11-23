@@ -16,7 +16,7 @@ import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, turns } from '@features/agent/stores/model';
 import type { PendingUser } from '@features/session/utils/pendingUser';
-import { isPendingExpired, matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
+import { isPendingExpired, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -40,7 +40,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const timelineSummaries = ref<TurnSummary[]>([]);
   const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
   const toolResultCache = ref<Record<string, TimelineToolResult>>({});
-  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -49,13 +48,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return true;
     }
   }
-  /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
-  const isV2Timeline = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    return (s.historyVersion ?? 0) === 2;
-  });
-  /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  /** 摘要源精确对账（requestId/lastRequestId），命中即转正并清 pending。 */
   function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
     need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
     dropPendingUser(sid);
@@ -77,15 +70,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         dropPendingUser(id);
         return;
       }
-      // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
-      if (!isV2Timeline.value) {
-        const hit = matchConfirmed(p, sessionMessages.value);
-        if (hit) {
-          confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
-          return;
-        }
-      }
-      // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
+      // 摘要源 requestId/lastRequestId 精确对账。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
       if (summaryHit) {
         confirmPendingHit(id, p, String(p.requestId || ''));
@@ -1221,7 +1206,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     isHistoryReadonly,
-    isV2Timeline,
     sessionMessages,
     timelineSummaries,
     budgetStatus,

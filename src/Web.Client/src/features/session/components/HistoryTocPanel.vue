@@ -46,10 +46,9 @@
 </template>
 <script setup lang="ts">
 /**
- * need19：历史气泡目录面板。
- * 数据唯一来源：workspaceStore.sessionMessages（主）/ subSessionStore.messages（子）。
- * 通过 useTimelineNav().scrollToAnchor() 跳转，不直接操作 DOM。
- */
+ * 历史目录面板。
+ * 数据来源：摘要时间线（timelineSummaries）/ 子会话存储（subSessionStore.messages）。
+ * 通过 useTimelineNav().scrollToAnchor() 跳转，不直接操作 DOM。 */
 import { computed, nextTick, ref, watch } from 'vue';
 import { Bot } from 'lucide-vue-next';
 import { useMessage } from 'naive-ui';
@@ -76,12 +75,7 @@ const nav = useTimelineNav();
 const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
-const isHistoryReadonly = computed(() => {
-  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
-  if (!s) return false;
-  const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
-  return v !== 2;
-});
+const isHistoryReadonly = computed(() => ws.isHistoryReadonly);
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
 

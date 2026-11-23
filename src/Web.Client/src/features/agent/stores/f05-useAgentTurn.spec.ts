@@ -27,7 +27,6 @@ function stubRuntime(): void {
     providerId: () => 'p1',
     modelId: () => 'm1',
     maxImages: () => 4,
-    findMessageContent: () => '',
     truncateHistory: () => Promise.resolve({ ok: true, replayText: 'replay' }),
     loadSessionMessages: () => Promise.resolve(),
     refreshBudget: () => Promise.resolve(),

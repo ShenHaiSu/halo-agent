@@ -6,7 +6,6 @@ export interface AgentRuntimeContext {
   providerId(): string;
   modelId(): string;
   maxImages(): number;
-  findMessageContent(sessionId: string, msgId: string): string;
   truncateHistory(
     workspaceId: string,
     sessionId: string,
@@ -29,7 +28,6 @@ const noopRuntime: AgentRuntimeContext = {
   providerId: () => '',
   modelId: () => '',
   maxImages: () => 4,
-  findMessageContent: () => '',
   truncateHistory: () => Promise.resolve({ ok: false, replayText: '' }),
   loadSessionMessages: () => Promise.resolve(),
   applyUsagePatch: () => undefined,

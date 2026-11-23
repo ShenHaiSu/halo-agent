@@ -1,7 +1,6 @@
-// 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
 // need02-P1：乐观 user 纯函数（与 store 解耦，可单测；禁止调 bridge/DOM）。
 // 语义来源：docs/need-02/03 §3.1 + 04-P1 §对账规则 + 05 R2–R4。
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
+import type { ChatImageRef } from '@shared/bridge/hostBridge';
 
 export type PendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
 
@@ -68,63 +67,6 @@ export function isPendingExpired(pending: PendingUser | null | undefined, nowMs:
   return nowMs - t > timeoutMs;
 }
 
-function tailUsers(messages: UnifiedChatMessage[], n = 5): UnifiedChatMessage[] {
-  const out: UnifiedChatMessage[] = [];
-  for (let i = messages.length - 1; i >= 0 && out.length < n; i--) {
-    const m = messages[i];
-    if (!m) continue;
-    if (String((m as UnifiedChatMessage).role || '').toLowerCase() !== 'user') continue;
-    out.push(m);
-  }
-  return out;
-}
-
-function withinWindow(aIso: string, bIso: string, ms = 60_000): boolean {
-  const a = Date.parse(String(aIso || ''));
-  const b = Date.parse(String(bIso || ''));
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
-  return Math.abs(a - b) <= ms;
-}
-
-/**
- * 对账（启发式 + 精确式双兼容，纯函数）：
- * 1. 精确：后端若回带 `requestId`（07 可选 B1），直接按 requestId 匹配；
- * 2. 启发：尾部 5 条内找 `role=user && content==pending.content && createdAt ±60s`；
- * 3. 兜底由调用方做（30s 标 `?`，见 isPendingExpired），这里只返回命中或 null。
- */
-export function matchConfirmed(
-  pending: PendingUser | null | undefined,
-  messages: UnifiedChatMessage[] | null | undefined
-): UnifiedChatMessage | null {
-  if (!pending) return null;
-  // failed/superseded/confirmed 不再参与对账（R4：重发新 requestId，旧 pending 不复用）。
-  if (pending.status !== 'sending') return null;
-  const list = Array.isArray(messages) ? messages : [];
-  if (!list.length) return null;
-  const reqId = String(pending.requestId || '').trim();
-  if (reqId) {
-    for (let i = list.length - 1; i >= 0; i--) {
-      const m = list[i] as unknown as { requestId?: unknown; id?: unknown };
-      if (m && String((m as { requestId?: unknown }).requestId || '').trim() === reqId) {
-        return list[i];
-      }
-    }
-  }
-  const want = String(pending.content ?? '');
-  for (const m of tailUsers(list, 5)) {
-    if (String(m.content ?? '') !== want) continue;
-    if (!withinWindow(String(pending.createdAtUtc || ''), String((m as UnifiedChatMessage).createdAtUtc || ''), 60_000)) {
-      continue;
-    }
-    // 图片占位一致性：pending 有图时要求候选至少携带同数图片（避免纯文本误命中带图轮）。
-    if (pending.images.length > 0) {
-      const imgs = Array.isArray((m as UnifiedChatMessage).images) ? (m as UnifiedChatMessage).images!.length : 0;
-      if (imgs < pending.images.length) continue;
-    }
-    return m;
-  }
-  return null;
-}
 /** 摘要源精确对账：pending.requestId 与 turn.lastRequestId 一致即命中（v2 下 jsonl 为空时的主对账路径）。 */
 export function matchConfirmedBySummary(
   pending: PendingUser | null | undefined,
