@@ -163,13 +163,14 @@ public sealed class TimelineS5Tests : IDisposable
         const string ws = "ws-s5";
         const string sess = "sess-s5old";
         const string turn = "uturn-u1";
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
-                + " VALUES('s5:old-call', $tid, 1, 1, 'tool_call', 'process', 'call-old', NULL, 2, '{}', '{}', NULL, 0);";
+                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, 's5:old-call', $tid, 1, 1, 'tool_call', 'process', 'call-old', NULL, 2, '{}', '{}', NULL, 0);";
+            cmd.Parameters.AddWithValue("$sid", sess);
             cmd.Parameters.AddWithValue("$tid", turn);
             cmd.ExecuteNonQuery();
         }
@@ -404,13 +405,14 @@ public sealed class TimelineS5Tests : IDisposable
         const string ws = "ws-s5";
         const string sess = "sess-s5legacy";
         const string turn = "uturn-u1";
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
-                + " VALUES('s5:legacy-result', $tid, 1, 1, 'tool_result', 'process', 'call-legacy', 'read_file', 5, 'hello', 'hello', NULL, 0);";
+                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, 's5:legacy-result', $tid, 1, 1, 'tool_result', 'process', 'call-legacy', 'read_file', 5, 'hello', 'hello', NULL, 0);";
+            cmd.Parameters.AddWithValue("$sid", sess);
             cmd.Parameters.AddWithValue("$tid", turn);
             cmd.ExecuteNonQuery();
         }

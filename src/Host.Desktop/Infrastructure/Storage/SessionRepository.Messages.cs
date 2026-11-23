@@ -57,7 +57,7 @@ public sealed partial class SessionRepository : ISessionRepository
         // S3 B3: v2 dual-write DB messages (mirror when history.db exists, INSERT OR IGNORE, never breaks jsonl)
         try
         {
-            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+            string dbPath = _storageManager.GetWorkspaceDbPath(workspaceId);
             if (File.Exists(dbPath))
             {
                 var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
@@ -76,7 +76,7 @@ public sealed partial class SessionRepository : ISessionRepository
         // S3 B3: v2 reads from DB messages first (history.db exists => DB is truth, ignore blocks)
         try
         {
-            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+            string dbPath = _storageManager.GetWorkspaceDbPath(workspaceId);
             if (File.Exists(dbPath))
             {
                 var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));

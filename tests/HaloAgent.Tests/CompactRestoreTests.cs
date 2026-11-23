@@ -103,7 +103,7 @@ public sealed class CompactRestoreTests : IDisposable
         var full = await _service.GetSessionMessagesAsync(wsId, sessId);
         var kept = full.Where(m => !deleteIds.Contains(m.Id, StringComparer.Ordinal)).ToList();
         await _repository.RewriteMessagesJsonlAsync(wsId, sessId, kept);
-        string dbPath = _storageManager.GetHistoryDbPath(wsId, sessId);
+        string dbPath = _storageManager.GetWorkspaceDbPath(wsId);
         if (File.Exists(dbPath))
             await new SessionHistoryStore(
                 new SessionHistoryDb(_storageManager)
@@ -323,11 +323,11 @@ public sealed class CompactRestoreTests : IDisposable
         var old = UnifiedChatMessage.User("【上下文摘要：压缩自此前 5 条】旧摘要正文");
         store.InsertSingleMessageForTest(wsId, sessId, old);
         var db = new SessionHistoryDb(_storageManager);
-        db.EnsureDatabase(wsId, sessId);
+        db.EnsureWorkspaceDatabase(wsId);
         var hit = (await store.GetMessagesAsync(wsId, sessId)).First(m => m.Id == old.Id);
         Assert.Equal(MessageKind.CompactStub, hit.Kind);
         Assert.Null(hit.MetaJson);
-        db.EnsureDatabase(wsId, sessId);
+        db.EnsureWorkspaceDatabase(wsId);
         Assert.Single((await store.GetMessagesAsync(wsId, sessId)).Where(m => m.Id == old.Id));
     }
 

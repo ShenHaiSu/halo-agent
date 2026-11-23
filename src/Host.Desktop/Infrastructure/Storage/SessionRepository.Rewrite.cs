@@ -91,7 +91,7 @@ public sealed partial class SessionRepository : ISessionRepository
         {
             if (meta != null && meta.HistoryVersion == 2)
             {
-                string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+                string dbPath = _storageManager.GetWorkspaceDbPath(workspaceId);
                 if (File.Exists(dbPath))
                 {
                     var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));

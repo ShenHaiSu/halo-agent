@@ -343,7 +343,23 @@ public sealed partial class SessionRepository : ISessionRepository
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (meta.HistoryVersion == 2)
+            if (meta.StorageFormatVersion == WorkspaceHistorySchema.CurrentFormatVersion)
+            {
+                try
+                {
+                    var timelineDb = new SessionHistoryDb(_storageManager);
+                    timelineDb.EnsureWorkspaceDatabase(workspaceId);
+                    timelineDb.CheckpointWorkspace(workspaceId);
+                }
+                catch (Exception ex)
+                {
+                    HaloLogger.App.Warn(
+                        "[SessionRepository] workspace database bootstrap failed, meta save continues: "
+                            + ex.Message
+                    );
+                }
+            }
+            else if (meta.HistoryVersion == 2)
             {
                 try
                 {

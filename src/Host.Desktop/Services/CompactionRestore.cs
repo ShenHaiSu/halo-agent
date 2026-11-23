@@ -119,10 +119,7 @@ public sealed class CompactionRestore
                 .ConfigureAwait(false);
             try
             {
-                string dbPath = _service.SessionRepository.Storage.GetHistoryDbPath(
-                    workspaceId,
-                    sessionId
-                );
+                string dbPath = _service.SessionRepository.Storage.GetWorkspaceDbPath(workspaceId);
                 if (File.Exists(dbPath))
                 {
                     var store = new SessionHistoryStore(
@@ -136,11 +133,15 @@ public sealed class CompactionRestore
                     {
                         using var conn = SessionHistoryDb.OpenConnection(dbPath);
                         using var delB = conn.CreateCommand();
-                        delB.CommandText = "DELETE FROM blocks WHERE turn_id = $tid;";
+                        delB.CommandText =
+                            "DELETE FROM blocks WHERE session_id = $sid AND turn_id = $tid;";
+                        delB.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                         delB.Parameters.AddWithValue("$tid", stubTurnId);
                         delB.ExecuteNonQuery();
                         using var delT = conn.CreateCommand();
-                        delT.CommandText = "DELETE FROM turns WHERE turn_id = $tid;";
+                        delT.CommandText =
+                            "DELETE FROM turns WHERE session_id = $sid AND turn_id = $tid;";
+                        delT.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                         delT.Parameters.AddWithValue("$tid", stubTurnId);
                         delT.ExecuteNonQuery();
                     }

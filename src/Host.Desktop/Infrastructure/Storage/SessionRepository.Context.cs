@@ -21,19 +21,20 @@ public sealed partial class SessionRepository : ISessionRepository
     {
         try
         {
-            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
+            string dbPath = _storageManager.GetWorkspaceDbPath(workspaceId);
             if (File.Exists(dbPath))
             {
                 var db = new SessionHistoryDb(_storageManager);
-                db.EnsureDatabase(workspaceId, sessionId);
-                using var conn = db.Open(workspaceId, sessionId);
+                db.EnsureWorkspaceDatabase(workspaceId);
+                using var conn = db.OpenWorkspace(workspaceId);
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText =
                     ActiveContextColumns
-                    + " FROM messages WHERE (SELECT MAX(seq) FROM messages WHERE kind='compact_stub') IS NULL"
-                    + " OR seq >= (SELECT MAX(seq) FROM messages WHERE kind='compact_stub')"
-                    + " OR (role='system' AND seq < (SELECT MIN(seq) FROM messages WHERE role<>'system'))"
-                    + " ORDER BY seq;";
+                    + " FROM messages WHERE session_id = $sid AND ((SELECT MAX(seq) FROM messages WHERE session_id = $sid AND kind='compact_stub') IS NULL"
+                    + " OR seq >= (SELECT MAX(seq) FROM messages WHERE session_id = $sid AND kind='compact_stub')"
+                    + " OR (role='system' AND seq < (SELECT MIN(seq) FROM messages WHERE session_id = $sid AND role<>'system'))"
+                    + ") ORDER BY seq;";
+                cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 var result = new List<UnifiedChatMessage>();
                 using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))

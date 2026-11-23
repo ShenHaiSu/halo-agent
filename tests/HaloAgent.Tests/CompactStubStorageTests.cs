@@ -99,7 +99,7 @@ public sealed class CompactStubStorageTests : IDisposable
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId, 2);
         var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
-        string dbPath = _storageManager.GetHistoryDbPath(wsId, sessId);
+        string dbPath = _storageManager.GetWorkspaceDbPath(wsId);
         // v2 DB 可能尚未创建（纯消息会话）；先确保一次再断言幂等
         store.EnsureDatabaseForTest(wsId, sessId);
         var cols1 = ReadCols(dbPath, "messages");
@@ -340,7 +340,7 @@ internal static class SessionHistoryStoreTestHooks
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
         );
         var db = (SessionHistoryDb)dbField!.GetValue(store)!;
-        db.EnsureDatabase(ws, sess);
+        db.EnsureWorkspaceDatabase(ws);
     }
 
     public static void InsertSingleMessageForTest(

@@ -18,6 +18,9 @@ public sealed class SessionHistoryDb
 
     public StoragePathManager Storage => _storage;
 
+    public string GetWorkspaceDbPath(string workspaceId) =>
+        _storage.GetWorkspaceDbPath(workspaceId);
+
     public string GetDbPath(string workspaceId, string sessionId) =>
         _storage.GetHistoryDbPath(workspaceId, sessionId);
 
@@ -78,6 +81,7 @@ public sealed class SessionHistoryDb
         + "CREATE INDEX IF NOT EXISTS ix_blocks_call ON blocks(call_id) WHERE call_id IS NOT NULL;"
         + "CREATE INDEX IF NOT EXISTS ix_messages_kind ON messages(kind) WHERE kind IS NOT NULL;";
 
+    /// <summary>过渡期保留的每会话建库入口：仅供历史链路兼容，新建库一律走工作区单库；迁移完成后移除。</summary>
     public string EnsureDatabase(string workspaceId, string sessionId)
     {
         string dbPath = GetDbPath(workspaceId, sessionId);
@@ -253,6 +257,66 @@ public sealed class SessionHistoryDb
         catch
         {
             // Checkpoint failures are observed via counters; never break the write path here.
+            try
+            {
+                TimelineObservability.ReportCheckpoint(false);
+            }
+            catch { }
+            return false;
+        }
+    }
+
+    /// <summary>工作区单库建库入口：建 sessions 注册表与三张业务表并对齐结构版本。</summary>
+    public string EnsureWorkspaceDatabase(string workspaceId)
+    {
+        string dbPath = GetWorkspaceDbPath(workspaceId);
+        string? dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        using var conn = OpenConnection(dbPath);
+        using (var pragma = conn.CreateCommand())
+        {
+            pragma.CommandText =
+                "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
+            pragma.ExecuteNonQuery();
+        }
+        WorkspaceHistorySchema.EnsureSchema(conn);
+        try
+        {
+            using var stubBackfill = conn.CreateCommand();
+            stubBackfill.CommandText =
+                "UPDATE messages SET kind = 'compact_stub'"
+                + " WHERE kind IS NULL AND role = 'user' AND content LIKE '【上下文摘要%';";
+            stubBackfill.ExecuteNonQuery();
+        }
+        catch { }
+        return dbPath;
+    }
+
+    public SqliteConnection OpenWorkspace(string workspaceId) =>
+        OpenConnection(GetWorkspaceDbPath(workspaceId));
+
+    public bool CheckpointWorkspace(string workspaceId)
+    {
+        string dbPath = GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+        {
+            return true;
+        }
+        try
+        {
+            using var conn = OpenConnection(dbPath);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            cmd.ExecuteNonQuery();
+            TimelineObservability.ReportCheckpoint(true);
+            return true;
+        }
+        catch
+        {
             try
             {
                 TimelineObservability.ReportCheckpoint(false);

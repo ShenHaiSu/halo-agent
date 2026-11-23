@@ -513,11 +513,11 @@ public sealed partial class CompactionService : ICompactionService
                 var db = new SessionHistoryDb(storage);
                 try
                 {
-                    db.Checkpoint(workspaceId, sessionId);
+                    db.CheckpointWorkspace(workspaceId);
                 }
                 catch { }
-                string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
-                dbBakPath = storage.GetHistoryBackupPath(workspaceId, sessionId);
+                string dbPath = storage.GetWorkspaceDbPath(workspaceId);
+                dbBakPath = storage.GetWorkspaceBackupPath(workspaceId);
                 if (File.Exists(dbPath))
                 {
                     try
@@ -670,10 +670,10 @@ public sealed partial class CompactionService : ICompactionService
                     if (!string.IsNullOrWhiteSpace(dbBakPath) && File.Exists(dbBakPath))
                     {
                         var storage = repository.Storage;
-                        string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
+                        string dbPath = storage.GetWorkspaceDbPath(workspaceId);
                         try
                         {
-                            new SessionHistoryDb(storage).Checkpoint(workspaceId, sessionId);
+                            new SessionHistoryDb(storage).CheckpointWorkspace(workspaceId);
                         }
                         catch { }
                         File.Copy(dbBakPath, dbPath, overwrite: true);

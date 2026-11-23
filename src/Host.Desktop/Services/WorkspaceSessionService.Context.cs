@@ -99,7 +99,7 @@ public sealed partial class WorkspaceSessionService
         {
             if (_sessionRepository is SessionRepository concrete)
             {
-                string dbPath = concrete.Storage.GetHistoryDbPath(workspaceId, sessionId);
+                string dbPath = concrete.Storage.GetWorkspaceDbPath(workspaceId);
                 if (File.Exists(dbPath))
                 {
                     var store = new SessionHistoryStore(new SessionHistoryDb(concrete.Storage));

@@ -177,7 +177,7 @@ public sealed class TimelineS2Tests : IDisposable
             var conn = new Microsoft.Data.Sqlite.SqliteConnection(
                 new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
                 {
-                    DataSource = _storageManager.GetHistoryDbPath(ws, sess),
+                    DataSource = _storageManager.GetWorkspaceDbPath(ws),
                     Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
                     Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
                     Pooling = false,
@@ -188,7 +188,8 @@ public sealed class TimelineS2Tests : IDisposable
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "SELECT content, content_ref FROM blocks WHERE block_id='req-big:b1';";
+                "SELECT content, content_ref FROM blocks WHERE session_id = $sid AND block_id='req-big:b1';";
+            cmd.Parameters.AddWithValue("$sid", sess);
             using var r = cmd.ExecuteReader();
             Assert.True(r.Read());
             Assert.Equal(string.Empty, r.GetString(0));

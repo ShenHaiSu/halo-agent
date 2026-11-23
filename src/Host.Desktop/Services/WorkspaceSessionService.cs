@@ -377,11 +377,13 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             CreatedByCallId = isSub ? createdByCallId : null,
             TaskPrompt = isSub ? (string.IsNullOrEmpty(taskIdx) ? null : taskIdx) : null,
             HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
+            SessionKind = isSub ? "sub" : "main",
         };
         if (isSub)
             meta.TitleLocked = true;
 
-        // 1. 保存 meta.json
+        // 1. 保存 meta.json（元数据文件为权威源，先落盘再同步注册表）
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
         // 2. 更新 sessions-index.json
@@ -393,6 +395,24 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             .SaveSessionsIndexAsync(workspaceId, sessions, ct)
             .ConfigureAwait(false);
 
+        // 3. 同步工作区库 sessions 注册表（派生缓存，不符以 meta.json 覆盖）
+        try
+        {
+            var registry = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
+            await registry
+                .RegisterSessionAsync(
+                    workspaceId,
+                    sessionId,
+                    WorkspaceHistorySchema.CurrentFormatVersion,
+                    meta.SessionKind,
+                    ct
+                )
+                .ConfigureAwait(false);
+        }
+        catch { }
+
         try
         {
             Infrastructure.Logging.HaloLogger.App.Info(
@@ -401,6 +421,69 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
         catch { }
         return meta;
+    }
+
+    /// <summary>工作区库注册表启动对账：按元数据文件补齐派生缓存，老会话不进表，三业务表只读不写。</summary>
+    public async Task<int> ReconcileWorkspaceRegistryAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+        {
+            return 0;
+        }
+        int fixedCount = 0;
+        try
+        {
+            var metas = await _sessionRepository
+                .LoadSessionsIndexAsync(workspaceId, ct)
+                .ConfigureAwait(false);
+            var registry = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
+            foreach (var item in metas)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                {
+                    continue;
+                }
+                if (item.StorageFormatVersion != WorkspaceHistorySchema.CurrentFormatVersion)
+                {
+                    continue;
+                }
+                string kind = string.Equals(
+                    item.SessionKind,
+                    "sub",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                    ? "sub"
+                    : string.Equals(
+                        item.SessionKind,
+                        "archived",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? "archived"
+                        : "main";
+                try
+                {
+                    await registry
+                        .RegisterSessionAsync(
+                            workspaceId,
+                            item.Id,
+                            WorkspaceHistorySchema.CurrentFormatVersion,
+                            kind,
+                            ct
+                        )
+                        .ConfigureAwait(false);
+                    fixedCount++;
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return fixedCount;
     }
 
     /// <summary>need13：查主下全部子（创建时间正序）。</summary>

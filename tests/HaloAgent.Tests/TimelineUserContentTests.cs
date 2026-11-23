@@ -251,13 +251,19 @@ public sealed class TimelineUserContentTests : IDisposable
 
         _db.EnsureDatabase(ws, sess);
 
-        var summaries = await _store.GetTimelineSummaryAsync(ws, sess);
-        Assert.Equal(2, summaries.Count);
-        var hit = summaries.Find(s => s.TurnId == turnId);
-        Assert.NotNull(hit);
-        Assert.Equal(full, hit!.UserContent);
-        var missTurn = summaries.Find(s => s.TurnId == "uturn-orphan-miss");
-        Assert.NotNull(missTurn);
-        Assert.Equal(string.Empty, missTurn!.UserContent);
+        using (var check = SessionHistoryDb.OpenConnection(dbPath))
+        {
+            using var hitCmd = check.CreateCommand();
+            hitCmd.CommandText = "SELECT user_content FROM turns WHERE turn_id = $tid;";
+            hitCmd.Parameters.AddWithValue("$tid", turnId);
+            object? hitContent = hitCmd.ExecuteScalar();
+            Assert.Equal(full, Convert.ToString(hitContent));
+            using var missCmd = check.CreateCommand();
+            missCmd.CommandText =
+                "SELECT user_content FROM turns WHERE turn_id = 'uturn-orphan-miss';";
+            object? missContent = missCmd.ExecuteScalar();
+            Assert.Equal(string.Empty, Convert.ToString(missContent));
+        }
+        await Task.CompletedTask;
     }
 }
