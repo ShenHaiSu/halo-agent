@@ -14,11 +14,6 @@
       >
       <n-button size="tiny" data-testid="sub-refresh-btn" @click="onRefresh">刷新</n-button>
       <n-button v-if="isRunning" size="tiny" type="error" ghost data-testid="sub-cancel-btn" @click="onCancel">掐断</n-button>
-      <span v-if="detail" class="font-mono text-secondary"
-        >IN {{ detail.inputTokens }} / OUT {{ detail.outputTokens }} / Cache {{ detail.cachedTokens }}</span
-      >
-      <n-button size="tiny" data-testid="sub-refresh-btn" @click="onRefresh">刷新</n-button>
-      <n-button v-if="isRunning" size="tiny" type="error" ghost data-testid="sub-cancel-btn" @click="onCancel">掐断</n-button>
     </div>
     <div v-if="isRunning" class="h-1 rounded bg-surface overflow-hidden"><div class="h-full w-1/3 bg-accent animate-pulse" /></div>
     <div v-if="loading" class="py-10 text-center text-xs text-secondary">加载中…</div>
@@ -83,9 +78,21 @@ const taskShort = computed(() => {
   return t.length > 80 ? t.slice(0, 80) + '…' : t;
 });
 const items = computed(() => buildTimelineItems(messages.value || []));
-function buildTimelineItems(msgs: UnifiedChatMessage[]): Array<{ key: string; kind: string; msg?: UnifiedChatMessage; group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] } }> {
+function buildTimelineItems(
+  msgs: UnifiedChatMessage[]
+): Array<{
+  key: string;
+  kind: string;
+  msg?: UnifiedChatMessage;
+  group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] };
+}> {
   // 子会话只读小链（豁免）：本地简单分组，不经主链投影。
-  const out: Array<{ key: string; kind: string; msg?: UnifiedChatMessage; group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] } }> = [];
+  const out: Array<{
+    key: string;
+    kind: string;
+    msg?: UnifiedChatMessage;
+    group?: { key: string; content: string; reasoning?: string; toolMessages: UnifiedChatMessage[] };
+  }> = [];
   let pendingAssistant: UnifiedChatMessage | null = null;
   let pendingTools: UnifiedChatMessage[] = [];
   const flush = (): void => {
@@ -94,7 +101,11 @@ function buildTimelineItems(msgs: UnifiedChatMessage[]): Array<{ key: string; ki
       key: String(pendingAssistant.id || `g_${out.length}`),
       kind: 'turn',
       msg: pendingAssistant,
-      group: { key: String(pendingAssistant.id || ''), content: String(pendingAssistant.content || ''), toolMessages: pendingTools.slice() },
+      group: {
+        key: String(pendingAssistant.id || ''),
+        content: String(pendingAssistant.content || ''),
+        toolMessages: pendingTools.slice(),
+      },
     });
     pendingAssistant = null;
     pendingTools = [];
@@ -106,7 +117,13 @@ function buildTimelineItems(msgs: UnifiedChatMessage[]): Array<{ key: string; ki
       pendingAssistant = m;
     } else if (role === 'tool') {
       if (pendingAssistant) pendingTools.push(m);
-      else out.push({ key: String(m.id || `t_${out.length}`), kind: 'turn', msg: m, group: { key: String(m.id || ''), content: String(m.content || ''), toolMessages: [m] } });
+      else
+        out.push({
+          key: String(m.id || `t_${out.length}`),
+          kind: 'turn',
+          msg: m,
+          group: { key: String(m.id || ''), content: String(m.content || ''), toolMessages: [m] },
+        });
     } else if (role === 'user' || role === 'system') {
       flush();
       out.push({ key: String(m.id || `${role}_${out.length}`), kind: role, msg: m });
