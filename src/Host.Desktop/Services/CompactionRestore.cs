@@ -121,14 +121,14 @@ public sealed class CompactionRestore
             try
             {
                 var meta = await _service
-                    .SessionRepository.LoadSessionMetaAsync(workspaceId, sessionId, ct)
+                    .SessionRepository.LoadSessionMetaAsync(workspaceId, sessionId!, ct)
                     .ConfigureAwait(false);
                 if (meta != null)
                 {
                     meta.MessageCount = merged.Count;
                     meta.UpdatedAtUtc = DateTime.UtcNow;
                     await _service
-                        .RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct)
+                        .RefreshMetaIndexAsync(workspaceId, sessionId!, meta, ct)
                         .ConfigureAwait(false);
                 }
             }

@@ -520,7 +520,7 @@ public sealed partial class SessionHistoryStore
             string? resolvedRef = contentRef;
             if (!string.IsNullOrWhiteSpace(contentRef))
             {
-                string? fromFile = TryReadContentRef(workspaceId, sessionId, contentRef);
+                string? fromFile = TryReadContentRef(workspaceId, sessionId!, contentRef);
                 if (fromFile != null)
                 {
                     resolved = fromFile;
@@ -637,7 +637,7 @@ public sealed partial class SessionHistoryStore
         string resolved = content;
         if (!string.IsNullOrWhiteSpace(contentRef))
         {
-            string? fromFile = TryReadContentRef(workspaceId, sessionId, contentRef);
+            string? fromFile = TryReadContentRef(workspaceId, sessionId!, contentRef);
             if (fromFile != null)
             {
                 resolved = fromFile;
@@ -940,7 +940,7 @@ public sealed partial class SessionHistoryStore
                 del.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 del.ExecuteNonQuery();
             }
-            InsertMessages(conn, tx, sessionId, kept);
+            InsertMessages(conn, tx, sessionId!, kept);
             tx.Commit();
         }
         finally
@@ -1140,10 +1140,10 @@ public sealed partial class SessionHistoryStore
                 i = j;
             }
             using var tx = conn.BeginTransaction();
-            InsertMessages(conn, tx, sessionId, allMsgs);
-            InsertBlocks(conn, tx, sessionId, allBlocks);
+            InsertMessages(conn, tx, sessionId!, allMsgs);
+            InsertBlocks(conn, tx, sessionId!, allBlocks);
             foreach (var t in turns)
-                UpsertTurn(conn, tx, sessionId, t, t.TurnSeq);
+                UpsertTurn(conn, tx, sessionId!, t, t.TurnSeq);
             tx.Commit();
         }
         finally
@@ -1242,7 +1242,7 @@ public sealed partial class SessionHistoryStore
                     return (false, "group-mismatch:" + (r.IsDBNull(0) ? "?" : r.GetString(0)));
                 }
             }
-            ReportWalSize(workspaceId, sessionId);
+            ReportWalSize(workspaceId, sessionId!);
             try
             {
                 TimelineObservability.ReportIntegrity(true);

@@ -112,7 +112,7 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
             string resolved = finalContent ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(contentRef))
             {
-                string? fromFile = TryReadToolOutput(workspaceId, sessionId, contentRef!);
+                string? fromFile = TryReadToolOutput(workspaceId, sessionId!, contentRef!);
                 if (fromFile != null)
                 {
                     resolved = fromFile;
@@ -289,7 +289,7 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
         }
 
         await _inner
-            .TruncateFromTurnSeqAsync(workspaceId, sessionId, anchorSeq, ct)
+            .TruncateFromTurnSeqAsync(workspaceId, sessionId!, anchorSeq, ct)
             .ConfigureAwait(false);
     }
 

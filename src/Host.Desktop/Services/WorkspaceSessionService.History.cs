@@ -312,8 +312,8 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         CopyBranchToolOutputFiles(
             storage,
             workspaceId,
-            sourceSessionId,
-            targetSessionId,
+            sourceSessionId!,
+            targetSessionId!,
             contentRefs
         );
     }
