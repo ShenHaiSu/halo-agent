@@ -19,12 +19,34 @@ namespace Host.Desktop.Services;
 public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
     private readonly ISessionRepository _sessionRepository;
+    private readonly SessionOperationCoordinator _operationCoordinator;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionAppendLocks = new();
 
-    public WorkspaceSessionService(ISessionRepository sessionRepository)
+    public WorkspaceSessionService(
+        ISessionRepository sessionRepository,
+        SessionOperationCoordinator? operationCoordinator = null
+    )
     {
         _sessionRepository =
             sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _operationCoordinator = operationCoordinator ?? SessionOperationCoordinator.Shared;
+    }
+
+    internal SessionOperationCoordinator OperationCoordinator => _operationCoordinator;
+
+    /// <summary>直接调用领域服务时也必须经过统一协调器，不能旁路。</summary>
+    internal SessionOperationLease AcquireHistoryLease(string workspaceId, string sessionId)
+    {
+        if (
+            !_operationCoordinator.TryAcquire(
+                workspaceId,
+                sessionId,
+                SessionOperationKind.History,
+                out var lease
+            )
+        )
+            throw new InvalidOperationException("HISTORY_OPERATION_IN_PROGRESS");
+        return lease!;
     }
 
     /// <summary>need05-03：供压缩服务做备份/原子重写（调用方须持有追加锁）。</summary>
@@ -376,12 +398,13 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             SubStatus = isSub ? "pending" : null,
             CreatedByCallId = isSub ? createdByCallId : null,
             TaskPrompt = isSub ? (string.IsNullOrEmpty(taskIdx) ? null : taskIdx) : null,
-            HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
+            SessionKind = isSub ? "sub" : "main",
         };
         if (isSub)
             meta.TitleLocked = true;
 
-        // 1. 保存 meta.json
+        // 1. 保存 meta.json（元数据文件为权威源，先落盘再同步注册表）
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
         // 2. 更新 sessions-index.json
@@ -393,6 +416,33 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             .SaveSessionsIndexAsync(workspaceId, sessions, ct)
             .ConfigureAwait(false);
 
+        // 3. 同步工作区库 sessions 注册表（派生缓存，不符以 meta.json 覆盖）
+        try
+        {
+            var registry = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
+            await registry
+                .RegisterSessionAsync(
+                    workspaceId,
+                    sessionId,
+                    WorkspaceHistorySchema.CurrentFormatVersion,
+                    meta.SessionKind,
+                    ct
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    "[Workspace] registry sync failed sess=" + sessionId + ": " + ex.Message
+                );
+            }
+            catch { }
+        }
+
         try
         {
             Infrastructure.Logging.HaloLogger.App.Info(
@@ -401,6 +451,144 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
         catch { }
         return meta;
+    }
+
+    /// <summary>工作区库注册表启动对账：逐目录读元数据文件补齐派生缓存，老会话不进表，三业务表只读不写；仅统计真实修复数。</summary>
+    public async Task<int> ReconcileWorkspaceRegistryAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+        {
+            return 0;
+        }
+        int fixedCount = 0;
+        try
+        {
+            string wsDir = Path.Combine(
+                _sessionRepository.Storage.SessionsDirectory,
+                workspaceId.Trim()
+            );
+            if (!Directory.Exists(wsDir))
+            {
+                return 0;
+            }
+            var db = new SessionHistoryDb(_sessionRepository.Storage);
+            try
+            {
+                db.EnsureWorkspaceDatabase(workspaceId);
+            }
+            catch { }
+            var registry = new SessionHistoryStore(db);
+            string[] sessionDirs;
+            try
+            {
+                sessionDirs = Directory.GetDirectories(wsDir);
+            }
+            catch
+            {
+                return 0;
+            }
+            foreach (string dir in sessionDirs)
+            {
+                ct.ThrowIfCancellationRequested();
+                string sessionId = Path.GetFileName(
+                    dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                );
+                if (string.IsNullOrWhiteSpace(sessionId))
+                {
+                    continue;
+                }
+                SessionMetadata? meta;
+                try
+                {
+                    meta = await _sessionRepository
+                        .LoadSessionMetaAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    continue;
+                }
+                if (meta == null || string.IsNullOrWhiteSpace(meta.Id))
+                {
+                    continue;
+                }
+                if (meta.StorageFormatVersion != WorkspaceHistorySchema.CurrentFormatVersion)
+                {
+                    continue;
+                }
+                string kind = string.Equals(
+                    meta.SessionKind,
+                    "sub",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                    ? "sub"
+                    : string.Equals(
+                        meta.SessionKind,
+                        "archived",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? "archived"
+                        : "main";
+                bool needsFix = true;
+                try
+                {
+                    using var conn = db.OpenWorkspace(workspaceId);
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        "SELECT storage_format, session_kind FROM sessions WHERE session_id = $sid;";
+                    cmd.Parameters.AddWithValue("$sid", meta.Id);
+                    using var reader = cmd.ExecuteReader();
+                    if (reader.Read())
+                    {
+                        int fmt = reader.IsDBNull(0) ? -1 : reader.GetInt32(0);
+                        string regKind = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                        if (
+                            fmt == WorkspaceHistorySchema.CurrentFormatVersion
+                            && string.Equals(regKind, kind, StringComparison.Ordinal)
+                        )
+                        {
+                            needsFix = false;
+                        }
+                    }
+                }
+                catch
+                {
+                    needsFix = true;
+                }
+                if (!needsFix)
+                {
+                    continue;
+                }
+                try
+                {
+                    await registry
+                        .RegisterSessionAsync(
+                            workspaceId,
+                            meta.Id,
+                            WorkspaceHistorySchema.CurrentFormatVersion,
+                            kind,
+                            ct
+                        )
+                        .ConfigureAwait(false);
+                    fixedCount++;
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        HaloLogger.App.Warn(
+                            "[Workspace] reconcile failed sess=" + meta.Id + ": " + ex.Message
+                        );
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        return fixedCount;
     }
 
     /// <summary>need13：查主下全部子（创建时间正序）。</summary>

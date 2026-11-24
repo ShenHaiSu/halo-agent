@@ -156,9 +156,8 @@ public sealed partial class HostBridgeFacade
     }
 
     /// <summary>
-    /// S7-E3 §4.3-2：附件 TTL 清理入口（先做“统计口径 + 手动触发”，自动清待观察一轮后再开）。
-    /// `dryRun=true` 只统计不删（默认，避免误删）；`retentionDays` 默认 30 天。
-    /// 只清附件文件与空目录，**不碰** `messages.jsonl`（缺文件即 IsMissing，读取链路已兜）。
+    /// 附件清理入口（只统计不删为默认，避免误删）。
+    /// 只清附件文件与空目录，不触碰消息与时间轴数据。
     /// </summary>
     public Task<BridgeResponse<string>> CleanupImageAttachments(
         int retentionDays = 30,

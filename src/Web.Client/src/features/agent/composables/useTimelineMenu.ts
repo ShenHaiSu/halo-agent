@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useDialog } from 'naive-ui';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
@@ -27,10 +27,32 @@ export function useTimelineMenu() {
     y: 0,
     target: null,
   });
+  const historyActionInFlight = ref(false);
   const menuBusy = computed(() => {
     const sid = workspaceStore.activeSessionId || '';
-    return stream.isGenerating || stream.streamingActive || (sid ? turn.isCompacting(sid) : false);
+    return historyActionInFlight.value || stream.isGenerating || stream.streamingActive || (sid ? turn.isCompacting(sid) : false);
   });
+  function toast(kind: 'success' | 'error' | 'warning', message: string): void {
+    try {
+      const api = (
+        window as unknown as {
+          $message?: { success: (s: string) => void; error: (s: string) => void; warning: (s: string) => void };
+        }
+      ).$message;
+      api?.[kind]?.(message);
+    } catch {
+      /* toast 不可用不阻断操作 */
+    }
+  }
+  async function runHistoryAction(action: () => Promise<void>): Promise<void> {
+    if (menuBusy.value) return;
+    historyActionInFlight.value = true;
+    try {
+      await action();
+    } finally {
+      historyActionInFlight.value = false;
+    }
+  }
   const menuCanCopy = computed(() => String(menuState.target?.text || '').length > 0);
   const menuCanCopyTurn = computed(() => String(menuState.target?.turnText || '').length > 0);
   const menuCopyLabel = computed(() => String(menuState.target?.copyLabel || '复制此消息').trim() || '复制此消息');
@@ -79,15 +101,30 @@ export function useTimelineMenu() {
   async function onMenuReplay(): Promise<void> {
     const target = menuState.target;
     closeMenu();
-    if (!target || menuBusy.value) return;
-    if (target.kind === 'user') await turn.replayUserMessage(target.id);
-    else await turn.replayAssistantTurn(target.id);
+    if (!target || target.canReplay === false || menuBusy.value) return;
+    await runHistoryAction(async () => {
+      const result = target.kind === 'user' ? await turn.replayUserMessage(target.id) : await turn.replayAssistantTurn(target.id);
+      if (!result.ok && result.message) toast('error', result.message);
+      else if (result.warnings?.length) toast('warning', result.warnings.map((w) => w.message).join('；'));
+    });
   }
   async function onMenuBranch(): Promise<void> {
     const target = menuState.target;
     closeMenu();
-    if (!target || menuBusy.value) return;
-    await workspaceStore.branchFromMessage(target.id, target.kind);
+    if (!target || target.canBranch === false || menuBusy.value) return;
+    await runHistoryAction(async () => {
+      const result = await workspaceStore.branchFromMessage(target.id, target.kind, target.draftText);
+      if (!result.ok) {
+        toast('error', result.message || '分支失败');
+        return;
+      }
+      if (result.newSessionId) {
+        toast('error', `分支清理失败，残留会话 ${result.newSessionId}（阶段 ${result.failedStage || '未知'}），请手动处理`);
+        return;
+      }
+      if (result.switched === false) toast('warning', '分支已创建，但当前会话已切换，请手动打开');
+      else toast('success', '分支已创建');
+    });
   }
   function onMenuDelete(): void {
     const target = menuState.target;
@@ -144,6 +181,7 @@ export function useTimelineMenu() {
   return {
     menuState,
     menuBusy,
+    historyActionInFlight,
     menuCanCopy,
     menuCanCopyTurn,
     menuCopyLabel,

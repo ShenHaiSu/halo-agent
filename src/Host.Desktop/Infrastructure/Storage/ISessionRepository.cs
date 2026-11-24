@@ -65,6 +65,16 @@ public interface ISessionRepository
         string sessionId,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 严格回滚：分别验证数据库分区、会话元数据、目录与索引，任何失败都记录在结果中，
+    /// 不吞错、不把残留误报为已清理。
+    /// </summary>
+    Task<HistoryRollbackResult> RollbackCreatedSessionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
     Task<bool> DeleteWorkspaceDirectoryAsync(string workspaceId, CancellationToken ct = default);
     Task<string> ExportSessionMarkdownAsync(
         string workspaceId,
@@ -72,36 +82,13 @@ public interface ISessionRepository
         CancellationToken ct = default
     );
 
-    /// <summary>need05-03：重写前全量备份 messages.jsonl，返回备份文件名。</summary>
-    Task<string> BackupMessagesJsonlAsync(
-        string workspaceId,
-        string sessionId,
-        CancellationToken ct = default
-    );
-
-    /// <summary>need07：同上，允许调用方指定备份文件前缀（默认 compact-bak，保持老调用零改动）。</summary>
-    Task<string> BackupMessagesJsonlAsync(
-        string workspaceId,
-        string sessionId,
-        string filePrefix,
-        CancellationToken ct = default
-    );
-
-    /// <summary>need05-03：原子重写 messages.jsonl（tmp→move，避免半截文件）。</summary>
-    Task RewriteMessagesJsonlAsync(
-        string workspaceId,
-        string sessionId,
-        IReadOnlyList<UnifiedChatMessage> messages,
-        CancellationToken ct = default
-    );
     string GetWorkspaceDirectory(string workspaceId);
     string GetSessionDirectory(string workspaceId, string sessionId);
-    string GetMessagesJsonlPath(string workspaceId, string sessionId);
 
-    /// <summary>need09-05：会话附件根目录 sessions/&lt;ws&gt;/&lt;sess&gt;/attachments。</summary>
+    /// <summary>会话附件根目录 sessions/&lt;ws&gt;/&lt;sess&gt;/attachments。</summary>
     string GetAttachmentsDirectory(string workspaceId, string sessionId);
 
-    /// <summary>need09-05：保存图片附件（sha16 去重，只存引用）。</summary>
+    /// <summary>保存图片附件（sha16 去重，只返回引用）。</summary>
     Task<ChatImageRef> SaveImageAttachmentAsync(
         string workspaceId,
         string sessionId,
@@ -113,6 +100,6 @@ public interface ISessionRepository
         CancellationToken ct = default
     );
 
-    /// <summary>need09-05：按 imageId 定位附件绝对路径（丢失返回 null）。</summary>
+    /// <summary>按 imageId 定位附件绝对路径（丢失返回 null）。</summary>
     string? FindAttachmentPath(string workspaceId, string sessionId, string imageId);
 }

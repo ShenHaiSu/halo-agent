@@ -14,10 +14,12 @@ public sealed partial class SessionHistoryStore
         CancellationToken ct = default
     )
     {
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT MAX(seq) FROM messages WHERE kind='compact_stub';";
+        cmd.CommandText =
+            "SELECT MAX(seq) FROM messages WHERE session_id = $sid AND kind='compact_stub';";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         object? v = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         if (v == null || v == DBNull.Value)
             return null;
@@ -31,12 +33,13 @@ public sealed partial class SessionHistoryStore
         CancellationToken ct = default
     )
     {
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT id, seq, content, input_tokens, output_tokens, cached_tokens, meta_json, created_utc"
-            + " FROM messages WHERE kind='compact_stub' ORDER BY seq DESC LIMIT 1;";
+            + " FROM messages WHERE session_id = $sid AND kind='compact_stub' ORDER BY seq DESC LIMIT 1;";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
             return null;
@@ -101,7 +104,8 @@ public sealed partial class SessionHistoryStore
         {
             using var tcmd = conn.CreateCommand();
             tcmd.CommandText =
-                "SELECT turn_id FROM turns WHERE kind='compact' ORDER BY turn_seq DESC LIMIT 1;";
+                "SELECT turn_id FROM turns WHERE session_id = $sid AND kind='compact' ORDER BY turn_seq DESC LIMIT 1;";
+            tcmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
             object? t = await tcmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
             if (t != null && t != DBNull.Value && !string.IsNullOrWhiteSpace(Convert.ToString(t)))
                 turnId = Convert.ToString(t)!;
@@ -131,12 +135,13 @@ public sealed partial class SessionHistoryStore
     )
     {
         var result = new List<UnifiedChatMessage>();
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
-            + " FROM messages WHERE seq >= $since ORDER BY seq;";
+            + " FROM messages WHERE session_id = $sid AND seq >= $since ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         cmd.Parameters.AddWithValue("$since", sinceSeq);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -169,13 +174,13 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(ws, sess);
-            using var conn = _db.Open(ws, sess);
-            ApplyFullSynchronous(conn);
+            _db.EnsureWorkspaceDatabase(ws);
+            using var conn = _db.OpenWorkspace(ws);
+            // 工作区库写依赖 WAL + busy_timeout；不再强制 FULL，避免放大持有窗口。
             using var tx = conn.BeginTransaction();
-            InsertMessages(conn, tx, new[] { stubMessage });
-            long turnSeq = ResolveTurnSeq(conn, tx, stubTurn);
-            UpsertTurn(conn, tx, stubTurn, turnSeq);
+            InsertMessages(conn, tx, sess, new[] { stubMessage });
+            long turnSeq = ResolveTurnSeq(conn, tx, sess, stubTurn);
+            UpsertTurn(conn, tx, sess, stubTurn, turnSeq);
             tx.Commit();
             return turnSeq;
         }

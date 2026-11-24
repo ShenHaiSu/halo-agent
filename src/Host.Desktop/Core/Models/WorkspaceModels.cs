@@ -131,14 +131,18 @@ public sealed class SessionMetadata
 
     public string? TaskPrompt { get; set; }
 
-    public int HistoryVersion { get; set; }
+    /// <summary>存储格式版本（三态）：null=未标注老会话，3=工作区单库，其余=数据异常。元数据权威源，新会话由创建路径显式写入。</summary>
+    public int? StorageFormatVersion { get; set; } = null;
+
+    /// <summary>会话语义：main|sub|archived，与存储格式正交。</summary>
+    public string SessionKind { get; set; } = "main";
 
     /// <summary>P007：会话级压缩模型冻结：null = 继承全局；首次写桩后固化为 stub。</summary>
     public string? CompactMode { get; set; }
 }
 
 /// <summary>
-/// need09-05：会话内图片引用（messages.jsonl 只存引用不存 base64；字节落盘 attachments/）。
+/// 会话内图片引用（消息区只存引用不存 base64；字节落盘 attachments/）。
 /// </summary>
 public sealed class ChatImageRef
 {
@@ -280,18 +284,48 @@ public sealed class HistoryTruncateResult
     public string? ReplayText { get; init; }
     public string? BackupFileName { get; init; }
 
-    public static HistoryTruncateResult Ok(int kept, int removed, string? replay, string? bak) =>
+    /// <summary>可复用的原用户图片；lost 项只警告，不参与重发。</summary>
+    public List<HistoryReplayImageDto> ReplayImages { get; init; } = new();
+
+    /// <summary>截断写入及其必要持久化步骤已成功完成；后续发送是独立步骤。</summary>
+    public bool DestructiveCommitCompleted { get; init; }
+
+    /// <summary>应用内恢复项标识，不承载正文或图片字节，也不是数据库撤销凭证。</summary>
+    public string? RecoveryToken { get; init; }
+
+    public static HistoryTruncateResult Ok(
+        int kept,
+        int removed,
+        string? replay,
+        string? bak,
+        IReadOnlyList<HistoryReplayImageDto>? replayImages = null,
+        string? recoveryToken = null
+    ) =>
         new()
         {
             Success = true,
             KeptMessages = kept,
             RemovedMessages = removed,
             ReplayText = replay,
-            BackupFileName = bak
+            BackupFileName = bak,
+            ReplayImages =
+                replayImages == null
+                    ? new List<HistoryReplayImageDto>()
+                    : new List<HistoryReplayImageDto>(replayImages),
+            DestructiveCommitCompleted = true,
+            RecoveryToken = recoveryToken
         };
 
-    public static HistoryTruncateResult Fail(string code) =>
-        new() { Success = false, ErrorCode = code };
+    /// <summary>错误说明仅用于诊断；对用户的稳定文案由 Bridge 按错误码映射。</summary>
+    public string? ErrorMessage { get; init; }
+
+    public static HistoryTruncateResult Fail(string code, string? message = null) =>
+        new()
+        {
+            Success = false,
+            ErrorCode = code,
+            ErrorMessage = message
+        };
 }
 
 /// <summary>孤儿 tool_calls 愈合结果：补 synthetic cancelled tool + 清理无主 tool 消息。</summary>

@@ -32,6 +32,14 @@ jobs:
       - name: Install (--frozen-lockfile)
         run: pnpm install --frozen-lockfile
 
+      - name: Naming hygiene (changed lines only)
+        working-directory: .
+        run: node build/check-naming-hygiene.mjs
+
+      - name: Architecture assertions
+        working-directory: .
+        run: node build/check-architecture.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

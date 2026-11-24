@@ -185,6 +185,39 @@ public sealed partial class HostBridgeFacade
                     );
                     continue;
                 }
+                string itemKind =
+                    el.TryGetProperty("kind", out var kindElement)
+                    && kindElement.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? (kindElement.GetString() ?? string.Empty).Trim()
+                        : string.Empty;
+                if (string.Equals(itemKind, "stored", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool storedOk = TurnAttachmentIngestor.TryStored(
+                        _storageManager,
+                        workspaceId,
+                        sessionId,
+                        el,
+                        index,
+                        out var storedRef,
+                        out var storedBytes
+                    );
+                    if (
+                        storedOk
+                        && storedRef != null
+                        && totalBytes + storedBytes <= S7MaxTotalBytes
+                    )
+                    {
+                        refs.Add(storedRef);
+                        accepted++;
+                        totalBytes += storedBytes;
+                        string storedMarker = Core.Models.ImagePlaceholder.Marker(
+                            storedRef.ImageId
+                        );
+                        if (storedMarker.Length > 0)
+                            userText = userText.Replace("[image:" + index + "]", storedMarker);
+                    }
+                    continue;
+                }
                 string fileName =
                     el.TryGetProperty("fileName", out var fnEl)
                     && fnEl.ValueKind == System.Text.Json.JsonValueKind.String

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
@@ -221,6 +222,22 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<SubSessionDetailDto>.Fail("SUB_NOT_FOUND", "子会话不存在");
             if (string.IsNullOrWhiteSpace(meta.ParentSessionId))
                 return BridgeResponse<SubSessionDetailDto>.Fail("NOT_A_SUB", "该会话不是子会话");
+            try
+            {
+                var formatStore = new WorkspaceSessionStore(_storageManager);
+                await formatStore.GetSummaryAsync(workspaceId, subSessionId).ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<SubSessionDetailDto>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<SubSessionDetailDto>.Fail(
+                    "UNSUPPORTED_FORMAT",
+                    unsupported.Message
+                );
+            }
             string parent = meta.ParentSessionId!.Trim();
             var active = _subCoordinator?.GetActive(parent) ?? Enumerable.Empty<SubHandle>();
             bool isRunning = active.Any(h =>
@@ -298,6 +315,25 @@ public sealed partial class HostBridgeFacade
                 return BridgeResponse<List<UnifiedChatMessage>>.Fail("SUB_NOT_FOUND", "子会话不存在");
             if (string.IsNullOrWhiteSpace(meta.ParentSessionId))
                 return BridgeResponse<List<UnifiedChatMessage>>.Fail("NOT_A_SUB", "该会话不是子会话");
+            try
+            {
+                var formatStore = new WorkspaceSessionStore(_storageManager);
+                await formatStore.GetSummaryAsync(workspaceId, subSessionId).ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<List<UnifiedChatMessage>>.Fail(
+                    "LEGACY_SESSION",
+                    legacy.Message
+                );
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<List<UnifiedChatMessage>>.Fail(
+                    "UNSUPPORTED_FORMAT",
+                    unsupported.Message
+                );
+            }
             var messages = await _workspaceSessionService
                 .GetSessionMessagesAsync(workspaceId, subSessionId)
                 .ConfigureAwait(false);

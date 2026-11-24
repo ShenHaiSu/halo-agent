@@ -21,7 +21,7 @@ namespace HaloAgent.Tests;
 
 /// <summary>
 /// need22-B02 §4：技能激活发包接入集成测试（T1~T8）。
-/// 核心不变式：落盘 messages.jsonl 永远是 marker，发包才是展开块。
+/// 核心不变式：落盘工作区单库永远是 marker，发包才是展开块。
 /// </summary>
 public sealed class Need22SkillActivationTurnTests : IDisposable
 {
@@ -236,7 +236,7 @@ public sealed class Need22SkillActivationTurnTests : IDisposable
         );
         Assert.True(result.Success);
 
-        // 1) 读回历史（服务层读的就是 messages.jsonl）
+        // 1) 读回历史（服务层读的就是落盘真相：工作区单库）
         var messages = await _service.GetSessionMessagesAsync(_workspace.Id, _session.Id);
         var userMsg = messages.First(m =>
             string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
@@ -244,17 +244,15 @@ public sealed class Need22SkillActivationTurnTests : IDisposable
         Assert.Contains("[[skill:", userMsg.Content);
         Assert.DoesNotContain("<skill ", userMsg.Content);
 
-        // 2) 直接读落盘文件复核（核心不变式 N1）
-        string jsonlPath = Path.Combine(
-            _storageManager.SessionsDirectory,
-            _workspace.Id,
-            _session.Id,
-            "messages.jsonl"
+        // 2) 直接读工作区单库复核（核心不变式：落盘仍是 marker，不含展开块）
+        var persisted = await new SessionHistoryStore(
+            new SessionHistoryDb(_storageManager)
+        ).GetMessagesAsync(_workspace.Id, _session.Id);
+        var persistedUser = persisted.First(m =>
+            string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
         );
-        Assert.True(File.Exists(jsonlPath));
-        string raw = await File.ReadAllTextAsync(jsonlPath);
-        Assert.Contains("[[skill:", raw);
-        Assert.DoesNotContain("<skill ", raw);
+        Assert.Contains("[[skill:", persistedUser.Content);
+        Assert.DoesNotContain("<skill ", persistedUser.Content);
     }
 
     // ---------- T7：标题不被 marker 污染 ----------

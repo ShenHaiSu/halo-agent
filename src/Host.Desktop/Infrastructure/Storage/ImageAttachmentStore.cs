@@ -14,8 +14,8 @@ using Host.Desktop.Infrastructure.Logging;
 namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
-/// need09-05：会话图片附件存储（引用落 messages.jsonl，字节落 attachments/；sha16 去重；只存引用不存 base64）。
-/// 由 SessionRepository / ViewImageTool / Bridge 共享；Orchestrator 不直接依赖。
+/// 会话图片附件存储（引用落消息区，字节落 attachments/；按内容去重；只存引用不存原文）。
+/// 由仓储与图片工具共享。
 /// </summary>
 public static class ImageAttachmentStore
 {
@@ -265,6 +265,90 @@ public static class ImageAttachmentStore
         { /* 查找永不抛 */
         }
         return null;
+    }
+
+    /// <summary>图片 ID 白名单：拒绝路径分隔符、通配符与相对片段，只接受字母数字下划线与连字符。</summary>
+    public static bool IsSafeImageId(string? imageId)
+    {
+        if (string.IsNullOrWhiteSpace(imageId))
+            return false;
+        foreach (char c in imageId)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 把保留前缀引用的图片文件复制到目标会话，按 imageId 与安全文件名生成目标路径。
+    /// 单张缺失或损坏只计入 missing，不阻断整次分支；目标目录随目标会话一起回滚。
+    /// </summary>
+    public static (int Copied, int Missing) CopyToSession(
+        string dataRoot,
+        string sourceWorkspaceId,
+        string sourceSessionId,
+        string targetWorkspaceId,
+        string targetSessionId,
+        IReadOnlyList<ChatImageRef> images
+    )
+    {
+        int copied = 0;
+        int missing = 0;
+        if (images == null || images.Count == 0)
+            return (copied, missing);
+        string targetRoot = GetAttachmentsDir(dataRoot, targetWorkspaceId, targetSessionId);
+        foreach (var image in images)
+        {
+            if (image == null || !IsSafeImageId(image.ImageId))
+            {
+                missing++;
+                continue;
+            }
+            string? sourcePath = FindImagePath(
+                dataRoot,
+                sourceWorkspaceId,
+                sourceSessionId,
+                image.ImageId
+            );
+            string mime = string.IsNullOrWhiteSpace(image.Mime)
+                ? MimeFromExtension(image.FileName)
+                : image.Mime;
+            if (
+                string.IsNullOrWhiteSpace(sourcePath)
+                || !File.Exists(sourcePath)
+                || !TryReadBounded(sourcePath, MaxImageBytes, out var bytes)
+                || bytes == null
+                || !CheckMagic(bytes, mime)
+            )
+            {
+                missing++;
+                continue;
+            }
+            try
+            {
+                string dateDir = Path.Combine(targetRoot, DateTime.UtcNow.ToString("yyyyMMdd"));
+                Directory.CreateDirectory(dateDir);
+                string targetPath = Path.Combine(
+                    dateDir,
+                    image.ImageId + "_" + SanitizeFileName(image.FileName)
+                );
+                string fullTarget = Path.GetFullPath(targetPath);
+                string fullRoot = Path.GetFullPath(targetRoot) + Path.DirectorySeparatorChar;
+                if (!fullTarget.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    missing++;
+                    continue;
+                }
+                File.Copy(sourcePath!, fullTarget, overwrite: true);
+                copied++;
+            }
+            catch
+            {
+                missing++;
+            }
+        }
+        return (copied, missing);
     }
 
     /// <summary>S2 有界读原语（take(limit+1) 语义，参考 pi-desktop 03-context-hydration Step 3）：

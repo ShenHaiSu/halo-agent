@@ -37,8 +37,14 @@ beforeEach(() => {
     providerId: () => 'provider-a',
     modelId: () => 'm1',
     maxImages: () => 4,
-    findMessageContent: () => '',
-    truncateHistory: () => Promise.resolve({ ok: true, replayText: '' }),
+    truncateHistory: () =>
+      Promise.resolve({
+        ok: true,
+        replayText: '',
+        replayImages: [],
+        destructiveCommitCompleted: true,
+        warnings: [],
+      }),
     loadSessionMessages: loadSpy,
     refreshBudget: budgetSpy,
     touchSessionTime: () => undefined,

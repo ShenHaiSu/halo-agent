@@ -64,7 +64,7 @@ public sealed class TimelineVerticalSliceTests : IDisposable
     {
         string ws = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string sess = "sess_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
         Assert.True(File.Exists(dbPath));
 
         using var conn = SessionHistoryDb.OpenConnection(dbPath);
@@ -199,9 +199,11 @@ public sealed class TimelineVerticalSliceTests : IDisposable
         Assert.Equal("final answer", summaries[0].FinalPreview);
         Assert.Equal(TimelineTurnStatus.Completed, summaries[0].Status);
 
-        using var conn = _db.Open(ws, sess);
+        using var conn = _db.OpenWorkspace(ws);
         using var finalCmd = conn.CreateCommand();
-        finalCmd.CommandText = "SELECT COUNT(*) FROM blocks WHERE tag='final';";
+        finalCmd.CommandText =
+            "SELECT COUNT(*) FROM blocks WHERE session_id = $sid AND tag='final';";
+        finalCmd.Parameters.AddWithValue("$sid", sess);
         long finalCount = (long)(await finalCmd.ExecuteScalarAsync())!;
         Assert.Equal(1, finalCount);
     }
@@ -238,13 +240,17 @@ public sealed class TimelineVerticalSliceTests : IDisposable
         };
         await _store.AppendTurnAsync(ws, sess, new List<UnifiedChatMessage>(), blocks, turn);
 
-        using var conn = _db.Open(ws, sess);
+        using var conn = _db.OpenWorkspace(ws);
         using var pendingCmd = conn.CreateCommand();
-        pendingCmd.CommandText = "SELECT COUNT(*) FROM blocks WHERE tag='pending';";
+        pendingCmd.CommandText =
+            "SELECT COUNT(*) FROM blocks WHERE session_id = $sid AND tag='pending';";
+        pendingCmd.Parameters.AddWithValue("$sid", sess);
         long pendingCount = (long)(await pendingCmd.ExecuteScalarAsync())!;
         Assert.Equal(0, pendingCount);
         using var processCmd = conn.CreateCommand();
-        processCmd.CommandText = "SELECT tag FROM blocks WHERE block_id='req:bp1';";
+        processCmd.CommandText =
+            "SELECT tag FROM blocks WHERE session_id = $sid AND block_id='req:bp1';";
+        processCmd.Parameters.AddWithValue("$sid", sess);
         string? tag = (string?)await processCmd.ExecuteScalarAsync();
         Assert.Equal("process", tag);
     }
@@ -366,10 +372,10 @@ public sealed class TimelineVerticalSliceTests : IDisposable
         {
             Id = sess,
             WorkspaceId = ws,
-            HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
         };
         await repository.SaveSessionMetaAsync(ws, meta);
-        string dbPath = _storageManager.GetHistoryDbPath(ws, sess);
+        string dbPath = _storageManager.GetWorkspaceDbPath(ws);
         Assert.True(File.Exists(dbPath));
         using var conn = SessionHistoryDb.OpenConnection(dbPath);
         using var tableCmd = conn.CreateCommand();

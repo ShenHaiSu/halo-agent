@@ -153,17 +153,9 @@ public sealed class LegacyRoutingTests : IDisposable
         // unknown ids fail on the legacy chain with an explainable envelope (rollback = stay on legacy).
         var facade = NewFacade();
 
-        var missing = await facade.GetSessionMessages("ws_nope", "sess_nope");
-        if (!missing.Ok)
-        {
-            Assert.NotNull(missing.Code);
-            Assert.False(string.IsNullOrWhiteSpace(missing.Message));
-        }
-        else
-        {
-            Assert.NotNull(missing.Data);
-            Assert.Empty(missing.Data!);
-        }
+        var missing = await _service.GetSessionMessagesAsync("ws_nope", "sess_nope");
+        Assert.NotNull(missing);
+        Assert.Empty(missing);
 
         var addEmpty = await facade.AddWorkspace(string.Empty);
         Assert.False(addEmpty.Ok);

@@ -9,14 +9,21 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
-import type { TurnSummary, TimelineBlockContent, TimelineBlockContentsResponse, TimelineToolResult } from '@shared/bridge/hostBridge';
+import type {
+  TurnSummary,
+  TimelineBlockContent,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
+  HistoryBranchResult,
+} from '@shared/bridge/hostBridge';
+import { historyErrorMessage } from '@shared/bridge/protocol/errors';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, turns } from '@features/agent/stores/model';
 import type { PendingUser } from '@features/session/utils/pendingUser';
-import { isPendingExpired, matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
+import { isPendingExpired, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -40,7 +47,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const timelineSummaries = ref<TurnSummary[]>([]);
   const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
   const toolResultCache = ref<Record<string, TimelineToolResult>>({});
-  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -49,13 +55,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return true;
     }
   }
-  /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
-  const isV2Timeline = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    return (s.historyVersion ?? 0) === 2;
-  });
-  /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  /** 摘要源精确对账（requestId/lastRequestId），命中即转正并清 pending。 */
   function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
     need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
     dropPendingUser(sid);
@@ -77,15 +77,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         dropPendingUser(id);
         return;
       }
-      // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
-      if (!isV2Timeline.value) {
-        const hit = matchConfirmed(p, sessionMessages.value);
-        if (hit) {
-          confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
-          return;
-        }
-      }
-      // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
+      // 摘要源 requestId/lastRequestId 精确对账。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
       if (summaryHit) {
         confirmPendingHit(id, p, String(p.requestId || ''));
@@ -166,13 +158,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
 
-  /** S3 F4：历史版本只读（v1 HistoryVersion !== 2，不可继续/截断/压缩，可分支；v2 全放行）。 */
-  const isHistoryReadonly = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
-    return v !== 2;
-  });
+  /** 历史只读横幅已随统一仓储退役：现全部会话可写，旧格式由打开时错误码提示。 */
+  const isHistoryReadonly = computed<boolean>(() => false);
 
   const filteredSessions = computed<SessionMetadata[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();
@@ -529,7 +516,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function loadSessionMessages(
     sessionId: string,
-    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean }
+    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean; background?: boolean }
   ): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
@@ -546,6 +533,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
+    // 默认只加载当前会话；后台加载必须显式声明，禁止异步响应清空当前视图。
+    if (!opts?.background && sid !== activeSessionId.value) return;
     // 发送链保留旧预算，切会话仍清空：消息列表照旧清空防闪旧历史
     sessionMessages.value = [];
     timelineSummaries.value = [];
@@ -556,19 +545,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
-      const res = await bridge.getSessionMessages(activeWorkspaceId.value, sid);
+      const api = bridge as unknown as { getTimelineSummary?: (w: string, s: string) => Promise<{ ok: boolean; data?: TurnSummary[] }> };
+      const res =
+        typeof api.getTimelineSummary === 'function'
+          ? await api.getTimelineSummary(activeWorkspaceId.value, sid)
+          : { ok: false as const, data: undefined };
       if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
         sessionStore.discardStale(`loadSessionMessages(${sid.slice(-6)})`);
         return;
       }
-      if (res.ok && res.data) {
-        sessionMessages.value = res.data;
+      if (res.ok && Array.isArray(res.data)) {
+        timelineSummaries.value = res.data;
       } else {
-        sessionMessages.value = [];
+        timelineSummaries.value = [];
       }
-      // 首次回包对账转正（key 不变，只换 id/时间；v2 摘要源二次对账在摘要回包后）。
-      tryConfirmPending(sid);
-      await loadTimelineSummary(sid);
+      // 首屏摘要直达：不再拉全量消息；旧全量字段保留为待删死代码，收尾阶段统一清理。
+      sessionMessages.value = [];
+      // 首次回包对账转正（key 不变，只换 id/时间；摘要回包后直接对账）。
       tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
@@ -1125,29 +1118,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // need07：分支（user→排除锚点+草稿预填原文；assistant→含整轮+草稿空）
-  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant'): Promise<boolean> {
-    if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+  /** 分支：捕获源工作区与会话，草稿直接来自目标文本；返回结构化结果供 UI 提示。 */
+  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant', draftText?: string): Promise<HistoryBranchResult> {
+    const sourceWorkspaceId = activeWorkspaceId.value;
+    const sourceSessionId = activeSessionId.value;
+    if (!sourceWorkspaceId || !sourceSessionId) {
+      return { ok: false, code: 'SESSION_NOT_FOUND', message: '会话不存在' };
+    }
     try {
-      dropPendingUser(activeSessionId.value);
+      dropPendingUser(sourceSessionId);
     } catch {
       /* ignore */
     }
-    const includeAnchor = kind === 'assistant';
-    const anchor = sessionMessages.value.find((m) => String(m.id) === String(anchorMessageId));
-    const draftText = kind === 'user' ? String(anchor?.content || '') : '';
     try {
       const bridge = getHostBridge();
-      const res = await bridge.branchSession(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, includeAnchor);
-      if (!res.ok || !res.data) return false;
+      const res = await bridge.branchSession(sourceWorkspaceId, sourceSessionId, anchorMessageId, kind === 'assistant');
+      if (!res.ok || !res.data) {
+        return {
+          ok: false,
+          code: res.code,
+          message: res.message || historyErrorMessage(res.code),
+          newSessionId: res.newSessionId ?? undefined,
+          failedStage: res.failedStage ?? undefined,
+        };
+      }
       const created = res.data;
       sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)];
+      if (sourceWorkspaceId !== activeWorkspaceId.value || sourceSessionId !== activeSessionId.value) {
+        return { ok: true, session: created, switched: false };
+      }
       await selectSession(created.id);
-      haloEventBus.emitLocal('chat:prefill-draft', { text: draftText, sessionId: created.id });
-      return true;
+      haloEventBus.emitLocal('chat:prefill-draft', {
+        text: kind === 'user' ? String(draftText || '') : '',
+        sessionId: created.id,
+      });
+      return { ok: true, session: created, switched: true };
     } catch (err) {
       console.error('[workspaceStore] branchFromMessage failed:', err);
-      return false;
+      return {
+        ok: false,
+        code: 'BRANCH_ERROR',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
   // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
@@ -1222,7 +1234,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     isHistoryReadonly,
-    isV2Timeline,
     sessionMessages,
     timelineSummaries,
     budgetStatus,

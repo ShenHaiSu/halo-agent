@@ -164,7 +164,7 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         assistantMsg.OutputTokens = 120;
         await _service.AppendSessionMessageAsync(ws.Id, session.Id, assistantMsg);
 
-        // 4. 并发追加测试 (验证 SemaphoreSlim per-session 锁并发安全性与 messages.jsonl 完整性)
+        // 4. 并发追加测试 (验证 SemaphoreSlim per-session 锁并发安全性与单库写入完整性)
         int concurrentCount = 15;
         var tasks = new List<Task>();
         for (int i = 0; i < concurrentCount; i++)
@@ -180,18 +180,18 @@ public sealed class Stage04WorkspaceAndBudgetTests : IDisposable
         }
         await Task.WhenAll(tasks);
 
-        // 5. 校验消息流式读取与物理 messages.jsonl 行数
+        // 5. 校验消息流式读取与落盘真相（工作区单库）行数
         var allMessages = await _service.GetSessionMessagesAsync(ws.Id, session.Id);
         Assert.Equal(2 + concurrentCount, allMessages.Count);
 
-        string sessionDir = Path.Combine(_tempRoot, "sessions", ws.Id, session.Id);
-        string jsonlFile = Path.Combine(sessionDir, "messages.jsonl");
-        Assert.True(File.Exists(jsonlFile));
-
-        string[] lines = await File.ReadAllLinesAsync(jsonlFile);
-        Assert.Equal(2 + concurrentCount, lines.Length);
+        var dbMessages = await new SessionHistoryStore(
+            new SessionHistoryDb(_storageManager)
+        ).GetMessagesAsync(ws.Id, session.Id);
+        Assert.Equal(2 + concurrentCount, dbMessages.Count);
+        Assert.Equal(allMessages.Select(m => m.Id).ToList(), dbMessages.Select(m => m.Id).ToList());
 
         // 验证 meta.json 也正确保持同步
+        string sessionDir = Path.Combine(_tempRoot, "sessions", ws.Id, session.Id);
         string metaFile = Path.Combine(sessionDir, "meta.json");
         Assert.True(File.Exists(metaFile));
         var metaFromDisk = JsonSerializer.Deserialize<SessionMetadata>(

@@ -322,7 +322,7 @@ public sealed class TimelineS4Tests : IDisposable
         string sess = "sess-s4-nodb-" + Guid.NewGuid().ToString("N");
         SessionHistoryStore.ClearCheckCacheForTests();
         Assert.True(await _store.CheckOnceAsync(ws, sess));
-        Assert.False(File.Exists(_storageManager.GetHistoryDbPath(ws, sess)));
+        Assert.False(File.Exists(_storageManager.GetWorkspaceDbPath(ws)));
         // 第二次命中进程内缓存
         Assert.True(await _store.CheckOnceAsync(ws, sess));
     }

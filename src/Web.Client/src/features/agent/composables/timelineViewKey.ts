@@ -33,6 +33,10 @@ export interface TimelineMenuState {
   canCopy: boolean;
   canCopyTurn: boolean;
   copyLabel: string;
+  replayDisabled?: boolean;
+  branchDisabled?: boolean;
+  replayTitle?: string;
+  branchTitle?: string;
 }
 
 /**
@@ -65,6 +69,13 @@ export interface TimelineViewModel {
   lastError: string;
   showRetry: boolean;
   liveTelemetry: TimelineLiveTelemetry | null;
+  /** 截断已提交但尚未发送的恢复项（仅目标会话展示）。 */
+  pendingReplay?: {
+    sessionId: string;
+    workspaceId: string;
+    text: string;
+    recoveryToken?: string;
+  } | null;
   menu: TimelineMenuState;
 }
 
@@ -114,6 +125,7 @@ export function timelineViewFallback(): TimelineViewModel {
     lastError: '',
     showRetry: false,
     liveTelemetry: null,
+    pendingReplay: null,
     menu: { visible: false, x: 0, y: 0, busy: false, canCopy: false, canCopyTurn: false, copyLabel: '复制此消息' },
   };
 }

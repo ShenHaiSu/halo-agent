@@ -103,27 +103,17 @@ public sealed partial class StoragePathManager
     public string GetSessionDirectory(string workspaceId, string sessionId) =>
         Path.Combine(SessionsDirectory, workspaceId ?? string.Empty, sessionId ?? string.Empty);
 
-    public string GetHistoryDbPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db"
-        );
+    public string GetWorkspaceDbPath(string workspaceId) =>
+        Path.Combine(SessionsDirectory, workspaceId ?? string.Empty, "history.db");
 
-    public string GetHistoryDbWalPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-wal";
+    public string GetWorkspaceDbWalPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + "-wal";
 
-    public string GetHistoryDbShmPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-shm";
+    public string GetWorkspaceDbShmPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + "-shm";
 
-    public string GetHistoryBackupPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db.bak"
-        );
+    public string GetWorkspaceBackupPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + ".bak";
 
     public string GetSessionToolOutputsDir(string workspaceId, string sessionId) =>
         Path.Combine(GetSessionDirectory(workspaceId, sessionId), "tool-outputs");
@@ -171,40 +161,25 @@ public sealed partial class StoragePathManager
     public static StoragePathManager Initialize(
         string? customBootstrapFilePath = null,
         string? customDefaultDataRoot = null,
-        string? customFallbackDataRoot = null
+        string? customFallbackDataRoot = null,
+        string? exeDirectory = null
     )
     {
-        var localAppData = Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData
+        var location = ResolveDataLocation(
+            customBootstrapFilePath,
+            customDefaultDataRoot,
+            customFallbackDataRoot,
+            exeDirectory
         );
-        var haloLocalAppDataDir = Path.Combine(localAppData, "HaloAgent");
-
-        var envBootstrap = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
-        var bootstrapPath = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customBootstrapFilePath)
-                ? customBootstrapFilePath
-                : !string.IsNullOrWhiteSpace(envBootstrap)
-                    ? envBootstrap
-                    : Path.Combine(haloLocalAppDataDir, "bootstrap.json")
-        );
-
-        var defaultRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customDefaultDataRoot)
-                ? customDefaultDataRoot
-                : DefaultCDriveDataRoot
-        );
-
-        var fallbackRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customFallbackDataRoot)
-                ? customFallbackDataRoot
-                : Path.Combine(haloLocalAppDataDir, "Data")
-        );
+        var bootstrapPath = location.BootstrapPath;
+        var defaultRoot = location.DataRootPath;
+        var fallbackRoot = location.FallbackDataRootPath;
 
         Directory.CreateDirectory(Path.GetDirectoryName(bootstrapPath)!);
 
-        var existingBootstrap = AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(
-            bootstrapPath
-        );
+        var existingBootstrap = location.IsPortable
+            ? null
+            : AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(bootstrapPath);
         var preferredPath = !string.IsNullOrWhiteSpace(existingBootstrap?.DataRootPath)
             ? existingBootstrap!.DataRootPath
             : defaultRoot;

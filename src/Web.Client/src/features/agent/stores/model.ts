@@ -2,7 +2,7 @@
  * 4 小 store 与旧转发共用同一份 state，响应式语义与旧 agentStore.ts 一致；跨 store 读经此处参数/事件，不直 import 其他 store。
  */
 import { ref } from 'vue';
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
+import type { ChatImageRef } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
 
 /** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
@@ -52,7 +52,7 @@ export interface AgentToolCard {
   /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
   fileBytes?: number | null;
   images?: ChatImageRef[];
-  /** need23-R1：该工具消息在 messages.jsonl 中的 id（空=尚未落盘）。 */
+  /** 该工具消息在统一仓储中的标识（空=尚未落盘）。 */
   messageId?: string;
   /** need23-R1：结果是否已落盘（ToolMessagePersisted 到达后为 true）。 */
   persisted?: boolean;
@@ -61,12 +61,34 @@ export interface AgentToolCard {
   errorCode?: string | null;
 }
 
-/** need09-04：sendPrompt 可选第二参附件项 */
+/** sendPrompt 可选第二参：base64 附件（老形状兼容，kind 可省略）。 */
 export interface AgentSendAttachment {
+  kind?: 'base64';
   attId: string;
   fileName: string;
   mime: string;
   base64: string;
+}
+
+/** 复用会话内已存储图片：只传 imageId，不接受 relPath。 */
+export interface AgentSendStoredMedia {
+  kind: 'stored';
+  imageId: string;
+  fileName: string;
+  mime: string;
+}
+
+export type AgentSendMedia = AgentSendAttachment | AgentSendStoredMedia;
+
+/** 截断已提交但尚未成功发送的恢复项，仅存活于当前应用生命周期。 */
+export interface PendingReplay {
+  workspaceId: string;
+  sessionId: string;
+  anchorMessageId: string;
+  text: string;
+  media: AgentSendMedia[];
+  recoveryToken?: string;
+  createdAt: number;
 }
 
 export interface AgentTelemetry {
@@ -107,8 +129,12 @@ export interface AgentTurnState {
   requestId: string;
   /** need22-P2 F5：失败重试用原文（成功/新发后清空） */
   lastPrompt: string;
-  /** need02-P1：失败重试用附件（含图重发带图；成功/新发后更新） */
+  /** 失败重试用附件（含图重发带图；成功/新发后更新） */
   lastAttachments: AgentSendAttachment[];
+  /** 本轮完整媒体（base64 + stored），失败重试继续携带。 */
+  lastMedia: AgentSendMedia[];
+  /** 截断已提交但尚未发送的恢复项（仅内存态，重启不恢复）。 */
+  pendingReplay: PendingReplay | null;
   /** need02-P1：乐观 user（分桶天然隔离；null=无 pending；仅视图层 overlay，不写 jsonl） */
   pendingUser: PendingUser | null;
   /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
@@ -146,8 +172,6 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
-export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
 
@@ -182,6 +206,8 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     requestId: '',
     lastPrompt: '',
     lastAttachments: [],
+    lastMedia: [],
+    pendingReplay: null,
     pendingUser: null,
     liveCompleting: false,
     steadyReady: false,

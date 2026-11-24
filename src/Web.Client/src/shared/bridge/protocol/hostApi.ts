@@ -23,6 +23,7 @@ import type {
   CompactionResultDto,
   ContextBudgetStatusDto,
   FirstRoundTexts,
+  HistoryCapabilities,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
   HistoryTruncateResultDto,
@@ -132,7 +133,7 @@ export interface HostBridgeApi {
     modelId?: string,
     force?: boolean
   ) => Promise<BridgeResponse<string>>;
-  /** need03-03-B：首轮取数直读（不受 HistoryVersion 守卫影响，标题链路共用）。 */
+  /** 首轮取数直读（标题链路共用）。 */
   getFirstRoundTexts: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<FirstRoundTexts>>;
   setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
@@ -180,7 +181,8 @@ export interface HostBridgeApi {
     beforeMessageId?: string
   ) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
   getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
-  // need07
+  /** 历史能力探测：旧后端方法缺失时由 transport 归一为全部不支持。 */
+  getHistoryCapabilities: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<HistoryCapabilities>>;
   truncateSessionHistory: (
     workspaceId: string,
     sessionId: string,

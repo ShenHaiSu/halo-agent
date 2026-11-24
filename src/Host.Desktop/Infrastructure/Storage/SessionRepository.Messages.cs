@@ -1,13 +1,6 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
 
@@ -28,43 +21,13 @@ public sealed partial class SessionRepository : ISessionRepository
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
-            var dir = Path.GetDirectoryName(jsonlPath);
-            if (!string.IsNullOrEmpty(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            string line =
-                JsonSerializer.Serialize(message, HaloJsonOptions.CompactCamelCase) + "\n";
-            byte[] bytes = Encoding.UTF8.GetBytes(line);
-
-            await using var fs = new FileStream(
-                jsonlPath,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.Read,
-                4096,
-                useAsync: true
-            );
-            await fs.WriteAsync(bytes, ct).ConfigureAwait(false);
-            await fs.FlushAsync(ct).ConfigureAwait(false);
+            var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+            store.InsertSingleMessage(workspaceId, sessionId, message);
         }
         finally
         {
             sessionLock.Release();
         }
-        // S3 B3: v2 dual-write DB messages (mirror when history.db exists, INSERT OR IGNORE, never breaks jsonl)
-        try
-        {
-            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
-            if (File.Exists(dbPath))
-            {
-                var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
-                store.InsertSingleMessage(workspaceId, sessionId, message);
-            }
-        }
-        catch { }
     }
 
     public async Task<List<UnifiedChatMessage>> GetMessagesAsync(
@@ -73,71 +36,11 @@ public sealed partial class SessionRepository : ISessionRepository
         CancellationToken ct = default
     )
     {
-        // S3 B3: v2 reads from DB messages first (history.db exists => DB is truth, ignore blocks)
-        try
-        {
-            string dbPath = _storageManager.GetHistoryDbPath(workspaceId, sessionId);
-            if (File.Exists(dbPath))
-            {
-                var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
-                var dbMsgs = await store
-                    .GetMessagesAsync(workspaceId, sessionId, ct)
-                    .ConfigureAwait(false);
-                foreach (var m in dbMsgs)
-                    MarkMissingImages(workspaceId, sessionId, m);
-                if (dbMsgs.Count > 0)
-                    return dbMsgs;
-            }
-        }
-        catch { }
-        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
-        if (!File.Exists(jsonlPath))
-        {
-            return new List<UnifiedChatMessage>();
-        }
-
-        var list = new List<UnifiedChatMessage>();
-        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            using var fs = new FileStream(
-                jsonlPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite
-            );
-            using var reader = new StreamReader(fs, Encoding.UTF8);
-            string? line;
-            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-                try
-                {
-                    var msg = JsonSerializer.Deserialize<UnifiedChatMessage>(
-                        line,
-                        HaloJsonOptions.CompactCamelCase
-                    );
-                    if (msg != null)
-                    {
-                        MarkMissingImages(workspaceId, sessionId, msg);
-                        list.Add(msg);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    HaloLogger.App.Warn(
-                        $"Failed to deserialize message line in session '{sessionId}': {ex.Message}"
-                    );
-                }
-            }
-        }
-        finally
-        {
-            sessionLock.Release();
-        }
-        return list;
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+        var dbMsgs = await store.GetMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        foreach (var m in dbMsgs)
+            MarkMissingImages(workspaceId, sessionId, m);
+        return dbMsgs;
     }
 
     public async IAsyncEnumerable<UnifiedChatMessage> StreamMessagesAsync(
@@ -146,53 +49,13 @@ public sealed partial class SessionRepository : ISessionRepository
         [EnumeratorCancellation] CancellationToken ct = default
     )
     {
-        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
-        if (!File.Exists(jsonlPath))
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+        var dbMsgs = await store.GetMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
+        foreach (var m in dbMsgs)
         {
-            yield break;
-        }
-
-        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            using var fs = new FileStream(
-                jsonlPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite
-            );
-            using var reader = new StreamReader(fs, Encoding.UTF8);
-            string? line;
-            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-                UnifiedChatMessage? msg = null;
-                try
-                {
-                    msg = JsonSerializer.Deserialize<UnifiedChatMessage>(
-                        line,
-                        HaloJsonOptions.CompactCamelCase
-                    );
-                }
-                catch (Exception ex)
-                {
-                    HaloLogger.App.Warn(
-                        $"Failed to deserialize message line in session '{sessionId}': {ex.Message}"
-                    );
-                }
-
-                if (msg != null)
-                {
-                    MarkMissingImages(workspaceId, sessionId, msg);
-                    yield return msg;
-                }
-            }
-        }
-        finally
-        {
-            sessionLock.Release();
+            ct.ThrowIfCancellationRequested();
+            MarkMissingImages(workspaceId, sessionId, m);
+            yield return m;
         }
     }
 
@@ -202,6 +65,14 @@ public sealed partial class SessionRepository : ISessionRepository
         CancellationToken ct = default
     )
     {
+        try
+        {
+            var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+            await store
+                .DeleteSessionPartitionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+        }
+        catch { }
         string sessionDir = GetSessionDirectory(workspaceId, sessionId);
         if (Directory.Exists(sessionDir))
         {
@@ -228,6 +99,98 @@ public sealed partial class SessionRepository : ISessionRepository
         return true;
     }
 
+    public async Task<HistoryRollbackResult> RollbackCreatedSessionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        var result = new HistoryRollbackResult();
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+
+        try
+        {
+            await store
+                .DeleteSessionPartitionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            using var conn = new SessionHistoryDb(_storageManager).OpenWorkspace(workspaceId);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT (SELECT COUNT(*) FROM messages WHERE session_id = $sid)"
+                + " + (SELECT COUNT(*) FROM turns WHERE session_id = $sid)"
+                + " + (SELECT COUNT(*) FROM blocks WHERE session_id = $sid);";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+            long remaining = Convert.ToInt64(cmd.ExecuteScalar());
+            result.PartitionDeleted = remaining == 0;
+            if (remaining != 0)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(
+                        BranchRollbackStage.Partition,
+                        "数据库分区仍有 " + remaining + " 行"
+                    )
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Partition, ex.Message)
+            );
+        }
+
+        try
+        {
+            string sessionDir = GetSessionDirectory(workspaceId, sessionId ?? string.Empty);
+            if (Directory.Exists(sessionDir))
+                Directory.Delete(sessionDir, recursive: true);
+            result.DirectoryDeleted = !Directory.Exists(sessionDir);
+            if (!result.DirectoryDeleted)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(BranchRollbackStage.Directory, "会话目录仍存在")
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Directory, ex.Message)
+            );
+        }
+
+        try
+        {
+            var sessions = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+            int removed = sessions.RemoveAll(s =>
+                string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+            );
+            if (removed > 0)
+                await SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+            result.MetadataDeleted = true;
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Metadata, ex.Message)
+            );
+        }
+
+        try
+        {
+            var after = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+            result.IndexRemoved = !after.Any(s =>
+                string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+            );
+            if (!result.IndexRemoved)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(BranchRollbackStage.Index, "会话索引仍包含该会话")
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(new HistoryRollbackFailure(BranchRollbackStage.Index, ex.Message));
+        }
+
+        return result;
+    }
+
     public Task<bool> DeleteWorkspaceDirectoryAsync(
         string workspaceId,
         CancellationToken ct = default
@@ -250,69 +213,5 @@ public sealed partial class SessionRepository : ISessionRepository
             }
         }
         return Task.FromResult(true);
-    }
-
-    /// <summary>
-    /// need05-03：备份 messages.jsonl → messages.compact-bak-{UTC:yyyyMMddHHmmss}.jsonl，返回备份文件名。
-    /// 与 AppendMessageAsync 持同一把 _sessionLocks[sessionId] 锁，天然互斥。
-    /// </summary>
-    public Task<string> BackupMessagesJsonlAsync(
-        string workspaceId,
-        string sessionId,
-        CancellationToken ct = default
-    ) => BackupMessagesJsonlAsync(workspaceId, sessionId, "messages.compact-bak-", ct);
-
-    /// <summary>need07：前缀可配备份（replay-bak / compact-bak 共用同一原子拷贝路径）。</summary>
-    public async Task<string> BackupMessagesJsonlAsync(
-        string workspaceId,
-        string sessionId,
-        string filePrefix,
-        CancellationToken ct = default
-    )
-    {
-        string prefix = string.IsNullOrWhiteSpace(filePrefix)
-            ? "messages.compact-bak-"
-            : filePrefix.Trim();
-        string jsonlPath = GetMessagesJsonlPath(workspaceId, sessionId);
-        string backupFileName = $"{prefix}{DateTime.UtcNow:yyyyMMddHHmmss}.jsonl";
-        string backupPath = Path.Combine(
-            GetSessionDirectory(workspaceId, sessionId),
-            backupFileName
-        );
-        var sessionLock = _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
-        await sessionLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var dir = Path.GetDirectoryName(backupPath);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-            if (File.Exists(jsonlPath))
-            {
-                using var src = new FileStream(
-                    jsonlPath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite
-                );
-                using var dst = new FileStream(
-                    backupPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None
-                );
-                await src.CopyToAsync(dst, ct).ConfigureAwait(false);
-                await dst.FlushAsync(ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await File.WriteAllTextAsync(backupPath, string.Empty, Encoding.UTF8, ct)
-                    .ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            sessionLock.Release();
-        }
-        return backupFileName;
     }
 }

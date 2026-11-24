@@ -19,6 +19,8 @@
         @menu-replay="t.menu.onMenuReplay()"
         @menu-branch="t.menu.onMenuBranch()"
         @menu-delete="t.menu.onMenuDelete()"
+        @resume-replay="t.turn.resumePendingReplay()"
+        @discard-replay="t.turn.discardPendingReplay()"
         @jump-latest="t.jumpToLatest()"
       />
     </div>
@@ -43,11 +45,7 @@ const t = reactive(rawTimeline);
 const workspaceSnapshot = useWorkspaceStore();
 const { timelineSummaries } = storeToRefs(workspaceSnapshot);
 const summaryList = computed(() => timelineSummaries.value ?? []);
-const isEmpty = computed(
-  () =>
-    // 主链纯 V2：persistedMessages 退出判据，只看摘要 + 活跃 + 乐观。
-    summaryList.value.length === 0 && !t.stream.hasActiveTurn && !t.turn.activeTurn?.pendingUser
-);
+const isEmpty = computed(() => summaryList.value.length === 0 && !t.stream.hasActiveTurn && !t.turn.activeTurn?.pendingUser);
 
 /** 渲染开关一次快照（后续只读）。 */
 const renderGate = useP02Flags();

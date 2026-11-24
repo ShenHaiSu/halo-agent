@@ -70,6 +70,10 @@ public sealed class TurnSummary
     public string UserContent { get; set; } = string.Empty;
     public string? FinalBlockId { get; set; }
     public string FinalPreview { get; set; } = string.Empty;
+
+    /// <summary>末轮正文全文：摘要层一次返回，首屏零额外请求；超限转外置引用，仅回预览。</summary>
+    public string FinalContent { get; set; } = string.Empty;
+
     public int Blocks { get; set; }
     public int Tools { get; set; }
     public int Failed { get; set; }
@@ -83,6 +87,12 @@ public sealed class TurnSummary
 
     /// <summary>P007：本轮压缩覆盖的消息条数；普通轮恒 0。</summary>
     public int RemovedMessages { get; set; }
+
+    /// <summary>摘要读出时投影的用户消息主键；仅用于历史操作，不参与导航渲染。</summary>
+    public string? UserMessageId { get; set; }
+
+    /// <summary>摘要读出时投影的本轮末条助手消息主键；失败轮或压缩轮为空。</summary>
+    public string? AssistantMessageId { get; set; }
 }
 
 /// <summary>块内容点查结果：小块直接给全文，大块给引用再读文件。</summary>

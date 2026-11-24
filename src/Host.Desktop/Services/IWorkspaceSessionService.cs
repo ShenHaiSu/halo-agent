@@ -121,29 +121,32 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default
     );
 
-    /// <summary>need07：重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
+    /// <summary>重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
     Task<HistoryTruncateResult> TruncateSessionHistoryAsync(
         string workspaceId,
         string sessionId,
         string anchorMessageId,
         bool removeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
-    /// <summary>need07：分支（includeAnchor=true 含锚轮，false 排除锚点）。</summary>
+    /// <summary>分支（includeAnchor=true 含锚轮，false 排除锚点）。</summary>
     Task<SessionMetadata> BranchSessionAsync(
         string workspaceId,
         string sourceSessionId,
         string anchorMessageId,
         bool includeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
     /// <summary>孤儿 tool_calls 愈合：缺回包的补 synthetic cancelled tool，无主 tool 消息直接清理。</summary>
     Task<HistoryHealResult> HealSessionHistoryAsync(
         string workspaceId,
         string sessionId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
     /// <summary>删除单条消息（删后顺带愈合，保证历史仍可直接发模型）。</summary>
@@ -151,7 +154,8 @@ public interface IWorkspaceSessionService
         string workspaceId,
         string sessionId,
         string messageId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
     Task<bool> UpdateSessionTitleAsync(
         string workspaceId,

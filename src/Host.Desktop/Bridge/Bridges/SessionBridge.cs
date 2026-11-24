@@ -167,34 +167,45 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(
+    /// <summary>旧全量消息直读入口已随统一仓储切换删除，请使用时间轴摘要接口。</summary>
+
+    /// <summary>标题链专用：按回合取指定回合的用户全文，摘要层直读，与消息门无关。</summary>
+    public async Task<BridgeResponse<string>> GetTurnUserContent(
         string workspaceId,
-        string sessionId
+        string sessionId,
+        string turnId
     )
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
+            }
+
+            var store = new WorkspaceSessionStore(_storageManager, _sessionRepository);
+            string content;
             try
             {
-                var meta = await _workspaceSessionService
-                    .GetSessionAsync(workspaceId, sessionId)
+                content = await store
+                    .GetUserContentAsync(workspaceId, sessionId, turnId ?? string.Empty)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion == 2)
-                    return BridgeResponse<List<UnifiedChatMessage>>.Fail(
-                        "USE_TIMELINE_API",
-                        "请使用 getTimelineSummary/getBlockContents"
-                    );
             }
-            catch { }
-            var messages = await _workspaceSessionService
-                .GetSessionMessagesAsync(workspaceId, sessionId)
-                .ConfigureAwait(false);
-            return BridgeResponse<List<UnifiedChatMessage>>.Success(messages);
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<string>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<string>.Fail("UNSUPPORTED_FORMAT", unsupported.Message);
+            }
+
+            return BridgeResponse<string>.Success(content ?? string.Empty);
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"GetSessionMessages failed for session '{sessionId}'", ex);
-            return BridgeResponse<List<UnifiedChatMessage>>.Fail(ex.Message, "SESSION_ERROR");
+            HaloLogger.App.Error($"GetTurnUserContent failed for session '{sessionId}'", ex);
+            return BridgeResponse<string>.Fail(ex.Message, "SESSION_ERROR");
         }
     }
 
@@ -211,8 +222,6 @@ public sealed partial class HostBridgeFacade
                 var meta = await _workspaceSessionService
                     .GetSessionAsync(workspaceId, sessionId)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<bool>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
                 if (
                     meta != null
                     && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)

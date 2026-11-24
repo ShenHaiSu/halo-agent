@@ -9,14 +9,13 @@ REM    2) Waits until the dev server is actually listening on 5173.
 REM    3) This window cd into dist, sets the dev env vars, then launches
 REM       Host.Desktop.exe -> CEF loads the dev server and opens DevTools.
 REM
-REM  Dev-mode env vars (see src/Host.Desktop/MainForm.cs):
-REM    HALO_ENV=Development       -> dev mode: load HALO_DEV_SERVER_URL + show DevTools
-REM    HALO_DEV_SERVER_URL=...    -> dev server URL (default http://localhost:5173)
-REM
-REM  Optional (uncomment the two lines in section 3 if needed):
-REM    HALO_BOOTSTRAP_PATH        -> isolate dev data from the production data root
-REM    HALO_ALLOW_MULTIINSTANCE=1 -> let the dev instance run beside a production one
+REM  Dev data isolation is automatic: dist\portable.data.json makes Host use
+REM    dist\.local-data for both bootstrap.json and the data root.
+REM  The marker is recreated here if missing, so dev.cmd works without build-dist.
+REM  HALO_ENV=Development       -> dev mode: load HALO_DEV_SERVER_URL + show DevTools
+REM  HALO_DEV_SERVER_URL=...    -> dev server URL (default http://localhost:5173)
 REM ============================================================================
+
 setlocal EnableExtensions
 cd /d "%~dp0"
 
@@ -36,7 +35,13 @@ if not exist "%DIST_DIR%\Host.Desktop.exe" (
   echo          Run build-dist.cmd first to generate .\dist.
   goto :fail
 )
-
+if not exist "%DIST_DIR%\portable.data.json" (
+  echo {"useLocalData": true} > "%DIST_DIR%\portable.data.json"
+  if errorlevel 1 (
+    echo [ERROR] Failed to write %DIST_DIR%\portable.data.json.
+    goto :fail
+  )
+)
 REM ---- 1) Vite dev server in a NEW window ------------------------------------
 echo [dev] 1/3 Starting Vite dev server in a new window ...
 start "HaloAgent Dev Server" /d "%WEB_DIR%" cmd /k "pnpm run dev"
@@ -65,8 +70,8 @@ cd /d "%DIST_DIR%"
 
 set "HALO_ENV=Development"
 set "HALO_DEV_SERVER_URL=%DEV_URL%"
-REM set "HALO_BOOTSTRAP_PATH=%~dp0.tmp\dev-bootstrap\bootstrap.json"
-REM set "HALO_ALLOW_MULTIINSTANCE=1"
+REM Data location is controlled by dist\portable.data.json; no bootstrap override is needed.
+REM The private data root keeps this instance separate from the installed one.
 
 start "HaloAgent Desktop Dev" "%DIST_DIR%\Host.Desktop.exe"
 

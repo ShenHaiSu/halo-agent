@@ -85,6 +85,77 @@ export interface TurnSummary {
   kind?: 'turn' | 'compact' | string;
   /** P007：本次压缩覆盖的消息条数（仅 compact 轮）。 */
   removedMessages?: number;
+  /** 后端投影的真实用户消息主键；只用于历史操作，不参与导航渲染。 */
+  userMessageId?: string | null;
+  /** 后端投影的本轮末条助手消息主键；失败轮或压缩轮为空。 */
+  assistantMessageId?: string | null;
+}
+
+/** 重放图片引用：lost 的图片只产生警告，不参与重新发送。 */
+export interface HistoryReplayImageDto {
+  imageId: string;
+  fileName: string;
+  mime: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  sha16: string;
+  lost: boolean;
+}
+
+/** 历史能力位：探测失败、字段缺失或旧后端方法不存在均归一为全部不支持。 */
+export interface HistoryCapabilities {
+  historyAnchors: boolean;
+  replayImages: boolean;
+  atomicHistoryMutex: boolean;
+  strictBranchRollback: boolean;
+}
+
+export const UnsupportedHistoryCapabilities: HistoryCapabilities = {
+  historyAnchors: false,
+  replayImages: false,
+  atomicHistoryMutex: false,
+  strictBranchRollback: false,
+};
+
+/** 能力归一：字段缺失、类型错误或探测失败一律视为不支持，禁止伪造支持。 */
+export function normalizeHistoryCapabilities(raw: unknown): HistoryCapabilities {
+  if (!raw || typeof raw !== 'object') return { ...UnsupportedHistoryCapabilities };
+  const source = raw as Record<string, unknown>;
+  const flag = (key: keyof HistoryCapabilities): boolean => (typeof source[key] === 'boolean' ? (source[key] as boolean) : false);
+  return {
+    historyAnchors: flag('historyAnchors'),
+    replayImages: flag('replayImages'),
+    atomicHistoryMutex: flag('atomicHistoryMutex'),
+    strictBranchRollback: flag('strictBranchRollback'),
+  };
+}
+
+/** 成功结果内的警告，IMAGE_MISSING 不作为 Bridge 失败码。 */
+export interface HistoryOperationWarning {
+  code: 'IMAGE_MISSING';
+  message: string;
+}
+
+export interface HistoryOperationResult {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  warnings?: HistoryOperationWarning[];
+}
+
+export interface HistoryReplayResult extends HistoryOperationResult {
+  replayText: string;
+  replayImages: HistoryReplayImageDto[];
+  destructiveCommitCompleted: boolean;
+  recoveryToken?: string;
+}
+
+export interface HistoryBranchResult extends HistoryOperationResult {
+  session?: unknown;
+  newSessionId?: string;
+  failedStage?: string;
+  switched?: boolean;
 }
 export interface TimelineBlockContent {
   blockId: string;
@@ -346,14 +417,17 @@ export interface PromptDiagnosticsDto {
   compressorPromptPreview: string;
   titlePromptPreview: string;
 }
-// need07：历史右键（截断/分支）
+/** 历史右键截断结果（分支与重放共享 DTO 基线）。 */
 export interface HistoryTruncateResultDto {
   success: boolean;
   errorCode?: string | null;
   keptMessages: number;
   removedMessages: number;
   replayText?: string | null;
+  replayImages?: HistoryReplayImageDto[] | null;
   backupFileName?: string | null;
+  destructiveCommitCompleted: boolean;
+  recoveryToken?: string | null;
 }
 export type SkillMemoryKind = 'skill' | 'memory';
 export type SkillMemoryScope = 'global' | 'project';
