@@ -99,6 +99,39 @@ public sealed partial class HostBridgeFacade
                     $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"
                 );
             }
+            SessionOperationLease? operationLease = null;
+            if (
+                !_sessionOperations.TryAcquire(
+                    workspaceId,
+                    sessionId,
+                    SessionOperationKind.Agent,
+                    out operationLease
+                )
+            )
+            {
+                string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar)
+                    ? ar
+                    : "unknown";
+                string conflictCode = _sessionOperations.TryGetHolderKind(
+                    workspaceId,
+                    sessionId,
+                    out var holder
+                )
+                    ? holder switch
+                    {
+                        SessionOperationKind.History => "HISTORY_OPERATION_IN_PROGRESS",
+                        SessionOperationKind.Compact => "COMPACTING",
+                        _ => "TURN_IN_PROGRESS"
+                    }
+                    : "TURN_IN_PROGRESS";
+                string conflictMessage = conflictCode switch
+                {
+                    "HISTORY_OPERATION_IN_PROGRESS" => "当前会话正在执行历史操作，请稍后重试",
+                    "COMPACTING" => "该会话正在压缩上下文，新一轮请稍候",
+                    _ => $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝"
+                };
+                return BridgeResponse<string>.Fail(conflictCode, conflictMessage);
+            }
             var cts = new CancellationTokenSource();
             _activeSessionTokens[turnKey] = cts;
             _activeAgentRequestIds[turnKey] = turnRequestId;
@@ -164,6 +197,7 @@ public sealed partial class HostBridgeFacade
                         _activeSessionTokens.TryRemove(turnKey, out _);
                         _activeAgentRequestIds.TryRemove(turnKey, out _);
                         cts.Dispose();
+                        operationLease?.Dispose();
                     }
                 },
                 CancellationToken.None

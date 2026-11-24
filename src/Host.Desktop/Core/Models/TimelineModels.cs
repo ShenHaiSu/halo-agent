@@ -87,6 +87,12 @@ public sealed class TurnSummary
 
     /// <summary>P007：本轮压缩覆盖的消息条数；普通轮恒 0。</summary>
     public int RemovedMessages { get; set; }
+
+    /// <summary>摘要读出时投影的用户消息主键；仅用于历史操作，不参与导航渲染。</summary>
+    public string? UserMessageId { get; set; }
+
+    /// <summary>摘要读出时投影的本轮末条助手消息主键；失败轮或压缩轮为空。</summary>
+    public string? AssistantMessageId { get; set; }
 }
 
 /// <summary>块内容点查结果：小块直接给全文，大块给引用再读文件。</summary>

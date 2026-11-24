@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
-import { summaryAnchorIds, summaryAssistantText, summaryCopyText, summaryUserText } from './summaryMenu';
+import { summaryAnchorKeys, summaryAssistantText, summaryCopyText, summaryHistoryAnchors, summaryUserText } from './summaryMenu';
 
 function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
   return {
@@ -9,6 +9,8 @@ function makeSummary(over: Partial<TurnSummary> = {}): TurnSummary {
     userPreview: '用户预览',
     finalBlockId: 'b-final',
     finalPreview: '正文预览',
+    userMessageId: 'u1',
+    assistantMessageId: 'a2',
     ...over,
   } as TurnSummary;
 }
@@ -42,8 +44,12 @@ describe('summaryMenuCopiesFullTurnWithoutEntryHack', () => {
     expect(summaryCopyText(null, '  正文  ')).toBe('正文');
   });
 
-  it('锚点：用户锚用 turnId，正文锚优先 finalBlockId', () => {
-    expect(summaryAnchorIds(makeSummary({ finalBlockId: '' }))).toEqual({ userId: 'uturn-u1', assistantId: 'uturn-u1' });
-    expect(summaryAnchorIds(makeSummary())).toEqual({ userId: 'uturn-u1', assistantId: 'b-final' });
+  it('历史锚点只取后端投影的真实消息 ID', () => {
+    expect(summaryHistoryAnchors(makeSummary())).toEqual({ userId: 'u1', assistantId: 'a2' });
+    expect(summaryHistoryAnchors(makeSummary({ userMessageId: null, assistantMessageId: null }))).toEqual({ userId: '', assistantId: '' });
+  });
+
+  it('导航锚点仍用 turnId 与 finalBlockId，不与操作锚点混用', () => {
+    expect(summaryAnchorKeys(makeSummary())).toEqual({ turnId: 'uturn-u1', blockId: 'b-final' });
   });
 });

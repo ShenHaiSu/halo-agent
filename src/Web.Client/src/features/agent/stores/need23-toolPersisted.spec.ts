@@ -20,7 +20,14 @@ function stubRuntime(): void {
     providerId: () => 'p1',
     modelId: () => 'm1',
     maxImages: () => 4,
-    truncateHistory: () => Promise.resolve({ ok: true, replayText: '' }),
+    truncateHistory: () =>
+      Promise.resolve({
+        ok: true,
+        replayText: '',
+        replayImages: [],
+        destructiveCommitCompleted: true,
+        warnings: [],
+      }),
     loadSessionMessages: () => Promise.resolve(),
     refreshBudget: () => Promise.resolve(),
     touchSessionTime: () => undefined,

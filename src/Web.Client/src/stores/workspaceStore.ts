@@ -9,7 +9,14 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
-import type { TurnSummary, TimelineBlockContent, TimelineBlockContentsResponse, TimelineToolResult } from '@shared/bridge/hostBridge';
+import type {
+  TurnSummary,
+  TimelineBlockContent,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
+  HistoryBranchResult,
+} from '@shared/bridge/hostBridge';
+import { historyErrorMessage } from '@shared/bridge/protocol/errors';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
@@ -509,7 +516,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function loadSessionMessages(
     sessionId: string,
-    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean }
+    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean; background?: boolean }
   ): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
@@ -526,6 +533,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
+    // 默认只加载当前会话；后台加载必须显式声明，禁止异步响应清空当前视图。
+    if (!opts?.background && sid !== activeSessionId.value) return;
     // 发送链保留旧预算，切会话仍清空：消息列表照旧清空防闪旧历史
     sessionMessages.value = [];
     timelineSummaries.value = [];
@@ -1109,29 +1118,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // need07：分支（user→排除锚点+草稿预填原文；assistant→含整轮+草稿空）
-  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant'): Promise<boolean> {
-    if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+  /** 分支：捕获源工作区与会话，草稿直接来自目标文本；返回结构化结果供 UI 提示。 */
+  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant', draftText?: string): Promise<HistoryBranchResult> {
+    const sourceWorkspaceId = activeWorkspaceId.value;
+    const sourceSessionId = activeSessionId.value;
+    if (!sourceWorkspaceId || !sourceSessionId) {
+      return { ok: false, code: 'SESSION_NOT_FOUND', message: '会话不存在' };
+    }
     try {
-      dropPendingUser(activeSessionId.value);
+      dropPendingUser(sourceSessionId);
     } catch {
       /* ignore */
     }
-    const includeAnchor = kind === 'assistant';
-    const anchor = sessionMessages.value.find((m) => String(m.id) === String(anchorMessageId));
-    const draftText = kind === 'user' ? String(anchor?.content || '') : '';
     try {
       const bridge = getHostBridge();
-      const res = await bridge.branchSession(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, includeAnchor);
-      if (!res.ok || !res.data) return false;
+      const res = await bridge.branchSession(sourceWorkspaceId, sourceSessionId, anchorMessageId, kind === 'assistant');
+      if (!res.ok || !res.data) {
+        return {
+          ok: false,
+          code: res.code,
+          message: res.message || historyErrorMessage(res.code),
+          newSessionId: res.newSessionId ?? undefined,
+          failedStage: res.failedStage ?? undefined,
+        };
+      }
       const created = res.data;
       sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)];
+      if (sourceWorkspaceId !== activeWorkspaceId.value || sourceSessionId !== activeSessionId.value) {
+        return { ok: true, session: created, switched: false };
+      }
       await selectSession(created.id);
-      haloEventBus.emitLocal('chat:prefill-draft', { text: draftText, sessionId: created.id });
-      return true;
+      haloEventBus.emitLocal('chat:prefill-draft', {
+        text: kind === 'user' ? String(draftText || '') : '',
+        sessionId: created.id,
+      });
+      return { ok: true, session: created, switched: true };
     } catch (err) {
       console.error('[workspaceStore] branchFromMessage failed:', err);
-      return false;
+      return {
+        ok: false,
+        code: 'BRANCH_ERROR',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
   // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。

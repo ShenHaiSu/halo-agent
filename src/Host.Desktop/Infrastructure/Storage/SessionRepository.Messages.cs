@@ -99,6 +99,98 @@ public sealed partial class SessionRepository : ISessionRepository
         return true;
     }
 
+    public async Task<HistoryRollbackResult> RollbackCreatedSessionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        var result = new HistoryRollbackResult();
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+
+        try
+        {
+            await store
+                .DeleteSessionPartitionAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            using var conn = new SessionHistoryDb(_storageManager).OpenWorkspace(workspaceId);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT (SELECT COUNT(*) FROM messages WHERE session_id = $sid)"
+                + " + (SELECT COUNT(*) FROM turns WHERE session_id = $sid)"
+                + " + (SELECT COUNT(*) FROM blocks WHERE session_id = $sid);";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+            long remaining = Convert.ToInt64(cmd.ExecuteScalar());
+            result.PartitionDeleted = remaining == 0;
+            if (remaining != 0)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(
+                        BranchRollbackStage.Partition,
+                        "数据库分区仍有 " + remaining + " 行"
+                    )
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Partition, ex.Message)
+            );
+        }
+
+        try
+        {
+            string sessionDir = GetSessionDirectory(workspaceId, sessionId ?? string.Empty);
+            if (Directory.Exists(sessionDir))
+                Directory.Delete(sessionDir, recursive: true);
+            result.DirectoryDeleted = !Directory.Exists(sessionDir);
+            if (!result.DirectoryDeleted)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(BranchRollbackStage.Directory, "会话目录仍存在")
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Directory, ex.Message)
+            );
+        }
+
+        try
+        {
+            var sessions = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+            int removed = sessions.RemoveAll(s =>
+                string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+            );
+            if (removed > 0)
+                await SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+            result.MetadataDeleted = true;
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(
+                new HistoryRollbackFailure(BranchRollbackStage.Metadata, ex.Message)
+            );
+        }
+
+        try
+        {
+            var after = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
+            result.IndexRemoved = !after.Any(s =>
+                string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+            );
+            if (!result.IndexRemoved)
+                result.Failures.Add(
+                    new HistoryRollbackFailure(BranchRollbackStage.Index, "会话索引仍包含该会话")
+                );
+        }
+        catch (Exception ex)
+        {
+            result.Failures.Add(new HistoryRollbackFailure(BranchRollbackStage.Index, ex.Message));
+        }
+
+        return result;
+    }
+
     public Task<bool> DeleteWorkspaceDirectoryAsync(
         string workspaceId,
         CancellationToken ct = default

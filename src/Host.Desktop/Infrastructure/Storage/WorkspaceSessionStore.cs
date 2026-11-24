@@ -134,6 +134,12 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
         return result;
     }
 
+    public Task<List<HistoryMessageRef>> GetMessageRefsAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    ) => _inner.GetMessageRefsAsync(workspaceId, sessionId, ct);
+
     public async Task<List<TimelineBlockContent>> GetBlockIdsAsync(
         string workspaceId,
         string sessionId,

@@ -7,6 +7,7 @@ import type {
   HistoryDeleteResultDto,
   HistoryHealResultDto,
   FirstRoundTexts,
+  HistoryCapabilities,
   HistoryTruncateResultDto,
   HostBridgeApi,
   SessionGoalDto,
@@ -20,6 +21,7 @@ import type {
   WorkspaceInfo,
 } from '../protocol/types';
 import { normalizeBridgePayload } from './normalize';
+import { UnsupportedHistoryCapabilities, normalizeHistoryCapabilities } from '../protocol/domain';
 
 export function createSessionApi(
   t: BridgeTransport
@@ -52,6 +54,7 @@ export function createSessionApi(
   | 'clearGoal'
   | 'getSubSessionDetail'
   | 'getSubSessionMessages'
+  | 'getHistoryCapabilities'
   | 'truncateSessionHistory'
   | 'branchSession'
   | 'healSessionHistory'
@@ -261,6 +264,20 @@ export function createSessionApi(
       } catch (e) {
         console.warn('[bridge] native unavailable, fallback empty state:', (e as Error)?.message ?? e);
         return { ok: true, data: [] as UnifiedChatMessage[] };
+      }
+    },
+    async getHistoryCapabilities(workspaceId: string, sessionId: string) {
+      if (!t.supports('getHistoryCapabilities')) {
+        return { ok: true, data: { ...UnsupportedHistoryCapabilities } } as BridgeResponse<HistoryCapabilities>;
+      }
+      try {
+        const response = normalizeBridgePayload<BridgeResponse<HistoryCapabilities>>(
+          await t.call('getHistoryCapabilities', workspaceId ?? '', sessionId ?? '')
+        );
+        if (!response.ok) return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
+        return { ...response, data: normalizeHistoryCapabilities(response.data) };
+      } catch {
+        return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
       }
     },
     async truncateSessionHistory(workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) {

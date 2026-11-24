@@ -1,18 +1,77 @@
+using System;
+using System.Collections.Generic;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
+using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
-/// <summary>need07：历史右键（截断/分支）Bridge 入口。need16：子会话只读守卫。</summary>
+/// <summary>历史右键操作的 Bridge 入口：能力、错误映射与会话操作互斥在此闭合。</summary>
 public sealed partial class HostBridgeFacade
 {
-    private bool IsHistoryBusy(string sessionId)
+    private static readonly Dictionary<string, string> HistoryErrorMessages =
+        new(StringComparer.Ordinal)
+        {
+            ["ANCHOR_NOT_FOUND"] = "历史已变化，未找到对应消息，请刷新后重试",
+            ["INVALID_ANCHOR_ROLE"] = "历史消息角色不支持此操作",
+            ["INVALID_BRANCH_REQUEST"] = "分支参数不合法，请刷新菜单后重试",
+            ["SESSION_BUSY"] = "当前会话正在生成或压缩，请稍后再试",
+            ["HISTORY_OPERATION_IN_PROGRESS"] = "当前会话正在执行其他历史操作",
+            ["SUB_READONLY"] = "子会话历史只读，不可修改",
+            ["HISTORY_READONLY"] = "历史版本只读，不可重放，可分支",
+            ["EMPTY_REPLAY_TEXT"] = "该消息没有可重放的文本",
+            ["NO_PRIOR_USER"] = "未找到该回复所属的用户消息",
+            ["REWRITE_ERROR"] = "历史重写未完成，请刷新确认并检查备份",
+            ["TRUNCATE_COMMIT_ERROR"] = "历史截断提交状态不确定，请勿重复操作",
+            ["BRANCH_COPY_ERROR"] = "分支复制失败，已回滚，原会话未改动",
+            ["BRANCH_ROLLBACK_FAILED"] = "分支清理失败，存在残留会话，请手动处理",
+            ["SESSION_NOT_FOUND"] = "会话不存在或已被删除"
+        };
+
+    internal static string HistoryErrorMessage(string? code, string fallback) =>
+        !string.IsNullOrWhiteSpace(code) && HistoryErrorMessages.TryGetValue(code, out var message)
+            ? message
+            : fallback;
+
+    private SessionOperationLease? AcquireHistoryLock(
+        string workspaceId,
+        string sessionId,
+        out string? errorCode
+    )
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return false;
-        string sid = sessionId.Trim();
-        return _activeSessionTokens.ContainsKey("agent:" + sid)
-            || _activeSessionTokens.ContainsKey("compact:" + sid);
+        if (
+            _sessionOperations.TryAcquire(
+                workspaceId,
+                sessionId,
+                SessionOperationKind.History,
+                TimeSpan.FromSeconds(5),
+                out var lease,
+                out var waitMs
+            )
+        )
+        {
+            errorCode = null;
+            return lease;
+        }
+        errorCode =
+            _sessionOperations.TryGetHolderKind(workspaceId, sessionId, out var holder)
+            && holder == SessionOperationKind.History
+                ? "HISTORY_OPERATION_IN_PROGRESS"
+                : "SESSION_BUSY";
+        try
+        {
+            HaloLogger.App.Info(
+                "[SessionLock] conflict ws="
+                    + workspaceId
+                    + " sess="
+                    + sessionId
+                    + " kind=History"
+                    + " waitMs="
+                    + waitMs
+            );
+        }
+        catch { }
+        return null;
     }
 
     private async Task<bool> IsSubSessionAsync(string workspaceId, string sessionId)
@@ -35,6 +94,21 @@ public sealed partial class HostBridgeFacade
     private Task<bool> IsHistoryReadonlyAsync(string workspaceId, string sessionId) =>
         Task.FromResult(false);
 
+    /// <summary>只读能力探测：不获取历史写锁，不修改数据。</summary>
+    public Task<BridgeResponse<HistoryCapabilities>> GetHistoryCapabilities(
+        string workspaceId,
+        string sessionId
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            return Task.FromResult(
+                BridgeResponse<HistoryCapabilities>.Fail("INVALID_SESSION", "工作区或会话不能为空")
+            );
+        return Task.FromResult(
+            BridgeResponse<HistoryCapabilities>.Success(HistoryCapabilities.Supported)
+        );
+    }
+
     public async Task<BridgeResponse<HistoryTruncateResult>> TruncateSessionHistory(
         string workspaceId,
         string sessionId,
@@ -44,29 +118,88 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+                return BridgeResponse<HistoryTruncateResult>.Fail("INVALID_SESSION", "工作区或会话不能为空");
             if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
-                return BridgeResponse<HistoryTruncateResult>.Fail("SUB_READONLY", "子会话历史只读，不可截断");
+                return BridgeResponse<HistoryTruncateResult>.Fail(
+                    "SUB_READONLY",
+                    HistoryErrorMessage("SUB_READONLY", "子会话不可操作")
+                );
             if (await IsHistoryReadonlyAsync(workspaceId, sessionId).ConfigureAwait(false))
                 return BridgeResponse<HistoryTruncateResult>.Fail(
                     "HISTORY_READONLY",
-                    "历史版本只读，不可截断，可分支"
+                    HistoryErrorMessage("HISTORY_READONLY", "历史只读")
                 );
-            if (IsHistoryBusy(sessionId))
-                return BridgeResponse<HistoryTruncateResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
-            var result = await _workspaceSessionService
-                .TruncateSessionHistoryAsync(workspaceId, sessionId, anchorMessageId, removeAnchor)
-                .ConfigureAwait(false);
-            if (!result.Success)
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
                 return BridgeResponse<HistoryTruncateResult>.Fail(
-                    result.ErrorCode ?? "TRUNCATE_FAILED",
-                    result.ErrorCode ?? "截断失败"
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
                 );
-            return BridgeResponse<HistoryTruncateResult>.Success(result);
+
+            bool handedOff = false;
+            try
+            {
+                var result = await _workspaceSessionService
+                    .TruncateSessionHistoryAsync(
+                        workspaceId,
+                        sessionId,
+                        anchorMessageId,
+                        removeAnchor,
+                        default,
+                        lease
+                    )
+                    .ConfigureAwait(false);
+                handedOff = true;
+                if (!result.Success)
+                    return BridgeResponse<HistoryTruncateResult>.Fail(
+                        result.ErrorCode ?? "TRUNCATE_FAILED",
+                        HistoryErrorMessage(result.ErrorCode, "截断失败")
+                    );
+                return BridgeResponse<HistoryTruncateResult>.Success(result);
+            }
+            catch (TruncateCommitException ex)
+            {
+                handedOff = true;
+                return BridgeResponse<HistoryTruncateResult>.Fail(
+                    "TRUNCATE_COMMIT_ERROR",
+                    HistoryErrorMessage("TRUNCATE_COMMIT_ERROR", ex.Message)
+                );
+            }
+            catch (InvalidOperationException ex)
+                when (ex.Message is "HISTORY_OPERATION_IN_PROGRESS" or "SESSION_BUSY")
+            {
+                handedOff = true;
+                return BridgeResponse<HistoryTruncateResult>.Fail(
+                    ex.Message,
+                    HistoryErrorMessage(ex.Message, "会话忙")
+                );
+            }
+            catch (Exception ex)
+            {
+                handedOff = true;
+                HaloLogger.App.Error(
+                    $"[History] replay.failed ws={workspaceId} sess={sessionId} anchor={anchorMessageId}",
+                    ex
+                );
+                return BridgeResponse<HistoryTruncateResult>.Fail(
+                    "TRUNCATE_ERROR",
+                    HistoryErrorMessage("TRUNCATE_ERROR", "截断失败")
+                );
+            }
+            finally
+            {
+                if (!handedOff)
+                    lease.Dispose();
+            }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"TruncateSessionHistory failed for session '{sessionId}'", ex);
-            return BridgeResponse<HistoryTruncateResult>.Fail("TRUNCATE_ERROR", ex.Message);
+            return BridgeResponse<HistoryTruncateResult>.Fail(
+                "TRUNCATE_ERROR",
+                HistoryErrorMessage("TRUNCATE_ERROR", "截断失败")
+            );
         }
     }
 
@@ -79,24 +212,101 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
+            if (
+                string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sourceSessionId)
+            )
+                return BridgeResponse<SessionMetadata>.Fail("INVALID_SESSION", "工作区或会话不能为空");
             if (await IsSubSessionAsync(workspaceId, sourceSessionId).ConfigureAwait(false))
-                return BridgeResponse<SessionMetadata>.Fail("SUB_READONLY", "子会话历史只读，不可分支");
-            if (IsHistoryBusy(sourceSessionId))
-                return BridgeResponse<SessionMetadata>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
-            var created = await _workspaceSessionService
-                .BranchSessionAsync(workspaceId, sourceSessionId, anchorMessageId, includeAnchor)
-                .ConfigureAwait(false);
-            return BridgeResponse<SessionMetadata>.Success(created);
-        }
-        catch (InvalidOperationException ex)
-            when (ex.Message is "ANCHOR_NOT_FOUND" or "SESSION_NOT_FOUND")
-        {
-            return BridgeResponse<SessionMetadata>.Fail(ex.Message, ex.Message);
+                return BridgeResponse<SessionMetadata>.Fail(
+                    "SUB_READONLY",
+                    HistoryErrorMessage("SUB_READONLY", "子会话不可操作")
+                );
+            var lease = AcquireHistoryLock(workspaceId, sourceSessionId, out var busyCode);
+            if (lease == null)
+                return BridgeResponse<SessionMetadata>.Fail(
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
+                );
+
+            bool handedOff = false;
+            try
+            {
+                var created = await _workspaceSessionService
+                    .BranchSessionAsync(
+                        workspaceId,
+                        sourceSessionId,
+                        anchorMessageId,
+                        includeAnchor,
+                        default,
+                        lease
+                    )
+                    .ConfigureAwait(false);
+                handedOff = true;
+                return BridgeResponse<SessionMetadata>.Success(created);
+            }
+            catch (BranchRollbackException ex)
+            {
+                handedOff = true;
+                HaloLogger.App.Error(
+                    "[History] branch.rollback.failed new="
+                        + ex.NewSessionId
+                        + " stages="
+                        + ex.FailedStages,
+                    ex
+                );
+                return BridgeResponse<SessionMetadata>.Fail(
+                    "BRANCH_ROLLBACK_FAILED",
+                    HistoryErrorMessage("BRANCH_ROLLBACK_FAILED", "分支清理失败")
+                        + "（残留会话 "
+                        + ex.NewSessionId
+                        + "，阶段 "
+                        + ex.FailedStages
+                        + "）",
+                    ex.NewSessionId,
+                    ex.FailedStages
+                );
+            }
+            catch (InvalidOperationException ex)
+                when (ex.Message
+                        is "ANCHOR_NOT_FOUND"
+                            or "SESSION_NOT_FOUND"
+                            or "INVALID_BRANCH_REQUEST"
+                            or "BRANCH_COPY_ERROR"
+                            or "HISTORY_OPERATION_IN_PROGRESS"
+                            or "SESSION_BUSY"
+                )
+            {
+                handedOff = true;
+                return BridgeResponse<SessionMetadata>.Fail(
+                    ex.Message,
+                    HistoryErrorMessage(ex.Message, "分支失败")
+                );
+            }
+            catch (Exception ex)
+            {
+                handedOff = true;
+                HaloLogger.App.Error(
+                    $"[History] branch.failed ws={workspaceId} src={sourceSessionId}",
+                    ex
+                );
+                return BridgeResponse<SessionMetadata>.Fail(
+                    "BRANCH_ERROR",
+                    HistoryErrorMessage("BRANCH_ERROR", "分支失败")
+                );
+            }
+            finally
+            {
+                if (!handedOff)
+                    lease.Dispose();
+            }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"BranchSession failed for session '{sourceSessionId}'", ex);
-            return BridgeResponse<SessionMetadata>.Fail("BRANCH_ERROR", ex.Message);
+            return BridgeResponse<SessionMetadata>.Fail(
+                "BRANCH_ERROR",
+                HistoryErrorMessage("BRANCH_ERROR", "分支失败")
+            );
         }
     }
 
@@ -107,22 +317,39 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
-            if (IsHistoryBusy(sessionId))
-                return BridgeResponse<HistoryHealResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
-            var result = await _workspaceSessionService
-                .HealSessionHistoryAsync(workspaceId, sessionId)
-                .ConfigureAwait(false);
-            if (!result.Success)
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
                 return BridgeResponse<HistoryHealResult>.Fail(
-                    result.ErrorCode ?? "HEAL_FAILED",
-                    result.ErrorCode ?? "愈合失败"
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
                 );
-            return BridgeResponse<HistoryHealResult>.Success(result);
+            bool handedOff = false;
+            try
+            {
+                var result = await _workspaceSessionService
+                    .HealSessionHistoryAsync(workspaceId, sessionId, default, lease)
+                    .ConfigureAwait(false);
+                handedOff = true;
+                if (!result.Success)
+                    return BridgeResponse<HistoryHealResult>.Fail(
+                        result.ErrorCode ?? "HEAL_FAILED",
+                        HistoryErrorMessage(result.ErrorCode, "愈合失败")
+                    );
+                return BridgeResponse<HistoryHealResult>.Success(result);
+            }
+            finally
+            {
+                if (!handedOff)
+                    lease.Dispose();
+            }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"HealSessionHistory failed for session '{sessionId}'", ex);
-            return BridgeResponse<HistoryHealResult>.Fail("HEAL_ERROR", ex.Message);
+            return BridgeResponse<HistoryHealResult>.Fail(
+                "HEAL_ERROR",
+                HistoryErrorMessage("HEAL_ERROR", "愈合失败")
+            );
         }
     }
 
@@ -135,18 +362,35 @@ public sealed partial class HostBridgeFacade
         try
         {
             if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
-                return BridgeResponse<HistoryDeleteResult>.Fail("SUB_READONLY", "子会话历史只读，不可删除");
-            if (IsHistoryBusy(sessionId))
-                return BridgeResponse<HistoryDeleteResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
-            var result = await _workspaceSessionService
-                .DeleteSessionMessageAsync(workspaceId, sessionId, messageId)
-                .ConfigureAwait(false);
-            if (!result.Success)
                 return BridgeResponse<HistoryDeleteResult>.Fail(
-                    result.ErrorCode ?? "DELETE_FAILED",
-                    result.ErrorCode ?? "删除失败"
+                    "SUB_READONLY",
+                    HistoryErrorMessage("SUB_READONLY", "子会话不可操作")
                 );
-            return BridgeResponse<HistoryDeleteResult>.Success(result);
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
+                return BridgeResponse<HistoryDeleteResult>.Fail(
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
+                );
+            bool handedOff = false;
+            try
+            {
+                var result = await _workspaceSessionService
+                    .DeleteSessionMessageAsync(workspaceId, sessionId, messageId, default, lease)
+                    .ConfigureAwait(false);
+                handedOff = true;
+                if (!result.Success)
+                    return BridgeResponse<HistoryDeleteResult>.Fail(
+                        result.ErrorCode ?? "DELETE_FAILED",
+                        HistoryErrorMessage(result.ErrorCode, "删除失败")
+                    );
+                return BridgeResponse<HistoryDeleteResult>.Success(result);
+            }
+            finally
+            {
+                if (!handedOff)
+                    lease.Dispose();
+            }
         }
         catch (Exception ex)
         {
@@ -154,13 +398,16 @@ public sealed partial class HostBridgeFacade
                 $"DeleteSessionMessage failed for session '{sessionId}' msg '{messageId}'",
                 ex
             );
-            return BridgeResponse<HistoryDeleteResult>.Fail("DELETE_ERROR", ex.Message);
+            return BridgeResponse<HistoryDeleteResult>.Fail(
+                "DELETE_ERROR",
+                HistoryErrorMessage("DELETE_ERROR", "删除失败")
+            );
         }
     }
 
     /// <summary>
     /// 启动时全量扫描：遍历全部工作区/会话做孤儿愈合（只读无伤会话直接跳过，只写脏会话）。
-    /// 后台 fire-and-forget 调用，永不阻塞 UI。支持取消；逐项异常进日志不断链（need22-P4 H9）。
+    /// 后台 fire-and-forget 调用，永不阻塞 UI。支持取消；逐项异常进日志不断链。
     /// </summary>
     public Task<BridgeResponse<int>> ScanAndHealAllSessions() =>
         ScanAndHealAllSessions(CancellationToken.None);
@@ -211,11 +458,10 @@ public sealed partial class HostBridgeFacade
                     try
                     {
                         var r = await _workspaceSessionService
-                            .HealSessionHistoryAsync(ws.Id, sess.Id)
+                            .HealSessionHistoryAsync(ws.Id, sess.Id, cancellationToken)
                             .ConfigureAwait(false);
                         if (r.Success && (r.SyntheticAppended > 0 || r.OrphanToolsRemoved > 0))
                             healedSessions++;
-                        // 启动 GC 孤儿 tool-outputs（工作区单库统一执行，失败不计入 healed）
                         try
                         {
                             var gcStore = new Infrastructure.Storage.SessionHistoryStore(
@@ -249,11 +495,10 @@ public sealed partial class HostBridgeFacade
         catch (Exception ex)
         {
             HaloLogger.App.Error("ScanAndHealAllSessions failed", ex);
-            return BridgeResponse<int>.Fail("SCAN_ERROR", ex.Message);
+            return BridgeResponse<int>.Fail("SCAN_ERROR", "扫描失败");
         }
     }
 
-    /// <summary>发货加固：会话目录过多时启动不全量扫，改为打开时懒检。</summary>
     internal const int StartupScanLazyThreshold = 200;
 
     internal static bool ShouldDeferStartupScan(int totalSessions) =>
@@ -282,9 +527,7 @@ public sealed partial class HostBridgeFacade
                         }
                     }
                 }
-                catch
-                { /* 单工作区枚举失败跳过，不阻断计数 */
-                }
+                catch { }
             }
             return total;
         }
@@ -294,7 +537,7 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    /// <summary>P007：压缩备份恢复入口（运维操作：删桩与全量重写唯一入口，须显式调用）。</summary>
+    /// <summary>压缩备份恢复入口：删桩与全量重写统一走历史写锁。</summary>
     public async Task<BridgeResponse<HistoryRestoreResult>> RestoreCompactedHistory(
         string workspaceId,
         string sessionId,
@@ -303,27 +546,34 @@ public sealed partial class HostBridgeFacade
     {
         try
         {
-            if (IsHistoryBusy(sessionId))
-                return BridgeResponse<HistoryRestoreResult>.Fail("SESSION_BUSY", "生成或压缩进行中，请稍后再试");
-            if (_workspaceSessionService is not Services.WorkspaceSessionService concrete)
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
                 return BridgeResponse<HistoryRestoreResult>.Fail(
-                    "UNSUPPORTED_SERVICE",
-                    "当前会话服务不支持恢复"
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
                 );
-            var tool = new Services.CompactionRestore(concrete);
-            var result = await tool.RestoreAsync(workspaceId, sessionId, backupFileName)
-                .ConfigureAwait(false);
-            if (!result.Success)
-                return BridgeResponse<HistoryRestoreResult>.Fail(
-                    result.ErrorCode ?? "RESTORE_FAILED",
-                    result.ErrorCode ?? "恢复失败"
-                );
-            return BridgeResponse<HistoryRestoreResult>.Success(result);
+            using (lease)
+            {
+                if (_workspaceSessionService is not Services.WorkspaceSessionService concrete)
+                    return BridgeResponse<HistoryRestoreResult>.Fail(
+                        "UNSUPPORTED_SERVICE",
+                        "当前会话服务不支持恢复"
+                    );
+                var tool = new Services.CompactionRestore(concrete);
+                var result = await tool.RestoreAsync(workspaceId, sessionId, backupFileName)
+                    .ConfigureAwait(false);
+                if (!result.Success)
+                    return BridgeResponse<HistoryRestoreResult>.Fail(
+                        result.ErrorCode ?? "RESTORE_FAILED",
+                        HistoryErrorMessage(result.ErrorCode, "恢复失败")
+                    );
+                return BridgeResponse<HistoryRestoreResult>.Success(result);
+            }
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error($"RestoreCompactedHistory failed for session '{sessionId}'", ex);
-            return BridgeResponse<HistoryRestoreResult>.Fail("RESTORE_ERROR", ex.Message);
+            return BridgeResponse<HistoryRestoreResult>.Fail("RESTORE_ERROR", "恢复失败");
         }
     }
 }

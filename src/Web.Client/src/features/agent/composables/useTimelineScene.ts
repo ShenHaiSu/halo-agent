@@ -98,15 +98,26 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
         output: tele.outputTokens,
       };
     },
+    get pendingReplay() {
+      return t.turn.currentPendingReplay ?? null;
+    },
     get menu() {
+      const busy = t.menu.menuBusy;
+      const reason = String(t.menu.menuState.target?.actionDisabledReason || '');
+      const replayDisabled = busy || t.menu.menuState.target?.canReplay === false;
+      const branchDisabled = busy || t.menu.menuState.target?.canBranch === false;
       return {
         visible: t.menu.menuState.visible,
         x: t.menu.menuState.x,
         y: t.menu.menuState.y,
-        busy: t.menu.menuBusy,
+        busy,
         canCopy: t.menu.menuCanCopy,
         canCopyTurn: t.menu.menuCanCopyTurn,
         copyLabel: t.menu.menuCopyLabel,
+        replayDisabled,
+        branchDisabled,
+        replayTitle: reason || '截断该轮并重新生成',
+        branchTitle: reason || '从这里创建分支会话',
       };
     },
   } as TimelineViewModel;

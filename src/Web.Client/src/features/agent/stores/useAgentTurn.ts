@@ -3,7 +3,9 @@
  */
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
-import { getBridgeTransport, haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
+import { getBridgeTransport, getHistoryCapabilitiesState, haloEventBus, type SessionStreamEventDto } from '@shared/bridge/hostBridge';
+import { historyErrorMessage } from '@shared/bridge/protocol/errors';
+import type { HistoryReplayResult, HistoryReplayImageDto } from '@shared/bridge/protocol/domain';
 import { startAgentTurn } from '@shared/bridge/api/agent';
 import {
   activeSessionId,
@@ -24,6 +26,8 @@ import {
   turnStartMarks,
   turns,
   type AgentSendAttachment,
+  type AgentSendMedia,
+  type PendingReplay,
   type AgentTurnState,
   type TurnEventPayload,
 } from './model';
@@ -156,11 +160,18 @@ export const useAgentTurn = defineStore('agent-turn', () => {
       touch(t);
     }
   }
-  async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
+  async function sendPromptForSession(
+    workspaceIdParam: string,
+    sessionIdParam: string,
+    text: string,
+    media?: AgentSendMedia[]
+  ): Promise<boolean> {
     const content = (text || '').trim();
-    const sessionId = activeSessionId.value;
-    const readyFiles = Array.isArray(attachments) ? attachments.filter((a) => a && (a as AgentSendAttachment).base64) : [];
-    if ((!content && readyFiles.length === 0) || !sessionId) return false;
+    const sessionId = (sessionIdParam || '').trim();
+    const workspaceId = (workspaceIdParam || '').trim();
+    const allMedia = Array.isArray(media) ? media.slice() : [];
+    const readyFiles = allMedia.filter((m) => m.kind !== 'stored') as AgentSendAttachment[];
+    if ((!content && allMedia.length === 0) || !workspaceId || !sessionId) return false;
     if (isCompacting(sessionId)) {
       toast('warning', '压缩中，新一轮请稍候');
       return false;
@@ -175,16 +186,29 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const prevRequestId = cur.requestId || '';
     const prevPrompt = cur.lastPrompt || '';
     const rt = agentRuntime();
-    const workspaceId = rt.workspaceId();
-    if (!workspaceId || !sessionId) return false;
-    // need09-03/04：超限取最新 N 张（与后端网关一致，取新丢旧；上限由 runtime 侧配置收敛）
+    // 超限取最新 N 张（与后端网关一致，取新丢旧；上限由 runtime 侧配置收敛）
     const maxImages = rt.maxImages();
     const kept = readyFiles.length > maxImages ? readyFiles.slice(readyFiles.length - maxImages) : readyFiles;
-    const attachmentsJson = kept.length > 0 ? JSON.stringify(kept) : '';
+    const serialized = allMedia.map((item) =>
+      item.kind === 'stored'
+        ? { kind: 'stored', imageId: item.imageId, fileName: item.fileName, mime: item.mime }
+        : {
+            kind: 'base64',
+            attId: (item as AgentSendAttachment).attId,
+            fileName: item.fileName,
+            mime: item.mime,
+            base64: (item as AgentSendAttachment).base64,
+          }
+    );
+    const keptMedia = serialized.length > maxImages ? serialized.slice(serialized.length - maxImages) : serialized;
+    const attachmentsJson = keptMedia.length > 0 ? JSON.stringify(keptMedia) : '';
     const requestId = newRequestId();
     // resetTurnState 内联（旧语义；分片缓冲归 stream 侧）
     dropSegBuf(sessionId);
+    // 重建轮状态时保留截断恢复项：发送失败后仍需可从原会话继续重放。
+    const preservedPendingReplay = getTurn(sessionId)?.pendingReplay ?? null;
     turns.value[sessionId] = emptyTurnState(sessionId, fallbackProtocol.value);
+    turns.value[sessionId].pendingReplay = preservedPendingReplay;
     turnStartMarks[sessionId] = Date.now();
     try {
       rt.touchSessionTime(sessionId);
@@ -212,6 +236,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     t.lastErrorInfo = null;
     t.lastPrompt = content;
     t.lastAttachments = kept.slice();
+    t.lastMedia = allMedia.slice();
     touch(t);
     try {
       const res = await startAgentTurn(getBridgeTransport(), {
@@ -286,8 +311,12 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     }
   }
 
-  /** need22-P2 F5：失败重试（用 lastPrompt 原文重发；成功清错误态）。 */
-  /** need02-P1：重试带图（lastAttachments），新 requestId，旧 failed 不复用。p1 off 时回旧链（仅文本）。 */
+  /** 当前会话发送入口：重放等跨异步操作必须调用带工作区/会话的版本，避免串线。 */
+  async function sendPrompt(text: string, attachments?: AgentSendAttachment[]): Promise<boolean> {
+    return sendPromptForSession(activeWorkspaceId.value, activeSessionId.value, text, attachments);
+  }
+
+  /** 发送失败重试：保留本轮完整媒体，并使用新的 requestId。 */
   async function retryLastTurn(targetSessionId?: string): Promise<boolean> {
     void targetSessionId;
     const sid = activeSessionId.value.trim();
@@ -295,13 +324,12 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const t = ensureTurn(sid);
     if (t.isGenerating) return false;
     const text = (t.lastPrompt || '').trim();
-    const atts = Array.isArray(t.lastAttachments) ? t.lastAttachments.slice() : [];
-    if (!text && atts.length === 0) return false;
+    const media = Array.isArray(t.lastMedia) ? t.lastMedia.slice() : [];
+    if (!text && media.length === 0) return false;
     t.lastError = '';
     t.lastErrorInfo = null;
     touch(t);
-    if (isP1On() && atts.length > 0) return sendPrompt(text, atts);
-    return sendPrompt(text);
+    return sendPromptForSession(activeWorkspaceId.value, sid, text, media);
   }
 
   /** need02-P1：replay/branch/delete 先清本 session pending，避免旧乐观串入新历史。 */
@@ -324,46 +352,182 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     touch(t);
   }
 
-  // 重放 user：截断优先，后端按仓储主键返回复发原文（重放归一由仓储主键保障，不再经消息内容反查）。
-  async function replayUserMessage(msgId: string): Promise<boolean> {
+  function replayFailure(code: string, message: string): HistoryReplayResult {
+    return {
+      ok: false,
+      code,
+      message,
+      replayText: '',
+      replayImages: [],
+      destructiveCommitCompleted: false,
+      warnings: [],
+    };
+  }
+
+  function isTargetCurrent(workspaceId: string, sessionId: string): boolean {
+    return activeWorkspaceId.value === workspaceId && activeSessionId.value === sessionId;
+  }
+
+  function toStoredMedia(images: HistoryReplayImageDto[]): AgentSendMedia[] {
+    return images
+      .filter((image) => image && !image.lost && !!image.imageId)
+      .map((image) => ({
+        kind: 'stored' as const,
+        imageId: image.imageId,
+        fileName: image.fileName,
+        mime: image.mime,
+      }));
+  }
+
+  /** 截断是破坏性提交，发送是独立后续步骤；任何一步失败都保留恢复项并准确说明。 */
+  async function runReplay(anchorMessageId: string): Promise<HistoryReplayResult> {
     const rt = agentRuntime();
-    const sid = (activeSessionId.value || '').trim();
-    const mid = (msgId || '').trim();
-    if (!sid || !mid || isBusyForHistory(sid) || isCompacting(sid)) return false;
-    clearPending(sid);
+    const workspaceId = (rt.workspaceId() || '').trim();
+    const sessionId = (activeSessionId.value || '').trim();
+    const mid = (anchorMessageId || '').trim();
+    if (!workspaceId || !sessionId || !mid) {
+      return replayFailure('ANCHOR_NOT_FOUND', historyErrorMessage('ANCHOR_NOT_FOUND'));
+    }
+    if (isBusyForHistory(sessionId) || isCompacting(sessionId)) {
+      return replayFailure('SESSION_BUSY', historyErrorMessage('SESSION_BUSY'));
+    }
+    const capabilities = getHistoryCapabilitiesState();
+    if (!capabilities.ready || !capabilities.capabilities.historyAnchors) {
+      return replayFailure('UNSUPPORTED_HISTORY', '当前后端版本不支持历史重放，请升级');
+    }
+    if (!capabilities.capabilities.replayImages) {
+      return replayFailure('UNSUPPORTED_HISTORY', '当前后端不支持安全重放，请升级');
+    }
+    clearPending(sessionId);
     try {
-      const res = await rt.truncateHistory(rt.workspaceId(), sid, mid, true);
-      if (!res.ok) return false;
-      const replayText = String(res.replayText || '').trim();
-      if (!replayText) return false;
-      await rt.loadSessionMessages(sid);
-      await rt.refreshBudget();
-      return await sendPrompt(replayText);
+      const result = await rt.truncateHistory(workspaceId, sessionId, mid, true);
+      if (!result.ok) {
+        const stable = historyErrorMessage(result.code, '');
+        return { ...result, message: stable || result.message || '历史操作失败' };
+      }
+      if (!result.destructiveCommitCompleted) {
+        return replayFailure('TRUNCATE_COMMIT_ERROR', historyErrorMessage('TRUNCATE_COMMIT_ERROR'));
+      }
+      const t = ensureTurn(sessionId);
+      const media = toStoredMedia(result.replayImages || []);
+      const warnings = [
+        ...(result.warnings || []),
+        ...(result.replayImages || [])
+          .filter((image) => image && image.lost)
+          .map((image) => ({
+            code: 'IMAGE_MISSING' as const,
+            message: `图片 ${image.fileName || image.imageId} 已缺失，未参与重放`,
+          })),
+      ];
+      const pending: PendingReplay = {
+        workspaceId,
+        sessionId,
+        anchorMessageId: mid,
+        text: result.replayText,
+        media,
+        recoveryToken: result.recoveryToken,
+        createdAt: Date.now(),
+      };
+      t.pendingReplay = pending;
+      touch(t);
+
+      if (!isTargetCurrent(workspaceId, sessionId)) {
+        return {
+          ...result,
+          ok: false,
+          code: 'REPLAY_TARGET_CHANGED',
+          message: historyErrorMessage('REPLAY_TARGET_CHANGED'),
+          warnings,
+        };
+      }
+      try {
+        await rt.loadSessionMessages(sessionId);
+        await rt.refreshBudget();
+      } catch {
+        return {
+          ...result,
+          ok: false,
+          code: 'REPLAY_SEND_FAILED',
+          message: '历史已截断，刷新失败，可稍后继续重放',
+          warnings,
+        };
+      }
+      if (!isTargetCurrent(workspaceId, sessionId)) {
+        return {
+          ...result,
+          ok: false,
+          code: 'REPLAY_TARGET_CHANGED',
+          message: historyErrorMessage('REPLAY_TARGET_CHANGED'),
+          warnings,
+        };
+      }
+      const sent = await sendPromptForSession(workspaceId, sessionId, result.replayText, media);
+      if (!sent) {
+        return {
+          ...result,
+          ok: false,
+          code: 'REPLAY_SEND_FAILED',
+          message: historyErrorMessage('REPLAY_SEND_FAILED'),
+          warnings,
+        };
+      }
+      const current = getTurn(sessionId);
+      if (current) {
+        current.pendingReplay = null;
+        touch(current);
+      }
+      return { ...result, warnings };
     } catch (err) {
-      console.error('[agent-turn] replayUserMessage failed:', err);
-      return false;
+      return replayFailure('REPLAY_SEND_FAILED', err instanceof Error ? err.message : String(err));
     }
   }
 
-  // need07：重放 assistant（后端按前驱 user 切面，返回复发原文）
-  async function replayAssistantTurn(assistantId: string): Promise<boolean> {
-    const rt = agentRuntime();
-    const sid = (activeSessionId.value || '').trim();
-    if (!sid || isBusyForHistory(sid) || isCompacting(sid)) return false;
-    clearPending(sid);
-    try {
-      const res = await rt.truncateHistory(rt.workspaceId(), sid, assistantId, true);
-      if (!res.ok) return false;
-      const replayText = String(res.replayText || '').trim();
-      if (!replayText) return false;
-      await rt.loadSessionMessages(sid);
-      await rt.refreshBudget();
-      return await sendPrompt(replayText);
-    } catch (err) {
-      console.error('[agent-turn] replayAssistantTurn failed:', err);
-      return false;
-    }
+  async function replayUserMessage(msgId: string): Promise<HistoryReplayResult> {
+    return runReplay(msgId);
   }
+
+  async function replayAssistantTurn(assistantId: string): Promise<HistoryReplayResult> {
+    return runReplay(assistantId);
+  }
+
+  /** 从截断后保留的恢复项继续发送：再次确认目标会话与能力，使用新 requestId。 */
+  async function resumePendingReplay(): Promise<HistoryReplayResult> {
+    const sessionId = activeSessionId.value.trim();
+    const workspaceId = activeWorkspaceId.value.trim();
+    const t = getTurn(sessionId);
+    const pending: PendingReplay | null = t?.pendingReplay ?? null;
+    if (!pending || pending.sessionId !== sessionId || pending.workspaceId !== workspaceId) {
+      return replayFailure('REPLAY_TARGET_CHANGED', '当前会话没有待继续的重放');
+    }
+    const capabilities = getHistoryCapabilitiesState();
+    if (!capabilities.ready || !capabilities.capabilities.historyAnchors) {
+      return replayFailure('UNSUPPORTED_HISTORY', '当前后端版本不支持历史重放，请升级');
+    }
+    clearPending(sessionId);
+    const sent = await sendPromptForSession(workspaceId, sessionId, pending.text, pending.media);
+    if (!sent) return replayFailure('REPLAY_SEND_FAILED', historyErrorMessage('REPLAY_SEND_FAILED'));
+    const current = getTurn(sessionId);
+    if (current) {
+      current.pendingReplay = null;
+      touch(current);
+    }
+    return {
+      ok: true,
+      replayText: pending.text,
+      replayImages: [],
+      destructiveCommitCompleted: true,
+      warnings: [],
+    };
+  }
+
+  function discardPendingReplay(): void {
+    const t = getTurn(activeSessionId.value);
+    if (!t?.pendingReplay) return;
+    t.pendingReplay = null;
+    touch(t);
+  }
+
+  const currentPendingReplay = computed<PendingReplay | null>(() => getTurn(activeSessionId.value)?.pendingReplay ?? null);
 
   // ---- 兼容：旧 handleTurnEvent 公开签名（生命周期分支；工具/子代理/Iteration 分支由各 store 事件订阅处理） ----
   function handleTurnEvent(kind: string, payload: Record<string, unknown>, sessionId?: string): void {
@@ -420,8 +584,12 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     clearLastError,
     isCompacting,
     sendPrompt,
+    sendPromptForSession,
     replayUserMessage,
     replayAssistantTurn,
+    resumePendingReplay,
+    discardPendingReplay,
+    currentPendingReplay,
     stopGenerating,
     bindTurn,
   };

@@ -16,7 +16,22 @@ import type {
   UsageFilter,
   UsageRowDto,
   WorkspaceInfo,
+  TurnSummary,
+  HistoryCapabilities,
 } from '@shared/bridge/protocol/types';
+import { UnsupportedHistoryCapabilities } from '@shared/bridge/protocol/domain';
+
+let configuredHistoryCapabilities: HistoryCapabilities = {
+  historyAnchors: true,
+  replayImages: true,
+  atomicHistoryMutex: true,
+  strictBranchRollback: true,
+};
+
+/** Mock 能力配置：传入不支持的能力即可复现旧后端降级场景。 */
+export function setMockHistoryCapabilities(capabilities: HistoryCapabilities): void {
+  configuredHistoryCapabilities = { ...capabilities };
+}
 
 export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
   return {
@@ -375,7 +390,13 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         },
       };
     },
-    // need07 mock：与真后端同语义（轮次展开 + 前驱 user 切面）
+    async getHistoryCapabilities() {
+      return {
+        ok: true,
+        data: { ...(configuredHistoryCapabilities ?? UnsupportedHistoryCapabilities) },
+      };
+    },
+    // 与真后端同语义（轮次展开 + 前驱 user 切面）
     async truncateSessionHistory(_workspaceId: string, sessionId: string, anchorMessageId: string) {
       const msgs = s.mockMessages[sessionId] || [];
       const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
@@ -396,9 +417,28 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       const kept = msgs.slice(0, cut);
       const removed = msgs.length - kept.length;
       s.mockMessages[sessionId] = kept;
+      const replayImages = (msgs[cut]?.images || []).map((image) => ({
+        imageId: String(image.imageId || ''),
+        fileName: String(image.fileName || ''),
+        mime: String(image.mime || ''),
+        width: Number(image.width || 0),
+        height: Number(image.height || 0),
+        sizeBytes: Number(image.sizeBytes || 0),
+        sha16: String(image.sha16 || ''),
+        lost: false,
+      }));
       return {
         ok: true,
-        data: { success: true, keptMessages: kept.length, removedMessages: removed, replayText, backupFileName: 'mock-replay-bak' },
+        data: {
+          success: true,
+          keptMessages: kept.length,
+          removedMessages: removed,
+          replayText,
+          replayImages,
+          backupFileName: 'mock-replay-bak',
+          destructiveCommitCompleted: true,
+          recoveryToken: 'replay:' + sessionId + ':' + anchorMessageId,
+        },
       };
     },
     async branchSession(workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) {
@@ -445,8 +485,39 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' },
       };
     },
-    async getTimelineSummary(_workspaceId: string, _sessionId: string) {
-      return { ok: true, data: [] };
+    async getTimelineSummary(_workspaceId: string, sessionId: string) {
+      const messages = s.mockMessages[sessionId] || [];
+      const summaries: Array<Record<string, unknown>> = [];
+      let index = 0;
+      while (index < messages.length) {
+        const role = String(messages[index].role || '').toLowerCase();
+        if (role !== 'user') {
+          index++;
+          continue;
+        }
+        const userMessage = messages[index];
+        let end = index + 1;
+        while (end < messages.length && String(messages[end].role || '').toLowerCase() !== 'user') end++;
+        let assistantId: string | null = null;
+        for (let k = end - 1; k >= index; k--) {
+          if (String(messages[k].role || '').toLowerCase() === 'assistant') {
+            assistantId = String(messages[k].id || '');
+            break;
+          }
+        }
+        summaries.push({
+          turnId: 'uturn-' + String(userMessage.id || ''),
+          turnSeq: summaries.length,
+          userPreview: String(userMessage.content || '').slice(0, 40),
+          userContent: String(userMessage.content || ''),
+          finalPreview: '',
+          userMessageId: String(userMessage.id || ''),
+          assistantMessageId: assistantId,
+          kind: 'compact_stub' === String(userMessage.kind || '') ? 'compact' : 'turn',
+        });
+        index = end;
+      }
+      return { ok: true, data: summaries as unknown as TurnSummary[] };
     },
     async getBlockContents(_w: string, _s: string, _ids: string[]) {
       return { ok: true, data: { items: {}, missing: [..._ids] } };

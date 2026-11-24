@@ -15,7 +15,7 @@ vi.mock('@shared/bridge/hostBridge', async (importOriginal) => {
 });
 
 import { startAgentTurn } from '@shared/bridge/api/agent';
-import { haloEventBus } from '@shared/bridge/hostBridge';
+import { haloEventBus, setHistoryCapabilitiesState } from '@shared/bridge/hostBridge';
 import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
 import { useAgentTelemetry } from '@features/agent/stores/useAgentTelemetry';
 import { registerAgentRuntimeContext } from '@features/agent/stores/runtime';
@@ -32,7 +32,14 @@ function stubRuntime(): void {
     providerId: () => 'p1',
     modelId: () => 'm1',
     maxImages: () => 4,
-    truncateHistory: () => Promise.resolve({ ok: true, replayText: 'replay' }),
+    truncateHistory: () =>
+      Promise.resolve({
+        ok: true,
+        replayText: 'replay',
+        replayImages: [],
+        destructiveCommitCompleted: true,
+        warnings: [],
+      }),
     loadSessionMessages: loadSpy,
     applyUsagePatch: patchSpy,
     refreshBudget: budgetSpy,
@@ -54,6 +61,12 @@ beforeEach(() => {
   budgetSpy.mockClear();
   mockedStart.mockResolvedValue({ ok: true, code: '', message: '', data: 't1' });
   stubRuntime();
+  setHistoryCapabilitiesState({
+    historyAnchors: true,
+    replayImages: true,
+    atomicHistoryMutex: true,
+    strictBranchRollback: true,
+  });
   setActiveSessionId('s1');
   setActiveWorkspaceId('w1');
   void activeSessionId;
@@ -70,7 +83,7 @@ describe('发送链预算语义', () => {
 
   it('replayUserStillClearsBudget', async () => {
     const store = useAgentTurn();
-    expect(await store.replayUserMessage('m1')).toBe(true);
+    expect((await store.replayUserMessage('m1')).ok).toBe(true);
     expect(loadSpy).toHaveBeenCalledTimes(2);
     expect(loadSpy.mock.calls[0]?.[1]).toBeUndefined();
     expect(loadSpy.mock.calls[1]?.[1]).toMatchObject({ preserveBudget: true });
@@ -78,7 +91,7 @@ describe('发送链预算语义', () => {
 
   it('replayAssistantStillClearsBudget', async () => {
     const store = useAgentTurn();
-    expect(await store.replayAssistantTurn('m2')).toBe(true);
+    expect((await store.replayAssistantTurn('m2')).ok).toBe(true);
     expect(loadSpy).toHaveBeenCalledTimes(2);
     expect(loadSpy.mock.calls[0]?.[1]).toBeUndefined();
     expect(loadSpy.mock.calls[1]?.[1]).toMatchObject({ preserveBudget: true });

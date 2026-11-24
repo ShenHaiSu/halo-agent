@@ -23,6 +23,7 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
     private readonly ISessionRepository _sessionRepository;
     private readonly IWorkspaceSessionService _workspaceSessionService;
     private readonly ITokenBudgetService _tokenBudgetService;
+    private readonly SessionOperationCoordinator _sessionOperations;
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
@@ -72,7 +73,8 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         AgentConfigService? agentConfigService = null,
         SkillMemoryService? skillMemoryService = null,
         SubAgentCoordinator? subCoordinator = null,
-        ToolRegistry? toolRegistry = null
+        ToolRegistry? toolRegistry = null,
+        SessionOperationCoordinator? sessionOperationCoordinator = null
     )
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
@@ -85,8 +87,10 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         _llmGatewayClient =
             llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
         _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
+        _sessionOperations = sessionOperationCoordinator ?? SessionOperationCoordinator.Shared;
         _workspaceSessionService =
-            workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
+            workspaceSessionService
+            ?? new WorkspaceSessionService(_sessionRepository, _sessionOperations);
         _tokenBudgetService =
             tokenBudgetService
             ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);

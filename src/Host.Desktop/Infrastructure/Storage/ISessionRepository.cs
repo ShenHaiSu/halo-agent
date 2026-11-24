@@ -65,6 +65,16 @@ public interface ISessionRepository
         string sessionId,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 严格回滚：分别验证数据库分区、会话元数据、目录与索引，任何失败都记录在结果中，
+    /// 不吞错、不把残留误报为已清理。
+    /// </summary>
+    Task<HistoryRollbackResult> RollbackCreatedSessionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
     Task<bool> DeleteWorkspaceDirectoryAsync(string workspaceId, CancellationToken ct = default);
     Task<string> ExportSessionMarkdownAsync(
         string workspaceId,

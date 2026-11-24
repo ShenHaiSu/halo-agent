@@ -19,12 +19,34 @@ namespace Host.Desktop.Services;
 public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
     private readonly ISessionRepository _sessionRepository;
+    private readonly SessionOperationCoordinator _operationCoordinator;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionAppendLocks = new();
 
-    public WorkspaceSessionService(ISessionRepository sessionRepository)
+    public WorkspaceSessionService(
+        ISessionRepository sessionRepository,
+        SessionOperationCoordinator? operationCoordinator = null
+    )
     {
         _sessionRepository =
             sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _operationCoordinator = operationCoordinator ?? SessionOperationCoordinator.Shared;
+    }
+
+    internal SessionOperationCoordinator OperationCoordinator => _operationCoordinator;
+
+    /// <summary>直接调用领域服务时也必须经过统一协调器，不能旁路。</summary>
+    internal SessionOperationLease AcquireHistoryLease(string workspaceId, string sessionId)
+    {
+        if (
+            !_operationCoordinator.TryAcquire(
+                workspaceId,
+                sessionId,
+                SessionOperationKind.History,
+                out var lease
+            )
+        )
+            throw new InvalidOperationException("HISTORY_OPERATION_IN_PROGRESS");
+        return lease!;
     }
 
     /// <summary>need05-03：供压缩服务做备份/原子重写（调用方须持有追加锁）。</summary>

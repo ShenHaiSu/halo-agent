@@ -28,9 +28,18 @@ export function summaryCopyText(summary: TurnSummary | null | undefined, blocksM
   return parts.map((p) => p.replace(/\n+$/, '')).join('\n\n');
 }
 
-/** 摘要源锚点：用户锚用 turnId，正文锚优先 finalBlockId。 */
-export function summaryAnchorIds(summary: TurnSummary | null | undefined): { userId: string; assistantId: string } {
-  const turnId = String(summary?.turnId || '').trim();
-  const finalBlockId = String(summary?.finalBlockId || '').trim();
-  return { userId: turnId, assistantId: finalBlockId || turnId };
+/** 历史操作锚点：只取后端投影的真实消息 ID，禁止使用 turnId 或 finalBlockId。 */
+export function summaryHistoryAnchors(summary: TurnSummary | null | undefined): { userId: string; assistantId: string } {
+  return {
+    userId: String(summary?.userMessageId || '').trim(),
+    assistantId: String(summary?.assistantMessageId || '').trim(),
+  };
+}
+
+/** 导航锚点：turnId / finalBlockId 只负责 UI 定位与展开，不参与历史操作。 */
+export function summaryAnchorKeys(summary: TurnSummary | null | undefined): { turnId: string; blockId: string } {
+  return {
+    turnId: String(summary?.turnId || '').trim(),
+    blockId: String(summary?.finalBlockId || '').trim(),
+  };
 }

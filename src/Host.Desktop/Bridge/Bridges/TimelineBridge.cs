@@ -1,6 +1,7 @@
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Storage;
+using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
@@ -37,6 +38,10 @@ public sealed partial class HostBridgeFacade
             var summaries = await store
                 .GetSummaryAsync(workspaceId, sessionId)
                 .ConfigureAwait(false);
+            var messageRefs = await store
+                .GetMessageRefsAsync(workspaceId, sessionId)
+                .ConfigureAwait(false);
+            HistoryAnchorProjector.Project(summaries, messageRefs);
             return BridgeResponse<List<TurnSummary>>.Success(summaries);
         }
         catch (LegacySessionFormatException ex)

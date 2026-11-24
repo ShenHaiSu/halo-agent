@@ -19,6 +19,8 @@
         @menu-replay="t.menu.onMenuReplay()"
         @menu-branch="t.menu.onMenuBranch()"
         @menu-delete="t.menu.onMenuDelete()"
+        @resume-replay="t.turn.resumePendingReplay()"
+        @discard-replay="t.turn.discardPendingReplay()"
         @jump-latest="t.jumpToLatest()"
       />
     </div>

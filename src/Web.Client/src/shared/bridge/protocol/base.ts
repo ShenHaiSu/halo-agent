@@ -5,6 +5,10 @@ export interface BridgeResponse<T> {
   code?: string;
   message?: string;
   data?: T;
+  /** 回滚失败残留的会话 ID（可选，仅历史操作失败时出现）。 */
+  newSessionId?: string;
+  /** 失败阶段（可选，仅历史操作失败时出现）。 */
+  failedStage?: string;
 }
 
 export interface SystemRuntimeInfo {

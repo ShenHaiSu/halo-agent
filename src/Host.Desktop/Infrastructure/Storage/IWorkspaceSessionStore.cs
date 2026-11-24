@@ -18,6 +18,13 @@ public interface IWorkspaceSessionStore
         CancellationToken ct = default
     );
 
+    /// <summary>锚点投影专用：只读消息 id / role / kind，不返回正文与图片字节。</summary>
+    Task<List<HistoryMessageRef>> GetMessageRefsAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    );
+
     /// <summary>过程层：展开指定回合时按需取块标识与预览，完整正文按块二次加载。</summary>
     Task<List<TimelineBlockContent>> GetBlockIdsAsync(
         string workspaceId,

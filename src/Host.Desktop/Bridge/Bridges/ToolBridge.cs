@@ -152,6 +152,37 @@ public sealed partial class HostBridgeFacade
             {
                 return BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候");
             }
+            SessionOperationLease? operationLease = null;
+            if (
+                !_sessionOperations.TryAcquire(
+                    wsId,
+                    sessId,
+                    SessionOperationKind.Compact,
+                    out operationLease
+                )
+            )
+            {
+                string conflictCode = _sessionOperations.TryGetHolderKind(
+                    wsId,
+                    sessId,
+                    out var holder
+                )
+                    ? holder switch
+                    {
+                        SessionOperationKind.History => "HISTORY_OPERATION_IN_PROGRESS",
+                        SessionOperationKind.Agent => "TURN_IN_PROGRESS",
+                        _ => "COMPACT_BUSY"
+                    }
+                    : "COMPACT_BUSY";
+                return BridgeResponse<CompactionResult>.Fail(
+                    conflictCode,
+                    conflictCode == "HISTORY_OPERATION_IN_PROGRESS"
+                        ? "当前会话正在执行历史操作，请稍后重试"
+                        : conflictCode == "TURN_IN_PROGRESS"
+                            ? "当前会话正在生成，请稍后再压缩"
+                            : "压缩进行中，请稍候"
+                );
+            }
 
             JsEventDispatcher.Publish(
                 "agent:turn-event",
@@ -271,6 +302,7 @@ public sealed partial class HostBridgeFacade
                     {
                         _activeSessionTokens.TryRemove(compactKey, out _);
                         cts.Dispose();
+                        operationLease?.Dispose();
                     }
                 },
                 CancellationToken.None

@@ -15,155 +15,247 @@ namespace Host.Desktop.Services;
 
 public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
-    /// <summary>分支：以前缀复制建新会话，原会话不动。</summary>
+    /// <summary>分支：以前缀复制建新会话，源会话只读；失败严格回滚，不吞错。</summary>
     public async Task<SessionMetadata> BranchSessionAsync(
         string workspaceId,
         string sourceSessionId,
         string anchorMessageId,
         bool includeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sourceSessionId))
             throw new ArgumentException("Workspace ID 与源会话 ID 不能为空");
-        var srcMeta = await _sessionRepository
-            .LoadSessionMetaAsync(workspaceId, sourceSessionId, ct)
-            .ConfigureAwait(false);
-        if (srcMeta == null)
-            throw new InvalidOperationException("SESSION_NOT_FOUND");
-        var messages = await _sessionRepository
-            .GetMessagesAsync(workspaceId, sourceSessionId, ct)
-            .ConfigureAwait(false);
-        int idx = messages.FindIndex(m =>
-            string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (idx < 0)
-            throw new InvalidOperationException("ANCHOR_NOT_FOUND");
-        int end = idx;
-        if (string.Equals(messages[idx].Role, "assistant", StringComparison.OrdinalIgnoreCase))
-        {
-            int t = idx + 1;
-            while (
-                t < messages.Count
-                && string.Equals(messages[t].Role, "tool", StringComparison.OrdinalIgnoreCase)
-            )
-                t++;
-            end = t - 1;
-        }
-        var prefixRaw = (includeAnchor ? messages.Take(end + 1) : messages.Take(idx)).ToList();
-        // 分支前缀同样可能劈开问答与工具回包的组合，复制前先在内存里愈合补齐。
-        var (prefix, _, _) = RebuildHealedHistory(prefixRaw);
-        string title =
-            string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话"
-                ? "新建会话"
-                : srcMeta.Title + "·分支";
-        // 分支永远建为主会话，不继承父子链。
-        var created = await CreateSessionAsync(
-                workspaceId,
-                title,
-                srcMeta.ProviderId,
-                srcMeta.ModelId,
-                ct
-            )
-            .ConfigureAwait(false);
-        var branchStore = new SessionHistoryStore(new SessionHistoryDb(_sessionRepository.Storage));
-        // 库内分区复制：消息可按原标识共存，多轮与文本块复制时重映射全局标识，避免搬走源分区；落盘的超长工具输出随复制同步搬运。
+        lease ??= AcquireHistoryLease(workspaceId, sourceSessionId);
         try
         {
-            RemapCopyPartitionForBranch(
-                _sessionRepository.Storage,
-                workspaceId,
-                sourceSessionId,
-                created.Id
-            );
-        }
-        catch { }
-        await branchStore
-            .RewriteMessagesAsync(workspaceId, created.Id, prefix, ct)
-            .ConfigureAwait(false);
-        // 复制后按前缀截断目标库后缀轮次，只留分支锚点之前的内容。
-        try
-        {
-            var keptIds = new HashSet<string>(prefix.Select(m => m.Id), StringComparer.Ordinal);
-            var dstSummaries = await branchStore
-                .GetTimelineSummaryAsync(workspaceId, created.Id, ct)
+            var srcMeta = await _sessionRepository
+                .LoadSessionMetaAsync(workspaceId, sourceSessionId, ct)
                 .ConfigureAwait(false);
-            long minDoomed = long.MaxValue;
-            foreach (var s in dstSummaries)
-            {
-                string tid = s.TurnId ?? string.Empty;
-                const string turnPrefix = "uturn-";
-                string suffix = tid.StartsWith(turnPrefix, StringComparison.Ordinal)
-                    ? tid.Substring(turnPrefix.Length)
-                    : tid;
-                int branchSep = suffix.IndexOf(":branch:", StringComparison.Ordinal);
-                if (branchSep >= 0)
-                    suffix = suffix.Substring(0, branchSep);
-                if (!keptIds.Contains(suffix) && s.TurnSeq < minDoomed)
-                    minDoomed = s.TurnSeq;
-            }
-            if (minDoomed != long.MaxValue)
-                await branchStore
-                    .TruncateFromTurnSeqAsync(workspaceId, created.Id, minDoomed, ct)
-                    .ConfigureAwait(false);
-            try
-            {
-                await branchStore
-                    .CollectOrphanToolOutputsAsync(workspaceId, created.Id, ct)
-                    .ConfigureAwait(false);
-            }
-            catch { }
-        }
-        catch { }
-        var newMeta = await _sessionRepository
-            .LoadSessionMetaAsync(workspaceId, created.Id, ct)
-            .ConfigureAwait(false);
-        if (newMeta != null)
-        {
-            newMeta.MessageCount = prefix.Count;
-            var lastSnap = prefix.LastOrDefault(m =>
-                m.InputTokens.HasValue && m.InputTokens.Value > 0
+            if (srcMeta == null)
+                throw new InvalidOperationException("SESSION_NOT_FOUND");
+            var messages = await _sessionRepository
+                .GetMessagesAsync(workspaceId, sourceSessionId, ct)
+                .ConfigureAwait(false);
+            int idx = messages.FindIndex(m =>
+                string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase)
             );
-            newMeta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
-            newMeta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
-            newMeta.CumulativePromptTokens = 0;
-            newMeta.CumulativeCompletionTokens = 0;
-            newMeta.UpdatedAtUtc = DateTime.UtcNow;
-            await RefreshMetaIndexAsync(workspaceId, created.Id, newMeta, ct).ConfigureAwait(false);
+            if (idx < 0)
+                throw new InvalidOperationException("ANCHOR_NOT_FOUND");
+            string role = (messages[idx].Role ?? string.Empty).Trim().ToLowerInvariant();
+            if (role != "user" && role != "assistant")
+                throw new InvalidOperationException("INVALID_BRANCH_REQUEST");
+            if (!includeAnchor && role != "user")
+                throw new InvalidOperationException("INVALID_BRANCH_REQUEST");
+            if (!HistoryTurnSlice.TryResolve(messages, anchorMessageId, out var slice))
+                throw new InvalidOperationException("INVALID_BRANCH_REQUEST");
+
+            var prefixRaw = (
+                includeAnchor ? messages.Take(slice.EndExclusive) : messages.Take(slice.UserIndex)
+            ).ToList();
+            var (prefix, _, _) = RebuildHealedHistory(prefixRaw);
+            var images = new List<ChatImageRef>();
+            foreach (var message in prefix)
+            {
+                if (message.Images == null)
+                    continue;
+                foreach (var image in message.Images)
+                {
+                    if (image != null)
+                        images.Add(image);
+                }
+            }
+            string title =
+                string.IsNullOrWhiteSpace(srcMeta.Title) || srcMeta.Title == "新建会话"
+                    ? "新建会话"
+                    : srcMeta.Title + "·分支";
+            var created = await CreateSessionAsync(
+                    workspaceId,
+                    title,
+                    srcMeta.ProviderId,
+                    srcMeta.ModelId,
+                    ct
+                )
+                .ConfigureAwait(false);
+            var branchStore = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
             try
             {
-                string dir = _sessionRepository.GetSessionDirectory(workspaceId, created.Id);
-                System.IO.Directory.CreateDirectory(dir);
-                string shortSrc =
-                    sourceSessionId.Length > 8 ? sourceSessionId.Substring(0, 8) : sourceSessionId;
-                string infoPath = System.IO.Path.Combine(
-                    dir,
-                    "messages.branch-src-" + shortSrc + ".json"
+                RemapCopyPartitionForBranch(
+                    _sessionRepository.Storage,
+                    workspaceId,
+                    sourceSessionId,
+                    created.Id
                 );
-                string infoJson = System.Text.Json.JsonSerializer.Serialize(
-                    new
-                    {
+                await branchStore
+                    .RewriteMessagesAsync(workspaceId, created.Id, prefix, ct)
+                    .ConfigureAwait(false);
+                var keptIds = new HashSet<string>(prefix.Select(m => m.Id), StringComparer.Ordinal);
+                var dstSummaries = await branchStore
+                    .GetTimelineSummaryAsync(workspaceId, created.Id, ct)
+                    .ConfigureAwait(false);
+                long minDoomed = long.MaxValue;
+                foreach (var s in dstSummaries)
+                {
+                    string tid = s.TurnId ?? string.Empty;
+                    const string turnPrefix = "uturn-";
+                    string suffix = tid.StartsWith(turnPrefix, StringComparison.Ordinal)
+                        ? tid.Substring(turnPrefix.Length)
+                        : tid;
+                    int branchSep = suffix.IndexOf(":branch:", StringComparison.Ordinal);
+                    if (branchSep >= 0)
+                        suffix = suffix.Substring(0, branchSep);
+                    if (!keptIds.Contains(suffix) && s.TurnSeq < minDoomed)
+                        minDoomed = s.TurnSeq;
+                }
+                if (minDoomed != long.MaxValue)
+                    await branchStore
+                        .TruncateFromTurnSeqAsync(workspaceId, created.Id, minDoomed, ct)
+                        .ConfigureAwait(false);
+
+                var (imagesCopied, imagesMissing) = ImageAttachmentStore.CopyToSession(
+                    _sessionRepository.Storage.CurrentDataRoot,
+                    workspaceId,
+                    sourceSessionId,
+                    workspaceId,
+                    created.Id,
+                    images
+                );
+                try
+                {
+                    await branchStore
+                        .CollectOrphanToolOutputsAsync(workspaceId, created.Id, ct)
+                        .ConfigureAwait(false);
+                }
+                catch { }
+
+                var newMeta = await _sessionRepository
+                    .LoadSessionMetaAsync(workspaceId, created.Id, ct)
+                    .ConfigureAwait(false);
+                if (newMeta != null)
+                {
+                    newMeta.MessageCount = prefix.Count;
+                    var lastSnap = prefix.LastOrDefault(m =>
+                        m.InputTokens.HasValue && m.InputTokens.Value > 0
+                    );
+                    newMeta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
+                    newMeta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
+                    newMeta.CumulativePromptTokens = 0;
+                    newMeta.CumulativeCompletionTokens = 0;
+                    newMeta.UpdatedAtUtc = DateTime.UtcNow;
+                    await RefreshMetaIndexAsync(workspaceId, created.Id, newMeta, ct)
+                        .ConfigureAwait(false);
+                }
+                await WriteBranchSourceInfoAsync(
+                        workspaceId,
+                        created.Id,
                         sourceSessionId,
                         anchorMessageId,
-                        copiedAtUtc = DateTime.UtcNow,
-                        copiedMessages = prefix.Count
-                    }
-                );
-                await System
-                    .IO.File.WriteAllTextAsync(infoPath, infoJson, ct)
+                        prefix.Count,
+                        ct
+                    )
                     .ConfigureAwait(false);
+                try
+                {
+                    HaloLogger.App.Info(
+                        "[History] branch.done ws="
+                            + workspaceId
+                            + " src="
+                            + sourceSessionId
+                            + " anchor="
+                            + anchorMessageId
+                            + " new="
+                            + created.Id
+                            + " copied="
+                            + prefix.Count
+                            + " imagesCopied="
+                            + imagesCopied
+                            + " imagesMissing="
+                            + imagesMissing
+                    );
+                }
+                catch { }
+                return newMeta ?? created;
             }
-            catch { }
-            try
+            catch (Exception original)
             {
-                Infrastructure.Logging.HaloLogger.App.Info(
-                    $"[History] branch ws={workspaceId} src={sourceSessionId} anchor={anchorMessageId} new={created.Id} copied={prefix.Count}"
-                );
+                var rollback = await _sessionRepository
+                    .RollbackCreatedSessionAsync(workspaceId, created.Id, ct)
+                    .ConfigureAwait(false);
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[History] branch.rollback ws="
+                            + workspaceId
+                            + " new="
+                            + created.Id
+                            + " stages="
+                            + rollback.FailedStages
+                            + " partition="
+                            + rollback.PartitionDeleted
+                            + " metadata="
+                            + rollback.MetadataDeleted
+                            + " directory="
+                            + rollback.DirectoryDeleted
+                            + " index="
+                            + rollback.IndexRemoved
+                    );
+                }
+                catch { }
+                if (rollback.HasFailure)
+                {
+                    try
+                    {
+                        HaloLogger.App.Error(
+                            "[History] branch.rollback.failed new="
+                                + created.Id
+                                + " stages="
+                                + rollback.FailedStages,
+                            original
+                        );
+                    }
+                    catch { }
+                    throw new BranchRollbackException(created.Id, rollback, original);
+                }
+                throw new InvalidOperationException("BRANCH_COPY_ERROR", original);
             }
-            catch { }
-            return newMeta;
         }
-        return created;
+        finally
+        {
+            lease.Dispose();
+        }
+    }
+
+    private async Task WriteBranchSourceInfoAsync(
+        string workspaceId,
+        string newSessionId,
+        string sourceSessionId,
+        string anchorMessageId,
+        int copiedMessages,
+        CancellationToken ct
+    )
+    {
+        try
+        {
+            string dir = _sessionRepository.GetSessionDirectory(workspaceId, newSessionId);
+            Directory.CreateDirectory(dir);
+            string shortSrc =
+                sourceSessionId.Length > 8 ? sourceSessionId.Substring(0, 8) : sourceSessionId;
+            string infoPath = Path.Combine(dir, "messages.branch-src-" + shortSrc + ".json");
+            string infoJson = System.Text.Json.JsonSerializer.Serialize(
+                new
+                {
+                    sourceSessionId,
+                    anchorMessageId,
+                    copiedAtUtc = DateTime.UtcNow,
+                    copiedMessages
+                }
+            );
+            await File.WriteAllTextAsync(infoPath, infoJson, ct).ConfigureAwait(false);
+        }
+        catch { }
     }
 
     /// <summary>分支复制：把源会话的多轮与文本块复制到目标分区并重映射全局标识，同时搬运落盘的超长工具输出。</summary>
@@ -544,11 +636,13 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
     public async Task<HistoryHealResult> HealSessionHistoryAsync(
         string workspaceId,
         string sessionId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             return HistoryHealResult.Fail("SESSION_NOT_FOUND");
+        using var operationLease = lease ?? AcquireHistoryLease(workspaceId, sessionId);
         var appendLock = GetSessionAppendLock(sessionId);
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -632,13 +726,15 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         string workspaceId,
         string sessionId,
         string messageId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
             return HistoryDeleteResult.Fail("SESSION_NOT_FOUND");
         if (string.IsNullOrWhiteSpace(messageId))
             return HistoryDeleteResult.Fail("MESSAGE_NOT_FOUND");
+        using var operationLease = lease ?? AcquireHistoryLease(workspaceId, sessionId);
         var appendLock = GetSessionAppendLock(sessionId);
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try

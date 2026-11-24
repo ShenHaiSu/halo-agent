@@ -30,8 +30,8 @@
     <button
       data-testid="context-menu-replay"
       class="history-context-menu-item"
-      :disabled="busy"
-      :title="busy ? '生成中不可操作，请稍后再试' : '截断后重新生成'"
+      :disabled="busy || replayDisabled"
+      :title="busy ? '忙碌中不可操作，请稍后再试' : replayTitle || '截断后重新生成'"
       @click="emit('replay')"
     >
       <RotateCcw class="w-3.5 h-3.5 shrink-0" />
@@ -40,8 +40,8 @@
     <button
       data-testid="context-menu-branch"
       class="history-context-menu-item"
-      :disabled="busy"
-      :title="busy ? '生成中不可操作，请稍后再试' : '从这里创建分支会话'"
+      :disabled="busy || branchDisabled"
+      :title="busy ? '忙碌中不可操作，请稍后再试' : branchTitle || '从这里创建分支会话'"
       @click="emit('branch')"
     >
       <GitBranch class="w-3.5 h-3.5 shrink-0" />
@@ -70,6 +70,10 @@ defineProps<{
   canCopy: boolean;
   canCopyTurn: boolean;
   copyLabel: string;
+  replayDisabled?: boolean;
+  branchDisabled?: boolean;
+  replayTitle?: string;
+  branchTitle?: string;
 }>();
 
 const emit = defineEmits<{

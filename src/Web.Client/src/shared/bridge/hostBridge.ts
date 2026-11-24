@@ -1,7 +1,8 @@
 /** need21-F02: 宿主桥生命周期（旧 src/bridge/hostBridge.ts 迁移）。
  * 本文件只做三件事：init/getHostBridge 门面（签名不变）+ Transport 选择（DEV&&?mock→Mock，否则 Cef）+ 版本断言。
  * Mock 实现常驻 @/mocks，仅 DEV 分支动态加载（@vite-ignore + DEV 死分支消除，生产包零 mock）。 */
-import type { HostBridgeApi } from './protocol/types';
+import type { HostBridgeApi, HistoryCapabilities } from './protocol/types';
+import { UnsupportedHistoryCapabilities } from './protocol/types';
 import { assertBridgeVersion, BRIDGE_VERSION } from './protocol/version';
 import { MOCK_BANNER_TEXT, reportBridgeError, toBridgeError } from './protocol/errors';
 import { dispatchIncomingEvents, haloEventBus } from './events';
@@ -22,6 +23,37 @@ const WRAPPED_MARK = '__haloWrappedApi';
 
 let resolvedBridge: HostBridgeApi | null = null;
 let activeTransport: BridgeTransport | null = null;
+let historyCapabilities: HistoryCapabilities = { ...UnsupportedHistoryCapabilities };
+let historyCapabilitiesReady = false;
+
+/** 历史能力快照：未初始化或探测失败一律为“不支持”，UI 据此禁用历史入口。 */
+export function getHistoryCapabilitiesState(): { capabilities: HistoryCapabilities; ready: boolean } {
+  return { capabilities: { ...historyCapabilities }, ready: historyCapabilitiesReady };
+}
+
+/** 能力快照注入：用于 Mock 场景与确定性测试，不伪造协议版本。 */
+export function setHistoryCapabilitiesState(capabilities: HistoryCapabilities, ready = true): void {
+  historyCapabilities = { ...capabilities };
+  historyCapabilitiesReady = ready;
+}
+
+/** 重新探测历史能力；探测失败归一为不支持，且不升级为应用级错误。 */
+export async function refreshHistoryCapabilities(workspaceId: string, sessionId: string): Promise<HistoryCapabilities> {
+  const api = resolvedBridge;
+  if (!api) {
+    historyCapabilities = { ...UnsupportedHistoryCapabilities };
+    historyCapabilitiesReady = false;
+    return { ...historyCapabilities };
+  }
+  try {
+    const response = await api.getHistoryCapabilities(workspaceId, sessionId);
+    historyCapabilities = response.ok && response.data ? { ...response.data } : { ...UnsupportedHistoryCapabilities };
+  } catch {
+    historyCapabilities = { ...UnsupportedHistoryCapabilities };
+  }
+  historyCapabilitiesReady = true;
+  return { ...historyCapabilities };
+}
 
 /** 是否显式要求 Mock（仅 DEV 生效）：URL 含 ?mock。 */
 function wantsMock(): boolean {
@@ -149,6 +181,7 @@ export async function initHostBridge(): Promise<HostBridgeApi> {
     throw Object.assign(new Error(err.message), err);
   }
 
+  await refreshHistoryCapabilities('probe', 'probe');
   markWrapped(resolvedBridge);
   window.hostBridge = resolvedBridge;
   return resolvedBridge;
@@ -206,8 +239,14 @@ export type {
   GlobalProxyMode,
   GoalMilestoneDto,
   HeaderResolutionContextDto,
+  HistoryBranchResult,
+  HistoryCapabilities,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
+  HistoryOperationResult,
+  HistoryOperationWarning,
+  HistoryReplayImageDto,
+  HistoryReplayResult,
   HistoryTruncateResultDto,
   HostBridgeApi,
   HostEventEnvelope,

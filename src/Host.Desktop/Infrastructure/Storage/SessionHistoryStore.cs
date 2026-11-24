@@ -697,6 +697,38 @@ public sealed partial class SessionHistoryStore
         };
     }
 
+    /// <summary>锚点投影专用：只取 id / role / kind，库不存在时返回空列表，结构异常向上抛。</summary>
+    public async Task<List<HistoryMessageRef>> GetMessageRefsAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        var result = new List<HistoryMessageRef>();
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return result;
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, role, kind FROM messages WHERE session_id = $sid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (reader.IsDBNull(0))
+                continue;
+            string id = reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            string role = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            string? kind = reader.IsDBNull(2) ? null : reader.GetString(2);
+            result.Add(new HistoryMessageRef(id, role, kind));
+        }
+        return result;
+    }
+
     /// <summary>S3：DB messages 全量读（组包/预算/压缩统一入口，ORDER BY seq）。</summary>
     public async Task<List<UnifiedChatMessage>> GetMessagesAsync(
         string workspaceId,

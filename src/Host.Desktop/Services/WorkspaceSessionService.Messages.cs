@@ -259,173 +259,271 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         return _sessionRepository.ExportSessionMarkdownAsync(workspaceId, sessionId, ct);
     }
 
-    /// <summary>need07：重放截断。持追加锁；切面以后端为准；失败不动盘。</summary>
+    /// <summary>重放截断：按整轮用户切面提交，返回原文与可复用图片；发送是独立的后续步骤。</summary>
     public async Task<HistoryTruncateResult> TruncateSessionHistoryAsync(
         string workspaceId,
         string sessionId,
         string anchorMessageId,
         bool removeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
-            return HistoryTruncateResult.Fail("SESSION_NOT_FOUND");
+            return HistoryTruncateResult.Fail("SESSION_NOT_FOUND", "会话不存在");
         if (string.IsNullOrWhiteSpace(anchorMessageId))
-            return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND");
-        var appendLock = GetSessionAppendLock(sessionId);
-        await appendLock.WaitAsync(ct).ConfigureAwait(false);
+            return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND", "未找到对应消息");
+        lease ??= AcquireHistoryLease(workspaceId, sessionId);
         try
         {
-            var meta = await _sessionRepository
-                .LoadSessionMetaAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-            if (meta == null)
-                return HistoryTruncateResult.Fail("SESSION_NOT_FOUND");
-            var messages = await _sessionRepository
-                .GetMessagesAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-            int idx = messages.FindIndex(m =>
-                string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase)
-            );
-            if (idx < 0)
-                return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND");
-            string role = (messages[idx].Role ?? string.Empty).ToLowerInvariant();
-            int cut;
-            string? replayText;
-            if (string.Equals(role, "assistant", StringComparison.Ordinal))
-            {
-                int j = idx;
-                while (
-                    j >= 0
-                    && !string.Equals(messages[j].Role, "user", StringComparison.OrdinalIgnoreCase)
-                )
-                    j--;
-                if (j < 0)
-                    return HistoryTruncateResult.Fail("NO_PRIOR_USER");
-                cut = j;
-                replayText = messages[j].Content;
-            }
-            else if (string.Equals(role, "user", StringComparison.Ordinal))
-            {
-                cut = idx;
-                replayText = messages[idx].Content;
-            }
-            else
-            {
-                cut = removeAnchor ? idx : idx + 1;
-                replayText = messages[idx].Content;
-            }
-            if (string.IsNullOrWhiteSpace(replayText))
-                return HistoryTruncateResult.Fail("EMPTY_REPLAY_TEXT");
-            var keptRaw = messages.Take(cut).ToList();
-            int removed = messages.Count - keptRaw.Count;
-            // FIX(tool-400)：截断切面可能劈开 assistant→tool 块，落盘前内存愈合，保证尾部配对完整。
-            var (kept, synthetic, orphans) = RebuildHealedHistory(keptRaw);
-            var workspaceStore = new WorkspaceSessionStore(_sessionRepository.Storage);
-            string bak;
+            var appendLock = GetSessionAppendLock(sessionId);
+            await appendLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                var backupInfo = await workspaceStore
-                    .BackupWorkspaceAsync(workspaceId, ct)
+                var meta = await _sessionRepository
+                    .LoadSessionMetaAsync(workspaceId, sessionId, ct)
                     .ConfigureAwait(false);
-                bak = backupInfo.BackupPath;
-            }
-            catch
-            {
-                return HistoryTruncateResult.Fail("REWRITE_ERROR");
-            }
-            try
-            {
+                if (meta == null)
+                    return HistoryTruncateResult.Fail("SESSION_NOT_FOUND", "会话不存在");
+                var messages = await _sessionRepository
+                    .GetMessagesAsync(workspaceId, sessionId, ct)
+                    .ConfigureAwait(false);
+                int idx = messages.FindIndex(m =>
+                    string.Equals(m.Id, anchorMessageId, StringComparison.OrdinalIgnoreCase)
+                );
+                if (idx < 0)
+                    return HistoryTruncateResult.Fail("ANCHOR_NOT_FOUND", "未找到对应消息");
+                string role = (messages[idx].Role ?? string.Empty).Trim().ToLowerInvariant();
+                if (role != "user" && role != "assistant")
+                    return HistoryTruncateResult.Fail("INVALID_ANCHOR_ROLE", "消息角色不支持重放");
+                if (!HistoryTurnSlice.TryResolve(messages, anchorMessageId, out var slice))
+                    return HistoryTruncateResult.Fail("NO_PRIOR_USER", "未找到所属用户消息");
+
+                int cut = slice.UserIndex;
+                var replaySource = messages[cut];
+                string? replayText = replaySource.Content;
+                if (string.IsNullOrWhiteSpace(replayText))
+                    return HistoryTruncateResult.Fail("EMPTY_REPLAY_TEXT", "该消息没有可重放的文本");
+                var replayImages = BuildReplayImages(workspaceId, sessionId, replaySource);
+
+                var keptRaw = messages.Take(cut).ToList();
+                int removed = messages.Count - keptRaw.Count;
+                var (kept, synthetic, orphans) = RebuildHealedHistory(keptRaw);
+                var workspaceStore = new WorkspaceSessionStore(_sessionRepository.Storage);
+                string bak;
+                try
+                {
+                    var backupInfo = await workspaceStore
+                        .BackupWorkspaceAsync(workspaceId, ct)
+                        .ConfigureAwait(false);
+                    bak = backupInfo.BackupPath;
+                }
+                catch
+                {
+                    return HistoryTruncateResult.Fail("REWRITE_ERROR", "备份失败，历史未改动");
+                }
+
                 var store = new SessionHistoryStore(
                     new SessionHistoryDb(_sessionRepository.Storage)
                 );
-                await store
-                    .RewriteMessagesAsync(workspaceId, sessionId, kept, ct)
-                    .ConfigureAwait(false);
-                long cutSeq = -1;
                 try
                 {
-                    var summaries = await store
-                        .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                    await store
+                        .RewriteMessagesAsync(workspaceId, sessionId, kept, ct)
                         .ConfigureAwait(false);
-                    string? cutUserId = null;
-                    if (cut < messages.Count)
+                }
+                catch (Exception rewriteError)
+                {
+                    LogHistoryFailure(
+                        "replay.failed",
+                        workspaceId,
+                        sessionId,
+                        anchorMessageId,
+                        rewriteError
+                    );
+                    return HistoryTruncateResult.Fail("REWRITE_ERROR", "历史重写未完成，请刷新确认");
+                }
+
+                try
+                {
+                    long cutSeq = -1;
+                    try
                     {
-                        for (int k = cut; k >= 0; k--)
-                        {
-                            var cand = k < messages.Count ? messages[k] : null;
-                            if (
-                                cand != null
-                                && string.Equals(
-                                    cand.Role,
-                                    "user",
-                                    StringComparison.OrdinalIgnoreCase
-                                )
-                            )
-                            {
-                                cutUserId = cand.Id;
-                                break;
-                            }
-                            if (k == 0)
-                                break;
-                        }
-                        if (
-                            cut < messages.Count
-                            && string.Equals(
-                                messages[cut].Role,
-                                "user",
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                        )
-                            cutUserId = messages[cut].Id;
-                    }
-                    if (!string.IsNullOrWhiteSpace(cutUserId))
-                    {
-                        string want = "uturn-" + cutUserId;
+                        var summaries = await store
+                            .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                            .ConfigureAwait(false);
+                        string want = "uturn-" + replaySource.Id;
                         var hit = summaries.FirstOrDefault(s =>
                             string.Equals(s.TurnId, want, StringComparison.Ordinal)
                         );
                         if (hit != null)
                             cutSeq = hit.TurnSeq;
                     }
-                }
-                catch { }
-                if (cutSeq > 0)
-                    await store
-                        .TruncateFromTurnSeqAsync(workspaceId, sessionId, cutSeq, ct)
+                    catch { }
+                    if (cutSeq > 0)
+                        await store
+                            .TruncateFromTurnSeqAsync(workspaceId, sessionId, cutSeq, ct)
+                            .ConfigureAwait(false);
+                    try
+                    {
+                        await store
+                            .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch { }
+                    meta.MessageCount = kept.Count;
+                    var lastSnap = kept.LastOrDefault(m =>
+                        m.InputTokens.HasValue && m.InputTokens.Value > 0
+                    );
+                    meta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
+                    meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
+                    meta.UpdatedAtUtc = DateTime.UtcNow;
+                    await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct)
                         .ConfigureAwait(false);
+                }
+                catch (Exception commitError)
+                {
+                    LogHistoryFailure(
+                        "replay.commit",
+                        workspaceId,
+                        sessionId,
+                        anchorMessageId,
+                        commitError
+                    );
+                    throw new TruncateCommitException("历史截断提交状态不确定，请刷新确认，不要重复操作", commitError);
+                }
+
+                string recoveryToken = "replay:" + sessionId + ":" + anchorMessageId;
                 try
                 {
-                    await store
-                        .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
-                        .ConfigureAwait(false);
+                    HaloLogger.App.Info(
+                        "[History] replay.commit ws="
+                            + workspaceId
+                            + " sess="
+                            + sessionId
+                            + " anchor="
+                            + anchorMessageId
+                            + " kept="
+                            + kept.Count
+                            + " removed="
+                            + removed
+                            + " synthetic="
+                            + synthetic
+                            + " orphans="
+                            + orphans
+                            + " bak="
+                            + bak
+                    );
                 }
                 catch { }
-            }
-            catch
-            {
-                return HistoryTruncateResult.Fail("REWRITE_ERROR");
-            }
-            meta.MessageCount = kept.Count;
-            var lastSnap = kept.LastOrDefault(m =>
-                m.InputTokens.HasValue && m.InputTokens.Value > 0
-            );
-            meta.TotalInputTokens = lastSnap?.InputTokens ?? 0;
-            meta.TotalCachedTokens = lastSnap?.CachedTokens ?? 0;
-            meta.UpdatedAtUtc = DateTime.UtcNow;
-            await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
-            try
-            {
-                Infrastructure.Logging.HaloLogger.App.Info(
-                    $"[History] truncate ws={workspaceId} sess={sessionId} anchor={anchorMessageId} kept={kept.Count} removed={removed} synthetic={synthetic} orphans={orphans} bak={bak}"
+                return HistoryTruncateResult.Ok(
+                    kept.Count,
+                    removed,
+                    replayText,
+                    bak,
+                    replayImages,
+                    recoveryToken
                 );
             }
-            catch { }
-            return HistoryTruncateResult.Ok(kept.Count, removed, replayText, bak);
+            finally
+            {
+                appendLock.Release();
+            }
         }
         finally
         {
-            appendLock.Release();
+            lease.Dispose();
         }
+    }
+
+    private static bool IsSafeStoredImageId(string? imageId)
+    {
+        if (string.IsNullOrWhiteSpace(imageId))
+            return false;
+        foreach (char c in imageId)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+                return false;
+        }
+        return true;
+    }
+
+    private List<HistoryReplayImageDto> BuildReplayImages(
+        string workspaceId,
+        string sessionId,
+        UnifiedChatMessage source
+    )
+    {
+        var result = new List<HistoryReplayImageDto>();
+        foreach (var image in source.Images ?? new List<ChatImageRef>())
+        {
+            bool lost = true;
+            if (IsSafeStoredImageId(image.ImageId))
+            {
+                string? path = ImageAttachmentStore.FindImagePath(
+                    _sessionRepository.Storage.CurrentDataRoot,
+                    workspaceId,
+                    sessionId,
+                    image.ImageId
+                );
+                string mime = string.IsNullOrWhiteSpace(image.Mime)
+                    ? ImageAttachmentStore.MimeFromExtension(image.FileName)
+                    : image.Mime;
+                if (
+                    !string.IsNullOrWhiteSpace(path)
+                    && File.Exists(path)
+                    && ImageAttachmentStore.TryReadBounded(
+                        path,
+                        ImageAttachmentStore.MaxImageBytes,
+                        out var bytes
+                    )
+                    && bytes != null
+                    && ImageAttachmentStore.CheckMagic(bytes, mime)
+                )
+                    lost = false;
+            }
+            if (lost)
+            {
+                try
+                {
+                    HaloLogger.App.Warn(
+                        "[History] image.reuse.miss ws="
+                            + workspaceId
+                            + " sess="
+                            + sessionId
+                            + " image="
+                            + image.ImageId
+                    );
+                }
+                catch { }
+            }
+            result.Add(HistoryReplayImageDto.FromReference(image, lost));
+        }
+        return result;
+    }
+
+    private static void LogHistoryFailure(
+        string stage,
+        string workspaceId,
+        string sessionId,
+        string anchorMessageId,
+        Exception error
+    )
+    {
+        try
+        {
+            HaloLogger.App.Error(
+                "[History] "
+                    + stage
+                    + " ws="
+                    + workspaceId
+                    + " sess="
+                    + sessionId
+                    + " anchor="
+                    + anchorMessageId,
+                error
+            );
+        }
+        catch { }
     }
 }

@@ -1,8 +1,16 @@
 /** 摘要源菜单目标：复制/重放/分支/删除按轮锚点。 */
 export interface HistoryTarget {
   kind: 'user' | 'assistant';
+  /** 历史操作消息 ID（真实 message.id），不是 turnId 或 finalBlockId。 */
   id: string;
   text: string;
+  /** 破坏性历史操作是否可用；undefined 仅用于兼容旧 live 回退路径。 */
+  canReplay?: boolean;
+  canBranch?: boolean;
+  /** 禁用原因：忙碌、无可用锚点、压缩行或能力缺失。 */
+  actionDisabledReason?: string;
+  /** 用户分支草稿原文（来自摘要 userContent）。 */
+  draftText?: string;
 }
 
 /** 剪贴板复制：优先异步接口，失败降级同步方案。 */

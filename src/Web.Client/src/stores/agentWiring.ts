@@ -6,6 +6,7 @@
  * 注意：本文件是唯一允许直 import 各 store 的 agent 接线点；features/agent/stores 下新 store 仍禁止直调其他 store。 */
 import { watch } from 'vue';
 import { getHostBridge, haloEventBus } from '@shared/bridge/hostBridge';
+import { missingImageWarning } from '@shared/bridge/protocol/errors';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useConfigStore } from '@/stores/configStore';
@@ -29,7 +30,20 @@ export function ensureAgentWiring(): void {
     maxImages: () => Math.max(1, Math.min(16, Math.trunc(Number(config.activeModel?.maxImagesPerTurn) || 4))),
     truncateHistory: async (w, s, mid, rm) => {
       const r = await getHostBridge().truncateSessionHistory(w, s, mid, rm);
-      return { ok: r.ok && !!r.data, replayText: String((r.data as unknown as { replayText?: unknown })?.replayText || '') };
+      const data = r.data;
+      const rawImages = data?.replayImages;
+      const replayImages = Array.isArray(rawImages) ? rawImages : [];
+      const warnings = replayImages.filter((image) => image && image.lost).map((image) => missingImageWarning(image.fileName));
+      return {
+        ok: r.ok && !!data,
+        code: r.code ?? undefined,
+        message: r.message ?? undefined,
+        replayText: String(data?.replayText || ''),
+        replayImages,
+        destructiveCommitCompleted: data?.destructiveCommitCompleted === true,
+        recoveryToken: data?.recoveryToken ?? undefined,
+        warnings,
+      };
     },
     loadSessionMessages: (sid, opts) => ws.loadSessionMessages(sid, opts),
     applyUsagePatch: (sid, usage) => ws.applyUsagePatch(sid, usage),

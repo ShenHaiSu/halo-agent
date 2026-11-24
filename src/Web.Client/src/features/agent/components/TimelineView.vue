@@ -60,12 +60,21 @@
           :can-copy="menu.canCopy"
           :can-copy-turn="menu.canCopyTurn"
           :copy-label="menu.copyLabel"
+          :replay-disabled="menu.replayDisabled"
+          :branch-disabled="menu.branchDisabled"
+          :replay-title="menu.replayTitle"
+          :branch-title="menu.branchTitle"
           @copy="emit('menu-copy')"
           @copy-turn="emit('menu-copy-turn')"
           @replay="emit('menu-replay')"
           @branch="emit('menu-branch')"
           @delete="emit('menu-delete')"
         />
+        <div v-if="pendingReplay" data-testid="replay-recovery" class="replay-recovery">
+          <span>历史已截断，本次未发送。可从这里继续重放。</span>
+          <button data-testid="replay-resume" type="button" @click="emit('resume-replay')">继续重放</button>
+          <button data-testid="replay-discard" type="button" @click="emit('discard-replay')">放弃</button>
+        </div>
       </div>
     </div>
     <TimelineJumpButton :visible="showJumpVisible" @jump="emit('jump-latest')" />
@@ -106,6 +115,8 @@ const emit = defineEmits<{
   'menu-replay': [];
   'menu-branch': [];
   'menu-delete': [];
+  'resume-replay': [];
+  'discard-replay': [];
   'jump-latest': [];
   'retry-pending': [item: TimelineEntry];
 }>();
@@ -142,6 +153,7 @@ const lastError = computed(() => view.value.lastError);
 const showRetry = computed(() => view.value.showRetry);
 const liveTelemetry = computed(() => view.value.liveTelemetry);
 const menu = computed(() => view.value.menu);
+const pendingReplay = computed(() => view.value.pendingReplay ?? null);
 
 const rowHandlers = {
   'user-menu': (e: MouseEvent, item: TimelineEntry) => emit('user-menu', e, item),
@@ -181,5 +193,29 @@ onUnmounted(() => emit('ready', null));
 .transcript-scroll {
   overflow-anchor: auto;
   scrollbar-gutter: stable;
+}
+.replay-recovery {
+  position: sticky;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  margin: 8px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--bg-surface, #1e1e1e);
+  font-size: 12px;
+}
+.replay-recovery span {
+  flex: 1;
+}
+.replay-recovery button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 </style>

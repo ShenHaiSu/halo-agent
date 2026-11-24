@@ -61,12 +61,34 @@ export interface AgentToolCard {
   errorCode?: string | null;
 }
 
-/** need09-04：sendPrompt 可选第二参附件项 */
+/** sendPrompt 可选第二参：base64 附件（老形状兼容，kind 可省略）。 */
 export interface AgentSendAttachment {
+  kind?: 'base64';
   attId: string;
   fileName: string;
   mime: string;
   base64: string;
+}
+
+/** 复用会话内已存储图片：只传 imageId，不接受 relPath。 */
+export interface AgentSendStoredMedia {
+  kind: 'stored';
+  imageId: string;
+  fileName: string;
+  mime: string;
+}
+
+export type AgentSendMedia = AgentSendAttachment | AgentSendStoredMedia;
+
+/** 截断已提交但尚未成功发送的恢复项，仅存活于当前应用生命周期。 */
+export interface PendingReplay {
+  workspaceId: string;
+  sessionId: string;
+  anchorMessageId: string;
+  text: string;
+  media: AgentSendMedia[];
+  recoveryToken?: string;
+  createdAt: number;
 }
 
 export interface AgentTelemetry {
@@ -107,8 +129,12 @@ export interface AgentTurnState {
   requestId: string;
   /** need22-P2 F5：失败重试用原文（成功/新发后清空） */
   lastPrompt: string;
-  /** need02-P1：失败重试用附件（含图重发带图；成功/新发后更新） */
+  /** 失败重试用附件（含图重发带图；成功/新发后更新） */
   lastAttachments: AgentSendAttachment[];
+  /** 本轮完整媒体（base64 + stored），失败重试继续携带。 */
+  lastMedia: AgentSendMedia[];
+  /** 截断已提交但尚未发送的恢复项（仅内存态，重启不恢复）。 */
+  pendingReplay: PendingReplay | null;
   /** need02-P1：乐观 user（分桶天然隔离；null=无 pending；仅视图层 overlay，不写 jsonl） */
   pendingUser: PendingUser | null;
   /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
@@ -180,6 +206,8 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     requestId: '',
     lastPrompt: '',
     lastAttachments: [],
+    lastMedia: [],
+    pendingReplay: null,
     pendingUser: null,
     liveCompleting: false,
     steadyReady: false,

@@ -1,17 +1,14 @@
-/** need21-F03：agent 域运行时上下文 DI（旧 store 直读 workspace/session/config/askUser 的替代）。
+/** agent 域运行时上下文 DI（旧 store 直读 workspace/session/config/askUser 的替代）。
  * 旧转发（stores/agentStore.ts）注册实现，新 store 只调 agentRuntime() 接口；单测可注入假实现。
  */
+import type { HistoryReplayResult } from '@shared/bridge/protocol/domain';
+
 export interface AgentRuntimeContext {
   workspaceId(): string;
   providerId(): string;
   modelId(): string;
   maxImages(): number;
-  truncateHistory(
-    workspaceId: string,
-    sessionId: string,
-    msgId: string,
-    removeAnchor: boolean
-  ): Promise<{ ok: boolean; replayText: string }>;
+  truncateHistory(workspaceId: string, sessionId: string, msgId: string, removeAnchor: boolean): Promise<HistoryReplayResult>;
   loadSessionMessages(sessionId: string, opts?: { preserveBudget?: boolean }): Promise<void>;
   applyUsagePatch(sessionId: string, usage: { inputTokens: number; cachedInputTokens?: number | null }): void;
   refreshBudget(): Promise<void>;
@@ -28,7 +25,14 @@ const noopRuntime: AgentRuntimeContext = {
   providerId: () => '',
   modelId: () => '',
   maxImages: () => 4,
-  truncateHistory: () => Promise.resolve({ ok: false, replayText: '' }),
+  truncateHistory: () =>
+    Promise.resolve({
+      ok: false,
+      replayText: '',
+      replayImages: [],
+      destructiveCommitCompleted: false,
+      warnings: [],
+    }),
   loadSessionMessages: () => Promise.resolve(),
   applyUsagePatch: () => undefined,
   refreshBudget: () => Promise.resolve(),

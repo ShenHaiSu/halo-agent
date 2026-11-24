@@ -211,6 +211,12 @@ public sealed class WorkspaceContractTests
             CancellationToken ct = default
         ) => Task.FromResult(new List<TurnSummary>());
 
+        public Task<List<HistoryMessageRef>> GetMessageRefsAsync(
+            string workspaceId,
+            string sessionId,
+            CancellationToken ct = default
+        ) => Task.FromResult(new List<HistoryMessageRef>());
+
         public Task<List<TimelineBlockContent>> GetBlockIdsAsync(
             string workspaceId,
             string sessionId,
