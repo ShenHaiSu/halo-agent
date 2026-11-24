@@ -10,7 +10,14 @@
         <div class="sm-field">
           <div class="sm-field-label text-secondary">种类</div>
           <div class="sm-field-control">
-            <n-segmented v-model:value="store.kind" :options="kindOptions" data-testid="sm-kind-seg" @update:value="onKind" />
+            <n-select
+              v-model:value="store.kind"
+              :options="kindOptions"
+              size="small"
+              style="width: 120px"
+              data-testid="sm-kind-select"
+              @update:value="onKind"
+            />
           </div>
         </div>
         <div class="sm-field">
@@ -19,6 +26,7 @@
             <n-select
               v-model:value="store.scopeFilter"
               :options="scopeOptions"
+              size="small"
               style="width: 140px"
               data-testid="sm-scope-select"
               @update:value="onScope"
@@ -31,6 +39,7 @@
             <n-select
               v-model:value="wsSelect"
               :options="wsOptions"
+              size="small"
               style="width: 200px"
               data-testid="sm-workspace-select"
               placeholder="选择工作区"
@@ -44,6 +53,7 @@
             <n-input
               v-model:value="searchInput"
               clearable
+              size="small"
               placeholder="按名称 / 标题 / 摘要搜索"
               style="width: 220px"
               data-testid="sm-search"
