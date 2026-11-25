@@ -1,32 +1,127 @@
 <template>
-  <div class="space-y-3 min-w-0 max-w-full overflow-x-hidden" data-testid="agent-behavior-tab">
-    <div
-      data-testid="agent-action-bar"
-      class="sticky top-0 z-10 flex items-center gap-2 rounded-md border border-subtle bg-elevated px-3 py-2 text-xs"
+  <div class="agent-behavior min-w-0 max-w-full overflow-x-hidden" data-testid="agent-behavior-tab">
+    <AgentBehaviorActionBar
+      :dirty="agentStore.dirty"
+      :dirty-count="agentStore.dirtyFields.length"
+      :saving="agentStore.saving"
+      :all-open="cards.allOpen.value"
+      @save="onSave"
+      @discard="onDiscard"
+      @reset-all="onResetAll"
+      @toggle-all="cards.toggleAll()"
+    />
+
+    <n-alert
+      v-if="validationMessage"
+      type="error"
+      :show-icon="true"
+      closable
+      class="agent-inline-alert"
+      data-testid="agent-validation-alert"
+      @close="validationMessage = ''"
     >
-      <span v-if="agentStore.dirty">●脏态</span><span v-else>○干净</span>
-      <n-button
-        type="primary"
-        size="small"
-        data-testid="agent-save"
-        :loading="agentStore.saving"
-        :disabled="!agentStore.dirty || agentStore.saving"
-        @click="onSave"
-        >保存</n-button
-      >
-      <n-button size="small" type="error" ghost data-testid="agent-reset-all" @click="onResetAll">恢复全部默认</n-button>
-      <span v-if="agentStore.config?.fallbackReason">{{ agentStore.config?.fallbackReason }}</span>
-      <span data-testid="agent-section-nav" class="ml-auto text-secondary">超时 · 轮次 · 子代理 · 监控 · 拒绝</span>
-    </div>
-    <n-alert v-if="showIntro" type="info" closable class="text-xs" @close="showIntro = false"
-      >生效范围：全局 config/agent.json，保存后下一轮对话起生效。</n-alert
+      {{ validationMessage }}
+    </n-alert>
+
+    <n-alert v-if="agentStore.externalChangePending" type="warning" :show-icon="true" class="agent-inline-alert">
+      <template #default>
+        <div>配置已在外部更改。请先保存或放弃当前修改，再重新加载。</div>
+        <div class="agent-inline-alert-actions">
+          <n-button size="tiny" @click="onDiscard">放弃当前修改并加载外部配置</n-button>
+          <n-button size="tiny" @click="onKeepLocal">保留当前修改，暂不加载</n-button>
+        </div>
+      </template>
+    </n-alert>
+
+    <AgentBehaviorCard
+      title="命令执行超时"
+      :summary="summaries.timeout"
+      :open="cards.expanded.timeout"
+      :dirty="cards.isCardDirty('timeout', agentStore.dirtyFields)"
+      test-id="agent-card-timeout"
+      @update:open="(v: boolean) => cards.setOpen('timeout', v)"
     >
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-      <AgentTimeoutCard v-if="agentStore.config" :cfg="agentStore.config" @update="onNum" @reset="onResetField" />
-      <AgentIterationsCard v-if="agentStore.config" :cfg="agentStore.config" @update="onNum" @reset="onResetField" />
-      <SubAgentConfigCard v-if="agentStore.config" :cfg="agentStore.config" @bool="onBool" @num="onSubNum" @reset="onResetField" />
-    </div>
-    <div class="grid grid-cols-1 gap-3">
+      <template #header-extra>
+        <n-button
+          size="tiny"
+          quaternary
+          :loading="resettingCard === 'timeout'"
+          :disabled="agentStore.saving || resettingCard !== null"
+          @click="onResetCard('timeout')"
+          >恢复本卡默认</n-button
+        >
+      </template>
+      <AgentTimeoutCard
+        v-if="agentStore.config"
+        :cfg="agentStore.config"
+        :dirty-fields="agentStore.dirtyFields"
+        @update="onNum"
+        @reset="onResetField"
+      />
+    </AgentBehaviorCard>
+
+    <AgentBehaviorCard
+      title="工具轮次与单轮时限"
+      :summary="summaries.iterations"
+      :open="cards.expanded.iterations"
+      :dirty="cards.isCardDirty('iterations', agentStore.dirtyFields)"
+      test-id="agent-card-iterations"
+      @update:open="(v: boolean) => cards.setOpen('iterations', v)"
+    >
+      <template #header-extra>
+        <n-button
+          size="tiny"
+          quaternary
+          :loading="resettingCard === 'iterations'"
+          :disabled="agentStore.saving || resettingCard !== null"
+          @click="onResetCard('iterations')"
+          >恢复本卡默认</n-button
+        >
+      </template>
+      <AgentIterationsCard
+        v-if="agentStore.config"
+        :cfg="agentStore.config"
+        :dirty-fields="agentStore.dirtyFields"
+        @update="onNum"
+        @reset="onResetField"
+      />
+    </AgentBehaviorCard>
+
+    <AgentBehaviorCard
+      title="子代理配置"
+      :summary="summaries.subagents"
+      :open="cards.expanded.subagents"
+      :dirty="cards.isCardDirty('subagents', agentStore.dirtyFields)"
+      test-id="agent-card-subagents"
+      @update:open="(v: boolean) => cards.setOpen('subagents', v)"
+    >
+      <template #header-extra>
+        <n-button
+          size="tiny"
+          quaternary
+          :loading="resettingCard === 'subagents'"
+          :disabled="agentStore.saving || resettingCard !== null"
+          @click="onResetCard('subagents')"
+          >恢复本卡默认</n-button
+        >
+      </template>
+      <SubAgentConfigCard
+        v-if="agentStore.config"
+        :cfg="agentStore.config"
+        :dirty-fields="agentStore.dirtyFields"
+        @bool="onBool"
+        @num="onSubNum"
+        @reset="onResetField"
+      />
+    </AgentBehaviorCard>
+
+    <AgentBehaviorCard
+      title="子运行监控"
+      :summary="summaries.monitor"
+      :open="cards.expanded.monitor"
+      test-id="agent-card-monitor"
+      @update:open="(v: boolean) => cards.setOpen('monitor', v)"
+    >
       <SubRuntimeMonitorCard
         :rows="subRuntimeRows"
         :loading="subRuntimeLoading"
@@ -35,24 +130,30 @@
         @refresh="onSubRuntimeRefresh"
         @cancel-tree="onSubCancelTree"
         @open-history="onOpenHistory"
+        @view-rejection="onViewRejection"
       />
+    </AgentBehaviorCard>
+
+    <AgentBehaviorCard
+      title="拒绝与自愈记录"
+      :summary="summaries.rejection"
+      :open="cards.expanded.rejection"
+      test-id="agent-card-rejection"
+      @update:open="(v: boolean) => cards.setOpen('rejection', v)"
+    >
       <RejectionLogCard :rows="rejectionRows" />
-    </div>
+    </AgentBehaviorCard>
   </div>
 </template>
 <script setup lang="ts">
-/**
- * need23：智能体行为页。
- * - 移除"目标摘要"卡（目标是会话级只读状态，编辑入口在右侧栏；此处展示无价值且跳转是死链）。
- * - 补齐 SubAgentConfigCard / SubRuntimeMonitorCard 的 import（此前漏 import → 整卡不渲染）。
- * - 子会话 id 不再截断（截断后 enterSub 必然找不到子会话）。
- */
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
 import { useAgentConfigStore } from '@/stores/agentConfigStore';
 import { getHostBridge, type AgentConfigDocument, type SubRuntimeInfo } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useSettingsDrawer } from '../composables/useSettingsDrawer';
+import AgentBehaviorActionBar from './agent/AgentBehaviorActionBar.vue';
+import AgentBehaviorCard from './agent/AgentBehaviorCard.vue';
 import AgentTimeoutCard from './agent/cards/AgentTimeoutCard.vue';
 import AgentIterationsCard from './agent/cards/AgentIterationsCard.vue';
 import SubAgentConfigCard from './agent/cards/SubAgentConfigCard.vue';
@@ -60,32 +161,54 @@ import SubRuntimeMonitorCard from './agent/cards/SubRuntimeMonitorCard.vue';
 import RejectionLogCard from './agent/cards/RejectionLogCard.vue';
 import { clampSubNum, type SubBoolField, type SubNumField } from './agent/cards/subAgentFields';
 import type { SubRejectionRow, SubRuntimeRow } from './agent/cards/subRuntimeTypes';
+import { useAgentBehaviorCards } from './agent/composables/useAgentBehaviorCards';
+import { validateAgentBehavior } from './agent/composables/useAgentBehaviorValidation';
+import { formatDuration, formatPermissionSummary } from './agent/utils/agentBehaviorFormat';
+import { fieldToCard, type AgentBehaviorCardName } from './agent/agentBehaviorTypes';
+import './agent/agent-behavior.css';
 
 const message = useMessage();
 const dialog = useDialog();
 const agentStore = useAgentConfigStore();
 const workspaceStore = useWorkspaceStore();
 const settingsDrawer = useSettingsDrawer();
-const showIntro = ref(false);
-try {
-  showIntro.value = localStorage.getItem('halo-agent-intro') !== 'hide';
-} catch {
-  showIntro.value = false;
-}
+const cards = useAgentBehaviorCards();
 
+const validationMessage = ref('');
+const resettingCard = ref<AgentBehaviorCardName | null>(null);
 const subRuntimeLoading = ref(false);
 const subRuntimeRows = ref<SubRuntimeRow[]>([]);
 const subPolicyText = ref('');
 const subRejection = ref<SubRejectionRow | null>(null);
 const rejectionRows = ref<SubRejectionRow[]>([]);
 
-/** 超时/轮次数值字段（AgentTimeoutCard + AgentIterationsCard）。 */
+/** 整卡恢复：后端没有分组别名，必须串行单项 reset，避免原子写回互相覆盖。 */
+const CARD_RESET_ALIASES: Record<AgentBehaviorCardName, readonly string[]> = {
+  timeout: ['defaultTimeout', 'maxTimeout'],
+  iterations: ['iterations', 'turnTimeout'],
+  subagents: ['subEnabled', 'subParallel', 'subIterations', 'subPerms'],
+  monitor: [],
+  rejection: [],
+};
+
 type NumericField = 'execDefaultTimeoutMs' | 'execMaxTimeoutMs' | 'maxIterations' | 'turnTimeoutMs';
 
+const summaries = computed(() => {
+  const cfg = agentStore.config;
+  const toolCalls = subRuntimeRows.value.reduce((total, row) => total + (row.toolCount || 0), 0);
+  return {
+    timeout: cfg ? `默认 ${formatDuration(cfg.execDefaultTimeoutMs)} · 上限 ${formatDuration(cfg.execMaxTimeoutMs)}` : '',
+    iterations: cfg ? `${cfg.maxIterations} 轮 · 单轮 ${formatDuration(cfg.turnTimeoutMs ?? 600000)}` : '',
+    subagents: cfg ? `${cfg.subAgentEnabled ? '已启用' : '已关闭'} · 并发 ${cfg.subMaxParallel} · 每子 ${cfg.subMaxIterations} 轮` : '',
+    monitor: `${subRuntimeRows.value.length} 个运行中 · ${toolCalls} 次工具调用`,
+    rejection: `${rejectionRows.value.length} 条记录`,
+  };
+});
+
 function setConfigField<K extends keyof AgentConfigDocument>(field: K, value: AgentConfigDocument[K]): void {
-  const c = agentStore.config;
-  if (!c) return;
-  c[field] = value;
+  const cfg = agentStore.config;
+  if (!cfg) return;
+  cfg[field] = value;
   agentStore.touchDirty();
 }
 
@@ -97,36 +220,97 @@ function onBool(field: SubBoolField, v: boolean): void {
   setConfigField(field, v);
 }
 
-/** 子代理数值：写入前裁剪到后端允许区间（1..8 / 1..100），避免 0 触发 AGENT_VALIDATION。 */
 function onSubNum(field: SubNumField, v: number | null): void {
   setConfigField(field, clampSubNum(field, v));
 }
 
-async function onSave() {
-  const res = await agentStore.saveConfig();
-  if (res.ok) message.success('智能体行为配置已保存，下一轮对话起生效');
-  else message.error(res.message || '保存失败');
+/** 展开出错字段所属卡片并把焦点移到控件，不只靠 toast。 */
+async function focusAgentField(field: string): Promise<void> {
+  cards.setOpen(fieldToCard(field), true);
+  await nextTick();
+  const host = document.querySelector<HTMLElement>(`[data-agent-field="${field}"]`);
+  if (!host) return;
+  const control = host.querySelector<HTMLElement>('input, textarea, button') ?? host;
+  control.focus();
+  host.scrollIntoView?.({ block: 'nearest' });
 }
 
-function onResetAll() {
-  dialog.error({
+async function onSave(): Promise<void> {
+  const cfg = agentStore.config;
+  if (!cfg) return;
+  validationMessage.value = '';
+  const issues = validateAgentBehavior(cfg);
+  if (issues.length > 0) {
+    validationMessage.value = issues[0].message;
+    await focusAgentField(issues[0].key);
+    message.error(issues[0].message);
+    return;
+  }
+  const res = await agentStore.saveConfig();
+  if (res.ok) {
+    message.success('智能体行为配置已保存，下一轮对话起生效');
+    return;
+  }
+  if (res.code === 'AGENT_VALIDATION' && agentStore.lastError) {
+    validationMessage.value = agentStore.lastError.message;
+    await focusAgentField(agentStore.lastError.field);
+    message.error(agentStore.lastError.message);
+    return;
+  }
+  message.error(res.message || '保存失败');
+}
+
+async function onDiscard(): Promise<void> {
+  const hadExternalChange = agentStore.externalChangePending;
+  agentStore.discardChanges();
+  validationMessage.value = '';
+  if (hadExternalChange) await agentStore.loadConfig();
+}
+
+function onKeepLocal(): void {
+  agentStore.externalChangePending = false;
+}
+
+function onResetAll(): void {
+  dialog.warning({
     title: '恢复全部默认',
-    content: '确认恢复全部默认？',
+    content: '恢复后立即写入本地配置，下一轮对话起生效。确认恢复全部默认？',
     positiveText: '确认恢复',
     negativeText: '取消',
     onPositiveClick: async () => {
-      const r = await agentStore.resetAll();
-      if (r.ok) message.success('已恢复全部默认');
-      else message.error('恢复失败');
+      const res = await agentStore.resetAll();
+      if (res.ok) message.success('已恢复全部默认');
+      else message.error(res.message || '恢复失败');
     },
   });
 }
 
-/** 恢复单项默认（字段名即后端 reset 别名，后端大小写/别名均认）。 */
+async function onResetCard(card: AgentBehaviorCardName): Promise<void> {
+  if (resettingCard.value !== null) return;
+  resettingCard.value = card;
+  try {
+    for (const alias of CARD_RESET_ALIASES[card]) {
+      const res = await agentStore.resetField(alias);
+      if (!res.ok) {
+        message.error(res.message || '恢复失败');
+        return;
+      }
+    }
+    validationMessage.value = '';
+    message.success('已恢复本卡默认');
+  } finally {
+    resettingCard.value = null;
+  }
+}
+
 async function onResetField(field: string): Promise<void> {
   const res = await agentStore.resetField(field);
-  if (res.ok) message.success('已恢复本项默认');
-  else message.error(res.message || '恢复失败');
+  if (res.ok) {
+    validationMessage.value = '';
+    message.success('已恢复本项默认');
+  } else {
+    message.error(res.message || '恢复失败');
+  }
 }
 
 async function onSubRuntimeRefresh(): Promise<void> {
@@ -139,27 +323,28 @@ async function onSubRuntimeRefresh(): Promise<void> {
       subRuntimeRows.value = [];
       rejectionRows.value = [];
       subRejection.value = null;
+      subPolicyText.value = '';
       return;
     }
     const res = await bridge.getSubRuntime(wsId, parentId);
     if (!res.ok || !res.data) return;
-    const d = res.data as SubRuntimeInfo;
-    subRuntimeRows.value = (d.subs || []).map((s) => ({
-      // need23：完整 id（进入子会话要用）；展示用短 id 单独放 shortId
-      subId: String(s.subId),
-      shortId: String(s.subId).slice(0, 8),
-      label: s.label,
-      status: s.status,
-      iteration: s.iteration,
-      toolCount: s.toolCount,
-      lastTool: s.lastTool,
-      elapsedMs: s.elapsedMs,
+    const data = res.data as SubRuntimeInfo;
+    subRuntimeRows.value = (data.subs || []).map((item) => ({
+      subId: String(item.subId),
+      shortId: String(item.subId).slice(0, 8),
+      label: item.label,
+      status: item.status,
+      iteration: item.iteration,
+      toolCount: item.toolCount,
+      lastTool: item.lastTool,
+      elapsedMs: item.elapsedMs,
     }));
-    const p = d.policy;
-    subPolicyText.value = p ? `快照：${p.enabled ? '开' : '关'} / 并发${p.maxParallel} / 轮次${p.maxIterations}` : '';
-    // need23：拒绝记录用后端真实时间（旧实现前端伪造 now()）
-    const list = d.recentRejections || (d.lastRejection ? [d.lastRejection] : []);
-    rejectionRows.value = list.map((r) => ({ code: r.code, callId: r.callId, atUtc: r.atUtc }));
+    const policy = data.policy;
+    subPolicyText.value = policy
+      ? `快照：${policy.enabled ? '已启用' : '已关闭'} · 并发 ${policy.maxParallel} · 每子 ${policy.maxIterations} 轮 · ${formatPermissionSummary(policy)}`
+      : '';
+    const list = data.recentRejections?.length ? data.recentRejections : data.lastRejection ? [data.lastRejection] : [];
+    rejectionRows.value = list.map((item) => ({ code: item.code, callId: item.callId, atUtc: item.atUtc }));
     subRejection.value = rejectionRows.value.length > 0 ? rejectionRows.value[0] : null;
   } catch (e) {
     console.warn('[agent-behavior] getSubRuntime failed:', e);
@@ -169,16 +354,15 @@ async function onSubRuntimeRefresh(): Promise<void> {
 }
 
 function onSubCancelTree(): void {
-  dialog.error({
+  dialog.warning({
     title: '掐断整树',
-    content: '确认掐断整树？',
+    content: '确认掐断整树？运行中的子代理任务将被取消。',
     positiveText: '确认掐断',
     negativeText: '取消',
     onPositiveClick: async () => {
-      const bridge = getHostBridge();
       const parentId = workspaceStore.activeSessionId || '';
       if (!parentId) return;
-      const res = await bridge.cancelAgentTree(parentId);
+      const res = await getHostBridge().cancelAgentTree(parentId);
       if (res.ok) {
         message.success('已发送整树取消指令');
         void onSubRuntimeRefresh();
@@ -189,21 +373,26 @@ function onSubCancelTree(): void {
   });
 }
 
-/** 进入子会话：必须用完整 subId（截断过的 id 后端查不到）。 */
+function onViewRejection(): void {
+  cards.setOpen('rejection', true);
+  void nextTick(() => {
+    document.querySelector('[data-testid="agent-card-rejection"]')?.scrollIntoView?.({ block: 'nearest' });
+  });
+}
+
 async function onOpenHistory(subId: string): Promise<void> {
   const wsId = workspaceStore.activeWorkspaceId || '';
-  const parent = workspaceStore.activeSessionId || '';
+  const parentId = workspaceStore.activeSessionId || '';
   const target = (subId || '').trim();
-  if (!wsId || !parent || !target) {
+  if (!wsId || !parentId || !target) {
     message.info('当前无可进入的子会话');
     return;
   }
   try {
     const { useSubSessionStore } = await import('@/stores/subSessionStore');
-    const s = useSubSessionStore();
-    await s.enterSub(wsId, parent, target);
+    const store = useSubSessionStore();
+    await store.enterSub(wsId, parentId, target);
     message.success('已进入子会话');
-    // need23：让出主工作台（否则设置抽屉盖住子会话视图）
     settingsDrawer.close();
   } catch (e) {
     message.error(`进入子会话失败：${String((e as Error)?.message ?? e)}`);
