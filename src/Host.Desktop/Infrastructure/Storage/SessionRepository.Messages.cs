@@ -88,14 +88,16 @@ public sealed partial class SessionRepository : ISessionRepository
             }
         }
 
-        var sessions = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
-        int removed = sessions.RemoveAll(s =>
-            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (removed > 0)
-        {
-            await SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
-        }
+        // 索引删除同样纳入工作区锁内的读-改-写，避免抹掉其他会话的并发元数据更新。
+        await MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
+                    sessions.RemoveAll(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    ),
+                ct
+            )
+            .ConfigureAwait(false);
         return true;
     }
 
@@ -157,12 +159,15 @@ public sealed partial class SessionRepository : ISessionRepository
 
         try
         {
-            var sessions = await LoadSessionsIndexAsync(workspaceId, ct).ConfigureAwait(false);
-            int removed = sessions.RemoveAll(s =>
-                string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-            );
-            if (removed > 0)
-                await SaveSessionsIndexAsync(workspaceId, sessions, ct).ConfigureAwait(false);
+            await MutateSessionsIndexAsync(
+                    workspaceId,
+                    sessions =>
+                        sessions.RemoveAll(s =>
+                            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                        ),
+                    ct
+                )
+                .ConfigureAwait(false);
             result.MetadataDeleted = true;
         }
         catch (Exception ex)

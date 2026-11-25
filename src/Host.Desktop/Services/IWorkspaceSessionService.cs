@@ -121,6 +121,17 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default
     );
 
+    /// <summary>
+    /// 显式写回子会话状态（meta.json 与 sessions-index.json 同步）。
+    /// 返回 false 表示会话不存在；耗时操作异步返回，桥接线程不得同步阻塞。
+    /// </summary>
+    Task<bool> UpdateSubStatusAsync(
+        string workspaceId,
+        string sessionId,
+        string status,
+        CancellationToken ct = default
+    );
+
     /// <summary>重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
     Task<HistoryTruncateResult> TruncateSessionHistoryAsync(
         string workspaceId,

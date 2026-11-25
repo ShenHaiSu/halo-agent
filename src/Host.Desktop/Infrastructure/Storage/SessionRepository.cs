@@ -163,21 +163,35 @@ public sealed partial class SessionRepository : ISessionRepository
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId))
-        {
             return new List<SessionMetadata>();
-        }
 
+        var wsLock = GetSessionsIndexLock(workspaceId);
+        await wsLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await LoadSessionsIndexNoLockAsync(workspaceId, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            wsLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 读 sessions-index.json 的内部实现，不取工作区锁。
+    /// 仅供已持有该锁的调用方使用（如 MutateSessionsIndexAsync），避免不可重入锁自锁。
+    /// </summary>
+    private async Task<List<SessionMetadata>> LoadSessionsIndexNoLockAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
         string path = GetSessionsIndexPath(workspaceId);
         if (!File.Exists(path))
         {
             return new List<SessionMetadata>();
         }
 
-        var wsLock = _workspaceSessionIndexLocks.GetOrAdd(
-            workspaceId,
-            _ => new SemaphoreSlim(1, 1)
-        );
-        await wsLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct)
@@ -200,11 +214,10 @@ public sealed partial class SessionRepository : ISessionRepository
             );
             return new List<SessionMetadata>();
         }
-        finally
-        {
-            wsLock.Release();
-        }
     }
+
+    private SemaphoreSlim GetSessionsIndexLock(string workspaceId) =>
+        _workspaceSessionIndexLocks.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
 
     private static void HealSessionTimes(SessionMetadata m, string? metaPath)
     {
@@ -271,6 +284,35 @@ public sealed partial class SessionRepository : ISessionRepository
         try
         {
             await AtomicFileWriter.WriteJsonAtomicAsync(path, sessions, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            wsLock.Release();
+        }
+    }
+
+    public async Task MutateSessionsIndexAsync(
+        string workspaceId,
+        Action<List<SessionMetadata>> mutate,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return;
+        if (mutate == null)
+            throw new ArgumentNullException(nameof(mutate));
+
+        var wsLock = GetSessionsIndexLock(workspaceId);
+        await wsLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // SemaphoreSlim 不可重入：这里必须调用不加锁的内部读，否则自锁死锁。
+            var sessions = await LoadSessionsIndexNoLockAsync(workspaceId, ct)
+                .ConfigureAwait(false);
+            mutate(sessions);
+            await AtomicFileWriter
+                .WriteJsonAtomicAsync(GetSessionsIndexPath(workspaceId), sessions, ct)
+                .ConfigureAwait(false);
         }
         finally
         {

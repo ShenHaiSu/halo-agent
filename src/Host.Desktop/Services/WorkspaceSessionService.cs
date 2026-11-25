@@ -407,13 +407,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         // 1. 保存 meta.json（元数据文件为权威源，先落盘再同步注册表）
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
-        // 2. 更新 sessions-index.json
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(workspaceId, ct)
-            .ConfigureAwait(false);
-        sessions.Insert(0, meta);
+        // 2. 更新 sessions-index.json（读-改-写在同一把工作区锁内完成）
         await _sessionRepository
-            .SaveSessionsIndexAsync(workspaceId, sessions, ct)
+            .MutateSessionsIndexAsync(workspaceId, sessions => sessions.Insert(0, meta), ct)
             .ConfigureAwait(false);
 
         // 3. 同步工作区库 sessions 注册表（派生缓存，不符以 meta.json 覆盖）
@@ -676,6 +672,44 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
                 .DeleteSessionAsync(workspaceId, sessionId, ct)
                 .ConfigureAwait(false);
         }
+    }
+
+    public async Task<bool> UpdateSubStatusAsync(
+        string workspaceId,
+        string sessionId,
+        string status,
+        CancellationToken ct = default
+    )
+    {
+        var meta = await _sessionRepository
+            .LoadSessionMetaAsync(workspaceId, sessionId, ct)
+            .ConfigureAwait(false);
+        if (meta == null)
+            return false;
+
+        meta.SubStatus = status;
+        meta.UpdatedAtUtc = DateTime.UtcNow;
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        // index 的 SubStatus/UpdatedAtUtc 与 meta 同步；读-改-写在同一把工作区锁内完成。
+        await _sessionRepository
+            .MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
+                {
+                    int idx = sessions.FindIndex(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (idx >= 0)
+                    {
+                        sessions[idx].SubStatus = status;
+                        sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+                    }
+                },
+                ct
+            )
+            .ConfigureAwait(false);
+        return true;
     }
 
     public Task<SessionMetadata?> GetSessionAsync(

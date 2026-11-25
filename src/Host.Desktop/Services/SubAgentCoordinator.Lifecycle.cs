@@ -159,8 +159,10 @@ public sealed partial class SubAgentCoordinator
                         continue;
                     try
                     {
-                        m.SubStatus = "cancelled";
-                        m.UpdatedAtUtc = DateTime.UtcNow;
+                        // 显式落盘终态，避免随后 Append 用旧 meta 覆盖回 running/pending。
+                        await _sessions
+                            .UpdateSubStatusAsync(ws.Id, m.Id, "cancelled")
+                            .ConfigureAwait(false);
                         await _sessions
                             .AppendSessionMessageAsync(
                                 ws.Id,
@@ -185,22 +187,10 @@ public sealed partial class SubAgentCoordinator
     {
         try
         {
-            var meta = await _sessions
-                .GetSessionAsync(workspaceId, subSessionId)
-                .ConfigureAwait(false);
-            if (meta == null)
-                return;
-            meta.SubStatus = status;
-            meta.UpdatedAtUtc = DateTime.UtcNow;
+            // 状态经显式入口写入 meta 与 index，不再靠 [SubStatus] 消息的副作用。
             await _sessions
-                .AppendSessionMessageAsync(
-                    workspaceId,
-                    subSessionId,
-                    UnifiedChatMessage.Assistant($"[SubStatus] {status}"),
-                    CancellationToken.None
-                )
+                .UpdateSubStatusAsync(workspaceId, subSessionId, status)
                 .ConfigureAwait(false);
-            // Append 已刷 index（含 SubStatus）；无需额外写 meta
         }
         catch { }
     }

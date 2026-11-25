@@ -145,23 +145,26 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
     {
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
-        // 同步更新 sessions-index.json
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(workspaceId, ct)
-            .ConfigureAwait(false);
-        int idx = sessions.FindIndex(s =>
-            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (idx >= 0)
-        {
-            sessions[idx] = meta;
-        }
-        else
-        {
-            sessions.Insert(0, meta);
-        }
+        // 同步更新 sessions-index.json（读-改-写在同一把工作区锁内完成）
         await _sessionRepository
-            .SaveSessionsIndexAsync(workspaceId, sessions, ct)
+            .MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
+                {
+                    int idx = sessions.FindIndex(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (idx >= 0)
+                    {
+                        sessions[idx] = meta;
+                    }
+                    else
+                    {
+                        sessions.Insert(0, meta);
+                    }
+                },
+                ct
+            )
             .ConfigureAwait(false);
     }
 
@@ -187,21 +190,24 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         meta.UpdatedAtUtc = DateTime.UtcNow;
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(workspaceId, ct)
+        await _sessionRepository
+            .MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
+                {
+                    int idx = sessions.FindIndex(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (idx >= 0)
+                    {
+                        sessions[idx].Title = meta.Title;
+                        sessions[idx].TitleLocked = true;
+                        sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+                    }
+                },
+                ct
+            )
             .ConfigureAwait(false);
-        int idx = sessions.FindIndex(s =>
-            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (idx >= 0)
-        {
-            sessions[idx].Title = meta.Title;
-            sessions[idx].TitleLocked = true;
-            sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
-            await _sessionRepository
-                .SaveSessionsIndexAsync(workspaceId, sessions, ct)
-                .ConfigureAwait(false);
-        }
 
         return true;
     }
@@ -223,20 +229,23 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         meta.UpdatedAtUtc = DateTime.UtcNow;
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(workspaceId, ct)
+        await _sessionRepository
+            .MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
+                {
+                    int idx = sessions.FindIndex(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (idx >= 0)
+                    {
+                        sessions[idx].IsPinned = isPinned;
+                        sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+                    }
+                },
+                ct
+            )
             .ConfigureAwait(false);
-        int idx = sessions.FindIndex(s =>
-            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (idx >= 0)
-        {
-            sessions[idx].IsPinned = isPinned;
-            sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
-            await _sessionRepository
-                .SaveSessionsIndexAsync(workspaceId, sessions, ct)
-                .ConfigureAwait(false);
-        }
 
         return true;
     }

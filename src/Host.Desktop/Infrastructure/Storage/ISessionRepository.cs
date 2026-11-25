@@ -27,6 +27,16 @@ public interface ISessionRepository
         List<SessionMetadata> sessions,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 在同一把工作区锁内完成 sessions-index.json 的读-改-写，避免并发写互相回退元数据。
+    /// mutate 回调在锁内执行，禁止在其中调用会再次获取工作区锁的方法。
+    /// </summary>
+    Task MutateSessionsIndexAsync(
+        string workspaceId,
+        Action<List<SessionMetadata>> mutate,
+        CancellationToken ct = default
+    );
     Task<SessionMetadata?> LoadSessionMetaAsync(
         string workspaceId,
         string sessionId,
