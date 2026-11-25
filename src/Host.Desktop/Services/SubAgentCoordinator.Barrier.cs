@@ -67,7 +67,8 @@ public sealed partial class SubAgentCoordinator
                     {
                         total = handles.Count,
                         timedOut = timedOutHandles.Count,
-                        budgetMs = (long)budget.TotalMilliseconds
+                        budgetMs = (long)budget.TotalMilliseconds,
+                        subIds = timedOutHandles.Select(h => h.SubSessionId).ToArray()
                     }
                 );
             }
@@ -221,7 +222,8 @@ public sealed partial class SubAgentCoordinator
                         callId = x.CallId,
                         subId = x.SubSessionId,
                         success = x.Success,
-                        timedOut = x.TimedOut
+                        timedOut = x.TimedOut,
+                        errorCode = x.ErrorCode
                     })
                     .ToArray(),
                 billedPrompt = results.Sum(x => x.InputTokens),

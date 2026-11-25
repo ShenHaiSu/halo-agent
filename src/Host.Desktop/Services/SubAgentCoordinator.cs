@@ -233,6 +233,7 @@ public sealed partial class SubAgentCoordinator
                             RunSubTurnAsync(
                                 workspaceId,
                                 subId,
+                                mainSessionId,
                                 taskText,
                                 providerId,
                                 modelId,
@@ -294,6 +295,7 @@ public sealed partial class SubAgentCoordinator
     private async Task<AgentTurnResult> RunSubTurnAsync(
         string workspaceId,
         string subSessionId,
+        string parentSessionId,
         string task,
         string providerId,
         string modelId,
@@ -307,7 +309,7 @@ public sealed partial class SubAgentCoordinator
         {
             await SetSubStatusAsync(workspaceId, subSessionId, "running").ConfigureAwait(false);
             Publish(
-                subSessionId,
+                parentSessionId,
                 "SubAgentProgress",
                 new { subId = subSessionId, status = "running" }
             );
@@ -336,7 +338,7 @@ public sealed partial class SubAgentCoordinator
                 )
                 .ConfigureAwait(false);
             Publish(
-                subSessionId,
+                parentSessionId,
                 "SubAgentProgress",
                 new
                 {

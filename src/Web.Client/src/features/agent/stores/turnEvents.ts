@@ -17,6 +17,7 @@ import {
   turnStartMarks,
 } from './model';
 import { agentRuntime } from './runtime';
+import { finalizeSubAgents } from './subAgentStatus';
 import { dropSegBuf, flushSegBufSync } from './useAgentStream';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 
@@ -293,9 +294,8 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
       t.isGenerating = false;
       t.streamingActive = false;
-      // need13：完成即解除子等待
-      t.subAgents.waiting = false;
-      t.subAgents.done = t.subAgents.total;
+      // 主轮终态兜底：残留 running 按失败收敛，绝不覆盖兄弟子真实终态。
+      finalizeSubAgents(t, 'failed');
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
       void finishTurn(sid, { deferClearMs: 300 });
@@ -359,8 +359,8 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.isGenerating = false;
       t.streamingActive = false;
       t.turnNotice = '已停止生成。';
-      // need13：取消掐断整树，子等待态同步解除
-      t.subAgents.waiting = false;
+      // 取消掐断整树：仍 running 的子收敛为 cancelled，已有终态的兄弟子不变。
+      finalizeSubAgents(t, 'cancelled');
       touch(t);
       void finishTurn(sid);
       break;
@@ -375,8 +375,8 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.lastErrorInfo = { code: str(payload['errorCode']) || 'TURN_ERROR', message: t.lastError, retry: true };
       // need22-P3 G6：TurnError 同落 turnNotice（模板已有 turnNotice + 重试按钮）
       t.turnNotice = `推理失败：${t.lastError}（可点“重试本轮”）`;
-      // need13：错误即解除子等待
-      t.subAgents.waiting = false;
+      // 错误收尾：仍 running 的子收敛为 failed，已有终态的兄弟子不变。
+      finalizeSubAgents(t, 'failed');
       touch(t);
       toast('error', t.lastError);
       void finishTurn(sid, { keepOnFailure: true });

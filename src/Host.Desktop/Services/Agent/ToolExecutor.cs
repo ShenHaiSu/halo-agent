@@ -438,11 +438,6 @@ public sealed partial class AgentOrchestrator
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
                     }
-                    PublishTurnEvent(
-                        sessionId,
-                        "SubAgentsBarrier",
-                        new { total = handles.Count, waiting = true }
-                    );
                     List<SubAgentResult> results;
                     try
                     {
@@ -486,21 +481,6 @@ public sealed partial class AgentOrchestrator
                         ctx.SubBilledIn += res.InputTokens;
                         ctx.SubBilledOut += res.OutputTokens;
                     }
-                    PublishTurnEvent(
-                        sessionId,
-                        "SubAgentsBarrierReleased",
-                        new
-                        {
-                            subs = results
-                                .Select(x => new
-                                {
-                                    callId = x.CallId,
-                                    subId = x.SubSessionId,
-                                    success = x.Success
-                                })
-                                .ToArray()
-                        }
-                    );
                 }
             }
         }
