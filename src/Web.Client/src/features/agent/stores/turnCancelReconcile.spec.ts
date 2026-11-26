@@ -16,7 +16,7 @@ import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
 import { finishTurn, stopGenerating } from '@features/agent/stores/turnEvents';
 import { registerAgentRuntimeContext } from '@features/agent/stores/runtime';
 import { ensureTurn, setActiveSessionId, setActiveWorkspaceId, turnStartMarks, turns } from '@features/agent/stores/model';
-import { isPendingCancelled } from '@features/session/utils/pendingUser';
+import { isPendingCancelled } from '@shared/utils/pendingStatus';
 
 const loadSpy = vi.fn().mockResolvedValue(undefined);
 const budgetSpy = vi.fn().mockResolvedValue(undefined);

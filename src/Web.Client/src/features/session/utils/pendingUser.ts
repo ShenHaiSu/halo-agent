@@ -51,10 +51,8 @@ export function makePendingUser(args: {
   };
 }
 
-/** 取消态判断：首回复前取消但 user 已持久化时保留气泡，不等同 failed。 */
-export function isPendingCancelled(pending: PendingUser | null | undefined): boolean {
-  return !!pending && pending.status === 'cancelled';
-}
+/** 取消态判断转发：实现在 shared，保持 session 侧既有 import 路径不变。 */
+export { isPendingCancelled } from '@shared/utils/pendingStatus';
 
 /** pending 是否属于该会话（切会话隔离：只 overlay 源 session，切走即藏）。 */
 export function isPendingForSession(pending: PendingUser | null | undefined, sessionId: string): boolean {
