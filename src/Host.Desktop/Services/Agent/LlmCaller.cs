@@ -399,8 +399,7 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-            // need12-P0/P2：流内抛取消同样先落袋本轮（有实测用实测，无实测用估算），再保住前面 iteration。
+            // 流内抛取消同样先落袋本轮，再保住前面迭代。
             UsageRecorder.CollectAuto(
                 ctx.UsageRows,
                 ctx.Provider,
@@ -415,7 +414,7 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+            await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-during-stream")
                 .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
@@ -425,8 +424,7 @@ public sealed partial class AgentOrchestrator
 
         if (tokens.Linked.IsCancellationRequested || streamCancelled)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-            // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本），保证取消不低估。
+            // 有实测用实测，无实测用估算，保证取消不低估。
             UsageRecorder.CollectAuto(
                 ctx.UsageRows,
                 ctx.Provider,
@@ -441,7 +439,12 @@ public sealed partial class AgentOrchestrator
                 UsageRecorder.SourceAgent
             );
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    iteration,
+                    "cancelled-before-stream-completed"
+                )
                 .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),

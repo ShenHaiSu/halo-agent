@@ -173,7 +173,12 @@ public sealed partial class HostBridgeFacade
                     {
                         JsEventDispatcher.Publish(
                             "agent:turn-event",
-                            new { sessionId = sessId, kind = "TurnCancelled" }
+                            new
+                            {
+                                sessionId = sessId,
+                                kind = "TurnCancelled",
+                                payload = new { reason = "bridge-cancel-fallback" },
+                            }
                         );
                     }
                     catch (Exception ex)

@@ -68,78 +68,105 @@ public sealed partial class AgentOrchestrator
         if (prep.Terminal != null)
             return prep.Terminal;
         var ctx = prep.Ctx!;
-        // (2) ReAct 循环（need08：ctx.EffectiveMax<=0 即无限轮次，永不进截断分支）
-        for (int iteration = 1; ctx.EffectiveMax <= 0 || iteration <= ctx.EffectiveMax; iteration++)
+        int currentIteration = 0;
+        try
         {
-            var (headOutcome, batch) = await BuildRequestAsync(
-                    ctx,
-                    iteration,
-                    workspaceId,
-                    sessionId,
-                    tokens
-                )
-                .ConfigureAwait(false);
-            if (headOutcome.Terminal != null)
-                return headOutcome.Terminal;
-            var request = batch!.Request;
-
-            var (callOutcome, streamState) = await CallAsync(
-                    ctx,
-                    iteration,
-                    workspaceId,
-                    sessionId,
-                    request,
-                    tokens
-                )
-                .ConfigureAwait(false);
-            if (callOutcome.Terminal != null)
-                return callOutcome.Terminal;
-            var pendingTools = streamState!.PendingTools;
-            var toolOrder = streamState.ToolOrder;
-            // 汇总 AssistantMessage 并持久化
-            var persistOutcome = await PersistAssistantAsync(
-                    ctx,
-                    iteration,
-                    workspaceId,
-                    sessionId,
-                    pendingTools,
-                    toolOrder,
-                    tokens
-                )
-                .ConfigureAwait(false);
-            if (persistOutcome.Terminal != null)
-                return persistOutcome.Terminal;
-            var (decideOutcome, proceedToDispatch) = await DecideAsync(
-                    ctx,
-                    iteration,
-                    workspaceId,
-                    sessionId,
-                    tokens
-                )
-                .ConfigureAwait(false);
-            if (decideOutcome.Terminal != null)
-                return decideOutcome.Terminal;
-            if (!proceedToDispatch)
-                continue;
-            var execOutcome = await ExecToolsAsync(ctx, iteration, workspaceId, sessionId, tokens)
-                .ConfigureAwait(false);
-            if (execOutcome.Terminal != null)
-                return execOutcome.Terminal;
-        }
-
-        // 理论不可达（有限循环内 iteration>=ctx.EffectiveMax 即返回；无限循环内必 return），兜底截断
-        PublishTurnEvent(
-            sessionId,
-            "TurnTruncated",
-            new
+            // ReAct 循环：无限模式只由取消或模型停手结束。
+            for (
+                int iteration = 1;
+                ctx.EffectiveMax <= 0 || iteration <= ctx.EffectiveMax;
+                iteration++
+            )
             {
-                iterations = ctx.EffectiveMax,
-                ctx.ToolExecutions,
-                maxIterations = ctx.EffectiveMax
+                currentIteration = iteration;
+                var (headOutcome, batch) = await BuildRequestAsync(
+                        ctx,
+                        iteration,
+                        workspaceId,
+                        sessionId,
+                        tokens
+                    )
+                    .ConfigureAwait(false);
+                if (headOutcome.Terminal != null)
+                    return headOutcome.Terminal;
+                var request = batch!.Request;
+
+                var (callOutcome, streamState) = await CallAsync(
+                        ctx,
+                        iteration,
+                        workspaceId,
+                        sessionId,
+                        request,
+                        tokens
+                    )
+                    .ConfigureAwait(false);
+                if (callOutcome.Terminal != null)
+                    return callOutcome.Terminal;
+                var pendingTools = streamState!.PendingTools;
+                var toolOrder = streamState.ToolOrder;
+                // 汇总 AssistantMessage 并持久化
+                var persistOutcome = await PersistAssistantAsync(
+                        ctx,
+                        iteration,
+                        workspaceId,
+                        sessionId,
+                        pendingTools,
+                        toolOrder,
+                        tokens
+                    )
+                    .ConfigureAwait(false);
+                if (persistOutcome.Terminal != null)
+                    return persistOutcome.Terminal;
+                var (decideOutcome, proceedToDispatch) = await DecideAsync(
+                        ctx,
+                        iteration,
+                        workspaceId,
+                        sessionId,
+                        tokens
+                    )
+                    .ConfigureAwait(false);
+                if (decideOutcome.Terminal != null)
+                    return decideOutcome.Terminal;
+                if (!proceedToDispatch)
+                    continue;
+                var execOutcome = await ExecToolsAsync(
+                        ctx,
+                        iteration,
+                        workspaceId,
+                        sessionId,
+                        tokens
+                    )
+                    .ConfigureAwait(false);
+                if (execOutcome.Terminal != null)
+                    return execOutcome.Terminal;
             }
-        );
-        UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-        await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated).ConfigureAwait(false);
-        return AgentTurnResult.Truncated(ctx.EffectiveMax, ctx.ToolExecutions);
+
+            // 理论不可达（有限循环内 iteration>=ctx.EffectiveMax 即返回；无限循环内必 return），兜底截断
+            PublishTurnEvent(
+                sessionId,
+                "TurnTruncated",
+                new
+                {
+                    iterations = ctx.EffectiveMax,
+                    ctx.ToolExecutions,
+                    maxIterations = ctx.EffectiveMax
+                }
+            );
+            UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Truncated)
+                .ConfigureAwait(false);
+            return AgentTurnResult.Truncated(ctx.EffectiveMax, ctx.ToolExecutions);
+        }
+        catch (OperationCanceledException) when (ctx.UserMessage != null)
+        {
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    Math.Max(currentIteration, 1),
+                    "unhandled-cancel"
+                )
+                .ConfigureAwait(false);
+            throw;
+        }
     }
 }

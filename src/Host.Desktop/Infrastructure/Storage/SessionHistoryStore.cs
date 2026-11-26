@@ -146,60 +146,181 @@ public sealed partial class SessionHistoryStore
         }
     }
 
-    /// <summary>发货加固：轮次以非完成态终结时落盘终态（截断/取消/错误），并把残留 final 降回 process。</summary>
-    /// <returns>命中已落盘轮次返回 true；轮次尚无落盘行返回 false（调用方无需重试）。</returns>
-    public async Task<bool> MarkTurnEndedAsync(
+    /// <summary>只更新已落盘轮次的终态；缺失轮次返回 false，不创建展示摘要。</summary>
+    public Task<bool> MarkTurnEndedAsync(
         string workspaceId,
         string sessionId,
         string turnId,
         string status,
         CancellationToken ct = default
+    ) => EnsureTurnEndedAsync(workspaceId, sessionId, turnId, status, null, ct);
+
+    /// <summary>在同一事务内补建或更新轮次终态，保证取消收尾幂等且不覆盖已有块统计。</summary>
+    public async Task<bool> EnsureTurnEndedAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        string status,
+        TurnSummary? fallback,
+        CancellationToken ct = default
     )
     {
-        if (string.IsNullOrWhiteSpace(turnId))
+        if (
+            string.IsNullOrWhiteSpace(workspaceId)
+            || string.IsNullOrWhiteSpace(sessionId)
+            || string.IsNullOrWhiteSpace(turnId)
+        )
         {
             return false;
         }
+        if (fallback != null && !string.Equals(fallback.TurnId, turnId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("补建摘要的轮次标识与目标轮次不一致。", nameof(fallback));
+        }
+        return await EnsureTurnEndedCoreAsync(workspaceId, sessionId, turnId, status, fallback, ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> EnsureTurnEndedCoreAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        string status,
+        TurnSummary? fallback,
+        CancellationToken ct
+    )
+    {
         string ended = NormalizeStatus(status);
-        var gate = GetWriteLock(workspaceId, sessionId);
+        string sid = sessionId ?? string.Empty;
+        var gate = GetWriteLock(workspaceId, sid);
         await gate.WaitAsync(ct).ConfigureAwait(false);
+        var watch = Stopwatch.StartNew();
+        const int maxAttempts = 6;
         try
         {
-            _db.EnsureWorkspaceDatabase(workspaceId);
-            using var conn = _db.OpenWorkspace(workspaceId);
-            using var tx = conn.BeginTransaction();
-            using var mark = conn.CreateCommand();
-            mark.Transaction = tx;
-            mark.CommandText =
-                "UPDATE turns SET status=$st, updated_at=$now WHERE session_id=$sid AND turn_id=$tid;";
-            mark.Parameters.AddWithValue("$st", ended);
-            mark.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
-            mark.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
-            mark.Parameters.AddWithValue("$tid", turnId);
-            if (mark.ExecuteNonQuery() == 0)
+            for (int attempt = 1; ; attempt++)
             {
-                tx.Rollback();
-                return false;
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    _db.EnsureWorkspaceDatabase(workspaceId);
+                    using var conn = _db.OpenWorkspace(workspaceId);
+                    using var tx = conn.BeginTransaction();
+                    string now = DateTime.UtcNow.ToString("o");
+                    bool exists;
+                    using (var query = conn.CreateCommand())
+                    {
+                        query.Transaction = tx;
+                        query.CommandText =
+                            "SELECT 1 FROM turns WHERE session_id=$sid AND turn_id=$tid LIMIT 1;";
+                        query.Parameters.AddWithValue("$sid", sid);
+                        query.Parameters.AddWithValue("$tid", turnId);
+                        exists = query.ExecuteScalar() != null;
+                    }
+
+                    bool created = false;
+                    if (exists)
+                    {
+                        using var mark = conn.CreateCommand();
+                        mark.Transaction = tx;
+                        mark.CommandText =
+                            "UPDATE turns SET status=$st, updated_at=$now WHERE session_id=$sid AND turn_id=$tid;";
+                        mark.Parameters.AddWithValue("$st", ended);
+                        mark.Parameters.AddWithValue("$now", now);
+                        mark.Parameters.AddWithValue("$sid", sid);
+                        mark.Parameters.AddWithValue("$tid", turnId);
+                        mark.ExecuteNonQuery();
+                        if (
+                            !string.Equals(
+                                ended,
+                                TimelineTurnStatus.Completed,
+                                StringComparison.Ordinal
+                            )
+                        )
+                        {
+                            using var demote = conn.CreateCommand();
+                            demote.Transaction = tx;
+                            demote.CommandText =
+                                "UPDATE blocks SET tag='process' WHERE session_id=$sid AND turn_id=$tid AND tag='final';";
+                            demote.Parameters.AddWithValue("$sid", sid);
+                            demote.Parameters.AddWithValue("$tid", turnId);
+                            demote.ExecuteNonQuery();
+                            using var clear = conn.CreateCommand();
+                            clear.Transaction = tx;
+                            clear.CommandText =
+                                "UPDATE turns SET final_block_id=NULL WHERE session_id=$sid AND turn_id=$tid;";
+                            clear.Parameters.AddWithValue("$sid", sid);
+                            clear.Parameters.AddWithValue("$tid", turnId);
+                            clear.ExecuteNonQuery();
+                        }
+                    }
+                    else if (fallback != null)
+                    {
+                        fallback.Status = ended;
+                        fallback.UpdatedAtUtc = now;
+                        long turnSeq = ResolveTurnSeq(conn, tx, sid, fallback);
+                        UpsertTurn(conn, tx, sid, fallback, turnSeq);
+                        created = true;
+                    }
+                    else
+                    {
+                        tx.Rollback();
+                        return false;
+                    }
+
+                    tx.Commit();
+                    watch.Stop();
+                    string requestId = fallback?.LastRequestId ?? string.Empty;
+                    if (created)
+                    {
+                        HaloLogger.App.Info(
+                            "[Timeline] turn finalize created sess="
+                                + sid
+                                + " turn="
+                                + turnId
+                                + " request="
+                                + requestId
+                                + " status="
+                                + ended
+                                + " elapsedMs="
+                                + watch.ElapsedMilliseconds
+                        );
+                    }
+                    else
+                    {
+                        HaloLogger.App.Debug(
+                            "[Timeline] turn finalize updated sess="
+                                + sid
+                                + " turn="
+                                + turnId
+                                + " request="
+                                + requestId
+                                + " status="
+                                + ended
+                                + " elapsedMs="
+                                + watch.ElapsedMilliseconds
+                        );
+                    }
+                    return true;
+                }
+                catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+                {
+                    await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+                }
             }
-            if (!string.Equals(ended, TimelineTurnStatus.Completed, StringComparison.Ordinal))
-            {
-                using var demote = conn.CreateCommand();
-                demote.Transaction = tx;
-                demote.CommandText =
-                    "UPDATE blocks SET tag='process' WHERE session_id=$sid AND turn_id=$tid AND tag='final';";
-                demote.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
-                demote.Parameters.AddWithValue("$tid", turnId);
-                demote.ExecuteNonQuery();
-                using var clear = conn.CreateCommand();
-                clear.Transaction = tx;
-                clear.CommandText =
-                    "UPDATE turns SET final_block_id=NULL WHERE session_id=$sid AND turn_id=$tid;";
-                clear.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
-                clear.Parameters.AddWithValue("$tid", turnId);
-                clear.ExecuteNonQuery();
-            }
-            tx.Commit();
-            return true;
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Warn(
+                "[Timeline] turn finalize failed sess="
+                    + sid
+                    + " turn="
+                    + turnId
+                    + " status="
+                    + ended,
+                ex
+            );
+            throw;
         }
         finally
         {

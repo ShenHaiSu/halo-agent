@@ -8,6 +8,52 @@ namespace Host.Desktop.Services;
 /// </summary>
 public static class TimelineFinalizer
 {
+    public static (List<TimelineBlock> Blocks, TurnSummary Turn) FinalizeUserTurn(
+        TurnContext ctx,
+        string status
+    )
+    {
+        if (ctx == null)
+            throw new ArgumentNullException(nameof(ctx));
+        if (
+            !string.Equals(status, TimelineTurnStatus.Cancelled, StringComparison.Ordinal)
+            && !string.Equals(status, TimelineTurnStatus.Error, StringComparison.Ordinal)
+        )
+        {
+            throw new ArgumentOutOfRangeException(nameof(status), status, "仅允许取消或错误终态。");
+        }
+        if (ctx.UserMessage == null || string.IsNullOrWhiteSpace(ctx.UserMessage.Id))
+        {
+            throw new InvalidOperationException("已持久化的用户消息是补建轮次终态的必要条件。");
+        }
+
+        string turnId = "uturn-" + ctx.UserMessage.Id;
+        string userContent = ctx.UserMessage.Content ?? string.Empty;
+        string now = DateTime.UtcNow.ToString("o");
+        var turn = new TurnSummary
+        {
+            TurnId = turnId,
+            TurnSeq = 0,
+            IterEnd = 0,
+            UserPreview = TimelineBlockTracker.BuildPreview(userContent, 15),
+            UserContent = userContent,
+            FinalBlockId = null,
+            Blocks = 0,
+            Tools = 0,
+            Failed = 0,
+            DurationMs = 0,
+            Chars = 0,
+            Status = status,
+            LastRequestId = ctx.TurnRequestId ?? string.Empty,
+            Kind = "turn",
+            RemovedMessages = 0,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            AnchorKey = turnId,
+        };
+        return (new List<TimelineBlock>(), turn);
+    }
+
     public static (List<TimelineBlock> Blocks, TurnSummary Turn) Finalize(
         TurnContext ctx,
         int iteration,

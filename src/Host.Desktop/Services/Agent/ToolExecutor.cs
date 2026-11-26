@@ -45,10 +45,9 @@ public sealed partial class AgentOrchestrator
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：工具执行前被取消，本 iteration 已落袋，保住前面行。
+                // 工具执行前被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-before-tool")
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -117,10 +116,9 @@ public sealed partial class AgentOrchestrator
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：工具执行中被取消，本 iteration 已落袋，保住前面行。
+                // 工具执行中被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-during-tool")
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -177,10 +175,14 @@ public sealed partial class AgentOrchestrator
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：tool 落盘时被取消，本 iteration 已落袋，保住前面行。
+                // tool 落盘时被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-tool-persist"
+                    )
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -231,7 +233,25 @@ public sealed partial class AgentOrchestrator
                         .ConfigureAwait(false);
                 }
             }
-            catch { }
+            catch (OperationCanceledException)
+            {
+                UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-tool-block-persist"
+                    )
+                    .ConfigureAwait(false);
+                return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
+            }
+            catch (Exception ex)
+            {
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    "[Timeline] tool block persist failed sess=" + sessionId,
+                    ex
+                );
+            }
             // need23-R1：tool 消息落盘即告知前端（携带完整消息体，前端增量合并，
             // 不必等下一轮 AssistantMessagePersisted 的全量重拉；旧前端 default 分支忽略，零影响）。
             PublishTurnEvent(
@@ -442,9 +462,13 @@ public sealed partial class AgentOrchestrator
                     }
                     catch (OperationCanceledException)
                     {
-                        PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                         UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                        await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                        await FinalizeCancelledTurnAsync(
+                                ctx,
+                                sessionId,
+                                iteration,
+                                "cancelled-during-barrier"
+                            )
                             .ConfigureAwait(false);
                         return PhaseOutcome.End(
                             AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)

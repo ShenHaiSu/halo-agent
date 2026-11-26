@@ -232,9 +232,10 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-            // need12-P0：循环入口即取消，保住前面 iteration 已落袋行。
+            // 循环入口即取消，保住前面迭代已落袋行。
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-before-request")
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -262,7 +263,14 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+            UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    iteration,
+                    "cancelled-during-context-load"
+                )
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -311,6 +319,21 @@ public sealed partial class AgentOrchestrator
                 await _sessionService
                     .AppendSessionMessageAsync(workspaceId, sessionId, notice, tokens.Linked)
                     .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-notice-persist"
+                    )
+                    .ConfigureAwait(false);
+                return (
+                    PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
+                    null
+                );
             }
             catch
             { /* 通知落盘失败不中断本轮 */

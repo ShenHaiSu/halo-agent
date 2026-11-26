@@ -31,7 +31,16 @@ public sealed partial class AgentOrchestrator
         TurnPrepared End(AgentTurnResult t) => new() { Terminal = t };
         if (tokens.Linked.IsCancellationRequested)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-before-start" });
+            PublishTurnEvent(
+                sessionId,
+                "TurnCancelled",
+                new
+                {
+                    reason = "cancelled-before-start",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
+            );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
@@ -61,7 +70,16 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-during-load" });
+            PublishTurnEvent(
+                sessionId,
+                "TurnCancelled",
+                new
+                {
+                    reason = "cancelled-during-load",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
+            );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         if (ctx.Workspace == null)
@@ -107,7 +125,12 @@ public sealed partial class AgentOrchestrator
             PublishTurnEvent(
                 sessionId,
                 "TurnCancelled",
-                new { reason = "cancelled-during-append" }
+                new
+                {
+                    reason = "cancelled-during-append",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
             );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
@@ -254,11 +277,8 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(
-                sessionId,
-                "TurnCancelled",
-                new { reason = "cancelled-during-prompt" }
-            );
+            await FinalizeCancelledTurnAsync(ctx, sessionId, 0, "cancelled-during-prompt")
+                .ConfigureAwait(false);
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         catch (Exception ex)
