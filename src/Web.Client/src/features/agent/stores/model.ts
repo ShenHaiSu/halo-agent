@@ -6,7 +6,7 @@ import type { ChatImageRef } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
 
 /** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
-export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
+export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'cancelled' | 'superseded';
 export interface PendingUser {
   key: string;
   requestId: string;

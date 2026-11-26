@@ -9,7 +9,7 @@ export interface AgentRuntimeContext {
   modelId(): string;
   maxImages(): number;
   truncateHistory(workspaceId: string, sessionId: string, msgId: string, removeAnchor: boolean): Promise<HistoryReplayResult>;
-  loadSessionMessages(sessionId: string, opts?: { preserveBudget?: boolean }): Promise<void>;
+  loadSessionMessages(sessionId: string, opts?: { preserveBudget?: boolean; background?: boolean }): Promise<void>;
   applyUsagePatch(sessionId: string, usage: { inputTokens: number; cachedInputTokens?: number | null }): void;
   refreshBudget(): Promise<void>;
   touchSessionTime(sessionId: string, iso?: string): void;
@@ -17,6 +17,8 @@ export interface AgentRuntimeContext {
   reconcileTimes(): void;
   askPending(sessionId: string): boolean;
   clearAskPending(sessionId: string): void;
+  /** 摘要确认：同一 requestId 的 TurnSummary 是否已在当前视图就位；未接线默认 false，保证不误清。 */
+  hasTurnSummary(sessionId: string, requestId: string): boolean;
   /** need23-R1：把后端已落盘的单条消息增量合并进视图（不触发全量重拉）。返回是否真的插入。 */
   mergePersistedMessage(sessionId: string, msg: unknown): boolean;
 }
@@ -41,6 +43,7 @@ const noopRuntime: AgentRuntimeContext = {
   reconcileTimes: () => undefined,
   askPending: () => false,
   clearAskPending: () => undefined,
+  hasTurnSummary: () => false,
   mergePersistedMessage: () => false,
 };
 let runtimeCtx: AgentRuntimeContext = noopRuntime;

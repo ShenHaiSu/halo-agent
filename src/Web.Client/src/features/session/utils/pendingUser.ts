@@ -2,7 +2,7 @@
 // 语义来源：docs/need-02/03 §3.1 + 04-P1 §对账规则 + 05 R2–R4。
 import type { ChatImageRef } from '@shared/bridge/hostBridge';
 
-export type PendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
+export type PendingStatus = 'sending' | 'confirmed' | 'failed' | 'cancelled' | 'superseded';
 
 export interface PendingUser {
   /** 本地键：`pending-<requestId>`（D2=A）。回包确认后原位替换为真实 id，timeline key 不变。 */
@@ -51,6 +51,11 @@ export function makePendingUser(args: {
   };
 }
 
+/** 取消态判断：首回复前取消但 user 已持久化时保留气泡，不等同 failed。 */
+export function isPendingCancelled(pending: PendingUser | null | undefined): boolean {
+  return !!pending && pending.status === 'cancelled';
+}
+
 /** pending 是否属于该会话（切会话隔离：只 overlay 源 session，切走即藏）。 */
 export function isPendingForSession(pending: PendingUser | null | undefined, sessionId: string): boolean {
   if (!pending) return false;
@@ -67,12 +72,13 @@ export function isPendingExpired(pending: PendingUser | null | undefined, nowMs:
   return nowMs - t > timeoutMs;
 }
 
-/** 摘要源精确对账：pending.requestId 与 turn.lastRequestId 一致即命中（v2 下 jsonl 为空时的主对账路径）。 */
+/** 摘要源精确对账：pending.requestId 与 turn.lastRequestId 一致即命中（v2 下 jsonl 为空时的主对账路径）。
+ * 取消态保留后仍可转正：sending 与 cancelled 均参与匹配，其余态不参与。 */
 export function matchConfirmedBySummary(
   pending: PendingUser | null | undefined,
   summaries: Array<{ lastRequestId?: string | null }> | null | undefined
 ): { lastRequestId: string } | null {
-  if (!pending || pending.status !== 'sending') return null;
+  if (!pending || (pending.status !== 'sending' && pending.status !== 'cancelled')) return null;
   const reqId = String(pending.requestId || '').trim();
   if (!reqId) return null;
   const list = Array.isArray(summaries) ? summaries : [];

@@ -57,6 +57,19 @@ export function ensureAgentWiring(): void {
     },
     askPending: (sid) => ask.hasPending(sid),
     clearAskPending: (sid) => ask.clearPending(sid),
+    hasTurnSummary: (sid, requestId) => {
+      const rid = String(requestId || '').trim();
+      if (!rid) return false;
+      const target = String(sid || '').trim();
+      if (!target) return false;
+      try {
+        const activeSid = String(ws.activeSessionId || '').trim();
+        if (target !== activeSid) return false;
+        return ws.timelineSummaries.some((summary) => String(summary.lastRequestId || '').trim() === rid);
+      } catch {
+        return false;
+      }
+    },
     // need23-R1：把后端已落盘的单条 tool 消息增量合并进视图（避免全量重拉）
     mergePersistedMessage: (sid, msg) => ws.mergePersistedMessage(sid, msg as import('@shared/bridge/protocol/domain').UnifiedChatMessage),
   });

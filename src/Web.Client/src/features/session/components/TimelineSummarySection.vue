@@ -27,7 +27,7 @@ import TimelineProcessBox from './TimelineProcessBox.vue';
 import PendingBubble from './PendingBubble.vue';
 import type { PendingUser } from '../utils/pendingUser';
 import { setTurnExpanded } from '../utils/timelineExpansion';
-import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
+import { flatBlocks, isEmptyTerminalTurn, summaryAnchorKeys } from '../utils/timelineSummary';
 
 const props = defineProps<{
   summaries: TurnSummary[];
@@ -52,6 +52,22 @@ const flatTurns = computed(() => flatBlocks(props.summaries));
 const lastTurnKey = computed(() => flatTurns.value[flatTurns.value.length - 1]?.key ?? '');
 const pendingKey = computed(() => String(props.pending?.requestId || props.pending?.key || 'pending'));
 const registered = ref<string[]>([]);
+
+/** 同一 requestId 不应同时存在于摘要与 pending：命中只记 Warn，不在渲染层隐藏，避免掩盖 store 对账问题。 */
+watch(
+  [flatTurns, () => props.pending?.requestId],
+  ([turns, requestId]) => {
+    try {
+      const rid = String(requestId || '').trim();
+      if (!rid || !props.pending) return;
+      const hit = turns.some((turn) => String(turn.lastRequestId || '').trim() === rid);
+      if (hit) console.warn('[timeline-summary] pending duplicated with summary, expect store reconcile:', { requestId: rid });
+    } catch {
+      /* 诊断永不阻断渲染 */
+    }
+  },
+  { immediate: true }
+);
 
 function onExpandChange(turnId: string, expanded: boolean): void {
   try {
@@ -90,6 +106,7 @@ function collectAnchors(): void {
       keys.push(anchors.user);
     }
     if ((turn as { kind?: string }).kind === 'compact') continue; // P007：桩只注册 user 锚点
+    if (isEmptyTerminalTurn(turn)) continue; // 零块终态轮只注册 user 锚点，无过程/final 锚点
     const processEl = root.querySelector(`[data-testid="timeline-process-head-${safeId}"]`);
     if (processEl instanceof HTMLElement) {
       nav.register(anchors.process, processEl);

@@ -67,8 +67,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!id) return;
       const t = turns.value[id];
       const p = t?.pendingUser;
-      if (!p || p.status !== 'sending') return;
-      if (isPendingExpired(p)) {
+      if (!p || (p.status !== 'sending' && p.status !== 'cancelled')) return;
+      if (p.status === 'sending' && isPendingExpired(p)) {
         try {
           need02Debug('pending-expired-drop', { requestId: p.requestId });
         } catch {
@@ -77,7 +77,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         dropPendingUser(id);
         return;
       }
-      // 摘要源 requestId/lastRequestId 精确对账。
+      // 摘要源 requestId/lastRequestId 精确对账；cancelled 态命中同样转正。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
       if (summaryHit) {
         confirmPendingHit(id, p, String(p.requestId || ''));

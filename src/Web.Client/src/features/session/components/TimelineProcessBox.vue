@@ -9,6 +9,7 @@
       </div>
     </div>
     <div
+      v-if="!emptyTerminal"
       class="rounded-r-md bg-[var(--reasoning-bg)] border-l-2 overflow-hidden mt-1 turn-process-slot"
       :class="turn.failed > 0 ? 'border-rose-500' : 'border-indigo-500/70'"
       data-testid="timeline-process-box"
@@ -69,12 +70,19 @@
       </div>
     </div>
     <div
-      v-if="!expanded"
+      v-if="!expanded && !emptyTerminal"
       class="timeline-process-placeholder turn-earlier-slot"
       :data-testid="`timeline-process-placeholder-${turn.turnId}`"
       aria-hidden="true"
     />
-    <template v-if="!hideFinal">
+    <div
+      v-if="emptyTerminal && !hideFinal"
+      class="mt-1 text-[11px] text-secondary turn-final-slot"
+      :data-testid="`timeline-terminal-empty-${turn.turnId}`"
+    >
+      {{ emptyTerminalText }}
+    </div>
+    <template v-if="!hideFinal && !emptyTerminal">
       <div
         v-if="hasFinalBlock"
         class="mt-1 app-text-body leading-relaxed text-primary break-words select-text markdown-body min-w-0 turn-final-slot"
@@ -119,7 +127,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { FlatTimelineTurn } from '@features/session/utils/timelineSummary';
-import { processBoxLabel, statusBadge } from '@features/session/utils/timelineSummary';
+import { isEmptyTerminalTurn, processBoxLabel, statusBadge } from '@features/session/utils/timelineSummary';
 import type { TimelineBlockContent } from '@shared/bridge/hostBridge';
 import type { AgentToolCard } from '@features/agent/stores/model';
 import MarkdownStreamBlocks from '@features/agent/components/MarkdownStreamBlocks.vue';
@@ -158,6 +166,9 @@ const ws = useWorkspaceStore();
 
 const badge = computed(() => statusBadge(props.turn.status));
 const label = computed(() => processBoxLabel(props.turn));
+/** 零块终态轮：隐藏过程盒与正文空态，只保留一行紧凑终态行。 */
+const emptyTerminal = computed(() => isEmptyTerminalTurn(props.turn));
+const emptyTerminalText = computed(() => (String(props.turn.status || '').toLowerCase() === 'error' ? '本轮失败，未生成回复' : '已停止，未生成回复'));
 const emptyText = computed(() => {
   if (props.turn.tools > 0) return `共 ${props.turn.blocks} 个过程块，${props.turn.tools} 个工具调用。`;
   return '暂无过程内容。';

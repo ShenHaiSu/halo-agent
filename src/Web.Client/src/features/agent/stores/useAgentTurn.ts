@@ -35,6 +35,7 @@ import { agentRuntime } from './runtime';
 import { dropSegBuf } from './useAgentStream';
 import {
   applyStreamError,
+  cancelPendingReconcile,
   finishTurn,
   handleTurnLifecycle,
   isBusyForHistory,
@@ -204,6 +205,8 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     const attachmentsJson = keptMedia.length > 0 ? JSON.stringify(keptMedia) : '';
     const requestId = newRequestId();
     // resetTurnState 内联（旧语义；分片缓冲归 stream 侧）
+    // 新发送 supersede 旧 cancelled/sending pending：旧对账重试不得再触新轮。
+    cancelPendingReconcile(sessionId);
     dropSegBuf(sessionId);
     // 重建轮状态时保留截断恢复项：发送失败后仍需可从原会话继续重放。
     const preservedPendingReplay = getTurn(sessionId)?.pendingReplay ?? null;
@@ -336,6 +339,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
   function clearPending(sessionId?: string): void {
     const sid = (sessionId ?? activeSessionId.value).trim();
     if (!sid) return;
+    cancelPendingReconcile(sid);
     const t = getTurn(sid);
     if (t && t.pendingUser) {
       t.pendingUser = null;
