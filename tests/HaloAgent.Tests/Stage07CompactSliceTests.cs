@@ -287,7 +287,7 @@ public sealed class Stage07CompactSliceTests : IDisposable
         Assert.NotEqual(stub1, stub2);
         Assert.Equal(stub2, active[1].Id);
 
-        // keepLastGroups 上限：长桩后历史仅尾部组进摘要输入
+        // stub 摘要输入覆盖全部新历史，keepLastGroups 不再裁剪摘要。
         var (wsId2, sessId2) = await NewSessionAsync();
         await BuildHistoryAsync(wsId2, sessId2, 4);
         var compactGateway2 = new ScriptedCompactGateway("首份摘要", "第二份摘要");
@@ -303,7 +303,7 @@ public sealed class Stage07CompactSliceTests : IDisposable
         Assert.Equal(2, compactGateway2.Requests.Count);
         string cappedBody = compactGateway2.Requests[1].Messages[0].Content ?? string.Empty;
         Assert.Contains("pair11", cappedBody);
-        Assert.DoesNotContain("pair00", cappedBody);
+        Assert.Contains("pair00", cappedBody);
     }
 
     private sealed class ScriptedCompactGateway : ILlmGatewayClient

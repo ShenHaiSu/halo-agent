@@ -173,7 +173,7 @@ public sealed class CompactStubStorageTests : IDisposable
             HaloJsonOptions.CompactCamelCase
         );
         Assert.NotNull(meta);
-        Assert.Equal(1, meta!.V);
+        Assert.Equal(2, meta!.V);
         Assert.Equal(result.RemovedMessages, meta.RemovedCount);
         Assert.Equal(result.SummaryOutputTokens, meta.SummaryTokens);
 
