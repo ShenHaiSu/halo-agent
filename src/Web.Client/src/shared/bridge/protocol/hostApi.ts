@@ -22,6 +22,7 @@ import type {
   AppearanceSettingsDto,
   CompactionResultDto,
   ContextBudgetStatusDto,
+  SessionDeletionResultDto,
   FirstRoundTexts,
   HistoryCapabilities,
   HistoryDeleteResultDto,
@@ -137,6 +138,8 @@ export interface HostBridgeApi {
   getFirstRoundTexts: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<FirstRoundTexts>>;
   setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
+  /** 严格会话树删除；Partial 保留在 data 中，不归一为成功布尔值。 */
+  deleteSessionV2: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<SessionDeletionResultDto>>;
   exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
   getContextBudget: (
     providerId: string,

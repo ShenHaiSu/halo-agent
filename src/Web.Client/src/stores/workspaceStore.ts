@@ -17,6 +17,7 @@ import type {
   HistoryBranchResult,
 } from '@shared/bridge/hostBridge';
 import { historyErrorMessage } from '@shared/bridge/protocol/errors';
+import type { DeleteSessionCommandResult, SessionDeletionOutcome } from '@shared/bridge/protocol/domain';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
@@ -487,31 +488,61 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false;
   }
 
-  async function deleteSession(sessionId: string): Promise<boolean> {
-    if (!activeWorkspaceId.value) return false;
+  async function deleteSession(sessionId: string): Promise<DeleteSessionCommandResult> {
+    const failure = (outcome: SessionDeletionOutcome, errorCode?: string, message?: string): DeleteSessionCommandResult => ({
+      outcome,
+      destructiveCommitCompleted: false,
+      deletedSessionIds: [],
+      residualSessionIds: [],
+      errorCode,
+      message,
+      warnings: [],
+    });
+    if (!activeWorkspaceId.value) return failure('failed', 'WORKSPACE_NOT_FOUND', '工作区不存在');
     try {
       const bridge = getHostBridge();
-      const res = await bridge.deleteSession(activeWorkspaceId.value, sessionId);
-      if (res.ok && res.data) {
-        sessions.value = sessions.value.filter((s) => s.id !== sessionId);
-        if (activeSessionId.value === sessionId) {
-          if (sessions.value.length > 0) {
-            await selectSession(sessions.value[0].id);
-          } else {
-            activeSessionId.value = '';
-            sessionMessages.value = [];
-            timelineSummaries.value = [];
-            budgetStatus.value = null;
-            budgetError.value = null;
-            persistLastActive();
-          }
-        }
-        return true;
+      const res = await bridge.deleteSessionV2(activeWorkspaceId.value, sessionId);
+      if (!res.ok || !res.data) {
+        return failure('failed', res.code, res.message || '会话删除失败，请查看日志后重试');
       }
+      const data = res.data;
+      const result: DeleteSessionCommandResult = {
+        outcome: data.outcome,
+        destructiveCommitCompleted: data.destructiveCommitCompleted,
+        deletedSessionIds: [...(data.deletedSessionIds || [])],
+        residualSessionIds: [...(data.residualSessionIds || [])],
+        backupFileName: data.backupFileName ?? null,
+        errorCode: data.errorCode ?? null,
+        message: res.message,
+        warnings: [...(data.warnings || [])],
+      };
+      if (!data.destructiveCommitCompleted) return result;
+
+      const deletedIds = new Set(data.deletedSessionIds?.length ? data.deletedSessionIds : [sessionId]);
+      const residualIds = new Set(data.residualSessionIds || []);
+      for (const id of deletedIds) {
+        if (!residualIds.has(id)) dropPendingUser(id);
+      }
+      sessions.value = sessions.value.filter((item) => !deletedIds.has(item.id) || residualIds.has(item.id));
+      if (deletedIds.has(activeSessionId.value) && !residualIds.has(activeSessionId.value)) {
+        if (sessions.value.length > 0) {
+          await selectSession(sessions.value[0].id);
+        } else {
+          useSessionStore().beginSelect('');
+          activeSessionId.value = '';
+          sessionMessages.value = [];
+          timelineSummaries.value = [];
+          budgetStatus.value = null;
+          budgetError.value = null;
+          clearTimelineCaches();
+          persistLastActive();
+        }
+      }
+      return result;
     } catch (err) {
       console.error('[workspaceStore] deleteSession failed:', err);
+      return failure('failed', 'SESSION_DELETE_ERROR', '会话删除失败，请查看日志后重试');
     }
-    return false;
   }
 
   async function loadSessionMessages(

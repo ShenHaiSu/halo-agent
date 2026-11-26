@@ -171,6 +171,7 @@
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
               :deleting="deletingId === sess.id"
+              :can-delete-session="canDeleteSession"
               :menu-open="menuId === sess.id"
               :now-tick="nowTick"
               @select="emit('select-session', $event)"
@@ -201,6 +202,7 @@
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
               :deleting="deletingId === sess.id"
+              :can-delete-session="canDeleteSession"
               :menu-open="menuId === sess.id"
               :now-tick="nowTick"
               @select="emit('select-session', $event)"
@@ -272,6 +274,7 @@ defineProps<{
   draft: string;
   armedId: string | null;
   deletingId: string | null;
+  canDeleteSession: boolean;
   menuId: string | null;
   nowTick: number;
   runningIds: string[];

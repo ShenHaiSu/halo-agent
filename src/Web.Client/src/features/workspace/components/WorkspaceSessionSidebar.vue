@@ -13,6 +13,7 @@
     :draft="s.editingTitleDraft"
     :armed-id="s.pendingDeleteSessionId"
     :deleting-id="s.deletingSessionId"
+    :can-delete-session="s.canDeleteSession"
     :menu-id="s.openMenuSessionId"
     :now-tick="s.nowTick"
     :running-ids="s.runningIds"

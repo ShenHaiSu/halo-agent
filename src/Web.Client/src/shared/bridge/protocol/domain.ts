@@ -450,6 +450,33 @@ export interface HistoryTruncateResultDto {
   destructiveCommitCompleted: boolean;
   recoveryToken?: string | null;
 }
+export type SessionDeletionOutcome = 'deleted' | 'partial' | 'failed' | 'notFound';
+export type SessionDeletionStage = 'notRequested' | 'completed' | 'failed';
+
+export interface SessionDeletionResultDto {
+  outcome: SessionDeletionOutcome;
+  errorCode?: string | null;
+  destructiveCommitCompleted: boolean;
+  backupFileName?: string | null;
+  deletedSessionIds: string[];
+  residualSessionIds: string[];
+  database: SessionDeletionStage;
+  directories: SessionDeletionStage;
+  index: SessionDeletionStage;
+  warnings: string[];
+}
+
+export interface DeleteSessionCommandResult {
+  outcome: SessionDeletionOutcome;
+  destructiveCommitCompleted: boolean;
+  deletedSessionIds: string[];
+  residualSessionIds: string[];
+  backupFileName?: string | null;
+  errorCode?: string | null;
+  message?: string;
+  warnings: string[];
+}
+
 export type SkillMemoryKind = 'skill' | 'memory';
 export type SkillMemoryScope = 'global' | 'project';
 export interface HistoryHealResultDto {

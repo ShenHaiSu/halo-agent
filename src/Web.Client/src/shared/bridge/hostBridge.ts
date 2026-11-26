@@ -219,6 +219,11 @@ export function getBridgeTransport(): BridgeTransport {
   return activeTransport;
 }
 
+/** 破坏性入口能力探测；旧宿主缺方法时返回 false，由 UI 明确禁用。 */
+export function supportsHostBridgeMethod(method: string): boolean {
+  return getBridgeTransport().supports(method);
+}
+
 /** 兼容旧 import（新代码请用 createHostBridgeApi + Transport）。 */
 export function wrapNativeHostBridge(rawBridge: unknown): HostBridgeApi {
   return createHostBridgeApi(new CefTransport(rawBridge));
@@ -235,6 +240,7 @@ export type {
   CompactionResultDto,
   ContextBudgetStatusDto,
   CustomHeaderEntry,
+  DeleteSessionCommandResult,
   GlobalNetworkSettings,
   GlobalProxyMode,
   GoalMilestoneDto,
@@ -264,6 +270,9 @@ export type {
   ProviderProxyMode,
   ProvidersConfigDocument,
   ProxyConnectivityTestResult,
+  SessionDeletionOutcome,
+  SessionDeletionResultDto,
+  SessionDeletionStage,
   SessionGoalDto,
   SessionMetadata,
   SessionStreamEventDto,

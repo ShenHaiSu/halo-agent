@@ -1,7 +1,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDialog, useMessage } from 'naive-ui';
-import { getHostBridge, type SessionMetadata } from '@shared/bridge/hostBridge';
+import { getHostBridge, supportsHostBridgeMethod, type SessionMetadata } from '@shared/bridge/hostBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useAgentTurn } from '@features/agent/stores/useAgentTurn';
 import { useAskUserStore } from '@/stores/askUserStore';
@@ -38,6 +38,7 @@ export function useSessionList() {
   const editingTitleDraft = ref('');
   const pendingDeleteSessionId = ref<string | null>(null);
   const deletingSessionId = ref<string | null>(null);
+  const canDeleteSession = ref(supportsHostBridgeMethod('deleteSessionV2'));
   let pendingDeleteTimer: number | null = null;
   const openMenuSessionId = ref<string | null>(null);
   const nowTick = ref(Date.now());
@@ -63,6 +64,14 @@ export function useSessionList() {
   }
   function armDeleteConfirm(sessId: string): void {
     if (editingSessionId.value || deletingSessionId.value !== null) return;
+    if (!canDeleteSession.value) {
+      message.warning('当前宿主不支持安全会话删除，请升级后重试');
+      return;
+    }
+    if (isSessionRunning(sessId)) {
+      message.warning('会话正在运行，请先取消后再删除');
+      return;
+    }
     pendingDeleteSessionId.value = sessId;
     if (pendingDeleteTimer !== null) clearTimeout(pendingDeleteTimer);
     pendingDeleteTimer = window.setTimeout(() => {
@@ -93,11 +102,28 @@ export function useSessionList() {
   }
   async function confirmDeleteInline(sessId: string): Promise<void> {
     if (deletingSessionId.value !== null) return;
+    if (!canDeleteSession.value) {
+      message.warning('当前宿主不支持安全会话删除，请升级后重试');
+      return;
+    }
+    if (isSessionRunning(sessId)) {
+      message.warning('会话正在运行，请先取消后再删除');
+      return;
+    }
     deletingSessionId.value = sessId;
     try {
       cancelDeleteConfirm();
       openMenuSessionId.value = null;
-      if (await workspaceStore.deleteSession(sessId)) message.success('会话已删除');
+      const result = await workspaceStore.deleteSession(sessId);
+      if (result.outcome === 'deleted') {
+        message.success(result.backupFileName ? `会话已删除（备份：${result.backupFileName}）` : '会话已删除');
+      } else if (result.outcome === 'partial') {
+        message.warning(`会话数据已删除，但 ${result.residualSessionIds.length} 个目录或索引项残留，请查看日志/重试`);
+      } else if (result.outcome === 'notFound') {
+        message.info('会话不存在，可能已被删除');
+      } else {
+        message.error(result.message || '会话删除失败，请查看日志后重试');
+      }
     } finally {
       deletingSessionId.value = null;
     }
@@ -305,6 +331,7 @@ export function useSessionList() {
     editingTitleDraft,
     pendingDeleteSessionId,
     deletingSessionId,
+    canDeleteSession,
     openMenuSessionId,
     nowTick,
     isSessionRunning,

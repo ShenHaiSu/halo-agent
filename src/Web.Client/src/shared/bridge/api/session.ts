@@ -10,6 +10,7 @@ import type {
   HistoryCapabilities,
   HistoryTruncateResultDto,
   HostBridgeApi,
+  SessionDeletionResultDto,
   SessionGoalDto,
   SessionMetadata,
   SubRuntimeInfo,
@@ -41,6 +42,7 @@ export function createSessionApi(
   | 'getFirstRoundTexts'
   | 'setSessionPinned'
   | 'deleteSession'
+  | 'deleteSessionV2'
   | 'exportSessionMarkdown'
   | 'getContextBudget'
   | 'compactSession'
@@ -114,6 +116,18 @@ export function createSessionApi(
     },
     async deleteSession(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('deleteSession', workspaceId, sessionId));
+    },
+    async deleteSessionV2(workspaceId: string, sessionId: string) {
+      if (!t.supports('deleteSessionV2')) {
+        return {
+          ok: false,
+          code: 'SESSION_DELETE_UNSUPPORTED',
+          message: '当前宿主不支持安全会话删除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<SessionDeletionResultDto>>(
+        await t.call('deleteSessionV2', workspaceId ?? '', sessionId ?? '')
+      );
     },
     async exportSessionMarkdown(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<string>>(await t.call('exportSessionMarkdown', workspaceId, sessionId));

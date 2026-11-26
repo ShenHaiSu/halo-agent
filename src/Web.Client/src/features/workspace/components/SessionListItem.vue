@@ -74,8 +74,18 @@
         :data-armed="armed ? 'true' : 'false'"
         :type="armed ? 'error' : 'default'"
         :loading="deleting"
-        :disabled="generating"
-        :title="generating ? '标题生成中，请稍候' : armed ? '再次点击确认（3s内有效）' : '删除会话'"
+        :disabled="generating || running || !canDeleteSession"
+        :title="
+          !canDeleteSession
+            ? '当前宿主不支持安全会话删除，请升级'
+            : running
+              ? '会话运行中，请先取消'
+              : generating
+                ? '标题生成中，请稍候'
+                : armed
+                  ? '再次点击确认（3s内有效）'
+                  : '删除会话'
+        "
         :class="armed ? '!bg-red-500/20 font-semibold' : ''"
         @click="emit('delete', sess.id)"
       >
@@ -115,6 +125,7 @@ const props = defineProps<{
   draft: string;
   askPending: boolean;
   deleting: boolean;
+  canDeleteSession: boolean;
   menuOpen: boolean;
   nowTick: number;
   generating: boolean;

@@ -229,6 +229,51 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       delete s.mockMessages[sessionId];
       return { ok: true, data: true };
     },
+    async deleteSessionV2(workspaceId: string, sessionId: string) {
+      const list = s.mockSessions[workspaceId] || [];
+      if (!list.some((item) => item.id === sessionId)) {
+        return {
+          ok: true,
+          data: {
+            outcome: 'notFound' as const,
+            destructiveCommitCompleted: false,
+            deletedSessionIds: [],
+            residualSessionIds: [],
+            database: 'notRequested' as const,
+            directories: 'notRequested' as const,
+            index: 'notRequested' as const,
+            warnings: [],
+          },
+        };
+      }
+      const ids = new Set<string>([sessionId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const item of list) {
+          if (item.parentSessionId && ids.has(item.parentSessionId) && !ids.has(item.id)) {
+            ids.add(item.id);
+            changed = true;
+          }
+        }
+      }
+      s.mockSessions[workspaceId] = list.filter((item) => !ids.has(item.id));
+      for (const id of ids) delete s.mockMessages[id];
+      return {
+        ok: true,
+        data: {
+          outcome: 'deleted' as const,
+          destructiveCommitCompleted: true,
+          backupFileName: 'history.db.bak',
+          deletedSessionIds: [...ids],
+          residualSessionIds: [],
+          database: 'completed' as const,
+          directories: 'completed' as const,
+          index: 'completed' as const,
+          warnings: [],
+        },
+      };
+    },
     async exportSessionMarkdown(_workspaceId: string, sessionId: string) {
       const msgs = s.mockMessages[sessionId] || [];
       let md = `# 会话记录 (${sessionId})\n\n`;
