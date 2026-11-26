@@ -58,7 +58,7 @@ import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
-import { flatBlocks, processBoxLabel, summaryAnchorKeys } from '@features/session/utils/timelineSummary';
+import { buildSummaryToc } from '@features/session/utils/summaryToc';
 import type { TocItem } from '@features/session/utils/historyToc';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import HistoryBubble from './HistoryBubble.vue';
@@ -97,59 +97,7 @@ const summaryToc = computed<TocItem[]>(() => {
   if (isSub.value) return [];
   const summaries = ws.timelineSummaries as TurnSummary[];
   if (!Array.isArray(summaries) || summaries.length === 0) return [];
-  const role = ui.tocRole;
-  const out: TocItem[] = [];
-  flatBlocks(summaries).forEach((turn, order) => {
-    const anchors = summaryAnchorKeys(turn.turnId, turn.finalBlockId);
-    const round = order + 1;
-    if (role === 'all' || role === 'user') {
-      out.push({
-        anchorKey: anchors.user,
-        role: 'user',
-        label: turn.userPreview || '提问',
-        fullText: turn.userContent || turn.userPreview,
-        charCount: Array.from(turn.userContent || turn.userPreview || '').length,
-        index: round,
-        round,
-        toolCount: 0,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: false,
-        isRoundTail: false,
-      });
-    }
-    if (role === 'all' || role === 'assistant') {
-      out.push({
-        anchorKey: anchors.process,
-        role: 'assistant',
-        label: `过程 · ${processBoxLabel(turn)}`,
-        fullText: `过程内容 · ${processBoxLabel(turn)}`,
-        charCount: turn.chars,
-        index: round,
-        round,
-        toolCount: turn.tools,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: true,
-        isRoundTail: false,
-      });
-      out.push({
-        anchorKey: anchors.final,
-        role: 'assistant',
-        label: turn.finalPreview ? Array.from(turn.finalPreview).slice(0, 15).join('') : `本轮无正文 · ${turn.tools} 工具`,
-        fullText: turn.finalPreview,
-        charCount: Array.from(turn.finalPreview || '').length,
-        index: round,
-        round,
-        toolCount: 0,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: false,
-        isRoundTail: true,
-      });
-    }
-  });
-  return out;
+  return buildSummaryToc(summaries, ui.tocRole);
 });
 /** 主链纯 V2：目录只用摘要源；子会话保留旧链（豁免）。 */
 const displayTocItems = computed<TocItem[]>(() => (isSub.value ? tocItems.value : summaryToc.value));
@@ -354,6 +302,9 @@ watch(activeSessionId, () => {
   justify-content: flex-start;
 }
 .toc-row--system {
+  justify-content: center;
+}
+.toc-row--compact {
   justify-content: center;
 }
 .toc-skeleton {

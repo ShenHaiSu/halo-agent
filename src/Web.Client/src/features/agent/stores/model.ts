@@ -117,6 +117,8 @@ export interface AgentTurnState {
   streamingReasoning: string;
   streamingActive: boolean;
   isGenerating: boolean;
+  /** 显式压缩忙态；不得由提示文案嗅探。 */
+  compacting: boolean;
   toolCards: AgentToolCard[];
   /** 已落盘轮次剪掉的工具卡终态快照：供流态装配继续渲染本轮历史；只追加、轮末随容器清空、有界。 */
   graduatedCards: AgentToolCard[];
@@ -197,6 +199,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     streamingReasoning: '',
     streamingActive: false,
     isGenerating: false,
+    compacting: false,
     toolCards: [],
     graduatedCards: [],
     telemetry: emptyTelemetry(protocol),

@@ -212,7 +212,12 @@ async function runPendingReconcile(sid: string, requestId: string, finishMark: n
     if (after.status !== 'cancelled' && after.status !== 'sending') return;
     if (hasSummaryConfirmed(sid, requestId)) {
       const latest = getTurn(sid);
-      if (latest && latest.pendingUser && String(latest.pendingUser.requestId || '') === requestId && (turnStartMarks[sid] || 0) === finishMark) {
+      if (
+        latest &&
+        latest.pendingUser &&
+        String(latest.pendingUser.requestId || '') === requestId &&
+        (turnStartMarks[sid] || 0) === finishMark
+      ) {
         cancelPendingReconcile(sid);
         latest.pendingUser = null;
         touch(latest);
@@ -463,31 +468,47 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       break;
     }
     case 'CompactStarted': {
-      // need05-03：压缩开始，不可中断；按钮置灰由 turnNotice 含“压缩中”驱动
+      t.compacting = true;
       t.isGenerating = true;
+      t.streamingActive = false;
       t.turnNotice = '压缩中…不可中断';
       touch(t);
       break;
     }
     case 'CompactCompleted': {
+      t.compacting = false;
       t.isGenerating = false;
       t.streamingActive = false;
-      // P007：压缩完成文案带摘要 tokens（≈N tokens）；无 tokens 时回退无后缀文案
       t.turnNotice =
         num(payload['summaryTokens']) > 0
           ? `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要（摘要 ≈${num(payload['summaryTokens'])} tokens）`
           : `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
+      const metadataWarning = str(payload['metadataWarning']);
+      if (metadataWarning) {
+        toast('warning', `压缩已提交，但元数据刷新告警：${metadataWarning}`);
+      }
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void refreshAfterTool(sid, 'finish'); // 重拉消息与预算
+      void refreshAfterTool(sid, 'finish');
+      break;
+    }
+    case 'CompactNoOp': {
+      t.compacting = false;
+      t.isGenerating = false;
+      t.streamingActive = false;
+      t.turnNotice = `无需压缩：${noOpReasonText(str(payload['noOpReason']))}`;
+      touch(t);
+      touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+      void refreshAfterTool(sid);
       break;
     }
     case 'CompactFailed': {
+      t.compacting = false;
       t.isGenerating = false;
       t.streamingActive = false;
       t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '压缩失败';
-      // need22-P2 F5：结构化错误（可重试=false，压缩失败走按钮重发）
       t.lastErrorInfo = { code: str(payload['errorCode']) || 'COMPACT_FAILED', message: t.lastError, retry: false };
+      t.turnNotice = `压缩失败：${t.lastError}`;
       toast('error', t.lastError);
       touch(t);
       break;
@@ -569,14 +590,27 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
   }
 }
 
+function noOpReasonText(reason: string): string {
+  switch (reason) {
+    case 'EMPTY':
+      return '会话为空';
+    case 'TOO_SHORT':
+      return '历史还太短';
+    case 'NO_NEW_CONTENT':
+      return '桩后没有新内容';
+    default:
+      return '当前无需压缩';
+  }
+}
+
 export function isCompacting(sessionId: string): boolean {
   const t = getTurn(sessionId);
-  return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
+  return t?.compacting === true;
 }
 
 export function isBusyForHistory(sessionId: string): boolean {
   const t = getTurn(sessionId);
-  if (!!t && (t.isGenerating || t.streamingActive || t.turnNotice.includes('压缩中'))) return true;
+  if (!!t && (t.isGenerating || t.streamingActive || t.compacting)) return true;
   // need09-06：问询 pending 视为忙（重放/分支/压缩/新发送一律拒绝，请先回答问题）
   try {
     return agentRuntime().askPending(sessionId);

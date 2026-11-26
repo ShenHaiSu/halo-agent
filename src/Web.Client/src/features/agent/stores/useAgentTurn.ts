@@ -235,6 +235,7 @@ export const useAgentTurn = defineStore('agent-turn', () => {
     t.requestId = requestId;
     markSeenRequest(requestId);
     t.isGenerating = true;
+    t.compacting = false;
     t.streamingActive = true;
     t.lastErrorInfo = null;
     t.lastPrompt = content;

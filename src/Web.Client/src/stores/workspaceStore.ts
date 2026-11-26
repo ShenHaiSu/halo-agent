@@ -1005,10 +1005,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const mId = configStore.activeModel?.id || '';
       const res = await bridge.compactSession(activeWorkspaceId.value, sessionId, pId, mId, keepLastGroups);
       if (res.ok) {
-        if (sessionId === activeSessionId.value) {
-          await loadSessionMessages(sessionId);
-          await refreshBudget();
-        }
+        // 启动响应只表示命令已受理；timeline/budget 由 CompactCompleted 或 CompactNoOp 事件刷新。
         return true;
       }
       return false;

@@ -253,20 +253,41 @@ export interface ContextBudgetStatusDto {
   prefixDivergenceBlock?: string | null;
 }
 
+export type CompactionOutcome = 'completed' | 'noop' | 'failed';
+
 export interface CompactionResultDto {
   success: boolean;
+  outcome?: CompactionOutcome;
   errorCode?: string | null;
   errorMessage?: string | null;
+  noOpReason?: string | null;
   removedMessages: number;
   keptMessages: number;
   summaryPreview: string;
   backupFileName?: string | null;
-}
-/** P007：压缩完成事件增量载荷（见 10-§2，键只增不改）。 */
-export interface CompactCompletedPayload {
   stubMessageId?: string | null;
+  stubTurnId?: string | null;
+  summaryOutputTokens?: number;
+  compactLlmCallCount?: number | null;
+  metadataWarning?: string | null;
+}
+/** 压缩完成事件增量载荷，字段只增不改。 */
+export interface CompactCompletedPayload {
+  removedMessages?: number;
+  keptMessages?: number;
+  summaryPreview?: string | null;
+  backupFileName?: string | null;
+  stubMessageId?: string | null;
+  stubTurnId?: string | null;
   summaryTokens?: number;
+  compactLlmCallCount?: number | null;
   occupancyBaseline?: string;
+  metadataWarning?: string | null;
+  updatedAtUtc?: string | null;
+}
+export interface CompactNoOpPayload {
+  noOpReason?: string | null;
+  updatedAtUtc?: string | null;
 }
 export interface PromptConfigDocument {
   version: number;

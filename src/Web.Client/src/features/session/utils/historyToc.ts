@@ -1,7 +1,7 @@
 /** 摘要源目录项：每轮三锚点（提问/过程/末轮），跳转口径与摘要区一致。 */
 export interface TocItem {
   anchorKey: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'compact';
   label: string;
   fullText: string;
   charCount: number;

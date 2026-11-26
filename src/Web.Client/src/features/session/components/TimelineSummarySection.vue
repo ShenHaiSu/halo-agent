@@ -1,15 +1,17 @@
 <template>
   <section v-if="flatTurns.length > 0 || pending" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
-    <TimelineProcessBox
-      v-for="turn in flatTurns"
-      :key="turn.key"
-      :turn="turn"
-      :hide-final="handoffActive && turn.key === lastTurnKey"
-      :initial-markdown="handoffActive && turn.key === lastTurnKey ? handoffFinalText : ''"
-      @expand-change="onExpandChange"
-      @user-menu="(ev, id) => emit('user-menu', ev, id)"
-      @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
-    />
+    <template v-for="turn in flatTurns" :key="turn.key">
+      <CompactTurn v-if="isCompactTurn(turn)" :turn="turn" />
+      <TimelineProcessBox
+        v-else
+        :turn="turn"
+        :hide-final="handoffActive && turn.key === lastTurnKey"
+        :initial-markdown="handoffActive && turn.key === lastTurnKey ? handoffFinalText : ''"
+        @expand-change="onExpandChange"
+        @user-menu="(ev, id) => emit('user-menu', ev, id)"
+        @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
+      />
+    </template>
     <PendingBubble
       v-if="pending"
       :pending="pending"
@@ -23,9 +25,11 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
+import CompactTurn from './CompactTurn.vue';
 import TimelineProcessBox from './TimelineProcessBox.vue';
 import PendingBubble from './PendingBubble.vue';
 import type { PendingUser } from '../utils/pendingUser';
+import { isCompactTurn } from '../utils/compactTurn';
 import { setTurnExpanded } from '../utils/timelineExpansion';
 import { flatBlocks, isEmptyTerminalTurn, summaryAnchorKeys } from '../utils/timelineSummary';
 
@@ -105,7 +109,7 @@ function collectAnchors(): void {
       nav.register(anchors.user, turnEl);
       keys.push(anchors.user);
     }
-    if ((turn as { kind?: string }).kind === 'compact') continue; // P007：桩只注册 user 锚点
+    if (isCompactTurn(turn)) continue;
     if (isEmptyTerminalTurn(turn)) continue; // 零块终态轮只注册 user 锚点，无过程/final 锚点
     const processEl = root.querySelector(`[data-testid="timeline-process-head-${safeId}"]`);
     if (processEl instanceof HTMLElement) {
