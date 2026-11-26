@@ -22,7 +22,7 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
@@ -41,7 +41,7 @@ public sealed partial class AgentOrchestrator
         {
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                tokens.Linked.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
             {
@@ -75,7 +75,7 @@ public sealed partial class AgentOrchestrator
                     WorkspaceId = workspaceId,
                     SessionId = sessionId,
                     DataRoot = ctx.DataRoot,
-                    CancellationToken = cancellationToken,
+                    CancellationToken = tokens.Linked,
                     ExecDefaultTimeoutMsOverride = ctx.CfgExecDefaultMs,
                     ExecMaxTimeoutMsOverride = ctx.CfgExecMaxMs,
                     AgentRole = AgentRole,
@@ -108,7 +108,7 @@ public sealed partial class AgentOrchestrator
                         dto,
                         toolContext,
                         ctx.TurnActiveSet,
-                        cancellationToken,
+                        tokens.Linked,
                         ctx.CfgClosedWorld,
                         ctx.CfgEnableJsonRepair
                     )
@@ -172,12 +172,7 @@ public sealed partial class AgentOrchestrator
             try
             {
                 await _sessionService
-                    .AppendSessionMessageAsync(
-                        workspaceId,
-                        sessionId,
-                        toolMessage,
-                        cancellationToken
-                    )
+                    .AppendSessionMessageAsync(workspaceId, sessionId, toolMessage, tokens.Linked)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -231,7 +226,7 @@ public sealed partial class AgentOrchestrator
                             toolTurnId,
                             resultBlock,
                             !toolResult.Success,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                 }
@@ -350,7 +345,7 @@ public sealed partial class AgentOrchestrator
                             s.CallId,
                             "spawn_subagent",
                             fail,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                     ctx.ToolExecutions++;
@@ -369,7 +364,7 @@ public sealed partial class AgentOrchestrator
                             s.CallId,
                             "spawn_subagent",
                             fail,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                     ctx.ToolExecutions++;
@@ -397,7 +392,7 @@ public sealed partial class AgentOrchestrator
                                 s.CallId,
                                 "spawn_subagent",
                                 fail,
-                                cancellationToken
+                                tokens.Linked
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
@@ -420,7 +415,7 @@ public sealed partial class AgentOrchestrator
                             ctx.Session!.ProviderId ?? string.Empty,
                             ctx.Session!.ModelId ?? string.Empty,
                             SubPolicy,
-                            cancellationToken
+                            tokens.User
                         )
                         .ConfigureAwait(false);
                     foreach (var r in rejected)
@@ -433,7 +428,7 @@ public sealed partial class AgentOrchestrator
                                 r.CallId,
                                 "spawn_subagent",
                                 fail,
-                                cancellationToken
+                                tokens.Linked
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
@@ -442,13 +437,7 @@ public sealed partial class AgentOrchestrator
                     try
                     {
                         results = await coord
-                            .BarrierAsync(
-                                workspaceId,
-                                sessionId,
-                                handles,
-                                rejected,
-                                cancellationToken
-                            )
+                            .BarrierAsync(workspaceId, sessionId, handles, rejected, tokens.User)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -469,7 +458,7 @@ public sealed partial class AgentOrchestrator
                                 res.CallId,
                                 "spawn_subagent",
                                 res.ToJson(),
-                                cancellationToken
+                                tokens.User
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;

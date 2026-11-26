@@ -136,7 +136,7 @@ public sealed partial class AgentOrchestrator
         string workspaceId,
         string sessionId,
         UnifiedLlmRequest request,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         // (5) 流式推理：汇总增量并实时推送
@@ -171,9 +171,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             await foreach (
-                var evt in _gatewayClient
-                    .StreamAsync(request, cancellationToken)
-                    .ConfigureAwait(false)
+                var evt in _gatewayClient.StreamAsync(request, tokens.Linked).ConfigureAwait(false)
             )
             {
                 switch (evt.Kind)
@@ -425,7 +423,7 @@ public sealed partial class AgentOrchestrator
             );
         }
 
-        if (cancellationToken.IsCancellationRequested || streamCancelled)
+        if (tokens.Linked.IsCancellationRequested || streamCancelled)
         {
             PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
             // need12-P2：有实测用实测，无实测用估算（input 全量 + 已产出文本），保证取消不低估。

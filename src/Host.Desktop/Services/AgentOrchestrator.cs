@@ -119,16 +119,20 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
     {
         int turnTimeoutMs = ResolveTurnTimeoutMs();
         if (turnTimeoutMs <= 0)
+        {
+            // 无限模式：Turn 语义退化为不可取消，Linked 仅随 User 取消，与改动前一致。
+            using var tokens = new TurnCancellation(cancellationToken, CancellationToken.None);
             return await RunAgentTurnCoreAsync(
                     workspaceId,
                     sessionId,
                     userText,
+                    tokens,
                     providerId,
                     modelId,
-                    cancellationToken,
                     turnRequestId
                 )
                 .ConfigureAwait(false);
+        }
         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
@@ -140,13 +144,14 @@ public sealed partial class AgentOrchestrator : IAgentOrchestrator
         AgentTurnResult result;
         try
         {
+            using var tokens = new TurnCancellation(cancellationToken, turnCts.Token);
             result = await RunAgentTurnCoreAsync(
                     workspaceId,
                     sessionId,
                     userText,
+                    tokens,
                     providerId,
                     modelId,
-                    turnCts.Token,
                     turnRequestId
                 )
                 .ConfigureAwait(false);

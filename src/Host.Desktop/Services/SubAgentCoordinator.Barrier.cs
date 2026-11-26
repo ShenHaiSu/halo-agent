@@ -17,6 +17,7 @@ public sealed partial class SubAgentCoordinator
         string parentSessionId,
         IReadOnlyList<SubHandle> handles,
         IReadOnlyList<(string CallId, string FailText)> rejected,
+        // 用户取消令牌：只在用户停止时中止等待；主轮超时不传入，故不会打断子收敛。
         CancellationToken mainCt,
         TimeSpan? overallTimeout = null
     )

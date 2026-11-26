@@ -49,9 +49,9 @@ public sealed partial class AgentOrchestrator
         string workspaceId,
         string sessionId,
         string userText,
+        TurnCancellation tokens,
         string? providerId = null,
         string? modelId = null,
-        CancellationToken cancellationToken = default,
         string? turnRequestId = null
     )
     {
@@ -61,7 +61,7 @@ public sealed partial class AgentOrchestrator
                 userText,
                 providerId,
                 modelId,
-                cancellationToken,
+                tokens,
                 turnRequestId
             )
             .ConfigureAwait(false);
@@ -76,7 +76,7 @@ public sealed partial class AgentOrchestrator
                     iteration,
                     workspaceId,
                     sessionId,
-                    cancellationToken
+                    tokens
                 )
                 .ConfigureAwait(false);
             if (headOutcome.Terminal != null)
@@ -89,7 +89,7 @@ public sealed partial class AgentOrchestrator
                     workspaceId,
                     sessionId,
                     request,
-                    cancellationToken
+                    tokens
                 )
                 .ConfigureAwait(false);
             if (callOutcome.Terminal != null)
@@ -104,7 +104,7 @@ public sealed partial class AgentOrchestrator
                     sessionId,
                     pendingTools,
                     toolOrder,
-                    cancellationToken
+                    tokens
                 )
                 .ConfigureAwait(false);
             if (persistOutcome.Terminal != null)
@@ -114,20 +114,14 @@ public sealed partial class AgentOrchestrator
                     iteration,
                     workspaceId,
                     sessionId,
-                    cancellationToken
+                    tokens
                 )
                 .ConfigureAwait(false);
             if (decideOutcome.Terminal != null)
                 return decideOutcome.Terminal;
             if (!proceedToDispatch)
                 continue;
-            var execOutcome = await ExecToolsAsync(
-                    ctx,
-                    iteration,
-                    workspaceId,
-                    sessionId,
-                    cancellationToken
-                )
+            var execOutcome = await ExecToolsAsync(ctx, iteration, workspaceId, sessionId, tokens)
                 .ConfigureAwait(false);
             if (execOutcome.Terminal != null)
                 return execOutcome.Terminal;

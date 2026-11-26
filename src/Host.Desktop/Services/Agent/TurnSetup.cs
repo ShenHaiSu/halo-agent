@@ -24,12 +24,12 @@ public sealed partial class AgentOrchestrator
         string userText,
         string? providerId,
         string? modelId,
-        CancellationToken cancellationToken,
+        TurnCancellation tokens,
         string? turnRequestId = null
     )
     {
         TurnPrepared End(AgentTurnResult t) => new() { Terminal = t };
-        if (cancellationToken.IsCancellationRequested)
+        if (tokens.Linked.IsCancellationRequested)
         {
             PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-before-start" });
             return End(AgentTurnResult.Cancelled(0, 0));
@@ -45,7 +45,7 @@ public sealed partial class AgentOrchestrator
             UserText = userText,
             ProviderId = providerId,
             ModelId = modelId,
-            CancellationToken = cancellationToken,
+            CancellationToken = tokens.Linked,
             TurnRequestId = string.IsNullOrWhiteSpace(turnRequestId)
                 ? string.Empty
                 : turnRequestId.Trim(),
@@ -53,10 +53,10 @@ public sealed partial class AgentOrchestrator
         try
         {
             ctx.Workspace = await _sessionService
-                .GetWorkspaceAsync(workspaceId, cancellationToken)
+                .GetWorkspaceAsync(workspaceId, tokens.Linked)
                 .ConfigureAwait(false);
             ctx.Session = await _sessionService
-                .GetSessionAsync(workspaceId, sessionId, cancellationToken)
+                .GetSessionAsync(workspaceId, sessionId, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -99,7 +99,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             await _sessionService
-                .AppendSessionMessageAsync(workspaceId, sessionId, userMessage, cancellationToken)
+                .AppendSessionMessageAsync(workspaceId, sessionId, userMessage, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)

@@ -223,12 +223,12 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            tokens.Linked.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
@@ -244,7 +244,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             history = await _sessionService
-                .GetActiveContextMessagesAsync(workspaceId, sessionId, cancellationToken)
+                .GetActiveContextMessagesAsync(workspaceId, sessionId, tokens.Linked)
                 .ConfigureAwait(false);
             // P007：发包只带活跃切片（桩之前的历史留在库里供回溯，不进上下文）。
             // P007-R12：单桩边缘（切片仅 1 条桩、无桩后内容）时追加一条本次请求级 system 提示，不落库、不进历史。
@@ -309,7 +309,7 @@ public sealed partial class AgentOrchestrator
             try
             {
                 await _sessionService
-                    .AppendSessionMessageAsync(workspaceId, sessionId, notice, cancellationToken)
+                    .AppendSessionMessageAsync(workspaceId, sessionId, notice, tokens.Linked)
                     .ConfigureAwait(false);
             }
             catch
@@ -624,7 +624,7 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         // (6) 无 ToolCalls（含空名调用已单独处理）则 TurnCompleted 结束
@@ -712,7 +712,7 @@ public sealed partial class AgentOrchestrator
                         call.CallId,
                         call.FunctionName,
                         discarded,
-                        cancellationToken
+                        tokens.Linked
                     )
                     .ConfigureAwait(false);
                 PublishTurnEvent(

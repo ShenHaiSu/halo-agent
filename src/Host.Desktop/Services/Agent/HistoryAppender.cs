@@ -167,7 +167,7 @@ public sealed partial class AgentOrchestrator
         string sessionId,
         Dictionary<string, PendingToolCall> pendingTools,
         List<string> toolOrder,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         var completedCalls = new List<UnifiedToolCall>();
@@ -217,12 +217,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             await _sessionService
-                .AppendSessionMessageAsync(
-                    workspaceId,
-                    sessionId,
-                    assistantMessage,
-                    cancellationToken
-                )
+                .AppendSessionMessageAsync(workspaceId, sessionId, assistantMessage, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -250,7 +245,7 @@ public sealed partial class AgentOrchestrator
                         messagesForDb,
                         timelineBlocks,
                         timelineTurn,
-                        cancellationToken
+                        tokens.Linked
                     )
                     .ConfigureAwait(false);
             }
@@ -315,7 +310,7 @@ public sealed partial class AgentOrchestrator
                             workspaceId,
                             sessionId,
                             UnifiedChatMessage.Tool(ecid, emptyText, "unknown"),
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                 }

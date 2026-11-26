@@ -127,6 +127,7 @@ public sealed partial class SubAgentCoordinator
         string mainProviderId,
         string mainModelId,
         SubPolicySnapshot policy,
+        // 用户取消令牌：子 CTS 只 linked 用户取消，主轮超时不级联到子。
         CancellationToken mainCt
     )
     {

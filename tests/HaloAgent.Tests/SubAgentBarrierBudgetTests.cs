@@ -86,15 +86,17 @@ public sealed class SubAgentBarrierBudgetTests : IDisposable
     private SubAgentCoordinator NewCoordinator() =>
         new(_service, _budgetService, new StubGateway(), agentConfig: _agentService);
 
-    [Fact(DisplayName = "有限主轮超时下 Barrier 预算显著早于主轮超时")]
-    public void BarrierBudget_EarlierThanMainTurnTimeout()
+    [Fact(DisplayName = "取消源拆分后 Barrier 预算按子预算算，不再被主轮超时压低")]
+    public void BarrierBudget_UsesChildBudgetAfterDecoupling()
     {
+        // 子超时 60s、buffer 30s：预算应为 2×60000+30000=150000ms，
+        // 不再被过去「主轮超时×0.8」的临时联动压到 48000ms。
         _agentService.SaveAgentConfig(Config(60000));
         try
         {
             double budgetMs = NewCoordinator().ResolveBarrierBudget(2).TotalMilliseconds;
 
-            Assert.InRange(budgetMs, 1000, 59999);
+            Assert.Equal(150000, budgetMs);
         }
         finally
         {
