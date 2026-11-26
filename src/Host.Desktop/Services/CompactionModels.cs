@@ -1,50 +1,65 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
-using Host.Desktop.Infrastructure.Config;
-using Host.Desktop.Infrastructure.Network;
-using Host.Desktop.LlmGateway;
-using Host.Desktop.LlmGateway.Models;
 
 namespace Host.Desktop.Services;
 
-/// <summary>need05-03：上下文压缩结果。</summary>
+public enum CompactionOutcome
+{
+    Completed,
+    NoOp,
+    Failed
+}
+
+public static class CompactionNoOpReasons
+{
+    public const string Empty = "EMPTY";
+    public const string TooShort = "TOO_SHORT";
+    public const string NoNewContent = "NO_NEW_CONTENT";
+}
+
+/// <summary>上下文压缩结果。Success 保留兼容语义，新逻辑必须优先判断 Outcome。</summary>
 public sealed class CompactionResult
 {
+    public CompactionOutcome Outcome { get; init; }
     public bool Success { get; init; }
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }
+    public string? NoOpReason { get; init; }
+    public string? MetadataWarning { get; init; }
     public int RemovedMessages { get; init; }
     public int KeptMessages { get; init; }
 
     /// <summary>摘要首 200 字，事件展示用。</summary>
     public string SummaryPreview { get; init; } = string.Empty;
     public string? BackupFileName { get; init; }
-
-    /// <summary>P007：桩消息 id（stub 模式成功时非空）。</summary>
     public string? StubMessageId { get; init; }
-
-    /// <summary>P007：桩轮 id（stub 模式成功时非空，v1 会话为 null）。</summary>
     public string? StubTurnId { get; init; }
 
-    /// <summary>P007：压缩请求 completion tokens（= meta_json.summaryTokens）。</summary>
+    /// <summary>最终写入桩的摘要 token；兼容旧事件字段。</summary>
     public int SummaryOutputTokens { get; init; }
 
-    public static CompactionResult Ok(int removed, int kept, string preview, string? backup) =>
+    /// <summary>本次 compact 的 map/reduce 请求总数。</summary>
+    public int CompactLlmCallCount { get; init; }
+
+    public static CompactionResult Ok(
+        int removed,
+        int kept,
+        string preview,
+        string? backup,
+        int summaryTokens = 0,
+        int compactLlmCallCount = 0
+    ) =>
         new()
         {
+            Outcome = CompactionOutcome.Completed,
             Success = true,
             RemovedMessages = removed,
             KeptMessages = kept,
             SummaryPreview = preview ?? string.Empty,
-            BackupFileName = backup
+            BackupFileName = backup,
+            SummaryOutputTokens = summaryTokens,
+            CompactLlmCallCount = compactLlmCallCount,
         };
 
-    /// <summary>P007：append-only 桩写入成功（不删旧行；Kept = 全量条数）。</summary>
     public static CompactionResult OkStub(
         int removed,
         int kept,
@@ -52,10 +67,13 @@ public sealed class CompactionResult
         string? stubTurnId,
         int summaryTokens,
         string preview,
-        string? backupFile = null
+        string? backupFile = null,
+        string? metadataWarning = null,
+        int compactLlmCallCount = 0
     ) =>
         new()
         {
+            Outcome = CompactionOutcome.Completed,
             Success = true,
             RemovedMessages = removed,
             KeptMessages = kept,
@@ -64,17 +82,25 @@ public sealed class CompactionResult
             StubMessageId = stubMsgId,
             StubTurnId = stubTurnId,
             SummaryOutputTokens = summaryTokens,
+            MetadataWarning = metadataWarning,
+            CompactLlmCallCount = compactLlmCallCount,
         };
 
-    /// <summary>无事可做（太短无需压缩）：Success 且 Removed==0，前端据此提示。</summary>
-    public static CompactionResult NoOp() => new() { Success = true };
+    public static CompactionResult NoOp(string? reason = null) =>
+        new()
+        {
+            Outcome = CompactionOutcome.NoOp,
+            Success = true,
+            NoOpReason = reason,
+        };
 
     public static CompactionResult Fail(string code, string message) =>
         new()
         {
+            Outcome = CompactionOutcome.Failed,
             Success = false,
             ErrorCode = code,
-            ErrorMessage = message
+            ErrorMessage = message,
         };
 }
 

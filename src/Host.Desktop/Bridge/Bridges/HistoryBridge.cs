@@ -537,6 +537,50 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    public Task<BridgeResponse<CompactionRepairReport>> AnalyzeCompactionHistory(
+        string workspaceId,
+        string sessionId
+    ) => RepairCompactionHistory(workspaceId, sessionId, false);
+
+    public async Task<BridgeResponse<CompactionRepairReport>> RepairCompactionHistory(
+        string workspaceId,
+        string sessionId,
+        bool apply
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+                return BridgeResponse<CompactionRepairReport>.Fail("INVALID_SESSION", "工作区或会话不能为空");
+            if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
+                return BridgeResponse<CompactionRepairReport>.Fail("SUB_READONLY", "子会话不可操作");
+            if (_workspaceSessionService is not Services.WorkspaceSessionService concrete)
+                return BridgeResponse<CompactionRepairReport>.Fail(
+                    "UNSUPPORTED_SERVICE",
+                    "当前会话服务不支持压缩历史修复"
+                );
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
+                return BridgeResponse<CompactionRepairReport>.Fail(
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
+                );
+            using (lease)
+            {
+                var repair = new Services.CompactionHistoryRepair(concrete);
+                var report = await repair
+                    .RepairAsync(workspaceId, sessionId, apply)
+                    .ConfigureAwait(false);
+                return BridgeResponse<CompactionRepairReport>.Success(report);
+            }
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"RepairCompactionHistory failed for session '{sessionId}'", ex);
+            return BridgeResponse<CompactionRepairReport>.Fail("COMPACT_REPAIR_ERROR", "压缩历史修复失败");
+        }
+    }
+
     /// <summary>压缩备份恢复入口：删桩与全量重写统一走历史写锁。</summary>
     public async Task<BridgeResponse<HistoryRestoreResult>> RestoreCompactedHistory(
         string workspaceId,

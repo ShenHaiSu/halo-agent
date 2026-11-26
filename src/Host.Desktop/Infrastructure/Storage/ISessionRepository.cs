@@ -53,6 +53,13 @@ public interface ISessionRepository
         UnifiedChatMessage message,
         CancellationToken ct = default
     );
+    Task<long> AppendCompactStubAsync(
+        string workspaceId,
+        string sessionId,
+        UnifiedChatMessage stubMessage,
+        TurnSummary stubTurn,
+        CancellationToken ct = default
+    );
     Task<List<UnifiedChatMessage>> GetMessagesAsync(
         string workspaceId,
         string sessionId,

@@ -1,14 +1,15 @@
 using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Storage;
 
 namespace Host.Desktop.Services;
 
-/// <summary>P007：压缩桩服务门面（M1 写入侧；M2 读侧门面同文件扩展）。</summary>
+public sealed record CompactCommitResult(long TurnSeq, string? MetadataWarning);
+
 public sealed partial class WorkspaceSessionService
 {
-    /// <summary>P007：桩 turn 落盘 + meta 冻结（只改 MessageCount/UpdatedAt/CompactMode；账单不动）。
-    /// 调用方须已持有会话追加锁（与 AppendSessionMessageAsync 同一把锁）。</summary>
-    public async Task<long> AppendCompactTurnAsync(
+    /// <summary>在同一事务中提交桩消息与 compact 轮，随后容错刷新元数据。</summary>
+    public async Task<CompactCommitResult> AppendCompactTurnAsync(
         string workspaceId,
         string sessionId,
         UnifiedChatMessage stubMessage,
@@ -18,32 +19,44 @@ public sealed partial class WorkspaceSessionService
     {
         if (stubMessage == null || string.IsNullOrWhiteSpace(stubMessage.Id))
             throw new ArgumentException("桩消息不能为空", nameof(stubMessage));
+        if (!string.Equals(stubMessage.Kind, MessageKind.CompactStub, StringComparison.Ordinal))
+            throw new ArgumentException("桩消息 kind 必须为 compact_stub", nameof(stubMessage));
+        if (!string.Equals(stubMessage.Role, "user", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("桩消息 role 必须为 user", nameof(stubMessage));
         if (stubTurn == null || string.IsNullOrWhiteSpace(stubTurn.TurnId))
             throw new ArgumentException("桩轮不能为空", nameof(stubTurn));
+        if (!string.Equals(stubTurn.Kind, TurnKind.Compact, StringComparison.Ordinal))
+            throw new ArgumentException("桩轮 kind 必须为 compact", nameof(stubTurn));
+        if (!string.Equals(stubTurn.TurnId, "cturn-" + stubMessage.Id, StringComparison.Ordinal))
+            throw new ArgumentException("桩轮 id 必须与桩消息匹配", nameof(stubTurn));
+        if (stubTurn.Blocks != 0 || stubTurn.FinalBlockId != null)
+            throw new ArgumentException("compact 轮不能包含 block 或 finalBlockId", nameof(stubTurn));
 
         var meta = await _sessionRepository
             .LoadSessionMetaAsync(workspaceId, sessionId, ct)
             .ConfigureAwait(false);
-
-        long turnSeq = 0;
+        long turnSeq;
         try
         {
-            var store = new SessionHistoryStore(new SessionHistoryDb(_sessionRepository.Storage));
-            turnSeq = await store
-                .InsertCompactStubAsync(workspaceId, sessionId, stubMessage, stubTurn, ct)
+            turnSeq = await _sessionRepository
+                .AppendCompactStubAsync(workspaceId, sessionId, stubMessage, stubTurn, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             try
             {
-                Infrastructure.Logging.HaloLogger.App.Error(
-                    "[Compact] InsertCompactStub failed ws="
+                HaloLogger.App.Error(
+                    "[Compact] compact.stub.commit.failed ws="
                         + workspaceId
                         + " sess="
                         + sessionId
-                        + ": "
-                        + ex.Message,
+                        + " msg="
+                        + stubMessage.Id
+                        + " turn="
+                        + stubTurn.TurnId
+                        + " error="
+                        + ex.GetType().Name,
                     ex
                 );
             }
@@ -51,27 +64,59 @@ public sealed partial class WorkspaceSessionService
             throw;
         }
 
-        if (meta != null)
+        if (meta == null)
         {
-            // P007：append-only 只增不减；账单（Cumulative*/Total*）与标题一律不动。
-            meta.MessageCount += 1;
-            if (string.IsNullOrWhiteSpace(meta.CompactMode))
-                meta.CompactMode = CompactMode.Stub;
-            meta.UpdatedAtUtc = DateTime.UtcNow;
-            await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
+            const string warning = "COMPACT_METADATA_WARNING: SESSION_META_MISSING";
+            try
+            {
+                HaloLogger.App.Warn(
+                    "[Compact] compact.meta.refresh.failed ws="
+                        + workspaceId
+                        + " sess="
+                        + sessionId
+                        + " reason=SESSION_META_MISSING"
+                );
+            }
+            catch { }
+            return new CompactCommitResult(turnSeq, warning);
         }
-        return turnSeq;
+
+        meta.MessageCount += 1;
+        if (string.IsNullOrWhiteSpace(meta.CompactMode))
+            meta.CompactMode = CompactMode.Stub;
+        meta.UpdatedAtUtc = DateTime.UtcNow;
+        try
+        {
+            await RefreshMetaIndexAsync(workspaceId, sessionId, meta, ct).ConfigureAwait(false);
+            return new CompactCommitResult(turnSeq, null);
+        }
+        catch (Exception ex)
+        {
+            string warning = "COMPACT_METADATA_WARNING: " + ex.GetType().Name;
+            try
+            {
+                HaloLogger.App.Warn(
+                    "[Compact] compact.meta.refresh.failed ws="
+                        + workspaceId
+                        + " sess="
+                        + sessionId
+                        + " error="
+                        + ex.GetType().Name,
+                    ex
+                );
+            }
+            catch { }
+            return new CompactCommitResult(turnSeq, warning);
+        }
     }
 
-    /// <summary>P007：活跃切片（真正进模型上下文的那段）。无桩会话等价于全量。
-    /// v2 单语句快路径（含前导 system）；失败/无库回退全量读 + 内存切片。</summary>
+    /// <summary>活跃切片（真正进模型上下文的那段）。无桩会话等价于全量。</summary>
     public async Task<List<UnifiedChatMessage>> GetActiveContextMessagesAsync(
         string workspaceId,
         string sessionId,
         CancellationToken ct = default
     )
     {
-        // P007：单语句快路径已含切片所需全部行；再经 ActiveContext.Slice 归一化（幂等）。
         try
         {
             var tail = await _sessionRepository
@@ -79,14 +124,16 @@ public sealed partial class WorkspaceSessionService
                 .ConfigureAwait(false);
             return Context.ActiveContext.Slice(tail);
         }
-        catch { }
-        var full = await _sessionRepository
-            .GetMessagesAsync(workspaceId, sessionId, ct)
-            .ConfigureAwait(false);
-        return Context.ActiveContext.Slice(full);
+        catch
+        {
+            var full = await _sessionRepository
+                .GetMessagesAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            return Context.ActiveContext.Slice(full);
+        }
     }
 
-    /// <summary>P007：最后一个压缩桩（无桩返回 null）。DB 优先，v1 纯 jsonl 回退扫全量。</summary>
+    /// <summary>最后一个压缩桩（无桩返回 null）。DB 优先，旧会话回退扫全量。</summary>
     public async Task<CompactStubInfo?> GetLastCompactStubAsync(
         string workspaceId,
         string sessionId,
@@ -110,6 +157,7 @@ public sealed partial class WorkspaceSessionService
             }
         }
         catch { }
+
         try
         {
             var full = await _sessionRepository
@@ -117,16 +165,16 @@ public sealed partial class WorkspaceSessionService
                 .ConfigureAwait(false);
             for (int i = full.Count - 1; i >= 0; i--)
             {
-                var m = full[i];
-                if (m == null || !Context.ActiveContext.IsStub(m))
+                var message = full[i];
+                if (message == null || !Context.ActiveContext.IsStub(message))
                     continue;
                 int removed = 0;
-                if (!string.IsNullOrWhiteSpace(m.MetaJson))
+                if (!string.IsNullOrWhiteSpace(message.MetaJson))
                 {
                     try
                     {
                         var meta = System.Text.Json.JsonSerializer.Deserialize<CompactStubMeta>(
-                            m.MetaJson,
+                            message.MetaJson,
                             HaloJsonOptions.CompactCamelCase
                         );
                         if (meta != null)
@@ -136,19 +184,40 @@ public sealed partial class WorkspaceSessionService
                 }
                 return new CompactStubInfo
                 {
-                    MessageId = m.Id,
-                    TurnId = "cturn-" + m.Id,
+                    MessageId = message.Id,
+                    TurnId = string.Empty,
+                    HasMatchingTurn = false,
                     Seq = null,
-                    Summary = m.Content ?? string.Empty,
-                    SummaryTokens = (int)(m.OutputTokens ?? 0),
-                    PromptTokens = (int)(m.InputTokens ?? 0),
-                    CachedTokens = (int)(m.CachedTokens ?? 0),
+                    Summary = message.Content ?? string.Empty,
+                    SummaryTokens = (int)(message.OutputTokens ?? 0),
+                    PromptTokens = (int)(message.InputTokens ?? 0),
+                    CachedTokens = (int)(message.CachedTokens ?? 0),
                     RemovedCount = removed,
-                    CreatedAtUtc = m.CreatedAtUtc,
+                    CreatedAtUtc = message.CreatedAtUtc,
                 };
             }
         }
         catch { }
         return null;
+    }
+
+    internal async Task<(long? FromSeq, long? ToSeq)> GetMessageSequenceRangeAsync(
+        string workspaceId,
+        string sessionId,
+        string fromMessageId,
+        string toMessageId,
+        CancellationToken ct = default
+    )
+    {
+        if (
+            _sessionRepository is not SessionRepository concrete
+            || string.IsNullOrWhiteSpace(fromMessageId)
+            || string.IsNullOrWhiteSpace(toMessageId)
+        )
+            return (null, null);
+        var store = new SessionHistoryStore(new SessionHistoryDb(concrete.Storage));
+        return await store
+            .GetMessageSequenceRangeAsync(workspaceId, sessionId, fromMessageId, toMessageId, ct)
+            .ConfigureAwait(false);
     }
 }

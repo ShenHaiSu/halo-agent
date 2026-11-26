@@ -39,15 +39,32 @@ public sealed class SessionHistoryDb
             pragma.ExecuteNonQuery();
         }
         WorkspaceHistorySchema.EnsureSchema(conn);
-        try
+        using (var tx = conn.BeginTransaction())
         {
-            using var stubBackfill = conn.CreateCommand();
-            stubBackfill.CommandText =
-                "UPDATE messages SET kind = 'compact_stub'"
-                + " WHERE kind IS NULL AND role = 'user' AND content LIKE '【上下文摘要%';";
-            stubBackfill.ExecuteNonQuery();
+            using (var backfill = conn.CreateCommand())
+            {
+                backfill.Transaction = tx;
+                backfill.CommandText =
+                    "UPDATE messages SET kind = 'compact_stub'"
+                    + " WHERE kind IS NULL AND role = 'user' AND content LIKE '【上下文摘要%';";
+                backfill.ExecuteNonQuery();
+            }
+            using (var normalizeTurns = conn.CreateCommand())
+            {
+                normalizeTurns.Transaction = tx;
+                normalizeTurns.CommandText =
+                    "UPDATE turns SET kind = 'compact'"
+                    + " WHERE kind = 'turn' AND substr(turn_id, 1, 6) = 'uturn-'"
+                    + " AND EXISTS ("
+                    + " SELECT 1 FROM messages m"
+                    + " WHERE m.session_id = turns.session_id"
+                    + " AND m.id = substr(turns.turn_id, 7)"
+                    + " AND m.kind = 'compact_stub'"
+                    + ");";
+                normalizeTurns.ExecuteNonQuery();
+            }
+            tx.Commit();
         }
-        catch { }
         return dbPath;
     }
 

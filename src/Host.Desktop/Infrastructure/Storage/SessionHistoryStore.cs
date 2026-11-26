@@ -41,6 +41,28 @@ public sealed partial class SessionHistoryStore
             );
     }
 
+    internal static async Task<long> ExecuteWithBusyRetryAsync(
+        Func<int, Task<long>> operation,
+        CancellationToken ct = default
+    )
+    {
+        if (operation == null)
+            throw new ArgumentNullException(nameof(operation));
+        const int maxAttempts = 6;
+        for (int attempt = 1; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation(attempt).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+            {
+                await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     private SemaphoreSlim GetWriteLock(string workspaceId, string sessionId)
     {
         string key = "ws:" + (workspaceId ?? string.Empty).Trim().ToLowerInvariant();
@@ -1092,7 +1114,25 @@ public sealed partial class SessionHistoryStore
             cmd.Parameters.AddWithValue("$utc", msg.CreatedAtUtc.ToString("o"));
             cmd.ExecuteNonQuery();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            try
+            {
+                HaloLogger.App.Error(
+                    "[Storage] message.append.failed ws="
+                        + workspaceId
+                        + " sess="
+                        + sessionId
+                        + " msg="
+                        + msg.Id
+                        + " error="
+                        + ex.GetType().Name,
+                    ex
+                );
+            }
+            catch { }
+            throw;
+        }
     }
 
     /// <summary>S3：按 turn_seq 截断（DELETE WHERE turn_seq &gt;= cut + 同步 messages/blocks）。</summary>

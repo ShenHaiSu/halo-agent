@@ -207,7 +207,7 @@ public sealed partial class HostBridgeFacade
                         var result = await CompactionService
                             .CompactAsync(wsId, sessId, provId, modId, keep, cts.Token)
                             .ConfigureAwait(false);
-                        if (result.Success)
+                        if (result.Outcome == CompactionOutcome.Completed)
                         {
                             // P007：占用基线取压缩后即时重算的实值（通常为 compact-estimate），禁止写死。
                             string occupancyBaseline = "compact-estimate";
@@ -251,8 +251,28 @@ public sealed partial class HostBridgeFacade
                                         summaryPreview = result.SummaryPreview,
                                         backupFileName = result.BackupFileName,
                                         stubMessageId = result.StubMessageId,
+                                        stubTurnId = result.StubTurnId,
                                         summaryTokens = result.SummaryOutputTokens,
+                                        compactLlmCallCount = result.CompactLlmCallCount,
                                         occupancyBaseline,
+                                        metadataWarning = result.MetadataWarning,
+                                        updatedAtUtc = DateTime.UtcNow.ToString("o")
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                }
+                            );
+                        }
+                        else if (result.Outcome == CompactionOutcome.NoOp)
+                        {
+                            JsEventDispatcher.Publish(
+                                "agent:turn-event",
+                                new
+                                {
+                                    sessionId = sessId,
+                                    kind = "CompactNoOp",
+                                    payload = new
+                                    {
+                                        noOpReason = result.NoOpReason,
                                         updatedAtUtc = DateTime.UtcNow.ToString("o")
                                     },
                                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
