@@ -96,6 +96,43 @@ public sealed class SessionOperationCoordinatorTests
     }
 
     [Fact]
+    public void BatchFailureReleasesLocksAcquiredEarlierInStableOrder()
+    {
+        var coordinator = new SessionOperationCoordinator();
+        Assert.True(
+            coordinator.TryAcquire("ws", "sess-b", SessionOperationKind.Agent, out var held)
+        );
+        using (held)
+        {
+            bool acquired = coordinator.TryAcquireBatch(
+                "ws",
+                new[] { "sess-b", "sess-a", "SESS-A" },
+                SessionOperationKind.History,
+                out var batch
+            );
+
+            Assert.False(acquired);
+            Assert.Null(batch);
+            Assert.False(coordinator.IsHeld("ws", "sess-a"));
+            Assert.True(coordinator.IsHeld("ws", "sess-b"));
+        }
+        Assert.True(
+            coordinator.TryAcquireBatch(
+                "ws",
+                new[] { "sess-b", "sess-a", "SESS-A" },
+                SessionOperationKind.History,
+                out var retry
+            )
+        );
+        Assert.NotNull(retry);
+        Assert.Equal(2, retry!.Count);
+        retry.Dispose();
+        retry.Dispose();
+        Assert.False(coordinator.IsHeld("ws", "sess-a"));
+        Assert.False(coordinator.IsHeld("ws", "sess-b"));
+    }
+
+    [Fact]
     public void HolderKindIsObservableForErrorMapping()
     {
         var coordinator = new SessionOperationCoordinator();

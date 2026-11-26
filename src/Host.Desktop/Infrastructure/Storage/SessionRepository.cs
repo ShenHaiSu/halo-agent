@@ -177,6 +177,29 @@ public sealed partial class SessionRepository : ISessionRepository
         }
     }
 
+    public async Task<List<SessionMetadata>> LoadSessionsIndexStrictAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return new List<SessionMetadata>();
+
+        string path = GetSessionsIndexPath(workspaceId);
+        if (!File.Exists(path))
+            return new List<SessionMetadata>();
+
+        string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false);
+        var list =
+            JsonSerializer.Deserialize<List<SessionMetadata>>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? new List<SessionMetadata>();
+        foreach (var metadata in list)
+            HealSessionTimes(metadata, null);
+        return list;
+    }
+
     /// <summary>
     /// 读 sessions-index.json 的内部实现，不取工作区锁。
     /// 仅供已持有该锁的调用方使用（如 MutateSessionsIndexAsync），避免不可重入锁自锁。

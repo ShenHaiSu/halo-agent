@@ -15,6 +15,9 @@ namespace Host.Desktop.Services;
 
 public interface IWorkspaceSessionService
 {
+    /// <summary>工作区共享生命周期租约；删除树持独占租约时返回 null。</summary>
+    IDisposable? TryAcquireWorkspaceSharedLease(string workspaceId);
+
     Task<List<WorkspaceInfo>> GetAllWorkspacesAsync(CancellationToken ct = default);
     Task<WorkspaceInfo?> GetWorkspaceAsync(string workspaceId, CancellationToken ct = default);
     Task<WorkspaceInfo> AddOrUpdateWorkspaceAsync(
@@ -84,11 +87,12 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default
     );
 
-    /// <summary>need13：级联删树（先取消由 Bridge 层调 CancelTree，再删子盘+主盘）。</summary>
-    Task<bool> DeleteSessionTreeAsync(
+    /// <summary>严格级联删除会话树：先备份，数据库单事务提交，再清理目录与索引并报告残留。</summary>
+    Task<SessionDeletionResult> DeleteSessionTreeAsync(
         string workspaceId,
         string sessionId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        Action<string>? cancelSessionTree = null
     );
     Task<SessionMetadata?> GetSessionAsync(
         string workspaceId,

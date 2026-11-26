@@ -289,27 +289,79 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<bool>> DeleteSession(string workspaceId, string sessionId)
+    public async Task<BridgeResponse<SessionDeletionResultDto>> DeleteSessionV2(
+        string workspaceId,
+        string sessionId
+    )
     {
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return BridgeResponse<SessionDeletionResultDto>.Fail(
+                "INVALID_SESSION",
+                "工作区 ID 与会话 ID 不能为空"
+            );
+        }
+
         try
         {
-            // need13：删主先 CancelTree 再级联删树（含子盘）
-            try
-            {
-                _subCoordinator?.CancelTree(sessionId.Trim());
-            }
-            catch { }
-            bool ok = await _workspaceSessionService
-                .DeleteSessionTreeAsync(workspaceId, sessionId)
+            Action<string>? cancelTree =
+                _subCoordinator == null ? null : id => _subCoordinator.CancelTree(id);
+            var result = await _workspaceSessionService
+                .DeleteSessionTreeAsync(workspaceId.Trim(), sessionId.Trim(), default, cancelTree)
                 .ConfigureAwait(false);
-            return BridgeResponse<bool>.Success(ok);
+            return BridgeResponse<SessionDeletionResultDto>.Success(
+                SessionDeletionResultDto.FromResult(result),
+                result.Outcome switch
+                {
+                    SessionDeletionOutcome.Deleted => "会话已删除",
+                    SessionDeletionOutcome.Partial => "会话数据已删除，但存在目录或索引残留",
+                    SessionDeletionOutcome.NotFound => "会话不存在",
+                    _ => DeletionErrorMessage(result.ErrorCode),
+                }
+            );
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"DeleteSession failed for session '{sessionId}'", ex);
-            return BridgeResponse<bool>.Fail(ex.Message, "SESSION_ERROR");
+            HaloLogger.App.Error(
+                $"DeleteSessionV2 failed for workspace '{workspaceId}' session '{sessionId}'",
+                ex
+            );
+            return BridgeResponse<SessionDeletionResultDto>.Fail(
+                "SESSION_DELETE_ERROR",
+                DeletionErrorMessage("SESSION_DELETE_ERROR")
+            );
         }
     }
+
+    public async Task<BridgeResponse<bool>> DeleteSession(string workspaceId, string sessionId)
+    {
+        var response = await DeleteSessionV2(workspaceId, sessionId).ConfigureAwait(false);
+        if (!response.Ok)
+        {
+            return BridgeResponse<bool>.Fail(
+                response.Code ?? "SESSION_DELETE_ERROR",
+                response.Message ?? DeletionErrorMessage(response.Code)
+            );
+        }
+
+        return BridgeResponse<bool>.Success(response.Data?.Outcome == "deleted", response.Message);
+    }
+
+    private static string DeletionErrorMessage(string? code) =>
+        code switch
+        {
+            "SESSION_NOT_FOUND" => "会话不存在，可能已被删除",
+            "SESSION_BUSY" => "会话正在生成、压缩或执行历史操作，请稍后重试",
+            "HISTORY_OPERATION_IN_PROGRESS" => "会话正在执行其他历史操作，请稍后重试",
+            "WORKSPACE_BUSY" => "工作区正在执行其他操作，请稍后重试",
+            "BACKUP_FAILED" => "备份失败，会话未删除",
+            "CANCEL_FAILED" => "无法确认会话已停止，会话未删除",
+            "SESSION_TREE_CYCLE" => "会话树结构异常，已拒绝删除",
+            "SESSION_DATABASE_DELETE_FAILED" => "数据库删除失败，会话未删除",
+            "DELETE_CANCELLED" => "删除已取消",
+            "INVALID_SESSION" => "工作区 ID 与会话 ID 不能为空",
+            _ => "会话删除失败，请查看日志后重试",
+        };
 
     public async Task<BridgeResponse<string>> ExportSessionMarkdown(
         string workspaceId,

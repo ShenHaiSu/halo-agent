@@ -65,40 +65,18 @@ public sealed partial class SessionRepository : ISessionRepository
         CancellationToken ct = default
     )
     {
-        try
-        {
-            var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
-            await store
-                .DeleteSessionPartitionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-        }
-        catch { }
-        string sessionDir = GetSessionDirectory(workspaceId, sessionId);
-        if (Directory.Exists(sessionDir))
-        {
-            try
-            {
-                Directory.Delete(sessionDir, recursive: true);
-            }
-            catch (Exception ex)
-            {
-                HaloLogger.App.Warn(
-                    $"Failed to delete session directory '{sessionDir}': {ex.Message}"
-                );
-            }
-        }
-
-        // 索引删除同样纳入工作区锁内的读-改-写，避免抹掉其他会话的并发元数据更新。
-        await MutateSessionsIndexAsync(
+        var result = await DeleteSessionTreeAsync(
                 workspaceId,
-                sessions =>
-                    sessions.RemoveAll(s =>
-                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
-                    ),
+                new[]
+                {
+                    new SessionDeletionNode { SessionId = sessionId ?? string.Empty, Depth = 0 },
+                },
                 ct
             )
             .ConfigureAwait(false);
-        return true;
+        return result.DatabaseCommitted
+            && result.Directories == SessionDeletionStage.Completed
+            && result.Index == SessionDeletionStage.Completed;
     }
 
     public async Task<HistoryRollbackResult> RollbackCreatedSessionAsync(

@@ -144,6 +144,11 @@ internal sealed class MetadataFailingRepository : ISessionRepository
         CancellationToken ct = default
     ) => _inner.LoadSessionsIndexAsync(workspaceId, ct);
 
+    public Task<List<SessionMetadata>> LoadSessionsIndexStrictAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    ) => _inner.LoadSessionsIndexStrictAsync(workspaceId, ct);
+
     public Task SaveSessionsIndexAsync(
         string workspaceId,
         List<SessionMetadata> sessions,
@@ -214,6 +219,12 @@ internal sealed class MetadataFailingRepository : ISessionRepository
         string sessionId,
         CancellationToken ct = default
     ) => _inner.DeleteSessionAsync(workspaceId, sessionId, ct);
+
+    public Task<SessionDeletionStorageResult> DeleteSessionTreeAsync(
+        string workspaceId,
+        IReadOnlyList<SessionDeletionNode> nodes,
+        CancellationToken ct = default
+    ) => _inner.DeleteSessionTreeAsync(workspaceId, nodes, ct);
 
     public Task<HistoryRollbackResult> RollbackCreatedSessionAsync(
         string workspaceId,

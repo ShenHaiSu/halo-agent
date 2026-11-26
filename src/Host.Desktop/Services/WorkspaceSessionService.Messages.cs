@@ -25,6 +25,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
         var appendLock = _sessionAppendLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
         await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -179,6 +182,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         CancellationToken ct = default
     )
     {
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
         var meta = await _sessionRepository
             .LoadSessionMetaAsync(workspaceId, sessionId, ct)
             .ConfigureAwait(false);
@@ -219,6 +225,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         CancellationToken ct = default
     )
     {
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
         var meta = await _sessionRepository
             .LoadSessionMetaAsync(workspaceId, sessionId, ct)
             .ConfigureAwait(false);

@@ -21,6 +21,8 @@ public sealed partial class HostBridgeFacade
 {
     public Task<BridgeResponse<string>> StartSessionRun(string requestJson)
     {
+        IDisposable? workspaceLease = null;
+        bool workspaceLeaseHandedOff = false;
         try
         {
             var req = JsonSerializer.Deserialize<UnifiedLlmRequest>(
@@ -39,6 +41,18 @@ public sealed partial class HostBridgeFacade
                 : req.RequestId;
 
             string workspaceId = req.HeaderContext?.WorkspaceId ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(workspaceId))
+            {
+                workspaceLease = _workspaceSessionService.TryAcquireWorkspaceSharedLease(
+                    workspaceId.Trim()
+                );
+                if (workspaceLease == null)
+                {
+                    return Task.FromResult(
+                        BridgeResponse<string>.Fail("WORKSPACE_BUSY", "工作区正在执行会话删除，请稍后重试")
+                    );
+                }
+            }
             SessionOperationLease? operationLease = null;
             if (
                 !_sessionOperations.TryAcquire(
@@ -173,10 +187,12 @@ public sealed partial class HostBridgeFacade
                         _activeSessionTokens.TryRemove(sessionId, out _);
                         cts.Dispose();
                         operationLease?.Dispose();
+                        workspaceLease?.Dispose();
                     }
                 },
                 CancellationToken.None
             );
+            workspaceLeaseHandedOff = true;
 
             return Task.FromResult(BridgeResponse<string>.Success(sessionId, "流式请求已启动"));
         }
@@ -184,6 +200,11 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("StartSessionRun failed", ex);
             return Task.FromResult(BridgeResponse<string>.Fail("SESSION_START_ERROR", ex.Message));
+        }
+        finally
+        {
+            if (!workspaceLeaseHandedOff)
+                workspaceLease?.Dispose();
         }
     }
 

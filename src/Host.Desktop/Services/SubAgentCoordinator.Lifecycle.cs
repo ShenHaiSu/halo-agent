@@ -77,23 +77,29 @@ public sealed partial class SubAgentCoordinator
     public int CancelTree(string parentSessionId)
     {
         int n = 0;
-        if (_trees.TryGetValue(parentSessionId, out var list))
+        if (!_trees.TryGetValue(parentSessionId, out var list))
+            return n;
+
+        List<SubHandle> snap;
+        lock (list)
         {
-            List<SubHandle> snap;
-            lock (list)
+            snap = list.ToList();
+        }
+        var failures = new List<Exception>();
+        foreach (var h in snap)
+        {
+            try
             {
-                snap = list.ToList();
+                h.Cts.Cancel();
+                n++;
             }
-            foreach (var h in snap)
+            catch (Exception ex)
             {
-                try
-                {
-                    h.Cts.Cancel();
-                    n++;
-                }
-                catch { }
+                failures.Add(ex);
             }
         }
+        if (failures.Count > 0)
+            throw new AggregateException("One or more sub-agent cancellations failed.", failures);
         return n;
     }
 

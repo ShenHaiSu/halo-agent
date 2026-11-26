@@ -48,6 +48,45 @@ public sealed class BridgeResponseSnapshotTests
     }
 
     [Fact]
+    public void SessionDeletionResult_MatchesSnapshot()
+    {
+        var result = new Host.Desktop.Core.Models.SessionDeletionResultDto
+        {
+            Outcome = "partial",
+            ErrorCode = "SESSION_DELETION_PARTIAL",
+            DestructiveCommitCompleted = true,
+            BackupFileName = "history.db.bak",
+            DeletedSessionIds = new[] { "sess-root", "sess-child" },
+            ResidualSessionIds = new[] { "sess-child" },
+            Database = "completed",
+            Directories = "failed",
+            Index = "completed",
+            Warnings = new[] { "DIRECTORY_DELETE_FAILED" },
+        };
+        string json = JsonSerializer.Serialize(result, HaloJsonOptions.CompactCamelCase);
+        Assert.Equal(ReadSnapshot("session_deletion_result.json"), json);
+    }
+
+    [Fact]
+    public void SessionDeletionEnumsMapToExplicitCamelCaseStrings()
+    {
+        var mapped = Host.Desktop.Core.Models.SessionDeletionResultDto.FromResult(
+            new Host.Desktop.Core.Models.SessionDeletionResult
+            {
+                Outcome = Host.Desktop.Core.Models.SessionDeletionOutcome.NotFound,
+                Database = Host.Desktop.Core.Models.SessionDeletionStage.NotRequested,
+                Directories = Host.Desktop.Core.Models.SessionDeletionStage.Completed,
+                Index = Host.Desktop.Core.Models.SessionDeletionStage.Failed,
+            }
+        );
+
+        Assert.Equal("notFound", mapped.Outcome);
+        Assert.Equal("notRequested", mapped.Database);
+        Assert.Equal("completed", mapped.Directories);
+        Assert.Equal("failed", mapped.Index);
+    }
+
+    [Fact]
     public void LegacyCoreEnvelope_SerializesIdentically()
     {
         var canonical = JsonSerializer.Serialize(

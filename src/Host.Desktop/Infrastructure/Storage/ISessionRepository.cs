@@ -22,6 +22,12 @@ public interface ISessionRepository
         string workspaceId,
         CancellationToken ct = default
     );
+
+    /// <summary>破坏性操作专用严格读取：索引缺失返回空列表，损坏或 IO 失败必须抛出。</summary>
+    Task<List<SessionMetadata>> LoadSessionsIndexStrictAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    );
     Task SaveSessionsIndexAsync(
         string workspaceId,
         List<SessionMetadata> sessions,
@@ -80,6 +86,13 @@ public interface ISessionRepository
     Task<bool> DeleteSessionAsync(
         string workspaceId,
         string sessionId,
+        CancellationToken ct = default
+    );
+
+    /// <summary>严格删除整棵会话树：数据库单事务提交后才清理目录与索引，并返回分阶段残留。</summary>
+    Task<SessionDeletionStorageResult> DeleteSessionTreeAsync(
+        string workspaceId,
+        IReadOnlyList<SessionDeletionNode> nodes,
         CancellationToken ct = default
     );
 

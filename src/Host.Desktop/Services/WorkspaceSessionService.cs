@@ -20,19 +20,30 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
     private readonly ISessionRepository _sessionRepository;
     private readonly SessionOperationCoordinator _operationCoordinator;
+    private readonly WorkspaceLifecycleGate _lifecycleGate;
+    private readonly Action<string>? _cancelSessionTree;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionAppendLocks = new();
 
     public WorkspaceSessionService(
         ISessionRepository sessionRepository,
-        SessionOperationCoordinator? operationCoordinator = null
+        SessionOperationCoordinator? operationCoordinator = null,
+        WorkspaceLifecycleGate? lifecycleGate = null,
+        Action<string>? cancelSessionTree = null
     )
     {
         _sessionRepository =
             sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _operationCoordinator = operationCoordinator ?? SessionOperationCoordinator.Shared;
+        _lifecycleGate = lifecycleGate ?? WorkspaceLifecycleGate.Shared;
+        _cancelSessionTree = cancelSessionTree;
     }
 
     internal SessionOperationCoordinator OperationCoordinator => _operationCoordinator;
+
+    internal WorkspaceLifecycleGate LifecycleGate => _lifecycleGate;
+
+    public IDisposable? TryAcquireWorkspaceSharedLease(string workspaceId) =>
+        _lifecycleGate.TryAcquireShared(workspaceId);
 
     /// <summary>直接调用领域服务时也必须经过统一协调器，不能旁路。</summary>
     internal SessionOperationLease AcquireHistoryLease(string workspaceId, string sessionId)
@@ -347,6 +358,10 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             throw new ArgumentException("Workspace ID cannot be empty.", nameof(workspaceId));
         }
 
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
+
         string role = string.Equals(agentRole, "sub", StringComparison.OrdinalIgnoreCase)
             ? "sub"
             : "main";
@@ -634,46 +649,6 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         return meta;
     }
 
-    /// <summary>need13：级联删树（先删子盘再删主盘；取消由 Bridge 层先调 CancelTree）。</summary>
-    public async Task<bool> DeleteSessionTreeAsync(
-        string workspaceId,
-        string sessionId,
-        CancellationToken ct = default
-    )
-    {
-        try
-        {
-            var subs = await GetSubSessionsAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
-            foreach (var sub in subs)
-            {
-                try
-                {
-                    await _sessionRepository
-                        .DeleteSessionAsync(workspaceId, sub.Id, ct)
-                        .ConfigureAwait(false);
-                }
-                catch { }
-            }
-            bool ok = await _sessionRepository
-                .DeleteSessionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-            try
-            {
-                Infrastructure.Logging.HaloLogger.App.Info(
-                    $"[SubAgent] delete-tree parent={sessionId} subs={subs.Count}"
-                );
-            }
-            catch { }
-            return ok;
-        }
-        catch
-        {
-            return await _sessionRepository
-                .DeleteSessionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-        }
-    }
-
     public async Task<bool> UpdateSubStatusAsync(
         string workspaceId,
         string sessionId,
@@ -681,6 +656,9 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         CancellationToken ct = default
     )
     {
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
         var meta = await _sessionRepository
             .LoadSessionMetaAsync(workspaceId, sessionId, ct)
             .ConfigureAwait(false);

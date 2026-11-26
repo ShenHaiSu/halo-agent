@@ -45,6 +45,8 @@ public sealed partial class HostBridgeFacade
         string? requestId = null
     )
     {
+        IDisposable? workspaceLease = null;
+        bool workspaceLeaseHandedOff = false;
         try
         {
             try
@@ -70,6 +72,14 @@ public sealed partial class HostBridgeFacade
             {
                 return BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空");
             }
+            workspaceLease = _workspaceSessionService.TryAcquireWorkspaceSharedLease(
+                workspaceId.Trim()
+            );
+            if (workspaceLease == null)
+            {
+                return BridgeResponse<string>.Fail("WORKSPACE_BUSY", "工作区正在执行会话删除，请稍后重试");
+            }
+
             string turnKey = "agent:" + sessionId.Trim();
             // need22-P1 T1：sendPrompt requestId 回显去重（重复投递直接成功回显，不重起一轮）。
             string turnRequestId = string.IsNullOrWhiteSpace(requestId)
@@ -203,10 +213,12 @@ public sealed partial class HostBridgeFacade
                         _activeAgentRequestIds.TryRemove(turnKey, out _);
                         cts.Dispose();
                         operationLease?.Dispose();
+                        workspaceLease?.Dispose();
                     }
                 },
                 CancellationToken.None
             );
+            workspaceLeaseHandedOff = true;
 
             return BridgeResponse<string>.Success(sessId, "Agent 推理已启动");
         }
@@ -214,6 +226,11 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("StartAgentTurn failed", ex);
             return BridgeResponse<string>.Fail("AGENT_START_ERROR", ex.Message);
+        }
+        finally
+        {
+            if (!workspaceLeaseHandedOff)
+                workspaceLease?.Dispose();
         }
     }
 

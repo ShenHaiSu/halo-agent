@@ -90,7 +90,12 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         _sessionOperations = sessionOperationCoordinator ?? SessionOperationCoordinator.Shared;
         _workspaceSessionService =
             workspaceSessionService
-            ?? new WorkspaceSessionService(_sessionRepository, _sessionOperations);
+            ?? new WorkspaceSessionService(
+                _sessionRepository,
+                _sessionOperations,
+                WorkspaceLifecycleGate.Shared,
+                id => _subCoordinator?.CancelTree(id)
+            );
         _tokenBudgetService =
             tokenBudgetService
             ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);

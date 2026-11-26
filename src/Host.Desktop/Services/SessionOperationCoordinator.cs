@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 
 namespace Host.Desktop.Services;
@@ -49,6 +51,28 @@ public sealed class SessionOperationLease : IDisposable
     {
         if (Interlocked.Exchange(ref _released, 1) == 0)
             _coordinator.ReleaseByOwner(_key, Owner);
+    }
+}
+
+/// <summary>按稳定顺序一次获取的会话领域锁租约；任一步失败会释放已获取的全部租约。</summary>
+public sealed class SessionOperationBatchLease : IDisposable
+{
+    private readonly List<SessionOperationLease> _leases;
+    private int _released;
+
+    internal SessionOperationBatchLease(IEnumerable<SessionOperationLease> leases)
+    {
+        _leases = leases.ToList();
+    }
+
+    public int Count => _leases.Count;
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _released, 1) != 0)
+            return;
+        for (int i = _leases.Count - 1; i >= 0; i--)
+            _leases[i].Dispose();
     }
 }
 
@@ -110,6 +134,37 @@ public sealed class SessionOperationCoordinator
             }
             Thread.Sleep(10);
         }
+    }
+
+    public bool TryAcquireBatch(
+        string workspaceId,
+        IEnumerable<string> sessionIds,
+        SessionOperationKind kind,
+        out SessionOperationBatchLease? lease
+    )
+    {
+        var stableIds = sessionIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(id => id, StringComparer.Ordinal)
+            .ToList();
+        var acquired = new List<SessionOperationLease>(stableIds.Count);
+        foreach (string sessionId in stableIds)
+        {
+            if (!TryAcquire(workspaceId, sessionId, kind, out var sessionLease))
+            {
+                for (int i = acquired.Count - 1; i >= 0; i--)
+                    acquired[i].Dispose();
+                lease = null;
+                return false;
+            }
+            acquired.Add(sessionLease!);
+        }
+
+        lease = new SessionOperationBatchLease(acquired);
+        return true;
     }
 
     /// <summary>仅持有者可释放；重复释放或非持有者释放均不影响当前持有者。</summary>

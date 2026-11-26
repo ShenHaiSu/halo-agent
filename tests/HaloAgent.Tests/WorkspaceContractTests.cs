@@ -292,6 +292,12 @@ public sealed class WorkspaceContractTests
             CancellationToken ct = default
         ) => Task.CompletedTask;
 
+        public Task DeleteSessionPartitionsAsync(
+            string workspaceId,
+            IReadOnlyCollection<string> sessionIds,
+            CancellationToken ct = default
+        ) => Task.CompletedTask;
+
         public Task<WorkspaceBackupInfo> BackupWorkspaceAsync(
             string workspaceId,
             CancellationToken ct = default

@@ -1560,37 +1560,54 @@ public sealed partial class SessionHistoryStore
         return Task.CompletedTask;
     }
 
-    /// <summary>工作区库会话删除：按会话分区删除全部行（不碰其他会话）。</summary>
-    public Task DeleteSessionPartitionAsync(
+    /// <summary>工作区库会话删除：按稳定顺序在单事务内删除全部会话分区。</summary>
+    public Task DeleteSessionPartitionsAsync(
         string workspaceId,
-        string sessionId,
+        IReadOnlyCollection<string> sessionIds,
         CancellationToken ct = default
     )
     {
         ct.ThrowIfCancellationRequested();
+        var stableIds = sessionIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(id => id, StringComparer.Ordinal)
+            .ToList();
+        if (stableIds.Count == 0)
+            return Task.CompletedTask;
+
         string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
         if (!File.Exists(dbPath))
-        {
             return Task.CompletedTask;
-        }
+
         _db.EnsureWorkspaceDatabase(workspaceId);
         using var conn = _db.OpenWorkspace(workspaceId);
-        foreach (string table in new[] { "messages", "blocks", "turns", "sessions" })
+        using var tx = conn.BeginTransaction();
+        foreach (string sessionId in stableIds)
         {
-            using var cmd = conn.CreateCommand();
-            if (string.Equals(table, "sessions", StringComparison.Ordinal))
+            ct.ThrowIfCancellationRequested();
+            foreach (string table in new[] { "messages", "blocks", "turns", "sessions" })
             {
-                cmd.CommandText = "DELETE FROM sessions WHERE session_id = $sid;";
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText =
+                    "DELETE FROM " + table + " WHERE session_id = $sid COLLATE NOCASE;";
+                cmd.Parameters.AddWithValue("$sid", sessionId);
+                cmd.ExecuteNonQuery();
             }
-            else
-            {
-                cmd.CommandText = "DELETE FROM " + table + " WHERE session_id = $sid;";
-            }
-            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
-            cmd.ExecuteNonQuery();
         }
+        tx.Commit();
         return Task.CompletedTask;
     }
+
+    /// <summary>工作区库会话删除：单 ID 便捷入口，委托批量事务。</summary>
+    public Task DeleteSessionPartitionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    ) => DeleteSessionPartitionsAsync(workspaceId, new[] { sessionId ?? string.Empty }, ct);
 
     private static string NormalizeSessionKind(string? kind)
     {

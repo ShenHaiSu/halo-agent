@@ -106,6 +106,13 @@ public interface IWorkspaceSessionStore
     /// <summary>会话生命周期：删除工作区库中指定会话分区的全部行。</summary>
     Task DeleteSessionAsync(string workspaceId, string sessionId, CancellationToken ct = default);
 
+    /// <summary>会话生命周期：在单事务内删除工作区库中全部指定会话分区。</summary>
+    Task DeleteSessionPartitionsAsync(
+        string workspaceId,
+        IReadOnlyCollection<string> sessionIds,
+        CancellationToken ct = default
+    );
+
     /// <summary>会话生命周期：对工作区库做在线一致性快照，返回快照位置信息。</summary>
     Task<WorkspaceBackupInfo> BackupWorkspaceAsync(
         string workspaceId,
