@@ -77,4 +77,31 @@ public sealed class HistoryContractTests
         Assert.DoesNotContain("newSessionId", json);
         Assert.DoesNotContain("failedStage", json);
     }
+
+    [Fact]
+    public void ProjectedUserOnlySummaryKeepsDtoShapeAndCamelCase()
+    {
+        // 与历史孤儿合成轮同形状：cancelled 零块、空 lastRequestId、无助手锚点。
+        var summary = new TurnSummary
+        {
+            TurnId = "uturn-user-old",
+            UserContent = "旧消息",
+            Status = "cancelled",
+            LastRequestId = string.Empty,
+            UserMessageId = "user-old",
+            AssistantMessageId = null,
+            CreatedAtUtc = "2026-11-26T00:00:00.0000000Z",
+            UpdatedAtUtc = "2026-11-26T00:00:00.0000000Z",
+            AnchorKey = "uturn-user-old",
+        };
+        string json = JsonSerializer.Serialize(summary, HaloJsonOptions.CompactCamelCase);
+
+        Assert.Contains("\"turnId\":\"uturn-user-old\"", json);
+        Assert.Contains("\"userMessageId\":\"user-old\"", json);
+        Assert.Contains("\"assistantMessageId\":null", json);
+        Assert.Contains("\"lastRequestId\":\"\"", json);
+        Assert.Contains("\"status\":\"cancelled\"", json);
+        Assert.Contains("\"turnSeq\":0", json);
+        Assert.DoesNotContain("TurnId", json); // 无 PascalCase 残留。
+    }
 }

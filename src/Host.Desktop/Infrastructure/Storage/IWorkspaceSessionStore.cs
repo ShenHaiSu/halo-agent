@@ -25,6 +25,14 @@ public interface IWorkspaceSessionStore
         CancellationToken ct = default
     );
 
+    /// <summary>历史缺失 user 投影专用：只读指定 id 的正文与时间，不返回图片与工具字段。</summary>
+    Task<List<HistoryUserTurn>> GetUserTurnsAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default
+    );
+
     /// <summary>过程层：展开指定回合时按需取块标识与预览，完整正文按块二次加载。</summary>
     Task<List<TimelineBlockContent>> GetBlockIdsAsync(
         string workspaceId,

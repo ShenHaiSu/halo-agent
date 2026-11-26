@@ -16,6 +16,9 @@ public sealed partial class SessionHistoryStore
     public const long LargeBlockThresholdBytes = 64L * 1024;
     public const int LargeBlockPreviewChars = 4096;
 
+    /// <summary>历史缺失 user 单批查询上限，避免 IN 参数膨胀成慢查询。</summary>
+    public const int UserTurnQueryBatchSize = 200;
+
     private readonly SessionHistoryDb _db;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _writeLocks = new();
 
@@ -846,6 +849,83 @@ public sealed partial class SessionHistoryStore
             string role = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             string? kind = reader.IsDBNull(2) ? null : reader.GetString(2);
             result.Add(new HistoryMessageRef(id, role, kind));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 历史缺失 user 的只读正文查询：只取 id/content/created_utc/seq，不碰图片与工具字段。
+    /// 库不存在返回空；查询失败向上抛，由 Bridge 归一为 TIMELINE_ERROR，不伪装成“没有孤儿”。
+    /// </summary>
+    public async Task<List<HistoryUserTurn>> GetUserTurnsAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default
+    )
+    {
+        var result = new List<HistoryUserTurn>();
+        if (messageIds == null || messageIds.Count == 0)
+            return result;
+
+        // 去重、过滤空白，ID 只来自数据库侧传入，仍做一次防御性规范化。
+        var ids = new List<string>(messageIds.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string? id in messageIds)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            if (seen.Add(id))
+                ids.Add(id);
+        }
+        if (ids.Count == 0)
+            return result;
+
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return result;
+        _db.EnsureWorkspaceDatabase(workspaceId);
+
+        using var conn = _db.OpenWorkspace(workspaceId);
+        for (int offset = 0; offset < ids.Count; offset += UserTurnQueryBatchSize)
+        {
+            int take = Math.Min(UserTurnQueryBatchSize, ids.Count - offset);
+            var names = new List<string>(take);
+            using var cmd = conn.CreateCommand();
+            var sql = new System.Text.StringBuilder();
+            sql.Append(
+                "SELECT id, content, created_utc, seq FROM messages"
+                    + " WHERE session_id = $sid AND id IN ("
+            );
+            for (int i = 0; i < take; i++)
+            {
+                string name = "$uid" + i;
+                names.Add(name);
+                if (i > 0)
+                    sql.Append(',');
+                sql.Append(name);
+                var parameter = cmd.CreateParameter();
+                parameter.ParameterName = name;
+                parameter.Value = ids[offset + i];
+                cmd.Parameters.Add(parameter);
+            }
+            sql.Append(") ORDER BY seq;");
+            cmd.CommandText = sql.ToString();
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+
+            using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (reader.IsDBNull(0))
+                    continue;
+                string id = reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                string content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                string created = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                long seq = reader.IsDBNull(3) ? 0 : reader.GetInt64(3);
+                result.Add(new HistoryUserTurn(id, content, created, seq));
+            }
         }
         return result;
     }

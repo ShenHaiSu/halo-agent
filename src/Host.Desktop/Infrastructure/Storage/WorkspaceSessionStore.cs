@@ -140,6 +140,13 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
         CancellationToken ct = default
     ) => _inner.GetMessageRefsAsync(workspaceId, sessionId, ct);
 
+    public Task<List<HistoryUserTurn>> GetUserTurnsAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default
+    ) => _inner.GetUserTurnsAsync(workspaceId, sessionId, messageIds, ct);
+
     public async Task<List<TimelineBlockContent>> GetBlockIdsAsync(
         string workspaceId,
         string sessionId,

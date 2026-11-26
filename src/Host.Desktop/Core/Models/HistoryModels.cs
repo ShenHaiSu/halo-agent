@@ -6,6 +6,14 @@ namespace Host.Desktop.Core.Models;
 /// <summary>轻量消息引用：仅含锚点投影所需字段，不携带正文、工具调用或图片字节。</summary>
 public sealed record HistoryMessageRef(string Id, string Role, string? Kind);
 
+/// <summary>历史缺失 user 的只读投影输入：仅含合成取消轮所需字段，不携带图片、工具调用或字节。</summary>
+public sealed record HistoryUserTurn(
+    string Id,
+    string Content,
+    string CreatedAtUtc,
+    long MessageSeq
+);
+
 /// <summary>重放图片引用：lost 的图片只产生警告，不参与重新发送。</summary>
 public sealed class HistoryReplayImageDto
 {

@@ -97,7 +97,8 @@ public static class HistoryAnchorProjector
     private static bool IsCompact(TurnSummary summary) =>
         string.Equals(summary.Kind, "compact", StringComparison.OrdinalIgnoreCase);
 
-    private static string? ExtractCandidateMessageId(string? turnId)
+    /// <summary>从展示 turnId 提取候选消息主键，供历史缺失轮投影复用同一套解析规则。</summary>
+    internal static string? ExtractCandidateMessageId(string? turnId)
     {
         if (string.IsNullOrWhiteSpace(turnId))
             return null;

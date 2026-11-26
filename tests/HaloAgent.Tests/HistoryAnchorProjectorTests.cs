@@ -133,4 +133,45 @@ public sealed class HistoryAnchorProjectorTests
         Assert.Equal("compact", summaries[0].Kind);
         Assert.Null(summaries[0].AssistantMessageId);
     }
+
+    [Fact]
+    public void SynthesizedUserOnlyTurnCarriesUserAnchorButNoAssistant()
+    {
+        var refs = new List<HistoryMessageRef>
+        {
+            new("user-old", "user", null),
+            new("assistant-later", "assistant", null),
+        };
+        // 真实链路：合成轮在锚点投影之后产生，锚点由投影器直接填充，不再二次投影。
+        var synthesized = HistoryTurnProjector.ProjectMissingUserTurns(
+            new List<TurnSummary>(),
+            refs,
+            new List<HistoryUserTurn>
+            {
+                new("user-old", "旧消息", "2026-11-26T00:00:00.0000000Z", 1),
+            },
+            hasActiveAgentTurn: false
+        );
+
+        Assert.Equal("user-old", synthesized[0].UserMessageId);
+        Assert.Null(synthesized[0].AssistantMessageId);
+    }
+
+    [Fact]
+    public void AnchorProjectionDoesNotDisturbExistingNormalTurns()
+    {
+        var refs = StandardRefs();
+        var existing = new List<TurnSummary> { Turn("uturn-u1") };
+        var projected = HistoryTurnProjector.ProjectMissingUserTurns(
+            existing,
+            refs,
+            new List<HistoryUserTurn>(),
+            false
+        );
+
+        HistoryAnchorProjector.Project(projected, refs);
+
+        Assert.Equal("u1", projected[0].UserMessageId);
+        Assert.Equal("a2", projected[0].AssistantMessageId);
+    }
 }

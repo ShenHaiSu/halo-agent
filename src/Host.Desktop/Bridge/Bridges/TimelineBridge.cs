@@ -42,7 +42,30 @@ public sealed partial class HostBridgeFacade
                 .GetMessageRefsAsync(workspaceId, sessionId)
                 .ConfigureAwait(false);
             HistoryAnchorProjector.Project(summaries, messageRefs);
-            return BridgeResponse<List<TurnSummary>>.Success(summaries);
+
+            // 历史孤儿只读投影：补出 messages 有 user、turns 无摘要的取消轮，不写库。
+            var representedIds = HistoryTurnProjector.CollectRepresentedUserIds(summaries);
+            var missingRefs = HistoryTurnProjector.FindMissingUserRefs(messageRefs, representedIds);
+            var missingUsers =
+                missingRefs.Count == 0
+                    ? new List<HistoryUserTurn>()
+                    : await store
+                        .GetUserTurnsAsync(
+                            workspaceId,
+                            sessionId,
+                            missingRefs.ConvertAll(r => r.Id)
+                        )
+                        .ConfigureAwait(false);
+            bool hasActiveTurn = _activeSessionTokens.ContainsKey("agent:" + sessionId.Trim());
+            var projected = HistoryTurnProjector.ProjectMissingUserTurns(
+                summaries,
+                messageRefs,
+                missingUsers,
+                hasActiveTurn
+            );
+            return BridgeResponse<List<TurnSummary>>.Success(
+                projected as List<TurnSummary> ?? new List<TurnSummary>(projected)
+            );
         }
         catch (LegacySessionFormatException ex)
         {
