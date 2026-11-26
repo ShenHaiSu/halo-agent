@@ -11,8 +11,11 @@ namespace Host.Desktop.Services;
 
 public sealed partial class SubAgentCoordinator
 {
-    /// <summary>need22-P1 T4：Barrier 总体超时预算（子数×单子超时+buffer；单子超时取 turnTimeoutMs）。</summary>
-    private TimeSpan ResolveBarrierBudget(int subCount)
+    /// <summary>Barrier 预算占主轮超时的比例，留余量给回填与主轮继续推理。</summary>
+    private const double SubBarrierMainTurnRatio = 0.8;
+
+    /// <summary>Barrier 总体超时预算（子数×单子超时+buffer，再受主轮超时联动约束；0=无限时跳过联动）。</summary>
+    internal TimeSpan ResolveBarrierBudget(int subCount)
     {
         try
         {
@@ -25,6 +28,12 @@ public sealed partial class SubAgentCoordinator
                         : Host.Desktop.Core.Models.AgentDefaults.TurnTimeoutMs;
                 long buffer = Math.Max(0, cfg.SubBarrierBufferMs);
                 long total = checked((long)subCount * single + buffer);
+                long mainTurnTimeout = cfg.TurnTimeoutMs;
+                if (mainTurnTimeout > 0)
+                {
+                    long ceiling = (long)Math.Floor(mainTurnTimeout * SubBarrierMainTurnRatio);
+                    total = Math.Min(total, ceiling);
+                }
                 return TimeSpan.FromMilliseconds(
                     Math.Clamp(
                         total,
