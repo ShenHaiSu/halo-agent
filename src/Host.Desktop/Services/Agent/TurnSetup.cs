@@ -293,16 +293,24 @@ public sealed partial class AgentOrchestrator
                 ctx.CfgToolsDeny = cfg.ToolsDenylist;
                 ctx.CfgClosedWorld = cfg.StrictToolsMode != StrictToolsMode.Off;
                 ctx.CfgEnableJsonRepair = cfg.EnableJsonRepair;
-                if (cfg.MaxIterations == 0)
-                    effectiveMax = 0;
-                else if (cfg.MaxIterations > 0)
-                    effectiveMax = Math.Min(cfg.MaxIterations, AgentDefaults.HardIterationsCeil);
-                else
+                // 子实例的轮次上限来自 spawn 参数（或子默认设置），已在构造值中 clamp；
+                // 全局轮次上限只作用于主轮，避免覆盖子实例各自独立的预算。
+                if (!string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
                 {
-                    HaloLogger.App.Warn(
-                        $"[Agent] agent.json 轮次非法（{cfg.MaxIterations}），已回退构造值 {MaxIterations}"
-                    );
-                    effectiveMax = MaxIterations;
+                    if (cfg.MaxIterations == 0)
+                        effectiveMax = 0;
+                    else if (cfg.MaxIterations > 0)
+                        effectiveMax = Math.Min(
+                            cfg.MaxIterations,
+                            AgentDefaults.HardIterationsCeil
+                        );
+                    else
+                    {
+                        HaloLogger.App.Warn(
+                            $"[Agent] agent.json 轮次非法（{cfg.MaxIterations}），已回退构造值 {MaxIterations}"
+                        );
+                        effectiveMax = MaxIterations;
+                    }
                 }
             }
         }
