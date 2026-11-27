@@ -121,18 +121,49 @@ public sealed partial class SessionRepository : ISessionRepository
         await _workspacesIndexLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct)
-                .ConfigureAwait(false);
-            var list = JsonSerializer.Deserialize<List<WorkspaceInfo>>(
-                json,
-                HaloJsonOptions.IndentedCamelCase
-            );
-            return list ?? new List<WorkspaceInfo>();
+            return await LoadWorkspacesIndexNoLockAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("Failed to load workspaces index", ex);
             return new List<WorkspaceInfo>();
+        }
+        finally
+        {
+            _workspacesIndexLock.Release();
+        }
+    }
+
+    /// <summary>内部读取，不取锁；异常向上传播，供破坏性索引变更判定权威失败。</summary>
+    private async Task<List<WorkspaceInfo>> LoadWorkspacesIndexNoLockAsync(CancellationToken ct)
+    {
+        if (!File.Exists(GetWorkspacesIndexPath()))
+            return new List<WorkspaceInfo>();
+        string json = await File.ReadAllTextAsync(GetWorkspacesIndexPath(), Encoding.UTF8, ct)
+            .ConfigureAwait(false);
+        return JsonSerializer.Deserialize<List<WorkspaceInfo>>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? new List<WorkspaceInfo>();
+    }
+
+    public async Task<WorkspaceInfo?> MutateWorkspacesIndexAsync(
+        Func<List<WorkspaceInfo>, WorkspaceInfo?> mutate,
+        CancellationToken ct = default
+    )
+    {
+        if (mutate == null)
+            throw new ArgumentNullException(nameof(mutate));
+
+        await _workspacesIndexLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var workspaces = await LoadWorkspacesIndexNoLockAsync(ct).ConfigureAwait(false);
+            var removed = mutate(workspaces);
+            await AtomicFileWriter
+                .WriteJsonAtomicAsync(GetWorkspacesIndexPath(), workspaces, ct)
+                .ConfigureAwait(false);
+            return removed;
         }
         finally
         {

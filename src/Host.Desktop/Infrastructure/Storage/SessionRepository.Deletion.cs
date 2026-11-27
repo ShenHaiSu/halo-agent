@@ -270,7 +270,7 @@ internal static class SessionDirectoryDeletion
         return TryResolveChildDirectory(workspaceDirectory, sessionId, out directory);
     }
 
-    private static bool TryResolveChildDirectory(
+    internal static bool TryResolveChildDirectory(
         string parent,
         string? segment,
         out string directory

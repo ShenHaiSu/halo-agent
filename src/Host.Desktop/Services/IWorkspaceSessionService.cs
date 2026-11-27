@@ -40,6 +40,18 @@ public interface IWorkspaceSessionService
         bool deletePhysicalSessionFolder = true,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 显式双模式移除工作区：解绑保留会话数据，彻底删除只清理两个明确根目录。
+    /// cancelWorkspaceSessions 用于 Purge 前取消该工作区全部已知会话。
+    /// </summary>
+    Task<WorkspaceRemovalResult> RemoveWorkspaceV2Async(
+        string workspaceId,
+        WorkspaceRemovalMode mode,
+        CancellationToken ct = default,
+        Action<string>? cancelWorkspaceSessions = null
+    );
+
     Task<bool> SetWorkspacePreferenceAsync(
         string workspaceId,
         string? providerId,

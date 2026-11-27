@@ -134,6 +134,11 @@ internal sealed class MetadataFailingRepository : ISessionRepository
     public Task<List<WorkspaceInfo>> LoadWorkspacesIndexAsync(CancellationToken ct = default) =>
         _inner.LoadWorkspacesIndexAsync(ct);
 
+    public Task<WorkspaceInfo?> MutateWorkspacesIndexAsync(
+        Func<List<WorkspaceInfo>, WorkspaceInfo?> mutate,
+        CancellationToken ct = default
+    ) => _inner.MutateWorkspacesIndexAsync(mutate, ct);
+
     public Task SaveWorkspacesIndexAsync(
         List<WorkspaceInfo> workspaces,
         CancellationToken ct = default

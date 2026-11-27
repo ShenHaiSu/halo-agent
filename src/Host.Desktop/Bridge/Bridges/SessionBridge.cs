@@ -87,21 +87,86 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<bool>> RemoveWorkspace(string workspaceId)
+    /// <summary>显式双模式入口：mode 只接受 unbind / purge；旧方法不会静默获得 Purge 能力。</summary>
+    public async Task<BridgeResponse<WorkspaceRemovalResultDto>> RemoveWorkspaceV2(
+        string workspaceId,
+        string mode
+    )
     {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "INVALID_WORKSPACE_ID",
+                "工作区 ID 不能为空"
+            );
+        if (!WorkspaceRemovalModeParser.TryParse(mode, out var parsedMode))
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "WORKSPACE_VALIDATION",
+                "移除模式只接受 unbind 或 purge"
+            );
+
         try
         {
-            bool removed = await _workspaceSessionService
-                .RemoveWorkspaceAsync(workspaceId)
+            Action<string>? cancelTree =
+                _subCoordinator == null ? null : id => _subCoordinator.CancelTree(id);
+            var result = await _workspaceSessionService
+                .RemoveWorkspaceV2Async(workspaceId.Trim(), parsedMode, default, cancelTree)
                 .ConfigureAwait(false);
-            return BridgeResponse<bool>.Success(removed);
+            return BridgeResponse<WorkspaceRemovalResultDto>.Success(
+                WorkspaceRemovalResultDto.FromResult(result),
+                result.Outcome switch
+                {
+                    WorkspaceRemovalOutcome.Completed
+                        => parsedMode == WorkspaceRemovalMode.Unbind ? "已移出列表；物理清理完成" : "工作区已彻底删除",
+                    WorkspaceRemovalOutcome.CompletedWithWarnings => "已移出列表，但部分物理数据清理失败或被保守保留",
+                    WorkspaceRemovalOutcome.NotFound => "工作区不存在",
+                    _ => WorkspaceRemovalErrorMessage(result.ErrorCode),
+                }
+            );
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"RemoveWorkspace failed for id '{workspaceId}'", ex);
-            return BridgeResponse<bool>.Fail(ex.Message, "WORKSPACE_ERROR");
+            HaloLogger.App.Error(
+                $"RemoveWorkspaceV2 failed for id '{workspaceId}' mode '{mode}'",
+                ex
+            );
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "WORKSPACE_REMOVAL_ERROR",
+                WorkspaceRemovalErrorMessage("WORKSPACE_REMOVAL_ERROR")
+            );
         }
     }
+
+    /// <summary>旧入口保持“仅移出列表”的文案语义：新宿主上永远安全解绑，不再默认彻底删除。</summary>
+    public async Task<BridgeResponse<bool>> RemoveWorkspace(string workspaceId)
+    {
+        var response = await RemoveWorkspaceV2(workspaceId, "unbind").ConfigureAwait(false);
+        if (!response.Ok)
+        {
+            return BridgeResponse<bool>.Fail(
+                response.Code ?? "WORKSPACE_REMOVAL_ERROR",
+                response.Message ?? WorkspaceRemovalErrorMessage(response.Code)
+            );
+        }
+        return BridgeResponse<bool>.Success(
+            response.Data?.WorkspaceUnbound == true,
+            response.Message
+        );
+    }
+
+    private static string WorkspaceRemovalErrorMessage(string? code) =>
+        code switch
+        {
+            "INVALID_WORKSPACE_ID" => "工作区 ID 不能为空或不合法",
+            "WORKSPACE_VALIDATION" => "移除模式只接受 unbind 或 purge",
+            "WORKSPACE_BUSY" => "工作区正在执行其他操作，请稍后重试",
+            "CANCEL_FAILED" => "无法确认会话已停止，未执行删除",
+            "REPARSE_POINT_UNSUPPORTED" => "检测到链接目录，出于安全原因未执行删除",
+            "PATH_TRAVERSAL" => "工作区路径越界，未执行删除",
+            "SESSIONS_INDEX_INVALID" => "会话索引损坏，未执行删除",
+            "WORKSPACE_NOT_FOUND" => "工作区不存在",
+            "DELETE_CANCELLED" => "移除已取消",
+            _ => "工作区移除失败，请查看日志后重试",
+        };
 
     public async Task<BridgeResponse<string?>> BrowseWorkspaceFolder(string? initialPath = null)
     {

@@ -17,6 +17,16 @@ public interface ISessionRepository
 {
     StoragePathManager Storage { get; }
     Task<List<WorkspaceInfo>> LoadWorkspacesIndexAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// 在同一把全局索引锁内完成 workspaces-index.json 的严格读-改-写。
+    /// 索引损坏或 IO 失败必须抛出，绝不把损坏当作空列表回写；mutate 返回被移除的工作区。
+    /// </summary>
+    Task<WorkspaceInfo?> MutateWorkspacesIndexAsync(
+        Func<List<WorkspaceInfo>, WorkspaceInfo?> mutate,
+        CancellationToken ct = default
+    );
+
     Task SaveWorkspacesIndexAsync(List<WorkspaceInfo> workspaces, CancellationToken ct = default);
     Task<List<SessionMetadata>> LoadSessionsIndexAsync(
         string workspaceId,
