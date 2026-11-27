@@ -95,6 +95,8 @@ type ChartLike = {
   getOption: () => {
     series?: Array<{ data?: unknown }>;
     xAxis?: Array<{ data?: unknown }>;
+    yAxis?: Array<{ axisLabel?: { formatter?: (v: number) => string } }>;
+    grid?: Array<{ containLabel?: boolean }>;
     tooltip?: Array<{
       trigger?: string;
       formatter?: (params: unknown) => string;
@@ -286,6 +288,23 @@ describe('UsageAnalyticsView（用量分析筛选 → 图表刷新）', () => {
     expect(store.filter.endDate).toBeUndefined();
     // 回落必须触发重新查询（否则图表仍是旧区间的数据）
     expect(bridgeStub.getUsageTrend.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('用量趋势纵轴不被裁剪（containLabel + 瘦身）', async () => {
+    await mountView(pinia);
+    const stacked = chartInstances[0] as ChartLike;
+    const opt = stacked.getOption();
+
+    // A: 网格必须包含 label，让 120M 级数值自适应留边，不被抽屉 overflow-x-hidden 裁掉
+    expect(opt.grid?.[0]?.containLabel).toBe(true);
+
+    // D: 轴 label 去多余 0（120.00M→120M），<1000 整数与 tooltip 口径一致
+    const fmt = opt.yAxis?.[0]?.axisLabel?.formatter;
+    expect(fmt).toBeTypeOf('function');
+    expect(fmt?.(120_000_000)).toBe('120M');
+    expect(fmt?.(2_500_000)).toBe('2.5M');
+    expect(fmt?.(10_000)).toBe('10K');
+    expect(fmt?.(999)).toBe('999');
   });
 
   it('筛选后不重复重绘（notMerge 下重复 setOption 会重播动画、图表闪一下）', async () => {

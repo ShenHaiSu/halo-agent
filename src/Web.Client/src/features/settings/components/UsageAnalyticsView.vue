@@ -329,6 +329,16 @@ function fmtInt(n: number): string {
 function fmtToken(n: number): string {
   return formatTokenShort(n);
 }
+/**
+ * 纵轴 label 瘦身（仅轴用）：去多余 0，省约 20% 宽度。
+ * 120.00M→120M / 2.50M→2.5M / 10.0K→10K；<1000 的逗号整数原样返回。
+ * 不动全局 formatTokenShort（瓦片/tooltip/单测仍用原口径）。
+ */
+function fmtTokenAxis(v: number): string {
+  return formatTokenShort(v)
+    .replace(/(\.\d*?[1-9])0+([KM])$/, '$1$2')
+    .replace(/\.0+([KM])$/, '$1');
+}
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -459,7 +469,7 @@ function renderStacked(): void {
       pageIconColor: chartMuted(),
       pageIconInactiveColor: chartSplit(),
     },
-    grid: { left: 48, right: 12, top: 36, bottom: 24 },
+    grid: { left: 8, right: 12, top: 36, bottom: 24, containLabel: true },
     xAxis: {
       type: 'category',
       data: dates,
@@ -471,7 +481,7 @@ function renderStacked(): void {
       type: 'value',
       axisLabel: {
         ...baseAxisLabel(11),
-        formatter: (v: number): string => formatTokenShort(v),
+        formatter: (v: number): string => fmtTokenAxis(v),
       },
       splitLine: { lineStyle: { color: chartSplit() } },
     },
@@ -499,7 +509,7 @@ function renderHit(): void {
         return date + '<br/>命中率: ' + (v * 100).toFixed(1) + '%';
       },
     },
-    grid: { left: 40, right: 12, top: 12, bottom: 24 },
+    grid: { left: 8, right: 12, top: 12, bottom: 24, containLabel: true },
     xAxis: {
       type: 'category',
       data: store.trend.dates,
