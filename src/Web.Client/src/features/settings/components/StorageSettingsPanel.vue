@@ -116,12 +116,32 @@
               :data-testid="`database-detail-${detail.workspaceId}`"
             >
               <template v-if="detail.measured">
-                {{ detail.workspaceId }}：已用 {{ formatBytes(detail.usedPageBytes) }} / 空闲
-                {{ formatBytes(detail.reclaimablePageBytes) }} / 备份 {{ formatBytes(detail.backupBytes) }} / WAL
+                <n-button
+                  text
+                  size="tiny"
+                  type="primary"
+                  class="font-mono text-[11px]"
+                  :title="`复制 ${detail.workspaceId}`"
+                  :data-testid="`copy-workspace-${detail.workspaceId}`"
+                  @click="handleCopyWorkspaceId(detail.workspaceId)"
+                >
+                  {{ detail.workspaceId }} </n-button
+                >：已用 {{ formatBytes(detail.usedPageBytes) }} / 空闲 {{ formatBytes(detail.reclaimablePageBytes) }} / 备份
+                {{ formatBytes(detail.backupBytes) }} / WAL
                 {{ formatBytes(detail.walBytes + detail.shmBytes) }}
               </template>
               <template v-else>
-                {{ detail.workspaceId }}：数据库明细不可用（{{ detail.warning || '未测量' }}），不显示 0 字节进度
+                <n-button
+                  text
+                  size="tiny"
+                  type="primary"
+                  class="font-mono text-[11px]"
+                  :title="`复制 ${detail.workspaceId}`"
+                  :data-testid="`copy-workspace-${detail.workspaceId}`"
+                  @click="handleCopyWorkspaceId(detail.workspaceId)"
+                >
+                  {{ detail.workspaceId }} </n-button
+                >：数据库明细不可用（{{ detail.warning || '未测量' }}），不显示 0 字节进度
               </template>
             </div>
             <div class="flex items-center gap-2 flex-wrap pt-1">
@@ -377,6 +397,7 @@ import {
   isLogChannelEmpty,
 } from '../composables/storageDisplay';
 import { selectDatabaseDetails, summarizeDatabaseDetails, useStorageMaintenance } from '../composables/useStorageMaintenance';
+import { copyTextToClipboard } from '@features/session/utils/historyAnchor';
 import StorageDiagnosticCard from './StorageDiagnosticCard.vue';
 import StorageEventTimelineCard from './StorageEventTimelineCard.vue';
 
@@ -571,6 +592,16 @@ async function handleCleanupExpiredLogs() {
   } else {
     message.error(res.message || '清理过期日志失败');
   }
+}
+
+function handleCopyWorkspaceId(id: string) {
+  const target = (id ?? '').trim();
+  if (!target) return;
+  maintenanceWorkspaceId.value = target;
+  void copyTextToClipboard(target).then((ok) => {
+    if (ok) message.success(`已复制并填入：${target}`);
+    else message.info('已填入输入框，剪贴板复制失败请手动复制');
+  });
 }
 
 function handleCompactHistory() {
