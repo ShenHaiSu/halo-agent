@@ -62,11 +62,24 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
       return isHandoffEnabled() && !!t.liveCompleting && !!t.steadyReady;
     },
     get handoffFinalText() {
-      // 正文全程用 Live 那一份；稳态盒首帧用同一文本作 markdown 种子，换手不闪 preview。
+      // 真相源优先级：稳态已对账且 requestId 精确匹配的摘要全文 > 唯一 live final 段。
+      // 绝不用整轮 streamingText 兜底——那会包含早期迭代过程正文，污染稳态种子。
+      let requestId = '';
+      try {
+        const active = t.turn?.activeTurn;
+        requestId = String(active?.handoffRequestId || active?.requestId || '');
+      } catch {
+        requestId = '';
+      }
+      if (t.steadyReady && requestId) {
+        const summaries = opts.summaryList.value || [];
+        const matched = summaries.find((s) => String(s.lastRequestId || '') === requestId);
+        const persisted = String(matched?.finalContent || '');
+        if (persisted) return persisted;
+      }
       const segs = (t.liveInclusiveSegs || []) as unknown as TimelineLiveSeg[];
       const { final } = splitHandoffSegs(segs);
-      const body = final.map((s) => String(s.text || '')).join('');
-      return body || String(t.stream.streamingText || '');
+      return final.length ? String(final[0]?.text || '') : '';
     },
     get handoffReduceHeight() {
       return isHandoffEnabled() && !!t.handoffAnim;

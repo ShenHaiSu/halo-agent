@@ -89,7 +89,19 @@
         :data-testid="`timeline-final-${turn.turnId}`"
         @contextmenu.prevent="emit('assistant-menu', $event, turn.turnId)"
       >
-        <div v-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
+        <!-- 有正文（含交接种子）就一直渲染同一份 markdown：后台对账不换 DOM、不闪加载态/preview。 -->
+        <template v-if="finalMarkdown">
+          <MarkdownStreamBlocks :text="finalMarkdown" :cache-key="finalCacheKey" />
+          <span
+            v-if="finalError"
+            class="inline-flex items-center gap-1 text-[11px] text-secondary opacity-80"
+            :data-testid="`timeline-final-reconcile-error-${turn.turnId}`"
+          >
+            正文对账失败
+            <button class="underline" :data-testid="`timeline-final-retry-${turn.turnId}`" @click.stop="reloadFinal">重试</button>
+          </span>
+        </template>
+        <div v-else-if="finalLoading" class="text-[11px] text-secondary" :data-testid="`timeline-final-loading-${turn.turnId}`">
           全文加载中…<span v-if="turn.finalPreview" class="opacity-70">{{ turn.finalPreview }}</span>
         </div>
         <div v-else-if="finalError" class="text-[11px] text-secondary" :data-testid="`timeline-final-error-${turn.turnId}`">
@@ -100,7 +112,6 @@
           正文块已删除，仅保留摘要：<span v-if="turn.finalPreview">{{ turn.finalPreview }}</span
           ><span v-else>（无摘要）</span>
         </div>
-        <MarkdownStreamBlocks v-else-if="finalMarkdown" :text="finalMarkdown" :cache-key="finalCacheKey" />
         <div v-else-if="turn.finalPreview" class="whitespace-pre-wrap">{{ turn.finalPreview }}</div>
         <div v-else class="text-[12px] text-secondary">本轮无正文，{{ turn.tools }} 个工具</div>
       </div>
@@ -168,7 +179,9 @@ const badge = computed(() => statusBadge(props.turn.status));
 const label = computed(() => processBoxLabel(props.turn));
 /** 零块终态轮：隐藏过程盒与正文空态，只保留一行紧凑终态行。 */
 const emptyTerminal = computed(() => isEmptyTerminalTurn(props.turn));
-const emptyTerminalText = computed(() => (String(props.turn.status || '').toLowerCase() === 'error' ? '本轮失败，未生成回复' : '已停止，未生成回复'));
+const emptyTerminalText = computed(() =>
+  String(props.turn.status || '').toLowerCase() === 'error' ? '本轮失败，未生成回复' : '已停止，未生成回复'
+);
 const emptyText = computed(() => {
   if (props.turn.tools > 0) return `共 ${props.turn.blocks} 个过程块，${props.turn.tools} 个工具调用。`;
   return '暂无过程内容。';
@@ -381,25 +394,49 @@ const finalMarkdown = ref('');
 const finalLoading = ref(false);
 const finalError = ref('');
 const finalMissing = ref(false);
+/** 每次 reload / 种子切换递增；过期响应一律丢弃，不覆盖当前正文。 */
+let finalRequestVersion = 0;
+/** 工作区+会话+轮+正文块：组件复用时的第二道防线，防止串轮覆写。 */
+function currentFinalContextKey(): string {
+  return [
+    String(ws.activeWorkspaceId || ''),
+    String(ws.activeSessionId || ''),
+    String(props.turn.turnId || ''),
+    String(props.turn.finalBlockId || ''),
+  ].join('|');
+}
+/** 区分「首帧本就无种子」与「曾有种子被撤销」：只有后者需要回读落盘。 */
+const hadSeed = ref(false);
 
 function resetFinal(): void {
   finalMarkdown.value = '';
+  finalLoading.value = false;
   finalError.value = '';
   finalMissing.value = false;
+  hadSeed.value = false;
 }
 
 function seedMarkdown(): string {
   return String(props.initialMarkdown || '');
 }
 
+/** 播种只作首帧过渡；不清空任何已有值之外的内容，版本号由调用方作废在途请求。 */
+function applySeed(seeded: string): void {
+  finalMarkdown.value = seeded;
+  finalLoading.value = false;
+  finalError.value = '';
+  finalMissing.value = false;
+  hadSeed.value = true;
+}
+
 async function reloadFinal(): Promise<void> {
-  if (props.turn.kind === 'compact') return; // P007：桩无正文块，不请求内容
+  if (props.turn.kind === 'compact') return; // 压缩桩无正文块，不请求内容
+  const version = ++finalRequestVersion;
+  const context = currentFinalContextKey();
+
   const seeded = seedMarkdown();
   if (seeded) {
-    finalMarkdown.value = seeded;
-    finalLoading.value = false;
-    finalError.value = '';
-    finalMissing.value = false;
+    applySeed(seeded);
     return;
   }
   const fid = (props.turn.finalBlockId || '').trim();
@@ -407,11 +444,13 @@ async function reloadFinal(): Promise<void> {
     resetFinal();
     return;
   }
-  finalLoading.value = true;
+  // 已有正文时后台对账：不清空、不显示加载态，避免二次跳变。
+  finalLoading.value = !finalMarkdown.value;
   finalError.value = '';
   finalMissing.value = false;
   try {
     const { items } = await ws.getBlockContents([fid]);
+    if (version !== finalRequestVersion || context !== currentFinalContextKey()) return;
     const hit = items[fid];
     if (hit) {
       finalMarkdown.value = String(hit.markdown || '');
@@ -420,10 +459,12 @@ async function reloadFinal(): Promise<void> {
       finalMarkdown.value = '';
       finalMissing.value = true;
     }
-  } catch (e) {
+  } catch {
+    if (version !== finalRequestVersion) return;
     finalError.value = '正文加载失败。';
+    // 保留当前 markdown，仅显示非阻塞重试，绝不回退到加载态/preview。
   } finally {
-    finalLoading.value = false;
+    if (version === finalRequestVersion) finalLoading.value = false;
   }
 }
 
@@ -431,6 +472,7 @@ watch(
   () => props.turn.turnId,
   () => {
     clearCollapseTimer();
+    ++finalRequestVersion;
     loadedOnce = false;
     blockMap.value = {};
     blockOrder.value = [];
@@ -447,28 +489,36 @@ watch(
 watch(
   () => props.turn.finalBlockId,
   () => {
+    ++finalRequestVersion;
     resetFinal();
     void reloadFinal();
   }
 );
 
 // 交接种子到达时同步落位：稳态盒在 reloadNow 时已挂载，交接窗稍后才置位，
-// 必须在换手前把全文 markdown 铺好，避免首帧出现「全文加载中…/finalPreview」pure text。
+// 必须在换手前把全文 markdown 铺好，避免首帧出现「全文加载中…/finalPreview」。
 watch(
   () => props.initialMarkdown,
-  (v) => {
-    const seeded = String(v || '');
-    if (!seeded) return;
-    finalMarkdown.value = seeded;
-    finalLoading.value = false;
-    finalError.value = '';
-    finalMissing.value = false;
+  (value) => {
+    const seeded = String(value || '');
+    if (seeded) {
+      ++finalRequestVersion; // 作废在途落盘请求
+      applySeed(seeded);
+      return;
+    }
+    if (hadSeed.value) {
+      hadSeed.value = false;
+      void reloadFinal(); // 撤销即回读落盘正文，期间保留当前 markdown
+    }
   }
 );
 onMounted(() => {
   void reloadFinal();
 });
-onUnmounted(() => clearCollapseTimer());
+onUnmounted(() => {
+  ++finalRequestVersion; // 丢弃在途响应
+  clearCollapseTimer();
+});
 </script>
 
 <style scoped>

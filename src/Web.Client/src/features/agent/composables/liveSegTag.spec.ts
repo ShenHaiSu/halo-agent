@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils';
 import { isHandoffEnabled, splitHandoffSegs } from '@features/agent/utils/handoffGrouping';
 import { provideTimelineScene } from './useTimelineScene';
 import { useTimelineView, type TimelineLiveSeg } from './timelineViewKey';
+import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 const seg = (kind: string, key: string, text: string, tag: string | null): TimelineLiveSeg => ({
   kind,
@@ -30,18 +31,34 @@ describe('交接期正文分组', () => {
     expect(process.map((s) => s.key)).toEqual(['r1', 't1']);
   });
 
-  it('多轮工具迭代下末轮正文仍唯一，不按数组末位猜测', () => {
+  it('多 final 异常只保留到达序最后一条，其余原样降级进过程槽', () => {
     const segs = [
-      seg('text', 'first', '第一轮正文', 'final'),
-      seg('tool', 'tool-1', '', 'process'),
-      seg('text', 'middle', '第二轮过程文字', 'process'),
-      seg('tool', 'tool-2', '', 'process'),
-      seg('text', 'last', '末轮正文', 'final'),
+      seg('text', 'txt-early', '早期迭代正文', 'final'),
+      seg('tool', 'tool-a', '', 'process'),
+      seg('text', 'txt-middle', '第二轮过程文字', 'process'),
+      seg('tool', 'tool-b', '', 'process'),
+      seg('text', 'txt-last', '末轮正文', 'final'),
     ];
-    // 真相源异常出现两条 final 时全部收进 final 槽，但正文不会被当过程收缩。
     const { process, final } = splitHandoffSegs(segs);
-    expect(final.map((s) => s.key)).toEqual(['first', 'last']);
-    expect(process.every((s) => s.tag === 'process')).toBe(true);
+    expect(final.map((s) => s.key)).toEqual(['txt-last']);
+    expect(process.map((s) => s.key)).toEqual(['txt-early', 'tool-a', 'txt-middle', 'tool-b']);
+    // 保留原对象与文本：降级只改分组，不丢过程内容、不改原 tag。
+    expect(process[0].text).toBe('早期迭代正文');
+    expect(process[0].tag).toBe('final');
+    expect(segs.filter((s) => s.tag === 'final').length).toBe(2);
+  });
+
+  it('final 后仍有过程工具段时不按数组末位 text 猜测正文', () => {
+    const segs = [seg('text', 'txt-answer', '末轮正文', 'final'), seg('tool', 'tool-after', '', 'process')];
+    const { process, final } = splitHandoffSegs(segs);
+    expect(final.map((s) => s.key)).toEqual(['txt-answer']);
+    expect(process.map((s) => s.key)).toEqual(['tool-after']);
+  });
+
+  it('全空白 segs 时 final 为空，不用外部整轮文本', () => {
+    const { process, final } = splitHandoffSegs([seg('text', 'txt-blank', '   ', null), seg('tool', 'tool-only', '', 'process')]);
+    expect(final).toEqual([]);
+    expect(process.map((s) => s.key)).toEqual(['txt-blank', 'tool-only']);
   });
 
   it('tag 全缺失时才按最后一个非空文本兜底', () => {
@@ -59,7 +76,7 @@ describe('交接期正文分组', () => {
 });
 
 describe('交接投影到视图模型', () => {
-  function vmFrom(source: Record<string, unknown>) {
+  function vmFrom(source: Record<string, unknown>, summaries: TurnSummary[] = []) {
     let captured: ReturnType<typeof useTimelineView> | null = null;
     const Probe = defineComponent({
       setup() {
@@ -72,7 +89,7 @@ describe('交接投影到视图模型', () => {
         provideTimelineScene(source as never, {
           renderHtml: (s) => s,
           renderStream: (s) => s,
-          summaryList: computed(() => []),
+          summaryList: computed(() => summaries),
           singleProcess: true,
         });
         return () => h(Probe);
@@ -111,5 +128,61 @@ describe('交接投影到视图模型', () => {
     const vm = vmFrom(source());
     expect(vm.handoffActive).toBe(false);
     expect(vm.handoffReduceHeight).toBe(false);
+  });
+
+  it('多 final 异常时种子只取末位 final，不拼接早期迭代正文', () => {
+    const vm = vmFrom(
+      source({
+        stream: { streamingText: '早期迭代正文\n# 末轮正文' },
+        liveInclusiveSegs: [seg('text', 'txt-early', '早期迭代正文\n', 'final'), seg('text', 'txt-last', '# 末轮正文', 'final')],
+      })
+    );
+    expect(vm.handoffFinalText).toBe('# 末轮正文');
+  });
+
+  it('没有 final 段时不再用整轮 streamingText 兜底', () => {
+    const vm = vmFrom(
+      source({
+        stream: { streamingText: '早期迭代正文\n过程文字' },
+        liveInclusiveSegs: [seg('text', 'txt-process', '早期迭代正文\n过程文字', 'process')],
+      })
+    );
+    expect(vm.handoffFinalText).toBe('');
+  });
+
+  it('稳态已对账且 requestId 精确匹配时优先取摘要 finalContent', () => {
+    const vm = vmFrom(
+      source({
+        turn: { activeTurn: { handoffRequestId: 'req-active', requestId: '' } },
+        liveInclusiveSegs: [seg('text', 'txt-live', '内存过渡种子', 'final')],
+      }),
+      [
+        {
+          turnId: 'turn-a',
+          lastRequestId: 'req-active',
+          finalContent: '# 落盘末轮正文',
+          finalPreview: '',
+        } as TurnSummary,
+      ]
+    );
+    expect(vm.handoffFinalText).toBe('# 落盘末轮正文');
+  });
+
+  it('requestId 不匹配时不取最后一条摘要，回退唯一 live final', () => {
+    const vm = vmFrom(
+      source({
+        turn: { activeTurn: { handoffRequestId: 'req-active', requestId: '' } },
+        liveInclusiveSegs: [seg('text', 'txt-live', '内存过渡种子', 'final')],
+      }),
+      [
+        {
+          turnId: 'turn-other',
+          lastRequestId: 'req-old',
+          finalContent: '# 别的轮正文',
+          finalPreview: '',
+        } as TurnSummary,
+      ]
+    );
+    expect(vm.handoffFinalText).toBe('内存过渡种子');
   });
 });

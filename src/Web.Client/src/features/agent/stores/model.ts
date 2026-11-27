@@ -34,6 +34,12 @@ export interface StreamSeg {
   callId?: string;
   persisted?: boolean;
 }
+/** 迟到 tag 事件：delta 仍在 rAF 缓冲时先记 override，seg 建成再消费。只存标签不存正文。 */
+export interface PendingTagOverride {
+  tag: 'process' | 'final';
+  reason: 'demote' | 'finalize' | 'flip';
+}
+
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
 export interface AgentToolCard {
@@ -143,6 +149,10 @@ export interface AgentTurnState {
   liveCompleting: boolean;
   /** 轮末对账（重新拉取落盘消息）已完成，稳态块可以上屏。 */
   steadyReady: boolean;
+  /** 交接窗内冻结的本轮 requestId：requestId 会在收尾清空，摘要对账仍须按轮精确匹配。 */
+  handoffRequestId: string;
+  /** 迟到 BlockTagUpdated 的轻量覆盖表（key=blockId）；建 seg 时消费，清桶时丢弃。 */
+  pendingTagOverrides: Record<string, PendingTagOverride>;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -214,6 +224,8 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     pendingUser: null,
     liveCompleting: false,
     steadyReady: false,
+    handoffRequestId: '',
+    pendingTagOverrides: {},
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
     curIteration: 0,
@@ -342,10 +354,11 @@ export function pushTextSeg(
     if (blockId && !tail.blockId) tail.blockId = blockId;
     if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
     if (tag && !tail.tag) tail.tag = tag;
+    consumePendingTag(t, tail);
     return;
   }
   const n = t.segs.length;
-  t.segs.push({
+  const seg: StreamSeg = {
     key: segKeyOf(t.sessionId, kind, t.curIteration, n),
     kind,
     iteration: t.curIteration,
@@ -354,7 +367,27 @@ export function pushTextSeg(
     blockId: blockId ?? null,
     seq: seq ?? null,
     tag: tag ?? null,
-  });
+  };
+  t.segs.push(seg);
+  consumePendingTag(t, seg);
+}
+
+/** 唯一 final：新 final 出现时旧 final 必须让位，与后端 FlipStaleFinal 语义对齐。 */
+export function markSoleFinal(t: AgentTurnState, seg: StreamSeg): void {
+  for (const s of t.segs) {
+    if (s.tag === 'final' && s !== seg) s.tag = 'process';
+  }
+  seg.tag = 'final';
+}
+
+/** seg 建成或补齐 blockId 后消费迟到 tag；命中 final 时顺带维持唯一性。 */
+function consumePendingTag(t: AgentTurnState, seg: StreamSeg): void {
+  const bid = String(seg.blockId || '');
+  const override = bid ? t.pendingTagOverrides[bid] : undefined;
+  if (!override) return;
+  if (override.tag === 'final') markSoleFinal(t, seg);
+  else seg.tag = override.tag;
+  delete t.pendingTagOverrides[bid];
 }
 
 export function demotePending(t: AgentTurnState): void {
@@ -364,12 +397,16 @@ export function demotePending(t: AgentTurnState): void {
 }
 
 export function finalizePending(t: AgentTurnState): string | null {
+  // 先清旧 final，再从后往前选最后一个非空 text：轮末任何时刻全轮至多一个 final。
+  for (const s of t.segs) {
+    if (s.tag === 'final') s.tag = 'process';
+  }
   let finalId: string | null = null;
   for (let i = t.segs.length - 1; i >= 0; i--) {
     const s = t.segs[i];
     if (s.kind !== 'text') continue;
     if (!s.text || !s.text.trim()) continue;
-    s.tag = 'final';
+    markSoleFinal(t, s);
     finalId = s.blockId || s.key;
     break;
   }

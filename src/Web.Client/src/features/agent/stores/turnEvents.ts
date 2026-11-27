@@ -11,6 +11,7 @@ import {
   getTurn,
   lastTurnSnapshot,
   markIterationTextPersisted,
+  markSoleFinal,
   resolveTargetSession,
   toast,
   touch,
@@ -279,6 +280,8 @@ export async function finishTurn(targetSessionId?: string, opts?: FinishTurnOpti
   const willDefer = deferMs > 0 && !(opts?.keepOnFailure && t.lastErrorInfo?.retry);
   if (willDefer) {
     t.liveCompleting = true;
+    // requestId 会在下方清空；交接窗的对账摘要匹配必须使用这里冻结的快照。
+    t.handoffRequestId = String(t.requestId || finishPendingId || '');
     touch(t);
     need02Debug('handoff', { requestId: t.requestId, deferMs, at: Date.now() });
   }
@@ -386,6 +389,8 @@ export async function finishTurn(targetSessionId?: string, opts?: FinishTurnOpti
     t.streamingActive = false;
     t.liveCompleting = false;
     t.steadyReady = false;
+    t.handoffRequestId = '';
+    t.pendingTagOverrides = {};
     dropSegBuf(sid);
     touch(t);
   };
@@ -575,14 +580,21 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       if (reason !== 'demote' && reason !== 'finalize' && reason !== 'flip') break;
       if (tag !== 'process' && tag !== 'final') break;
       if (!bid) break;
+      // 先把 rAF 缓冲里的 delta 建成 seg，避免 flip/finalize 事件打空后旧 final 残留。
+      flushSegBufSync(sid);
       let touched = false;
       for (const s of t.segs) {
         if (String(s.blockId || '') === bid || String(s.key || '') === bid) {
-          s.tag = tag;
+          if (tag === 'final') markSoleFinal(t, s);
+          else s.tag = tag;
           touched = true;
         }
       }
-      if (touched) touch(t);
+      if (!touched) {
+        // 事件先于 delta 到达：记轻量 override，seg 建成时消费；后到事件覆盖旧值。
+        t.pendingTagOverrides[bid] = { tag, reason: reason as 'demote' | 'finalize' | 'flip' };
+      }
+      touch(t);
       break;
     }
     default:

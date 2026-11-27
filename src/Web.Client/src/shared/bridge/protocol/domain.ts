@@ -71,6 +71,8 @@ export interface TurnSummary {
   userContent?: string;
   finalBlockId?: string | null;
   finalPreview: string;
+  /** 末轮正文全文（超限摘要为空，需按 finalBlockId 回读 block）；交接期优先于内存态拼接文本。 */
+  finalContent?: string;
   blocks: number;
   tools: number;
   failed: number;
