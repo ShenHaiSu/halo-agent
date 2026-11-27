@@ -27,6 +27,7 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
+    private WorkspaceStorageMaintenanceService? _storageMaintenance;
     private SubAgentCoordinator? _subCoordinator;
     private readonly bool _gpuDisabled;
 
@@ -56,6 +57,14 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         );
 
     private ToolRegistry ToolRegistryInternal => _toolRegistry ??= new ToolRegistry();
+
+    private WorkspaceStorageMaintenanceService StorageMaintenance =>
+        _storageMaintenance ??= new WorkspaceStorageMaintenanceService(
+            _storageManager,
+            _sessionRepository,
+            _sessionOperations,
+            WorkspaceLifecycleGate.Shared
+        );
 
     public HostBridgeFacade(
         Form? mainForm,

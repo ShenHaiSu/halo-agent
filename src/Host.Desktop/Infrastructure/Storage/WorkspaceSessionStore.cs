@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using Host.Desktop.Core.Models;
-using Microsoft.Data.Sqlite;
 
 namespace Host.Desktop.Infrastructure.Storage;
 
@@ -17,8 +15,6 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
     private readonly StoragePathManager _storage;
     private readonly ISessionRepository _repository;
     private readonly SessionHistoryStore _inner;
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> BackupLocks =
-        new(StringComparer.OrdinalIgnoreCase);
 
     public WorkspaceSessionStore(StoragePathManager storage, ISessionRepository? repository = null)
     {
@@ -348,118 +344,13 @@ public sealed class WorkspaceSessionStore : IWorkspaceSessionStore
         return _inner.DeleteSessionPartitionsAsync(workspaceId, sessionIds, ct);
     }
 
-    public async Task<WorkspaceBackupInfo> BackupWorkspaceAsync(
+    /// <summary>
+    /// 兼容门面：备份实现收敛到工作区级维护门，避免备份与压实并发。
+    /// </summary>
+    public Task<WorkspaceBackupInfo> BackupWorkspaceAsync(
         string workspaceId,
         CancellationToken ct = default
-    )
-    {
-        ct.ThrowIfCancellationRequested();
-        string dbPath = _storage.GetWorkspaceDbPath(workspaceId);
-        string backupPath = _storage.GetWorkspaceBackupPath(workspaceId);
-        var backupLock = BackupLocks.GetOrAdd(backupPath, _ => new SemaphoreSlim(1, 1));
-        await backupLock.WaitAsync(ct).ConfigureAwait(false);
-        bool createdDatabase = false;
-        bool walExisted = File.Exists(dbPath + "-wal");
-        bool shmExisted = File.Exists(dbPath + "-shm");
-        string tmpPath = backupPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            if (!File.Exists(dbPath))
-            {
-                new SessionHistoryDb(_storage).EnsureWorkspaceDatabase(workspaceId);
-                createdDatabase = true;
-            }
-
-            string? dir = Path.GetDirectoryName(backupPath);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
-            TryDeleteStaleBackups(backupPath);
-
-            // 只读连接生成在线快照：失败时不回写源库，也不提前覆盖旧备份。
-            using (
-                var conn = new SqliteConnection(
-                    new SqliteConnectionStringBuilder
-                    {
-                        DataSource = dbPath,
-                        Mode = SqliteOpenMode.ReadOnly,
-                        Cache = SqliteCacheMode.Private,
-                        Pooling = false,
-                    }.ToString()
-                )
-            )
-            {
-                conn.Open();
-                using var vacuum = conn.CreateCommand();
-                vacuum.CommandText = "VACUUM INTO $tmp;";
-                vacuum.Parameters.AddWithValue("$tmp", tmpPath);
-                vacuum.ExecuteNonQuery();
-            }
-
-            File.Move(tmpPath, backupPath, overwrite: true);
-            if (!walExisted)
-                TryDeleteFile(dbPath + "-wal");
-            if (!shmExisted)
-                TryDeleteFile(dbPath + "-shm");
-            TryDeleteStaleBackups(backupPath);
-            return new WorkspaceBackupInfo
-            {
-                WorkspaceId = workspaceId ?? string.Empty,
-                BackupPath = backupPath,
-                CreatedAtUtc = DateTime.UtcNow,
-            };
-        }
-        catch
-        {
-            TryDeleteFile(tmpPath);
-            if (createdDatabase)
-            {
-                TryDeleteFile(dbPath);
-                TryDeleteFile(dbPath + "-wal");
-                TryDeleteFile(dbPath + "-shm");
-            }
-            if (!walExisted)
-                TryDeleteFile(dbPath + "-wal");
-            if (!shmExisted)
-                TryDeleteFile(dbPath + "-shm");
-            throw;
-        }
-        finally
-        {
-            backupLock.Release();
-        }
-    }
-
-    private static void TryDeleteStaleBackups(string backupPath)
-    {
-        try
-        {
-            string? dir = Path.GetDirectoryName(backupPath);
-            if (string.IsNullOrEmpty(dir))
-                return;
-            foreach (
-                string stale in Directory.GetFiles(dir, Path.GetFileName(backupPath) + ".*.tmp")
-            )
-                TryDeleteFile(stale);
-        }
-        catch
-        {
-            // 过期临时文件清理失败不阻止新快照生成。
-        }
-    }
-
-    private static void TryDeleteFile(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch
-        {
-            // 清理失败由调用方异常或残留告警负责，不伪造成功。
-        }
-    }
+    ) => new WorkspaceDatabaseMaintenance(_storage).BackupAsync(workspaceId, ct);
 
     private string? TryReadToolOutput(string workspaceId, string sessionId, string contentRef)
     {

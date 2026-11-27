@@ -7,12 +7,23 @@ public sealed partial class StoragePathManager
 {
     /// <summary>
     /// 按受管子目录聚合存储占用。空目录也保留 0 值项；单文件读不到时逐项跳过，不影响整体统计。
+    /// SizeBytes 始终是物理字节总和；sessions 行额外挂载主库页级明细（只读 PRAGMA 快照，不阻塞写入）。
     /// </summary>
     public StorageBreakdown GetStorageBreakdown()
     {
         var root = CurrentDataRoot;
         var items = new List<StorageBreakdownItem>();
         long total = 0;
+
+        IReadOnlyList<WorkspaceDatabaseStorageDetail>? databaseDetails = null;
+        try
+        {
+            databaseDetails = new WorkspaceDatabaseStorageReader(this).MeasureAll();
+        }
+        catch
+        {
+            databaseDetails = null;
+        }
 
         foreach (var subDirectory in ManagedSubDirectories)
         {
@@ -22,7 +33,14 @@ public sealed partial class StoragePathManager
                 {
                     Name = subDirectory,
                     SizeBytes = bytes,
-                    FileCount = count
+                    FileCount = count,
+                    DatabaseDetails = string.Equals(
+                        subDirectory,
+                        "sessions",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? databaseDetails?.ToList()
+                        : null
                 }
             );
             total += bytes;
