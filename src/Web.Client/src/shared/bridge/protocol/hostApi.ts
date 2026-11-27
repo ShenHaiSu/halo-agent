@@ -7,6 +7,8 @@ import type {
   StorageMigrationResult,
   StorageValidationResult,
   SystemRuntimeInfo,
+  WorkspaceBackupCleanupResult,
+  WorkspaceCompactionResult,
 } from './base';
 import type {
   GlobalNetworkSettings,
@@ -19,11 +21,17 @@ import type {
 import type { UnifiedLlmRequestDto } from './llm';
 import type {
   AgentConfigDocument,
+  AppearanceSettingsDto,
   CompactionResultDto,
   ContextBudgetStatusDto,
+  SessionDeletionResultDto,
+  WorkspaceRemovalResultDto,
+  FirstRoundTexts,
+  HistoryCapabilities,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
   HistoryTruncateResultDto,
+  HistoryTurnDeleteResultDto,
   PromptConfigDocument,
   PromptDiagnosticsDto,
   PromptPreviewDto,
@@ -68,6 +76,10 @@ export interface HostBridgeApi {
   writeDiagnosticLog: (channel: string, message: string) => Promise<BridgeResponse<boolean>>;
   setWindowTitle: (title: string) => Promise<BridgeResponse<boolean>>;
   getStorageBreakdown: () => Promise<BridgeResponse<StorageBreakdown>>;
+  /** 手动压实工作区历史库；旧宿主缺失时由 transport 探测禁用。 */
+  compactWorkspaceHistory: (workspaceId: string) => Promise<BridgeResponse<WorkspaceCompactionResult>>;
+  /** 手动清理工作区历史库备份；旧宿主缺失时由 transport 探测禁用。 */
+  deleteWorkspaceBackup: (workspaceId: string) => Promise<BridgeResponse<WorkspaceBackupCleanupResult>>;
   getRecentHostEvents: (limit?: number) => Promise<BridgeResponse<StorageEventDto[]>>;
   cleanupImageAttachments: (retentionDays?: number, dryRun?: boolean) => Promise<BridgeResponse<string>>;
 
@@ -117,15 +129,27 @@ export interface HostBridgeApi {
   /** 设置工作区别名（纯前端视觉）；alias 传空串 = 清除别名。 */
   renameWorkspace: (workspaceId: string, alias?: string | null) => Promise<BridgeResponse<WorkspaceInfo>>;
   removeWorkspace: (workspaceId: string) => Promise<BridgeResponse<boolean>>;
+  /** 显式双模式移除；旧入口只解绑，Purge 必须走这里并做能力探测。 */
+  removeWorkspaceV2: (workspaceId: string, mode: 'unbind' | 'purge') => Promise<BridgeResponse<WorkspaceRemovalResultDto>>;
   browseWorkspaceFolder: (initialPath?: string) => Promise<BridgeResponse<string | null>>;
   getSessions: (workspaceId: string) => Promise<BridgeResponse<SessionMetadata[]>>;
   createSession: (workspaceId: string, title?: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<SessionMetadata>>;
   getSessionMessages: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
   appendSessionMessage: (workspaceId: string, sessionId: string, message: UnifiedChatMessage | string) => Promise<BridgeResponse<boolean>>;
   updateSessionTitle: (workspaceId: string, sessionId: string, title: string) => Promise<BridgeResponse<boolean>>;
-  generateSessionTitle: (workspaceId: string, sessionId: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<string>>;
+  generateSessionTitle: (
+    workspaceId: string,
+    sessionId: string,
+    providerId?: string,
+    modelId?: string,
+    force?: boolean
+  ) => Promise<BridgeResponse<string>>;
+  /** 首轮取数直读（标题链路共用）。 */
+  getFirstRoundTexts: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<FirstRoundTexts>>;
   setSessionPinned: (workspaceId: string, sessionId: string, isPinned: boolean) => Promise<BridgeResponse<boolean>>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
+  /** 严格会话树删除；Partial 保留在 data 中，不归一为成功布尔值。 */
+  deleteSessionV2: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<SessionDeletionResultDto>>;
   exportSessionMarkdown: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<string>>;
   getContextBudget: (
     providerId: string,
@@ -170,7 +194,8 @@ export interface HostBridgeApi {
     beforeMessageId?: string
   ) => Promise<BridgeResponse<UnifiedChatMessage[]>>;
   getPromptDiagnostics: (workspaceId: string, sessionId?: string) => Promise<BridgeResponse<PromptDiagnosticsDto>>;
-  // need07
+  /** 历史能力探测：旧后端方法缺失时由 transport 归一为全部不支持。 */
+  getHistoryCapabilities: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<HistoryCapabilities>>;
   truncateSessionHistory: (
     workspaceId: string,
     sessionId: string,
@@ -179,6 +204,11 @@ export interface HostBridgeApi {
   ) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
   healSessionHistory: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<HistoryHealResultDto>>;
   deleteSessionMessage: (workspaceId: string, sessionId: string, messageId: string) => Promise<BridgeResponse<HistoryDeleteResultDto>>;
+  deleteSessionTurn: (
+    workspaceId: string,
+    sessionId: string,
+    anchorMessageId: string
+  ) => Promise<BridgeResponse<HistoryTurnDeleteResultDto>>;
   // need10：技能与记忆只读管理（查/开关/删除；无新建与编辑）
   listSkillMemory: (
     kind: SkillMemoryKind,
@@ -229,4 +259,6 @@ export interface HostBridgeApi {
   getTurnBlockIds: (workspaceId: string, sessionId: string, turnId: string) => Promise<BridgeResponse<string[]>>;
   getLastActive: () => Promise<BridgeResponse<UiActiveState>>;
   setLastActive: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<boolean>>;
+  getAppearance: () => Promise<BridgeResponse<AppearanceSettingsDto>>;
+  setAppearance: (settingsJson: string) => Promise<BridgeResponse<boolean>>;
 }

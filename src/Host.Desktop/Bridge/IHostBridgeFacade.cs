@@ -27,4 +27,6 @@ public interface IHostBridgeFacade
     Task<BridgeResponse<SessionGoal>> GetGoal(string workspaceId, string sessionId);
     Task<BridgeResponse<object>> GetUsageFilterOptions();
     Task<BridgeResponse<UiActiveStateDto>> GetLastActive();
+    Task<BridgeResponse<AppearanceState>> GetAppearance();
+    Task<BridgeResponse<bool>> SetAppearance(string settingsJson);
 }

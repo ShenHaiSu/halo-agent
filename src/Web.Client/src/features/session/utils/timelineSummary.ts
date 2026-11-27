@@ -81,6 +81,20 @@ export interface SummaryAnchors {
   final: string;
 }
 
+/** 零块终态轮判断：首回复前取消/失败时后端只落 user-only 摘要，无过程盒与正文。
+ * 命中后展示层隐藏过程盒与“0 个工具”文案，只保留 user 槽与一行紧凑终态。 */
+export function isEmptyTerminalTurn(turn: FlatTimelineTurn | null | undefined): boolean {
+  if (!turn) return false;
+  const status = String(turn.status || '').toLowerCase();
+  if (status !== 'cancelled' && status !== 'error') return false;
+  if (Number(turn.blocks || 0) !== 0) return false;
+  if (Number(turn.tools || 0) !== 0) return false;
+  if (Number(turn.failed || 0) !== 0) return false;
+  if (String(turn.finalBlockId || '').trim()) return false;
+  if (String(turn.finalPreview || '').trim()) return false;
+  return true;
+}
+
 export function summaryAnchorKeys(turnId: string, finalBlockId?: string | null): SummaryAnchors {
   const base = String(turnId || '');
   const finalKey = String(finalBlockId || '').trim();

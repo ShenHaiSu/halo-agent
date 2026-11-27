@@ -11,15 +11,15 @@
   >
     <span class="toc-seq">{{ item.index }}</span>
     <span class="toc-label">{{ item.label }}</span>
-    <span v-if="item.toolCount" class="toc-badge">🔧{{ item.toolCount }}</span>
+    <span v-if="item.role !== 'compact' && item.toolCount" class="toc-badge">
+      <Wrench :size="12" aria-hidden="true" />{{ item.toolCount }}
+    </span>
   </button>
 </template>
 <script setup lang="ts">
-/**
- * need19：单个气泡（左/右对齐、tooltip、活跃态）。
- * 不计算跳转坐标，只 emit jump。
- */
+/** 单个目录气泡：只负责标签、tooltip 与跳转事件。 */
 import { computed } from 'vue';
+import { Wrench } from 'lucide-vue-next';
 import type { TocItem } from '@features/session/utils/historyToc';
 import { bubbleLabel } from '@features/session/utils/historyToc';
 
@@ -31,7 +31,18 @@ defineEmits<{
   (e: 'jump', item: TocItem): void;
 }>();
 
-const roleText = computed(() => (props.item.role === 'user' ? '用户' : props.item.role === 'assistant' ? '回复' : '系统'));
+const roleText = computed(() => {
+  switch (props.item.role) {
+    case 'user':
+      return '用户';
+    case 'assistant':
+      return '回复';
+    case 'compact':
+      return '压缩';
+    default:
+      return '系统';
+  }
+});
 const tooltipText = computed(() => {
   const t = props.item;
   const preview = bubbleLabel(t.fullText, 60) || t.label;
@@ -70,5 +81,17 @@ const tooltipText = computed(() => {
   font-size: 11px;
   color: var(--text-secondary);
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.toc-bubble--compact {
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+  background: transparent;
+}
+.toc-bubble--compact:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent-primary);
 }
 </style>

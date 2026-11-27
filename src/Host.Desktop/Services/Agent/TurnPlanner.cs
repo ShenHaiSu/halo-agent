@@ -223,18 +223,19 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            tokens.Linked.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-            // need12-P0：循环入口即取消，保住前面 iteration 已落袋行。
+            // 循环入口即取消，保住前面迭代已落袋行。
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-before-request")
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -244,7 +245,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             history = await _sessionService
-                .GetActiveContextMessagesAsync(workspaceId, sessionId, cancellationToken)
+                .GetActiveContextMessagesAsync(workspaceId, sessionId, tokens.Linked)
                 .ConfigureAwait(false);
             // P007：发包只带活跃切片（桩之前的历史留在库里供回溯，不进上下文）。
             // P007-R12：单桩边缘（切片仅 1 条桩、无桩后内容）时追加一条本次请求级 system 提示，不落库、不进历史。
@@ -262,7 +263,14 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
+            UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    iteration,
+                    "cancelled-during-context-load"
+                )
+                .ConfigureAwait(false);
             return (
                 PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
                 null
@@ -309,8 +317,23 @@ public sealed partial class AgentOrchestrator
             try
             {
                 await _sessionService
-                    .AppendSessionMessageAsync(workspaceId, sessionId, notice, cancellationToken)
+                    .AppendSessionMessageAsync(workspaceId, sessionId, notice, tokens.Linked)
                     .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-notice-persist"
+                    )
+                    .ConfigureAwait(false);
+                return (
+                    PhaseOutcome.End(AgentTurnResult.Cancelled(iteration - 1, ctx.ToolExecutions)),
+                    null
+                );
             }
             catch
             { /* 通知落盘失败不中断本轮 */
@@ -624,7 +647,7 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         // (6) 无 ToolCalls（含空名调用已单独处理）则 TurnCompleted 结束
@@ -712,7 +735,7 @@ public sealed partial class AgentOrchestrator
                         call.CallId,
                         call.FunctionName,
                         discarded,
-                        cancellationToken
+                        tokens.Linked
                     )
                     .ConfigureAwait(false);
                 PublishTurnEvent(

@@ -15,6 +15,9 @@ namespace Host.Desktop.Services;
 
 public interface IWorkspaceSessionService
 {
+    /// <summary>工作区共享生命周期租约；删除树持独占租约时返回 null。</summary>
+    IDisposable? TryAcquireWorkspaceSharedLease(string workspaceId);
+
     Task<List<WorkspaceInfo>> GetAllWorkspacesAsync(CancellationToken ct = default);
     Task<WorkspaceInfo?> GetWorkspaceAsync(string workspaceId, CancellationToken ct = default);
     Task<WorkspaceInfo> AddOrUpdateWorkspaceAsync(
@@ -37,6 +40,18 @@ public interface IWorkspaceSessionService
         bool deletePhysicalSessionFolder = true,
         CancellationToken ct = default
     );
+
+    /// <summary>
+    /// 显式双模式移除工作区：解绑保留会话数据，彻底删除只清理两个明确根目录。
+    /// cancelWorkspaceSessions 用于 Purge 前取消该工作区全部已知会话。
+    /// </summary>
+    Task<WorkspaceRemovalResult> RemoveWorkspaceV2Async(
+        string workspaceId,
+        WorkspaceRemovalMode mode,
+        CancellationToken ct = default,
+        Action<string>? cancelWorkspaceSessions = null
+    );
+
     Task<bool> SetWorkspacePreferenceAsync(
         string workspaceId,
         string? providerId,
@@ -84,11 +99,12 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default
     );
 
-    /// <summary>need13：级联删树（先取消由 Bridge 层调 CancelTree，再删子盘+主盘）。</summary>
-    Task<bool> DeleteSessionTreeAsync(
+    /// <summary>严格级联删除会话树：先备份，数据库单事务提交，再清理目录与索引并报告残留。</summary>
+    Task<SessionDeletionResult> DeleteSessionTreeAsync(
         string workspaceId,
         string sessionId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        Action<string>? cancelSessionTree = null
     );
     Task<SessionMetadata?> GetSessionAsync(
         string workspaceId,
@@ -121,29 +137,43 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default
     );
 
-    /// <summary>need07：重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
+    /// <summary>
+    /// 显式写回子会话状态（meta.json 与 sessions-index.json 同步）。
+    /// 返回 false 表示会话不存在；耗时操作异步返回，桥接线程不得同步阻塞。
+    /// </summary>
+    Task<bool> UpdateSubStatusAsync(
+        string workspaceId,
+        string sessionId,
+        string status,
+        CancellationToken ct = default
+    );
+
+    /// <summary>重放截断（removeAnchor=true 为重放模式：按前驱 user 切面并返回复发原文）。</summary>
     Task<HistoryTruncateResult> TruncateSessionHistoryAsync(
         string workspaceId,
         string sessionId,
         string anchorMessageId,
         bool removeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
-    /// <summary>need07：分支（includeAnchor=true 含锚轮，false 排除锚点）。</summary>
+    /// <summary>分支（includeAnchor=true 含锚轮，false 排除锚点）。</summary>
     Task<SessionMetadata> BranchSessionAsync(
         string workspaceId,
         string sourceSessionId,
         string anchorMessageId,
         bool includeAnchor,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
     /// <summary>孤儿 tool_calls 愈合：缺回包的补 synthetic cancelled tool，无主 tool 消息直接清理。</summary>
     Task<HistoryHealResult> HealSessionHistoryAsync(
         string workspaceId,
         string sessionId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
 
     /// <summary>删除单条消息（删后顺带愈合，保证历史仍可直接发模型）。</summary>
@@ -151,7 +181,17 @@ public interface IWorkspaceSessionService
         string workspaceId,
         string sessionId,
         string messageId,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
+    );
+
+    /// <summary>删除锚点所属整轮：messages/turns/blocks 单事务提交，失败全部回滚。</summary>
+    Task<HistoryTurnDeleteResult> DeleteSessionTurnAsync(
+        string workspaceId,
+        string sessionId,
+        string anchorMessageId,
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
     );
     Task<bool> UpdateSessionTitleAsync(
         string workspaceId,

@@ -22,7 +22,7 @@ public sealed partial class AgentOrchestrator
         int iteration,
         string workspaceId,
         string sessionId,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         // (7) 依次调度执行每个 ToolCall（自愈：绝不抛异常中断）
@@ -41,14 +41,13 @@ public sealed partial class AgentOrchestrator
         {
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                tokens.Linked.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：工具执行前被取消，本 iteration 已落袋，保住前面行。
+                // 工具执行前被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-before-tool")
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -75,7 +74,7 @@ public sealed partial class AgentOrchestrator
                     WorkspaceId = workspaceId,
                     SessionId = sessionId,
                     DataRoot = ctx.DataRoot,
-                    CancellationToken = cancellationToken,
+                    CancellationToken = tokens.Linked,
                     ExecDefaultTimeoutMsOverride = ctx.CfgExecDefaultMs,
                     ExecMaxTimeoutMsOverride = ctx.CfgExecMaxMs,
                     AgentRole = AgentRole,
@@ -108,7 +107,7 @@ public sealed partial class AgentOrchestrator
                         dto,
                         toolContext,
                         ctx.TurnActiveSet,
-                        cancellationToken,
+                        tokens.Linked,
                         ctx.CfgClosedWorld,
                         ctx.CfgEnableJsonRepair
                     )
@@ -117,10 +116,9 @@ public sealed partial class AgentOrchestrator
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：工具执行中被取消，本 iteration 已落袋，保住前面行。
+                // 工具执行中被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(ctx, sessionId, iteration, "cancelled-during-tool")
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -151,7 +149,7 @@ public sealed partial class AgentOrchestrator
                         call.ArgumentsJson,
                         errorCode
                     );
-            // need22-P1 T6：大 toolOutput（>64KB）先落盘 fileRef{path,size}，content 只留前 4K 预览（messages.jsonl 信封格式不变）。
+            // 大工具输出先落盘再引用，消息区只留前 4K 预览，统一信封格式不变。
             toolText = SpillLargeToolOutput(
                 toolText,
                 ctx.DataRoot,
@@ -172,20 +170,19 @@ public sealed partial class AgentOrchestrator
             try
             {
                 await _sessionService
-                    .AppendSessionMessageAsync(
-                        workspaceId,
-                        sessionId,
-                        toolMessage,
-                        cancellationToken
-                    )
+                    .AppendSessionMessageAsync(workspaceId, sessionId, toolMessage, tokens.Linked)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-                // need12-P0：tool 落盘时被取消，本 iteration 已落袋，保住前面行。
+                // tool 落盘时被取消，本迭代已落袋，保住前面行。
                 UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-tool-persist"
+                    )
                     .ConfigureAwait(false);
                 return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
             }
@@ -231,12 +228,30 @@ public sealed partial class AgentOrchestrator
                             toolTurnId,
                             resultBlock,
                             !toolResult.Success,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                 }
             }
-            catch { }
+            catch (OperationCanceledException)
+            {
+                UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+                await FinalizeCancelledTurnAsync(
+                        ctx,
+                        sessionId,
+                        iteration,
+                        "cancelled-during-tool-block-persist"
+                    )
+                    .ConfigureAwait(false);
+                return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
+            }
+            catch (Exception ex)
+            {
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    "[Timeline] tool block persist failed sess=" + sessionId,
+                    ex
+                );
+            }
             // need23-R1：tool 消息落盘即告知前端（携带完整消息体，前端增量合并，
             // 不必等下一轮 AssistantMessagePersisted 的全量重拉；旧前端 default 分支忽略，零影响）。
             PublishTurnEvent(
@@ -350,7 +365,7 @@ public sealed partial class AgentOrchestrator
                             s.CallId,
                             "spawn_subagent",
                             fail,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                     ctx.ToolExecutions++;
@@ -369,7 +384,7 @@ public sealed partial class AgentOrchestrator
                             s.CallId,
                             "spawn_subagent",
                             fail,
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                     ctx.ToolExecutions++;
@@ -397,7 +412,7 @@ public sealed partial class AgentOrchestrator
                                 s.CallId,
                                 "spawn_subagent",
                                 fail,
-                                cancellationToken
+                                tokens.Linked
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
@@ -420,7 +435,7 @@ public sealed partial class AgentOrchestrator
                             ctx.Session!.ProviderId ?? string.Empty,
                             ctx.Session!.ModelId ?? string.Empty,
                             SubPolicy,
-                            cancellationToken
+                            tokens.User
                         )
                         .ConfigureAwait(false);
                     foreach (var r in rejected)
@@ -433,34 +448,27 @@ public sealed partial class AgentOrchestrator
                                 r.CallId,
                                 "spawn_subagent",
                                 fail,
-                                cancellationToken
+                                tokens.Linked
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
                     }
-                    PublishTurnEvent(
-                        sessionId,
-                        "SubAgentsBarrier",
-                        new { total = handles.Count, waiting = true }
-                    );
                     List<SubAgentResult> results;
                     try
                     {
                         results = await coord
-                            .BarrierAsync(
-                                workspaceId,
-                                sessionId,
-                                handles,
-                                rejected,
-                                cancellationToken
-                            )
+                            .BarrierAsync(workspaceId, sessionId, handles, rejected, tokens.User)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
-                        PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                         UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                        await MarkTimelineTurnEndedAsync(ctx, TimelineTurnStatus.Cancelled)
+                        await FinalizeCancelledTurnAsync(
+                                ctx,
+                                sessionId,
+                                iteration,
+                                "cancelled-during-barrier"
+                            )
                             .ConfigureAwait(false);
                         return PhaseOutcome.End(
                             AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)
@@ -474,7 +482,7 @@ public sealed partial class AgentOrchestrator
                                 res.CallId,
                                 "spawn_subagent",
                                 res.ToJson(),
-                                cancellationToken
+                                tokens.User
                             )
                             .ConfigureAwait(false);
                         ctx.ToolExecutions++;
@@ -486,21 +494,6 @@ public sealed partial class AgentOrchestrator
                         ctx.SubBilledIn += res.InputTokens;
                         ctx.SubBilledOut += res.OutputTokens;
                     }
-                    PublishTurnEvent(
-                        sessionId,
-                        "SubAgentsBarrierReleased",
-                        new
-                        {
-                            subs = results
-                                .Select(x => new
-                                {
-                                    callId = x.CallId,
-                                    subId = x.SubSessionId,
-                                    success = x.Success
-                                })
-                                .ToArray()
-                        }
-                    );
                 }
             }
         }

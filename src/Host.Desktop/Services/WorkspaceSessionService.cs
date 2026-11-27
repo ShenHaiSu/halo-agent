@@ -19,12 +19,45 @@ namespace Host.Desktop.Services;
 public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
 {
     private readonly ISessionRepository _sessionRepository;
+    private readonly SessionOperationCoordinator _operationCoordinator;
+    private readonly WorkspaceLifecycleGate _lifecycleGate;
+    private readonly Action<string>? _cancelSessionTree;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionAppendLocks = new();
 
-    public WorkspaceSessionService(ISessionRepository sessionRepository)
+    public WorkspaceSessionService(
+        ISessionRepository sessionRepository,
+        SessionOperationCoordinator? operationCoordinator = null,
+        WorkspaceLifecycleGate? lifecycleGate = null,
+        Action<string>? cancelSessionTree = null
+    )
     {
         _sessionRepository =
             sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _operationCoordinator = operationCoordinator ?? SessionOperationCoordinator.Shared;
+        _lifecycleGate = lifecycleGate ?? WorkspaceLifecycleGate.Shared;
+        _cancelSessionTree = cancelSessionTree;
+    }
+
+    internal SessionOperationCoordinator OperationCoordinator => _operationCoordinator;
+
+    internal WorkspaceLifecycleGate LifecycleGate => _lifecycleGate;
+
+    public IDisposable? TryAcquireWorkspaceSharedLease(string workspaceId) =>
+        _lifecycleGate.TryAcquireShared(workspaceId);
+
+    /// <summary>直接调用领域服务时也必须经过统一协调器，不能旁路。</summary>
+    internal SessionOperationLease AcquireHistoryLease(string workspaceId, string sessionId)
+    {
+        if (
+            !_operationCoordinator.TryAcquire(
+                workspaceId,
+                sessionId,
+                SessionOperationKind.History,
+                out var lease
+            )
+        )
+            throw new InvalidOperationException("HISTORY_OPERATION_IN_PROGRESS");
+        return lease!;
     }
 
     /// <summary>need05-03：供压缩服务做备份/原子重写（调用方须持有追加锁）。</summary>
@@ -79,70 +112,74 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
 
         string normalizedPath = NormalizePath(rootPath);
-        var workspaces = await _sessionRepository
-            .LoadWorkspacesIndexAsync(ct)
-            .ConfigureAwait(false);
+        WorkspaceInfo? target = null;
+        bool created = false;
+        await _sessionRepository
+            .MutateWorkspacesIndexAsync(
+                list =>
+                {
+                    // 按不区分大小写检查是否已存在；读-改-写在同一把全局索引锁内完成。
+                    var existing = list.FirstOrDefault(w =>
+                        string.Equals(
+                            NormalizePath(w.RootPath),
+                            normalizedPath,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+                    if (existing != null)
+                    {
+                        existing.LastOpenedAtUtc = DateTime.UtcNow;
+                        if (!string.IsNullOrWhiteSpace(customName))
+                            existing.Name = customName.Trim();
+                        target = existing;
+                        return null;
+                    }
 
-        // 按不区分大小写检查是否已存在
-        var existing = workspaces.FirstOrDefault(w =>
-            string.Equals(
-                NormalizePath(w.RootPath),
-                normalizedPath,
-                StringComparison.OrdinalIgnoreCase
+                    string name = !string.IsNullOrWhiteSpace(customName)
+                        ? customName.Trim()
+                        : Path.GetFileName(
+                            normalizedPath.TrimEnd(
+                                Path.DirectorySeparatorChar,
+                                Path.AltDirectorySeparatorChar
+                            )
+                        );
+                    if (string.IsNullOrWhiteSpace(name))
+                        name = normalizedPath;
+
+                    var newWorkspace = new WorkspaceInfo
+                    {
+                        Name = name,
+                        RootPath = normalizedPath,
+                        WorkspaceHash = HeaderVariableResolver.ComputeDeterministicHash16(
+                            normalizedPath
+                        ),
+                        CreatedAtUtc = DateTime.UtcNow,
+                        LastOpenedAtUtc = DateTime.UtcNow,
+                    };
+                    list.Add(newWorkspace);
+                    target = newWorkspace;
+                    created = true;
+                    return null;
+                },
+                ct
             )
-        );
-
-        if (existing != null)
-        {
-            existing.LastOpenedAtUtc = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(customName))
-            {
-                existing.Name = customName.Trim();
-            }
-            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-            TryEnsureProjectSkillMemory(normalizedPath);
-            return existing;
-        }
-
-        // 新建工作区
-        string name = !string.IsNullOrWhiteSpace(customName)
-            ? customName.Trim()
-            : Path.GetFileName(
-                normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            );
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = normalizedPath;
-        }
-
-        string workspaceHash = HeaderVariableResolver.ComputeDeterministicHash16(normalizedPath);
-
-        var newWorkspace = new WorkspaceInfo
-        {
-            Name = name,
-            RootPath = normalizedPath,
-            WorkspaceHash = workspaceHash,
-            CreatedAtUtc = DateTime.UtcNow,
-            LastOpenedAtUtc = DateTime.UtcNow
-        };
-
-        workspaces.Add(newWorkspace);
-        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-
-        // 若该工作区下尚无会话，自动初始化首个会话
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(newWorkspace.Id, ct)
             .ConfigureAwait(false);
-        if (sessions.Count == 0)
+
+        var workspace =
+            target ?? throw new InvalidOperationException("WORKSPACE_INDEX_WRITE_FAILED");
+        if (created)
         {
-            await CreateSessionAsync(newWorkspace.Id, "新建会话", ct: ct).ConfigureAwait(false);
+            // 若该工作区下尚无会话，自动初始化首个会话
+            var sessions = await _sessionRepository
+                .LoadSessionsIndexAsync(workspace.Id, ct)
+                .ConfigureAwait(false);
+            if (sessions.Count == 0)
+                await CreateSessionAsync(workspace.Id, "新建会话", ct: ct).ConfigureAwait(false);
         }
 
-        // need09-01：新建工作区后建空 .haloagent/skills|memory（失败只 Warn，不阻塞绑定）
+        // 新建工作区后建空 .haloagent/skills|memory（失败只 Warn，不阻塞绑定）
         TryEnsureProjectSkillMemory(normalizedPath);
-
-        return newWorkspace;
+        return workspace;
     }
 
     /// <summary>need09-01：AddWorkspace 后自动建 Project 空域；失败只 Warn。容忍 .haloagent 不存在视为空域。</summary>
@@ -179,24 +216,30 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         if (string.IsNullOrWhiteSpace(workspaceId))
             return null;
 
-        var workspaces = await _sessionRepository
-            .LoadWorkspacesIndexAsync(ct)
-            .ConfigureAwait(false);
-        var ws = workspaces.FirstOrDefault(w =>
-            string.Equals(w.Id, workspaceId.Trim(), StringComparison.OrdinalIgnoreCase)
-        );
-        if (ws == null)
-            return null;
-
         string trimmed = (alias ?? string.Empty).Trim();
         if (trimmed.Length > MaxWorkspaceAliasLength)
             trimmed = trimmed[..MaxWorkspaceAliasLength];
+        string? nextAlias = string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+        WorkspaceInfo? updated = null;
 
-        // 空白 = 清除别名（回退显示 Name）；同时清理历史误存的空串
-        ws.Alias = string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
-
-        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-        return ws;
+        await _sessionRepository
+            .MutateWorkspacesIndexAsync(
+                list =>
+                {
+                    var ws = list.FirstOrDefault(w =>
+                        string.Equals(w.Id, workspaceId.Trim(), StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (ws == null)
+                        return null;
+                    // 空白 = 清除别名（回退显示 Name）；同时清理历史误存的空串
+                    ws.Alias = nextAlias;
+                    updated = ws;
+                    return null;
+                },
+                ct
+            )
+            .ConfigureAwait(false);
+        return updated;
     }
 
     /// <summary>
@@ -210,15 +253,23 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
     {
         if (string.IsNullOrWhiteSpace(workspaceId))
             return false;
-        var workspaces = await _sessionRepository
-            .LoadWorkspacesIndexAsync(ct)
+        WorkspaceInfo? removed = null;
+        await _sessionRepository
+            .MutateWorkspacesIndexAsync(
+                list =>
+                {
+                    removed = list.FirstOrDefault(w =>
+                        string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (removed != null)
+                        list.Remove(removed);
+                    return removed;
+                },
+                ct
+            )
             .ConfigureAwait(false);
-        int removed = workspaces.RemoveAll(w =>
-            string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (removed > 0)
+        if (removed != null)
         {
-            await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
             if (deletePhysicalSessionFolder)
             {
                 // 注意：仅删数据根下的会话物理目录，不碰工作区 RootPath 下的 .haloagent/。
@@ -238,35 +289,47 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         CancellationToken ct = default
     )
     {
-        var workspaces = await _sessionRepository
-            .LoadWorkspacesIndexAsync(ct)
+        bool updated = false;
+        await _sessionRepository
+            .MutateWorkspacesIndexAsync(
+                list =>
+                {
+                    var ws = list.FirstOrDefault(w =>
+                        string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (ws == null)
+                        return null;
+                    ws.DefaultProviderId = providerId;
+                    ws.DefaultModelId = modelId;
+                    updated = true;
+                    return null;
+                },
+                ct
+            )
             .ConfigureAwait(false);
-        var ws = workspaces.FirstOrDefault(w =>
-            string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (ws == null)
-            return false;
-
-        ws.DefaultProviderId = providerId;
-        ws.DefaultModelId = modelId;
-        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-        return true;
+        return updated;
     }
 
     public async Task<bool> TouchWorkspaceAsync(string workspaceId, CancellationToken ct = default)
     {
-        var workspaces = await _sessionRepository
-            .LoadWorkspacesIndexAsync(ct)
+        bool updated = false;
+        await _sessionRepository
+            .MutateWorkspacesIndexAsync(
+                list =>
+                {
+                    var ws = list.FirstOrDefault(w =>
+                        string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (ws == null)
+                        return null;
+                    ws.LastOpenedAtUtc = DateTime.UtcNow;
+                    updated = true;
+                    return null;
+                },
+                ct
+            )
             .ConfigureAwait(false);
-        var ws = workspaces.FirstOrDefault(w =>
-            string.Equals(w.Id, workspaceId, StringComparison.OrdinalIgnoreCase)
-        );
-        if (ws == null)
-            return false;
-
-        ws.LastOpenedAtUtc = DateTime.UtcNow;
-        await _sessionRepository.SaveWorkspacesIndexAsync(workspaces, ct).ConfigureAwait(false);
-        return true;
+        return updated;
     }
 
     public async Task<List<SessionMetadata>> GetSessionsByWorkspaceAsync(
@@ -325,6 +388,10 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             throw new ArgumentException("Workspace ID cannot be empty.", nameof(workspaceId));
         }
 
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
+
         string role = string.Equals(agentRole, "sub", StringComparison.OrdinalIgnoreCase)
             ? "sub"
             : "main";
@@ -376,22 +443,46 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
             SubStatus = isSub ? "pending" : null,
             CreatedByCallId = isSub ? createdByCallId : null,
             TaskPrompt = isSub ? (string.IsNullOrEmpty(taskIdx) ? null : taskIdx) : null,
-            HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
+            SessionKind = isSub ? "sub" : "main",
         };
         if (isSub)
             meta.TitleLocked = true;
 
-        // 1. 保存 meta.json
+        // 1. 保存 meta.json（元数据文件为权威源，先落盘再同步注册表）
         await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
 
-        // 2. 更新 sessions-index.json
-        var sessions = await _sessionRepository
-            .LoadSessionsIndexAsync(workspaceId, ct)
-            .ConfigureAwait(false);
-        sessions.Insert(0, meta);
+        // 2. 更新 sessions-index.json（读-改-写在同一把工作区锁内完成）
         await _sessionRepository
-            .SaveSessionsIndexAsync(workspaceId, sessions, ct)
+            .MutateSessionsIndexAsync(workspaceId, sessions => sessions.Insert(0, meta), ct)
             .ConfigureAwait(false);
+
+        // 3. 同步工作区库 sessions 注册表（派生缓存，不符以 meta.json 覆盖）
+        try
+        {
+            var registry = new SessionHistoryStore(
+                new SessionHistoryDb(_sessionRepository.Storage)
+            );
+            await registry
+                .RegisterSessionAsync(
+                    workspaceId,
+                    sessionId,
+                    WorkspaceHistorySchema.CurrentFormatVersion,
+                    meta.SessionKind,
+                    ct
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                Infrastructure.Logging.HaloLogger.App.Warn(
+                    "[Workspace] registry sync failed sess=" + sessionId + ": " + ex.Message
+                );
+            }
+            catch { }
+        }
 
         try
         {
@@ -401,6 +492,144 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
         catch { }
         return meta;
+    }
+
+    /// <summary>工作区库注册表启动对账：逐目录读元数据文件补齐派生缓存，老会话不进表，三业务表只读不写；仅统计真实修复数。</summary>
+    public async Task<int> ReconcileWorkspaceRegistryAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+        {
+            return 0;
+        }
+        int fixedCount = 0;
+        try
+        {
+            string wsDir = Path.Combine(
+                _sessionRepository.Storage.SessionsDirectory,
+                workspaceId.Trim()
+            );
+            if (!Directory.Exists(wsDir))
+            {
+                return 0;
+            }
+            var db = new SessionHistoryDb(_sessionRepository.Storage);
+            try
+            {
+                db.EnsureWorkspaceDatabase(workspaceId);
+            }
+            catch { }
+            var registry = new SessionHistoryStore(db);
+            string[] sessionDirs;
+            try
+            {
+                sessionDirs = Directory.GetDirectories(wsDir);
+            }
+            catch
+            {
+                return 0;
+            }
+            foreach (string dir in sessionDirs)
+            {
+                ct.ThrowIfCancellationRequested();
+                string sessionId = Path.GetFileName(
+                    dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                );
+                if (string.IsNullOrWhiteSpace(sessionId))
+                {
+                    continue;
+                }
+                SessionMetadata? meta;
+                try
+                {
+                    meta = await _sessionRepository
+                        .LoadSessionMetaAsync(workspaceId, sessionId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    continue;
+                }
+                if (meta == null || string.IsNullOrWhiteSpace(meta.Id))
+                {
+                    continue;
+                }
+                if (meta.StorageFormatVersion != WorkspaceHistorySchema.CurrentFormatVersion)
+                {
+                    continue;
+                }
+                string kind = string.Equals(
+                    meta.SessionKind,
+                    "sub",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                    ? "sub"
+                    : string.Equals(
+                        meta.SessionKind,
+                        "archived",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? "archived"
+                        : "main";
+                bool needsFix = true;
+                try
+                {
+                    using var conn = db.OpenWorkspace(workspaceId);
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        "SELECT storage_format, session_kind FROM sessions WHERE session_id = $sid;";
+                    cmd.Parameters.AddWithValue("$sid", meta.Id);
+                    using var reader = cmd.ExecuteReader();
+                    if (reader.Read())
+                    {
+                        int fmt = reader.IsDBNull(0) ? -1 : reader.GetInt32(0);
+                        string regKind = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                        if (
+                            fmt == WorkspaceHistorySchema.CurrentFormatVersion
+                            && string.Equals(regKind, kind, StringComparison.Ordinal)
+                        )
+                        {
+                            needsFix = false;
+                        }
+                    }
+                }
+                catch
+                {
+                    needsFix = true;
+                }
+                if (!needsFix)
+                {
+                    continue;
+                }
+                try
+                {
+                    await registry
+                        .RegisterSessionAsync(
+                            workspaceId,
+                            meta.Id,
+                            WorkspaceHistorySchema.CurrentFormatVersion,
+                            kind,
+                            ct
+                        )
+                        .ConfigureAwait(false);
+                    fixedCount++;
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        HaloLogger.App.Warn(
+                            "[Workspace] reconcile failed sess=" + meta.Id + ": " + ex.Message
+                        );
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        return fixedCount;
     }
 
     /// <summary>need13：查主下全部子（创建时间正序）。</summary>
@@ -450,44 +679,45 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         return meta;
     }
 
-    /// <summary>need13：级联删树（先删子盘再删主盘；取消由 Bridge 层先调 CancelTree）。</summary>
-    public async Task<bool> DeleteSessionTreeAsync(
+    public async Task<bool> UpdateSubStatusAsync(
         string workspaceId,
         string sessionId,
+        string status,
         CancellationToken ct = default
     )
     {
-        try
-        {
-            var subs = await GetSubSessionsAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
-            foreach (var sub in subs)
-            {
-                try
+        using var workspaceLease =
+            TryAcquireWorkspaceSharedLease(workspaceId)
+            ?? throw new InvalidOperationException("WORKSPACE_BUSY");
+        var meta = await _sessionRepository
+            .LoadSessionMetaAsync(workspaceId, sessionId, ct)
+            .ConfigureAwait(false);
+        if (meta == null)
+            return false;
+
+        meta.SubStatus = status;
+        meta.UpdatedAtUtc = DateTime.UtcNow;
+        await _sessionRepository.SaveSessionMetaAsync(workspaceId, meta, ct).ConfigureAwait(false);
+
+        // index 的 SubStatus/UpdatedAtUtc 与 meta 同步；读-改-写在同一把工作区锁内完成。
+        await _sessionRepository
+            .MutateSessionsIndexAsync(
+                workspaceId,
+                sessions =>
                 {
-                    await _sessionRepository
-                        .DeleteSessionAsync(workspaceId, sub.Id, ct)
-                        .ConfigureAwait(false);
-                }
-                catch { }
-            }
-            bool ok = await _sessionRepository
-                .DeleteSessionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-            try
-            {
-                Infrastructure.Logging.HaloLogger.App.Info(
-                    $"[SubAgent] delete-tree parent={sessionId} subs={subs.Count}"
-                );
-            }
-            catch { }
-            return ok;
-        }
-        catch
-        {
-            return await _sessionRepository
-                .DeleteSessionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-        }
+                    int idx = sessions.FindIndex(s =>
+                        string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (idx >= 0)
+                    {
+                        sessions[idx].SubStatus = status;
+                        sessions[idx].UpdatedAtUtc = meta.UpdatedAtUtc;
+                    }
+                },
+                ct
+            )
+            .ConfigureAwait(false);
+        return true;
     }
 
     public Task<SessionMetadata?> GetSessionAsync(

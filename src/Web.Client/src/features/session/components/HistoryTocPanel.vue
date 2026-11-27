@@ -11,24 +11,12 @@
         data-testid="toc-role-filter"
         aria-label="过滤角色"
       />
-      <n-tooltip trigger="hover" placement="top">
-        <template #trigger>
-          <n-switch v-model:value="roundHeadsOnly" size="small" data-testid="toc-round-heads-switch" aria-label="只看每轮末条" />
-        </template>
-        只看每轮末条
-      </n-tooltip>
       <n-button size="tiny" quaternary title="置顶" data-testid="toc-to-top" @click="toTop">⇡</n-button>
       <n-button size="tiny" quaternary title="置底" data-testid="toc-to-bottom" @click="toBottom">⇣</n-button>
     </div>
     <div v-if="hintBar" class="toc-hint" data-testid="toc-hint-bar">
       点击气泡跳转到对应消息；点击外部不会关闭本栏，请点右上角 ✕ 关闭。
       <n-button size="tiny" quaternary @click="dismissHint">知道了</n-button>
-    </div>
-    <div v-if="summaryToc.length > 0" class="toc-summary" data-testid="toc-summary">
-      <div class="toc-summary-title">时间轴摘要 · {{ summaryToc.length }} 项</div>
-      <div v-for="item in summaryToc" :key="item.anchorKey" class="toc-row" :class="[`toc-row--${item.role}`]">
-        <HistoryBubble :item="item" :active="item.anchorKey === activeKey" @jump="onJump" />
-      </div>
     </div>
     <div v-if="loading" class="toc-list" aria-busy="true">
       <div v-for="i in 5" :key="i" class="toc-skeleton" />
@@ -58,10 +46,9 @@
 </template>
 <script setup lang="ts">
 /**
- * need19：历史气泡目录面板。
- * 数据唯一来源：workspaceStore.sessionMessages（主）/ subSessionStore.messages（子）。
- * 通过 useTimelineNav().scrollToAnchor() 跳转，不直接操作 DOM。
- */
+ * 历史目录面板。
+ * 数据来源：摘要时间线（timelineSummaries）/ 子会话存储（subSessionStore.messages）。
+ * 通过 useTimelineNav().scrollToAnchor() 跳转，不直接操作 DOM。 */
 import { computed, nextTick, ref, watch } from 'vue';
 import { Bot } from 'lucide-vue-next';
 import { useMessage } from 'naive-ui';
@@ -71,7 +58,7 @@ import { useSubSessionStore } from '@/stores/subSessionStore';
 import { useAgentStream } from '@features/agent/stores/useAgentStream';
 import { useUiStore } from '@/stores/uiStore';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
-import { flatBlocks, processBoxLabel, summaryAnchorKeys } from '@features/session/utils/timelineSummary';
+import { buildSummaryToc } from '@features/session/utils/summaryToc';
 import type { TocItem } from '@features/session/utils/historyToc';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import HistoryBubble from './HistoryBubble.vue';
@@ -88,12 +75,7 @@ const nav = useTimelineNav();
 const { loadingMessages, activeSessionId } = storeToRefs(ws);
 
 const isSub = computed(() => sub.mode === 'sub');
-const isHistoryReadonly = computed(() => {
-  const s = ws.activeSession as unknown as { historyVersion?: number } | null;
-  if (!s) return false;
-  const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
-  return v !== 2;
-});
+const isHistoryReadonly = computed(() => ws.isHistoryReadonly);
 const loading = computed(() => (isSub.value ? sub.loading : loadingMessages.value));
 const streamingPulse = computed(() => !isSub.value && agentStream.hasActiveTurn);
 
@@ -109,72 +91,13 @@ const roleFilter = computed({
     resetWindow();
   },
 });
-const roundHeadsOnly = computed({
-  get: () => ui.tocRoundHeadsOnly,
-  set: (v: boolean) => {
-    ui.tocRoundHeadsOnly = v;
-    resetWindow();
-  },
-});
 
 const tocItems = computed<TocItem[]>(() => []);
 const summaryToc = computed<TocItem[]>(() => {
   if (isSub.value) return [];
   const summaries = ws.timelineSummaries as TurnSummary[];
   if (!Array.isArray(summaries) || summaries.length === 0) return [];
-  const role = ui.tocRole;
-  const out: TocItem[] = [];
-  flatBlocks(summaries).forEach((turn, order) => {
-    const anchors = summaryAnchorKeys(turn.turnId, turn.finalBlockId);
-    const round = order + 1;
-    if (role === 'all' || role === 'user') {
-      out.push({
-        anchorKey: anchors.user,
-        role: 'user',
-        label: turn.userPreview || '提问',
-        fullText: turn.userContent || turn.userPreview,
-        charCount: Array.from(turn.userContent || turn.userPreview || '').length,
-        index: round,
-        round,
-        toolCount: 0,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: false,
-        isRoundTail: false,
-      });
-    }
-    if (role === 'all' || role === 'assistant') {
-      out.push({
-        anchorKey: anchors.process,
-        role: 'assistant',
-        label: `过程 · ${processBoxLabel(turn)}`,
-        fullText: `过程内容 · ${processBoxLabel(turn)}`,
-        charCount: turn.chars,
-        index: round,
-        round,
-        toolCount: turn.tools,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: true,
-        isRoundTail: false,
-      });
-      out.push({
-        anchorKey: anchors.final,
-        role: 'assistant',
-        label: turn.finalPreview ? Array.from(turn.finalPreview).slice(0, 15).join('') : `本轮无正文 · ${turn.tools} 工具`,
-        fullText: turn.finalPreview,
-        charCount: Array.from(turn.finalPreview || '').length,
-        index: round,
-        round,
-        toolCount: 0,
-        hasReasoning: false,
-        createdAtUtc: '',
-        isRoundHead: false,
-        isRoundTail: true,
-      });
-    }
-  });
-  return out;
+  return buildSummaryToc(summaries, ui.tocRole);
 });
 /** 主链纯 V2：目录只用摘要源；子会话保留旧链（豁免）。 */
 const displayTocItems = computed<TocItem[]>(() => (isSub.value ? tocItems.value : summaryToc.value));
@@ -360,18 +283,6 @@ watch(activeSessionId, () => {
   align-items: center;
   gap: 8px;
 }
-.toc-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 2px 8px;
-  border-bottom: 1px dashed var(--border-subtle);
-  margin-bottom: 4px;
-}
-.toc-summary-title {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
 .toc-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -391,6 +302,9 @@ watch(activeSessionId, () => {
   justify-content: flex-start;
 }
 .toc-row--system {
+  justify-content: center;
+}
+.toc-row--compact {
   justify-content: center;
 }
 .toc-skeleton {

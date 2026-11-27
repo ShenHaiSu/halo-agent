@@ -99,7 +99,7 @@ public sealed class CompactStubStorageTests : IDisposable
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId, 2);
         var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
-        string dbPath = _storageManager.GetHistoryDbPath(wsId, sessId);
+        string dbPath = _storageManager.GetWorkspaceDbPath(wsId);
         // v2 DB 可能尚未创建（纯消息会话）；先确保一次再断言幂等
         store.EnsureDatabaseForTest(wsId, sessId);
         var cols1 = ReadCols(dbPath, "messages");
@@ -173,7 +173,7 @@ public sealed class CompactStubStorageTests : IDisposable
             HaloJsonOptions.CompactCamelCase
         );
         Assert.NotNull(meta);
-        Assert.Equal(1, meta!.V);
+        Assert.Equal(2, meta!.V);
         Assert.Equal(result.RemovedMessages, meta.RemovedCount);
         Assert.Equal(result.SummaryOutputTokens, meta.SummaryTokens);
 
@@ -183,12 +183,15 @@ public sealed class CompactStubStorageTests : IDisposable
         Assert.Equal(CompactMode.Stub, sessMeta!.CompactMode);
         Assert.Equal(beforeCount + 1, sessMeta.MessageCount);
 
-        // jsonl 末行与 DB 桩行一致
-        string wsDir = _repository.GetWorkspaceDirectory(wsId);
-        string jsonlPath = Path.Combine(wsDir, sessId, "messages.jsonl");
-        string last = File.ReadLines(jsonlPath).Last();
-        Assert.Contains("\"kind\":\"compact_stub\"", last);
-        Assert.Contains("\"metaJson\"", last);
+        // 桩行经 DB 落盘：条数 +1 且末行即桩（user/compact_stub）
+        var dbMsgs = await new SessionHistoryStore(
+            new SessionHistoryDb(_storageManager)
+        ).GetMessagesAsync(wsId, sessId);
+        Assert.Equal(beforeCount + 1, dbMsgs.Count);
+        var dbLast = dbMsgs[^1];
+        Assert.Equal(stub!.Id, dbLast.Id);
+        Assert.Equal(MessageKind.CompactStub, dbLast.Kind);
+        Assert.Equal("user", dbLast.Role);
     }
 
     [Fact(DisplayName = "P007-M1: 桩 turn kind=compact，seq=MAX+1")]
@@ -340,7 +343,7 @@ internal static class SessionHistoryStoreTestHooks
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
         );
         var db = (SessionHistoryDb)dbField!.GetValue(store)!;
-        db.EnsureDatabase(ws, sess);
+        db.EnsureWorkspaceDatabase(ws);
     }
 
     public static void InsertSingleMessageForTest(

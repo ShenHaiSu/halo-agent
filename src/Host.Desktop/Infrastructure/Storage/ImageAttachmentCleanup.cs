@@ -47,7 +47,7 @@ public static class ImageAttachmentCleanup
     /// S7-E3 §4.3：附件清理入口。扫**全局 blob 区 + 全部会话附件区**，按 `LastWriteTimeUtc` 判定超期。
     ///
     /// 安全边界：
-    /// ① 只删附件文件与清理后变空的目录，**永不碰** `messages.jsonl`（缺文件即 `IsMissing`，读取链路已兜）；
+    /// ① 只删附件文件与清理后变空的目录，不触碰消息与时间轴数据；
     /// ② `dryRun=true` 时只统计不删（验收 E3-1 的口径：先给出 total size / count 再让用户决定）；
     /// ③ 单个文件删除失败（占用/权限）只记数跳过，不中断整轮清理。
     ///

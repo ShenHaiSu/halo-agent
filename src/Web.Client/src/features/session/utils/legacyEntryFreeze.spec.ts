@@ -27,7 +27,7 @@ describe('noLegacyProjectionSymbolsRemain', () => {
       const lower = f.toLowerCase();
       if (lower.includes('subhistoryview') || lower.includes('usetimelinegroups') || lower.includes('subsession')) continue;
       if (lower.endsWith('historytocpanel.vue') || lower.endsWith('historytoc.ts')) continue;
-      if (lower.endsWith('stores/model.ts') || lower.endsWith('stores/useagentelemetry.ts')) continue;
+      if (lower.endsWith('stores/useagentelemetry.ts')) continue;
       if (lower.endsWith('session/utils/pendinguser.ts') || lower.endsWith('stores/workspacestore.ts')) continue;
       if (lower.endsWith('stores/agentwiring.ts') || lower.endsWith('stores/runtime.ts')) continue;
       const text = readFileSync(f, 'utf8');
@@ -37,7 +37,7 @@ describe('noLegacyProjectionSymbolsRemain', () => {
       if (text.includes('toPendingMessage(')) {
         offenders.push(`${f.slice(ROOT.length + 1)}:toPending`);
       }
-      // V1 会话只读降级保留 jsonl 启发式对账（matchConfirmed），仅主链新增引用才算回潮。
+      // 旧启发式对账已删除，仅主链新增引用才算回潮。
       if (text.includes('pendingOverlayMessages')) {
         offenders.push(`${f.slice(ROOT.length + 1)}:overlay`);
       }

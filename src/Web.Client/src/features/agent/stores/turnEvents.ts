@@ -11,12 +11,14 @@ import {
   getTurn,
   lastTurnSnapshot,
   markIterationTextPersisted,
+  markSoleFinal,
   resolveTargetSession,
   toast,
   touch,
   turnStartMarks,
 } from './model';
 import { agentRuntime } from './runtime';
+import { finalizeSubAgents } from './subAgentStatus';
 import { dropSegBuf, flushSegBufSync } from './useAgentStream';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 
@@ -122,12 +124,127 @@ export async function refreshAfterTool(targetSessionId?: string, reason?: string
   }
 }
 
-export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailure?: boolean; deferClearMs?: number }): Promise<void> {
+export interface FinishTurnOptions {
+  keepOnFailure?: boolean;
+  deferClearMs?: number;
+  terminalStatus?: 'completed' | 'cancelled' | 'error' | 'truncated';
+  userMessagePersisted?: boolean | null;
+  timelineFinalized?: boolean | null;
+}
+
+/** 有界对账重试间隔：重拉可能早于后端终态提交，退避补拉最多 3 次。 */
+const PENDING_RECONCILE_DELAYS_MS = [200, 600, 1500];
+const pendingReconcileTimers = new Map<string, number>();
+
+/** 取消旧轮对账重试：新发送/重发/删除 pending 后旧定时器不得再触新轮。 */
+export function cancelPendingReconcile(sessionId: string): void {
+  const sid = (sessionId || '').trim();
+  if (!sid) return;
+  const timer = pendingReconcileTimers.get(sid);
+  if (timer === undefined) return;
+  pendingReconcileTimers.delete(sid);
+  try {
+    window.clearTimeout(timer);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 摘要确认：同一 requestId 的轮次摘要是否已在当前视图就位；异常一律按未命中处理。 */
+function hasSummaryConfirmed(sid: string, requestId: string): boolean {
+  const rid = String(requestId || '').trim();
+  if (!sid || !rid) return false;
+  try {
+    return agentRuntime().hasTurnSummary(sid, rid) === true;
+  } catch {
+    return false;
+  }
+}
+
+function schedulePendingReconcile(sid: string, requestId: string, finishMark: number, attempt = 0): void {
+  if (!sid || !requestId) return;
+  if (attempt >= PENDING_RECONCILE_DELAYS_MS.length) {
+    try {
+      const cur = getTurn(sid)?.pendingUser;
+      if (cur && String(cur.requestId || '') === requestId && (cur.status === 'cancelled' || cur.status === 'sending')) {
+        console.warn('[agent-turn] pending reconcile exhausted, keep pending for manual resend:', {
+          sessionId: sid,
+          requestId,
+        });
+        console.debug('[agent-turn] pending reconcile exhausted, keep pending:', { requestId });
+      }
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  cancelPendingReconcile(sid);
+  if (sid !== activeSessionId.value) return;
+  if ((turnStartMarks[sid] || 0) !== finishMark) return;
+  const delay = PENDING_RECONCILE_DELAYS_MS[attempt];
+  try {
+    const timer = window.setTimeout(() => {
+      pendingReconcileTimers.delete(sid);
+      void runPendingReconcile(sid, requestId, finishMark, attempt);
+    }, delay);
+    pendingReconcileTimers.set(sid, timer);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function runPendingReconcile(sid: string, requestId: string, finishMark: number, attempt: number): Promise<void> {
+  try {
+    if (!sid || !requestId) return;
+    if (sid !== activeSessionId.value) return;
+    if ((turnStartMarks[sid] || 0) !== finishMark) return;
+    const cur = getTurn(sid)?.pendingUser;
+    if (!cur || String(cur.requestId || '') !== requestId) return;
+    if (cur.status !== 'cancelled' && cur.status !== 'sending') return;
+    try {
+      await agentRuntime().loadSessionMessages(sid, { background: true });
+    } catch (err) {
+      console.warn('[agent-turn] pending reconcile reload failed:', err);
+    }
+    if (sid !== activeSessionId.value) return;
+    if ((turnStartMarks[sid] || 0) !== finishMark) return;
+    const after = getTurn(sid)?.pendingUser;
+    if (!after || String(after.requestId || '') !== requestId) return;
+    if (after.status !== 'cancelled' && after.status !== 'sending') return;
+    if (hasSummaryConfirmed(sid, requestId)) {
+      const latest = getTurn(sid);
+      if (
+        latest &&
+        latest.pendingUser &&
+        String(latest.pendingUser.requestId || '') === requestId &&
+        (turnStartMarks[sid] || 0) === finishMark
+      ) {
+        cancelPendingReconcile(sid);
+        latest.pendingUser = null;
+        touch(latest);
+        try {
+          console.debug('[agent-turn] pending drop by reconcile:', { requestId });
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
+    schedulePendingReconcile(sid, requestId, finishMark, attempt + 1);
+  } catch {
+    /* 对账永不阻断 */
+  }
+}
+
+export async function finishTurn(targetSessionId?: string, opts?: FinishTurnOptions): Promise<void> {
   const sid = (targetSessionId ?? activeSessionId.value).trim();
   if (!sid) return;
   const t = ensureTurn(sid);
   const finishMark = turnStartMarks[sid] || 0;
   const finishPendingId = String(t.pendingUser?.requestId || '');
+  const terminalStatus = opts?.terminalStatus ?? 'completed';
+  const persistedOpt = opts?.userMessagePersisted;
+  const userMessagePersisted = typeof persistedOpt === 'boolean' ? persistedOpt : null;
   try {
     flushSegBufSync(sid);
   } catch (e) {
@@ -163,6 +280,8 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
   const willDefer = deferMs > 0 && !(opts?.keepOnFailure && t.lastErrorInfo?.retry);
   if (willDefer) {
     t.liveCompleting = true;
+    // requestId 会在下方清空；交接窗的对账摘要匹配必须使用这里冻结的快照。
+    t.handoffRequestId = String(t.requestId || finishPendingId || '');
     touch(t);
     need02Debug('handoff', { requestId: t.requestId, deferMs, at: Date.now() });
   }
@@ -174,20 +293,70 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     t.steadyReady = true;
     touch(t);
   }
-  // 轮末收口：稳态已就位，乐观发送态必多余，直接清理，避免常驻。
-  // 可重试失败保留失败态供重发；旧定时器不得清理新轮待发送态。
+  // 轮末收口：只有同一 requestId 的摘要确认存在才清 pending，避免首回复前取消被无声丢失。
+  // 可重试失败保留失败态供重发；旧定时器不得清理新轮待发送态；各会话只动自家分桶。
   try {
     if ((turnStartMarks[sid] || 0) === finishMark) {
       const cur = t.pendingUser;
       if (cur && (!finishPendingId || String(cur.requestId || '') === finishPendingId)) {
         const keep = !!(opts?.keepOnFailure && t.lastErrorInfo?.retry);
         if (!keep) {
-          t.pendingUser = null;
-          touch(t);
-          try {
-            need02Debug('pending-drop-finish', { requestId: finishPendingId });
-          } catch {
-            /* ignore */
+          if (userMessagePersisted === false) {
+            cancelPendingReconcile(sid);
+            t.pendingUser = null;
+            touch(t);
+            try {
+              console.debug('[agent-turn] pending drop unpersisted:', { requestId: finishPendingId });
+            } catch {
+              /* ignore */
+            }
+          } else if (finishPendingId && hasSummaryConfirmed(sid, finishPendingId)) {
+            cancelPendingReconcile(sid);
+            t.pendingUser = null;
+            touch(t);
+            try {
+              console.debug('[agent-turn] pending drop finish:', { requestId: finishPendingId });
+            } catch {
+              /* ignore */
+            }
+          } else if (terminalStatus === 'cancelled') {
+            cur.status = 'cancelled';
+            cur.errorCode = cur.errorCode || 'TURN_CANCELLED';
+            touch(t);
+            try {
+              console.debug('[agent-turn] pending cancelled keep:', { requestId: finishPendingId });
+            } catch {
+              /* ignore */
+            }
+            schedulePendingReconcile(sid, finishPendingId, finishMark, 0);
+          } else if (terminalStatus === 'error') {
+            // 错误终态沿用失败保留语义：不静默删除，等待重发或下一次对账。
+            cur.status = 'failed';
+            cur.errorCode = cur.errorCode || 'TURN_ERROR';
+            touch(t);
+          } else if (terminalStatus === 'completed' || terminalStatus === 'truncated') {
+            // 完成/截断仍未命中摘要：记录诊断但不静默删除，避免与取消路径同因。
+            try {
+              console.warn('[agent-turn] finish without summary hit, keep pending for reconcile:', {
+                sessionId: sid,
+                requestId: finishPendingId,
+                terminalStatus,
+              });
+              console.debug('[agent-turn] pending miss keep:', { requestId: finishPendingId, terminalStatus });
+            } catch {
+              /* ignore */
+            }
+            if (finishPendingId) schedulePendingReconcile(sid, finishPendingId, finishMark, 0);
+          } else {
+            try {
+              console.warn('[agent-turn] finish without summary hit, keep pending:', {
+                sessionId: sid,
+                requestId: finishPendingId,
+                terminalStatus,
+              });
+            } catch {
+              /* ignore */
+            }
           }
         }
       }
@@ -220,6 +389,8 @@ export async function finishTurn(targetSessionId?: string, opts?: { keepOnFailur
     t.streamingActive = false;
     t.liveCompleting = false;
     t.steadyReady = false;
+    t.handoffRequestId = '';
+    t.pendingTagOverrides = {};
     dropSegBuf(sid);
     touch(t);
   };
@@ -293,41 +464,56 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.telemetry.totalMs = turnStartMarks[sid] > 0 ? Date.now() - turnStartMarks[sid] : null;
       t.isGenerating = false;
       t.streamingActive = false;
-      // need13：完成即解除子等待
-      t.subAgents.waiting = false;
-      t.subAgents.done = t.subAgents.total;
+      // 主轮终态兜底：残留 running 按失败收敛，绝不覆盖兄弟子真实终态。
+      finalizeSubAgents(t, 'failed');
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void finishTurn(sid, { deferClearMs: 300 });
+      void finishTurn(sid, { deferClearMs: 300, terminalStatus: 'completed' });
       agentRuntime().generateTitle(sid);
       break;
     }
     case 'CompactStarted': {
-      // need05-03：压缩开始，不可中断；按钮置灰由 turnNotice 含“压缩中”驱动
+      t.compacting = true;
       t.isGenerating = true;
+      t.streamingActive = false;
       t.turnNotice = '压缩中…不可中断';
       touch(t);
       break;
     }
     case 'CompactCompleted': {
+      t.compacting = false;
       t.isGenerating = false;
       t.streamingActive = false;
-      // P007：压缩完成文案带摘要 tokens（≈N tokens）；无 tokens 时回退无后缀文案
       t.turnNotice =
         num(payload['summaryTokens']) > 0
           ? `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要（摘要 ≈${num(payload['summaryTokens'])} tokens）`
           : `✔ 已压缩：${num(payload['removedMessages'])}条收敛为摘要`;
+      const metadataWarning = str(payload['metadataWarning']);
+      if (metadataWarning) {
+        toast('warning', `压缩已提交，但元数据刷新告警：${metadataWarning}`);
+      }
       touch(t);
       touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
-      void refreshAfterTool(sid, 'finish'); // 重拉消息与预算
+      void refreshAfterTool(sid, 'finish');
+      break;
+    }
+    case 'CompactNoOp': {
+      t.compacting = false;
+      t.isGenerating = false;
+      t.streamingActive = false;
+      t.turnNotice = `无需压缩：${noOpReasonText(str(payload['noOpReason']))}`;
+      touch(t);
+      touchSessionClock(sid, str(payload['updatedAtUtc']) || undefined);
+      void refreshAfterTool(sid);
       break;
     }
     case 'CompactFailed': {
+      t.compacting = false;
       t.isGenerating = false;
       t.streamingActive = false;
       t.lastError = str(payload['errorMessage']) || str(payload['errorCode']) || '压缩失败';
-      // need22-P2 F5：结构化错误（可重试=false，压缩失败走按钮重发）
       t.lastErrorInfo = { code: str(payload['errorCode']) || 'COMPACT_FAILED', message: t.lastError, retry: false };
+      t.turnNotice = `压缩失败：${t.lastError}`;
       toast('error', t.lastError);
       touch(t);
       break;
@@ -349,7 +535,7 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
         t.turnNotice = '已达到单轮迭代上限，已暂停自动执行。请检查中间结果后发送“继续”以恢复任务。';
       }
       touch(t);
-      void finishTurn(sid, { deferClearMs: 300 });
+      void finishTurn(sid, { deferClearMs: 300, terminalStatus: 'truncated' });
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -359,10 +545,14 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.isGenerating = false;
       t.streamingActive = false;
       t.turnNotice = '已停止生成。';
-      // need13：取消掐断整树，子等待态同步解除
-      t.subAgents.waiting = false;
+      // 取消掐断整树：仍 running 的子收敛为 cancelled，已有终态的兄弟子不变。
+      finalizeSubAgents(t, 'cancelled');
       touch(t);
-      void finishTurn(sid);
+      void finishTurn(sid, {
+        terminalStatus: 'cancelled',
+        userMessagePersisted: typeof payload['userMessagePersisted'] === 'boolean' ? (payload['userMessagePersisted'] as boolean) : null,
+        timelineFinalized: typeof payload['timelineFinalized'] === 'boolean' ? (payload['timelineFinalized'] as boolean) : null,
+      });
       break;
     }
     case 'TurnError': {
@@ -375,11 +565,11 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       t.lastErrorInfo = { code: str(payload['errorCode']) || 'TURN_ERROR', message: t.lastError, retry: true };
       // need22-P3 G6：TurnError 同落 turnNotice（模板已有 turnNotice + 重试按钮）
       t.turnNotice = `推理失败：${t.lastError}（可点“重试本轮”）`;
-      // need13：错误即解除子等待
-      t.subAgents.waiting = false;
+      // 错误收尾：仍 running 的子收敛为 failed，已有终态的兄弟子不变。
+      finalizeSubAgents(t, 'failed');
       touch(t);
       toast('error', t.lastError);
-      void finishTurn(sid, { keepOnFailure: true });
+      void finishTurn(sid, { keepOnFailure: true, terminalStatus: 'error' });
       agentRuntime().generateTitle(sid);
       break;
     }
@@ -390,14 +580,21 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
       if (reason !== 'demote' && reason !== 'finalize' && reason !== 'flip') break;
       if (tag !== 'process' && tag !== 'final') break;
       if (!bid) break;
+      // 先把 rAF 缓冲里的 delta 建成 seg，避免 flip/finalize 事件打空后旧 final 残留。
+      flushSegBufSync(sid);
       let touched = false;
       for (const s of t.segs) {
         if (String(s.blockId || '') === bid || String(s.key || '') === bid) {
-          s.tag = tag;
+          if (tag === 'final') markSoleFinal(t, s);
+          else s.tag = tag;
           touched = true;
         }
       }
-      if (touched) touch(t);
+      if (!touched) {
+        // 事件先于 delta 到达：记轻量 override，seg 建成时消费；后到事件覆盖旧值。
+        t.pendingTagOverrides[bid] = { tag, reason: reason as 'demote' | 'finalize' | 'flip' };
+      }
+      touch(t);
       break;
     }
     default:
@@ -405,14 +602,27 @@ export function handleTurnLifecycle(kind: string, payload: Record<string, unknow
   }
 }
 
+function noOpReasonText(reason: string): string {
+  switch (reason) {
+    case 'EMPTY':
+      return '会话为空';
+    case 'TOO_SHORT':
+      return '历史还太短';
+    case 'NO_NEW_CONTENT':
+      return '桩后没有新内容';
+    default:
+      return '当前无需压缩';
+  }
+}
+
 export function isCompacting(sessionId: string): boolean {
   const t = getTurn(sessionId);
-  return !!t && t.isGenerating && t.turnNotice.includes('压缩中');
+  return t?.compacting === true;
 }
 
 export function isBusyForHistory(sessionId: string): boolean {
   const t = getTurn(sessionId);
-  if (!!t && (t.isGenerating || t.streamingActive || t.turnNotice.includes('压缩中'))) return true;
+  if (!!t && (t.isGenerating || t.streamingActive || t.compacting)) return true;
   // need09-06：问询 pending 视为忙（重放/分支/压缩/新发送一律拒绝，请先回答问题）
   try {
     return agentRuntime().askPending(sessionId);
@@ -453,7 +663,7 @@ export async function stopGenerating(targetSessionId?: string): Promise<void> {
   const sessionId = (targetSessionId ?? activeSessionId.value).trim();
   if (!sessionId) return;
   if (isCompacting(sessionId)) return; // need05-03：压缩中不可中断，中断按钮无效
-  // need22-P2 F5：等后端 TurnCancelled 事件后再清本地（超时 5s 降级清 + 告警）
+  // 等后端 TurnCancelled 事件后再清本地（超时 5s 降级保留 cancelled + 对账重试）
   const cancelled = waitTurnCancelled(sessionId, 5000);
   try {
     const bridge = getHostBridge();
@@ -462,9 +672,27 @@ export async function stopGenerating(targetSessionId?: string): Promise<void> {
     console.error('[agent-turn] stopGenerating failed:', err);
   }
   const got = await cancelled;
+  const t = ensureTurn(sessionId);
   if (!got) {
-    console.warn('[agent-turn] stopGenerating: TurnCancelled 超时 5s，降级本地清理');
-    toast('warning', '取消指令已发送，但后端确认超时，已本地清理');
+    console.warn('[agent-turn] stopGenerating: TurnCancelled 超时 5s，降级本地保留取消态');
+    toast('warning', '取消指令已发送，正在确认历史状态…');
+    // 超时不删 pending：user 已进入上下文的可能性更高，标 cancelled 并安排对账重试。
+    const pendingId = String(t.pendingUser?.requestId || t.requestId || '').trim();
+    if (pendingId && t.pendingUser && String(t.pendingUser.requestId || '') === pendingId) {
+      t.pendingUser.status = 'cancelled';
+      t.pendingUser.errorCode = t.pendingUser.errorCode || 'CANCEL_CONFIRM_TIMEOUT';
+    }
+    t.isGenerating = false;
+    t.streamingActive = false;
+    t.turnNotice = '取消指令已发送，正在确认历史状态…';
+    touch(t);
+    try {
+      await agentRuntime().loadSessionMessages(sessionId, { background: true });
+    } catch {
+      /* 重拉失败走对账重试 */
+    }
+    if (pendingId) schedulePendingReconcile(sessionId, pendingId, turnStartMarks[sessionId] || 0, 0);
+    return;
   }
   // need09-06：问询等待期间停止 = 取消提问 + 取消整轮（后端 ct 联动转 Fail）
   try {
@@ -472,11 +700,11 @@ export async function stopGenerating(targetSessionId?: string): Promise<void> {
   } catch {
     /* ignore */
   }
-  const t = ensureTurn(sessionId);
-  t.isGenerating = false;
-  t.streamingActive = false;
-  t.requestId = '';
-  t.turnNotice = '已停止生成。';
-  touch(t);
+  const idle = ensureTurn(sessionId);
+  idle.isGenerating = false;
+  idle.streamingActive = false;
+  idle.requestId = '';
+  idle.turnNotice = '已停止生成。';
+  touch(idle);
   await refreshAfterTool(sessionId);
 }

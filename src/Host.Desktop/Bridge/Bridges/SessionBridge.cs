@@ -87,21 +87,86 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<bool>> RemoveWorkspace(string workspaceId)
+    /// <summary>显式双模式入口：mode 只接受 unbind / purge；旧方法不会静默获得 Purge 能力。</summary>
+    public async Task<BridgeResponse<WorkspaceRemovalResultDto>> RemoveWorkspaceV2(
+        string workspaceId,
+        string mode
+    )
     {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "INVALID_WORKSPACE_ID",
+                "工作区 ID 不能为空"
+            );
+        if (!WorkspaceRemovalModeParser.TryParse(mode, out var parsedMode))
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "WORKSPACE_VALIDATION",
+                "移除模式只接受 unbind 或 purge"
+            );
+
         try
         {
-            bool removed = await _workspaceSessionService
-                .RemoveWorkspaceAsync(workspaceId)
+            Action<string>? cancelTree =
+                _subCoordinator == null ? null : id => _subCoordinator.CancelTree(id);
+            var result = await _workspaceSessionService
+                .RemoveWorkspaceV2Async(workspaceId.Trim(), parsedMode, default, cancelTree)
                 .ConfigureAwait(false);
-            return BridgeResponse<bool>.Success(removed);
+            return BridgeResponse<WorkspaceRemovalResultDto>.Success(
+                WorkspaceRemovalResultDto.FromResult(result),
+                result.Outcome switch
+                {
+                    WorkspaceRemovalOutcome.Completed
+                        => parsedMode == WorkspaceRemovalMode.Unbind ? "已移出列表；物理清理完成" : "工作区已彻底删除",
+                    WorkspaceRemovalOutcome.CompletedWithWarnings => "已移出列表，但部分物理数据清理失败或被保守保留",
+                    WorkspaceRemovalOutcome.NotFound => "工作区不存在",
+                    _ => WorkspaceRemovalErrorMessage(result.ErrorCode),
+                }
+            );
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"RemoveWorkspace failed for id '{workspaceId}'", ex);
-            return BridgeResponse<bool>.Fail(ex.Message, "WORKSPACE_ERROR");
+            HaloLogger.App.Error(
+                $"RemoveWorkspaceV2 failed for id '{workspaceId}' mode '{mode}'",
+                ex
+            );
+            return BridgeResponse<WorkspaceRemovalResultDto>.Fail(
+                "WORKSPACE_REMOVAL_ERROR",
+                WorkspaceRemovalErrorMessage("WORKSPACE_REMOVAL_ERROR")
+            );
         }
     }
+
+    /// <summary>旧入口保持“仅移出列表”的文案语义：新宿主上永远安全解绑，不再默认彻底删除。</summary>
+    public async Task<BridgeResponse<bool>> RemoveWorkspace(string workspaceId)
+    {
+        var response = await RemoveWorkspaceV2(workspaceId, "unbind").ConfigureAwait(false);
+        if (!response.Ok)
+        {
+            return BridgeResponse<bool>.Fail(
+                response.Code ?? "WORKSPACE_REMOVAL_ERROR",
+                response.Message ?? WorkspaceRemovalErrorMessage(response.Code)
+            );
+        }
+        return BridgeResponse<bool>.Success(
+            response.Data?.WorkspaceUnbound == true,
+            response.Message
+        );
+    }
+
+    private static string WorkspaceRemovalErrorMessage(string? code) =>
+        code switch
+        {
+            "INVALID_WORKSPACE_ID" => "工作区 ID 不能为空或不合法",
+            "WORKSPACE_VALIDATION" => "移除模式只接受 unbind 或 purge",
+            "WORKSPACE_BUSY" => "工作区正在执行其他操作，请稍后重试",
+            "CANCEL_FAILED" => "无法确认会话已停止，未执行删除",
+            "REPARSE_POINT_UNSUPPORTED" => "检测到链接目录，出于安全原因未执行删除",
+            "PATH_TRAVERSAL" => "工作区路径越界，未执行删除",
+            "SESSIONS_INDEX_INVALID" => "会话索引损坏，未执行删除",
+            "WORKSPACE_NOT_FOUND" => "工作区不存在",
+            "DELETE_CANCELLED" => "移除已取消",
+            _ => "工作区移除失败，请查看日志后重试",
+        };
 
     public async Task<BridgeResponse<string?>> BrowseWorkspaceFolder(string? initialPath = null)
     {
@@ -167,34 +232,45 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<List<UnifiedChatMessage>>> GetSessionMessages(
+    /// <summary>旧全量消息直读入口已随统一仓储切换删除，请使用时间轴摘要接口。</summary>
+
+    /// <summary>标题链专用：按回合取指定回合的用户全文，摘要层直读，与消息门无关。</summary>
+    public async Task<BridgeResponse<string>> GetTurnUserContent(
         string workspaceId,
-        string sessionId
+        string sessionId,
+        string turnId
     )
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return BridgeResponse<string>.Fail("INVALID_SESSION", "工作区 ID 与会话 ID 不能为空");
+            }
+
+            var store = new WorkspaceSessionStore(_storageManager, _sessionRepository);
+            string content;
             try
             {
-                var meta = await _workspaceSessionService
-                    .GetSessionAsync(workspaceId, sessionId)
+                content = await store
+                    .GetUserContentAsync(workspaceId, sessionId, turnId ?? string.Empty)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion == 2)
-                    return BridgeResponse<List<UnifiedChatMessage>>.Fail(
-                        "USE_TIMELINE_API",
-                        "请使用 getTimelineSummary/getBlockContents"
-                    );
             }
-            catch { }
-            var messages = await _workspaceSessionService
-                .GetSessionMessagesAsync(workspaceId, sessionId)
-                .ConfigureAwait(false);
-            return BridgeResponse<List<UnifiedChatMessage>>.Success(messages);
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<string>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<string>.Fail("UNSUPPORTED_FORMAT", unsupported.Message);
+            }
+
+            return BridgeResponse<string>.Success(content ?? string.Empty);
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"GetSessionMessages failed for session '{sessionId}'", ex);
-            return BridgeResponse<List<UnifiedChatMessage>>.Fail(ex.Message, "SESSION_ERROR");
+            HaloLogger.App.Error($"GetTurnUserContent failed for session '{sessionId}'", ex);
+            return BridgeResponse<string>.Fail(ex.Message, "SESSION_ERROR");
         }
     }
 
@@ -211,8 +287,6 @@ public sealed partial class HostBridgeFacade
                 var meta = await _workspaceSessionService
                     .GetSessionAsync(workspaceId, sessionId)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<bool>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
                 if (
                     meta != null
                     && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
@@ -280,27 +354,79 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    public async Task<BridgeResponse<bool>> DeleteSession(string workspaceId, string sessionId)
+    public async Task<BridgeResponse<SessionDeletionResultDto>> DeleteSessionV2(
+        string workspaceId,
+        string sessionId
+    )
     {
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return BridgeResponse<SessionDeletionResultDto>.Fail(
+                "INVALID_SESSION",
+                "工作区 ID 与会话 ID 不能为空"
+            );
+        }
+
         try
         {
-            // need13：删主先 CancelTree 再级联删树（含子盘）
-            try
-            {
-                _subCoordinator?.CancelTree(sessionId.Trim());
-            }
-            catch { }
-            bool ok = await _workspaceSessionService
-                .DeleteSessionTreeAsync(workspaceId, sessionId)
+            Action<string>? cancelTree =
+                _subCoordinator == null ? null : id => _subCoordinator.CancelTree(id);
+            var result = await _workspaceSessionService
+                .DeleteSessionTreeAsync(workspaceId.Trim(), sessionId.Trim(), default, cancelTree)
                 .ConfigureAwait(false);
-            return BridgeResponse<bool>.Success(ok);
+            return BridgeResponse<SessionDeletionResultDto>.Success(
+                SessionDeletionResultDto.FromResult(result),
+                result.Outcome switch
+                {
+                    SessionDeletionOutcome.Deleted => "会话已删除",
+                    SessionDeletionOutcome.Partial => "会话数据已删除，但存在目录或索引残留",
+                    SessionDeletionOutcome.NotFound => "会话不存在",
+                    _ => DeletionErrorMessage(result.ErrorCode),
+                }
+            );
         }
         catch (Exception ex)
         {
-            HaloLogger.App.Error($"DeleteSession failed for session '{sessionId}'", ex);
-            return BridgeResponse<bool>.Fail(ex.Message, "SESSION_ERROR");
+            HaloLogger.App.Error(
+                $"DeleteSessionV2 failed for workspace '{workspaceId}' session '{sessionId}'",
+                ex
+            );
+            return BridgeResponse<SessionDeletionResultDto>.Fail(
+                "SESSION_DELETE_ERROR",
+                DeletionErrorMessage("SESSION_DELETE_ERROR")
+            );
         }
     }
+
+    public async Task<BridgeResponse<bool>> DeleteSession(string workspaceId, string sessionId)
+    {
+        var response = await DeleteSessionV2(workspaceId, sessionId).ConfigureAwait(false);
+        if (!response.Ok)
+        {
+            return BridgeResponse<bool>.Fail(
+                response.Code ?? "SESSION_DELETE_ERROR",
+                response.Message ?? DeletionErrorMessage(response.Code)
+            );
+        }
+
+        return BridgeResponse<bool>.Success(response.Data?.Outcome == "deleted", response.Message);
+    }
+
+    private static string DeletionErrorMessage(string? code) =>
+        code switch
+        {
+            "SESSION_NOT_FOUND" => "会话不存在，可能已被删除",
+            "SESSION_BUSY" => "会话正在生成、压缩或执行历史操作，请稍后重试",
+            "HISTORY_OPERATION_IN_PROGRESS" => "会话正在执行其他历史操作，请稍后重试",
+            "WORKSPACE_BUSY" => "工作区正在执行其他操作，请稍后重试",
+            "BACKUP_FAILED" => "备份失败，会话未删除",
+            "CANCEL_FAILED" => "无法确认会话已停止，会话未删除",
+            "SESSION_TREE_CYCLE" => "会话树结构异常，已拒绝删除",
+            "SESSION_DATABASE_DELETE_FAILED" => "数据库删除失败，会话未删除",
+            "DELETE_CANCELLED" => "删除已取消",
+            "INVALID_SESSION" => "工作区 ID 与会话 ID 不能为空",
+            _ => "会话删除失败，请查看日志后重试",
+        };
 
     public async Task<BridgeResponse<string>> ExportSessionMarkdown(
         string workspaceId,

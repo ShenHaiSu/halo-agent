@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Host.Desktop.Core.Models;
+using Host.Desktop.Infrastructure.Logging;
 using Microsoft.Data.Sqlite;
 
 namespace Host.Desktop.Infrastructure.Storage;
@@ -14,29 +16,34 @@ public sealed partial class SessionHistoryStore
         CancellationToken ct = default
     )
     {
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT MAX(seq) FROM messages WHERE kind='compact_stub';";
+        cmd.CommandText =
+            "SELECT MAX(seq) FROM messages WHERE session_id = $sid AND kind='compact_stub';";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         object? v = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         if (v == null || v == DBNull.Value)
             return null;
         return Convert.ToInt64(v);
     }
 
-    /// <summary>最后一个桩的完整视图（含 meta_json / usage）；无桩返回 null。</summary>
+    /// <summary>最后一个桩的完整视图；turn 只取与消息 id 精确匹配的 compact 轮。</summary>
     public async Task<CompactStubInfo?> GetLastCompactStubAsync(
         string ws,
         string sess,
         CancellationToken ct = default
     )
     {
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, seq, content, input_tokens, output_tokens, cached_tokens, meta_json, created_utc"
-            + " FROM messages WHERE kind='compact_stub' ORDER BY seq DESC LIMIT 1;";
+            "SELECT m.id, m.seq, m.content, m.input_tokens, m.output_tokens, m.cached_tokens, m.meta_json, m.created_utc, t.turn_id"
+            + " FROM messages m LEFT JOIN turns t"
+            + " ON t.session_id = m.session_id AND t.turn_id = 'cturn-' || m.id AND t.kind = 'compact'"
+            + " WHERE m.session_id = $sid AND m.kind='compact_stub' ORDER BY m.seq DESC LIMIT 1;";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
             return null;
@@ -96,22 +103,13 @@ public sealed partial class SessionHistoryStore
             catch { }
         }
 
-        string turnId = "cturn-" + msgId;
-        try
-        {
-            using var tcmd = conn.CreateCommand();
-            tcmd.CommandText =
-                "SELECT turn_id FROM turns WHERE kind='compact' ORDER BY turn_seq DESC LIMIT 1;";
-            object? t = await tcmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (t != null && t != DBNull.Value && !string.IsNullOrWhiteSpace(Convert.ToString(t)))
-                turnId = Convert.ToString(t)!;
-        }
-        catch { }
-
+        bool hasMatchingTurn = !reader.IsDBNull(8);
+        string turnId = hasMatchingTurn ? reader.GetString(8) : string.Empty;
         return new CompactStubInfo
         {
             MessageId = msgId,
             TurnId = turnId,
+            HasMatchingTurn = hasMatchingTurn,
             Seq = seq,
             Summary = summary,
             SummaryTokens = summaryTokens,
@@ -120,6 +118,34 @@ public sealed partial class SessionHistoryStore
             RemovedCount = removed,
             CreatedAtUtc = created,
         };
+    }
+
+    /// <summary>读取两条边界消息的真实 seq；任一缺失时对应边界返回 null。</summary>
+    public async Task<(long? FromSeq, long? ToSeq)> GetMessageSequenceRangeAsync(
+        string ws,
+        string sess,
+        string fromMessageId,
+        string toMessageId,
+        CancellationToken ct = default
+    )
+    {
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT"
+            + " (SELECT seq FROM messages WHERE session_id=$sid AND id=$from LIMIT 1),"
+            + " (SELECT seq FROM messages WHERE session_id=$sid AND id=$to LIMIT 1);";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
+        cmd.Parameters.AddWithValue("$from", fromMessageId ?? string.Empty);
+        cmd.Parameters.AddWithValue("$to", toMessageId ?? string.Empty);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            return (null, null);
+        return (
+            reader.IsDBNull(0) ? null : reader.GetInt64(0),
+            reader.IsDBNull(1) ? null : reader.GetInt64(1)
+        );
     }
 
     /// <summary>按 seq 增量读（seq &gt;= sinceSeq，ORDER BY seq）。</summary>
@@ -131,12 +157,13 @@ public sealed partial class SessionHistoryStore
     )
     {
         var result = new List<UnifiedChatMessage>();
-        _db.EnsureDatabase(ws, sess);
-        using var conn = _db.Open(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        using var conn = _db.OpenWorkspace(ws);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
-            + " FROM messages WHERE seq >= $since ORDER BY seq;";
+            + " FROM messages WHERE session_id = $sid AND seq >= $since ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sess ?? string.Empty);
         cmd.Parameters.AddWithValue("$since", sinceSeq);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -167,17 +194,42 @@ public sealed partial class SessionHistoryStore
             throw new ArgumentException("桩轮不能为空", nameof(stubTurn));
         var gate = GetWriteLock(ws, sess);
         await gate.WaitAsync(ct).ConfigureAwait(false);
+        var watch = Stopwatch.StartNew();
         try
         {
-            _db.EnsureDatabase(ws, sess);
-            using var conn = _db.Open(ws, sess);
-            ApplyFullSynchronous(conn);
-            using var tx = conn.BeginTransaction();
-            InsertMessages(conn, tx, new[] { stubMessage });
-            long turnSeq = ResolveTurnSeq(conn, tx, stubTurn);
-            UpsertTurn(conn, tx, stubTurn, turnSeq);
-            tx.Commit();
-            return turnSeq;
+            _db.EnsureWorkspaceDatabase(ws);
+            return await ExecuteWithBusyRetryAsync(
+                    attempt =>
+                    {
+                        using var conn = _db.OpenWorkspace(ws);
+                        using var tx = conn.BeginTransaction();
+                        InsertMessages(conn, tx, sess, new[] { stubMessage });
+                        long turnSeq = ResolveTurnSeq(conn, tx, sess, stubTurn);
+                        UpsertTurn(conn, tx, sess, stubTurn, turnSeq);
+                        tx.Commit();
+                        try
+                        {
+                            HaloLogger.App.Info(
+                                "[Compact] compact.stub.commit.succeeded ws="
+                                    + ws
+                                    + " sess="
+                                    + sess
+                                    + " msg="
+                                    + stubMessage.Id
+                                    + " turn="
+                                    + stubTurn.TurnId
+                                    + " attempt="
+                                    + attempt
+                                    + " elapsedMs="
+                                    + watch.ElapsedMilliseconds
+                            );
+                        }
+                        catch { }
+                        return Task.FromResult(turnSeq);
+                    },
+                    ct
+                )
+                .ConfigureAwait(false);
         }
         finally
         {

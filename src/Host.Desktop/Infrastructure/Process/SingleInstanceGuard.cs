@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Host.Desktop.Infrastructure.Storage;
 
 namespace Host.Desktop.Infrastructure.Process;
 
@@ -100,21 +101,46 @@ public sealed class SingleInstanceGuard : IDisposable
         );
 
     /// <summary>
-    /// need18-03 §2 探针：只拼接，不写盘（绝不调 StoragePathManager.Initialize）。
-    /// 与 StoragePathManager.Initialize 的 bootstrap 解析保持一致：
-    /// HALO_BOOTSTRAP_PATH &gt; LocalAppData\HaloAgent\bootstrap.json。
+    /// 启动探针：只拼接，不写盘，绝不调用 StoragePathManager.Initialize。
+    /// 数据位置解析统一委托给 StoragePathManager，确保与 Initialize 得到同一引导路径。
+    /// 损坏标记时取保守私有路径，启动阻断由 Initialize 负责。
     /// </summary>
     public static string ResolveBootstrapProbePath()
     {
-        var env = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
-        if (!string.IsNullOrWhiteSpace(env))
-            return Path.GetFullPath(env);
-        var lad = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.GetFullPath(Path.Combine(lad, "HaloAgent", "bootstrap.json"));
+        return StoragePathManager.ResolveProbeDataLocation().BootstrapPath;
     }
 
-    /// <summary>旁路纯函数，供单测 T9（避免调真实 Main）。</summary>
-    public static bool ShouldBypass() =>
+    /// <summary>测试专用重载：传入运行目录以验证便携标记的探针路径。</summary>
+    public static string ResolveBootstrapProbePath(string exeDirectory)
+    {
+        return StoragePathManager.ResolveProbeDataLocation(exeDirectory).BootstrapPath;
+    }
+
+    /// <summary>运维显式旁路或私有数据模式均跳过应用级单实例锁。</summary>
+    public static bool ShouldBypass()
+    {
+        if (
+            string.Equals(
+                Environment.GetEnvironmentVariable("HALO_ALLOW_MULTIINSTANCE"),
+                "1",
+                StringComparison.Ordinal
+            )
+        )
+        {
+            return true;
+        }
+        try
+        {
+            return StoragePathManager.ResolveProbeDataLocation().IsPortable;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>数据锁只认运维显式旁路；私有数据仍按各自数据根互斥，避免同根多开。</summary>
+    public static bool ShouldBypassDataLock() =>
         string.Equals(
             Environment.GetEnvironmentVariable("HALO_ALLOW_MULTIINSTANCE"),
             "1",

@@ -1,23 +1,44 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { computed, ref, type ComputedRef, type Ref } from 'vue';
 import { getHostBridge, haloEventBus, type AgentConfigDocument, type BridgeResponse } from '@shared/bridge/hostBridge';
 
-/** need08：智能体行为配置 store（对标 promptStore/configStore）。 */
+/** 智能体行为配置状态：保存基线、字段脏态与外部变更保护。 */
 export const useAgentConfigStore = defineStore('agentConfig', () => {
   const config = ref<AgentConfigDocument | null>(null);
+  const savedConfig: Ref<AgentConfigDocument | null> = ref(null);
   const loading = ref(false);
   const saving = ref(false);
   const lastSavedHash = ref('');
   const lastError = ref<{ field: string; message: string } | null>(null);
+  const externalChangePending: Ref<boolean> = ref(false);
 
-  const dirty = computed(() => {
-    if (!config.value) return false;
-    return JSON.stringify(config.value) !== lastSavedHash.value;
+  const dirtyFields: ComputedRef<string[]> = computed(() => {
+    if (!config.value || !savedConfig.value) return [];
+    const current = config.value as unknown as Record<string, unknown>;
+    const saved = savedConfig.value as unknown as Record<string, unknown>;
+    const keys = new Set([...Object.keys(current), ...Object.keys(saved)]);
+    return [...keys].filter((key) => JSON.stringify(current[key]) !== JSON.stringify(saved[key]));
   });
 
-  function markSaved() {
+  const dirty = computed(() => dirtyFields.value.length > 0);
+
+  function cloneConfig(document: AgentConfigDocument): AgentConfigDocument {
+    return JSON.parse(JSON.stringify(document)) as AgentConfigDocument;
+  }
+
+  function markSaved(): void {
+    savedConfig.value = config.value ? cloneConfig(config.value) : null;
     lastSavedHash.value = config.value ? JSON.stringify(config.value) : '';
     lastError.value = null;
+    externalChangePending.value = false;
+  }
+
+  function discardChanges(): void {
+    if (savedConfig.value) {
+      config.value = cloneConfig(savedConfig.value);
+    }
+    lastError.value = null;
+    externalChangePending.value = false;
   }
 
   function touchDirty() {
@@ -73,7 +94,7 @@ export const useAgentConfigStore = defineStore('agentConfig', () => {
   /** 从 AGENT_VALIDATION 消息里猜字段，供视图滚动定位。 */
   function guessField(message: string): string {
     const m = message.toLowerCase();
-    // need13：子代理字段优先（submaxiterations 含 maxiterations 子串，必须先判）
+    // 子代理轮次字段包含最大轮次字段名，必须先判，避免误定位。
     if (m.includes('submaxparallel') || message.includes('并发')) return 'subMaxParallel';
     if (m.includes('submaxiterations') || message.includes('子轮次')) return 'subMaxIterations';
     if (m.includes('subagentenabled') || message.includes('总开关')) return 'subAgentEnabled';
@@ -88,15 +109,22 @@ export const useAgentConfigStore = defineStore('agentConfig', () => {
   function watchStorageChange() {
     if (unsub) return;
     unsub = haloEventBus.on('storage:changed', () => {
+      if (dirty.value) {
+        externalChangePending.value = true;
+        return;
+      }
       void loadConfig();
     });
   }
 
   return {
     config,
+    savedConfig,
     loading,
     saving,
     dirty,
+    dirtyFields,
+    externalChangePending,
     lastSavedHash,
     lastError,
     loadConfig,
@@ -104,6 +132,7 @@ export const useAgentConfigStore = defineStore('agentConfig', () => {
     resetField,
     resetAll,
     touchDirty,
+    discardChanges,
     markSaved,
     watchStorageChange,
   };

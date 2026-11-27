@@ -73,6 +73,51 @@ public sealed class StorageDisplayEnhancementTests : IDisposable
         Assert.Equal(0, count);
     }
 
+    [Fact]
+    public void GetStorageBreakdown_包含backups且计入总量()
+    {
+        var (manager, root) = CreateManager();
+        var backupDir = Path.Combine(root, "backups", "ws", "sess");
+        Directory.CreateDirectory(backupDir);
+        File.WriteAllText(Path.Combine(backupDir, "a.bak"), new string('b', 128));
+        File.WriteAllText(Path.Combine(backupDir, "a.bak.meta.json"), "{}");
+        File.WriteAllText(Path.Combine(backupDir, "index.json"), "[]");
+
+        var breakdown = manager.GetStorageBreakdown();
+        var backups = Assert.Single(breakdown.Items.Where(item => item.Name == "backups"));
+        Assert.Equal(128 + 2 + 2, backups.SizeBytes);
+        Assert.Equal(3, backups.FileCount);
+        Assert.Equal(breakdown.Items.Sum(item => item.SizeBytes), breakdown.TotalBytes);
+    }
+
+    [Fact]
+    public async Task ChangeDataRootAsync_迁移backups保留目录结构()
+    {
+        var (manager, root) = CreateManager();
+        var backupDir = Path.Combine(root, "backups", "ws", "sess");
+        Directory.CreateDirectory(backupDir);
+        File.WriteAllText(Path.Combine(backupDir, "a.bak"), new string('b', 128));
+        File.WriteAllText(Path.Combine(backupDir, "a.bak.meta.json"), "{}");
+        File.WriteAllText(Path.Combine(backupDir, "index.json"), "[]");
+
+        var newRoot = Path.Combine(
+            Path.GetTempPath(),
+            "HaloStorageDisplay",
+            Guid.NewGuid().ToString("N"),
+            "MigratedRoot"
+        );
+        _tempRoots.Add(Path.GetDirectoryName(newRoot)!);
+
+        var result = await manager.ChangeDataRootAsync(newRoot, migrateExistingData: true);
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.MigratedFileCount >= 3);
+        var migrated = Path.Combine(newRoot, "backups", "ws", "sess");
+        Assert.True(File.Exists(Path.Combine(migrated, "a.bak")));
+        Assert.True(File.Exists(Path.Combine(migrated, "a.bak.meta.json")));
+        Assert.True(File.Exists(Path.Combine(migrated, "index.json")));
+    }
+
     // ===== 事件持久化 =====
 
     [Fact]

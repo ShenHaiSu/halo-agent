@@ -24,6 +24,14 @@
       <span>发送失败·点击重发</span>
       <button type="button" class="pending-retry-btn" data-testid="pending-retry-btn" @click.stop="emit('retry-pending')">重发</button>
     </div>
+    <div
+      v-else-if="pendingStatus === 'cancelled'"
+      data-testid="pending-cancelled"
+      class="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-secondary select-none"
+    >
+      <span>已停止·点击重发</span>
+      <button type="button" class="pending-retry-btn pending-retry-cancelled" data-testid="pending-retry-btn" @click.stop="emit('retry-pending')">重发</button>
+    </div>
   </div>
 </template>
 
@@ -38,6 +46,8 @@ const props = defineProps<{ content: string; pendingStatus: string }>();
 const emit = defineEmits<{ 'user-menu': [e: MouseEvent]; 'retry-pending': [] }>();
 
 const failedCls = computed(() => (props.pendingStatus === 'failed' ? 'border-red-400' : 'border-subtle'));
+
+/** 取消态边框沿用默认 subtle：消息已进入上下文，不按失败标红。 */
 </script>
 
 <style scoped>
@@ -72,5 +82,13 @@ const failedCls = computed(() => (props.pendingStatus === 'failed' ? 'border-red
 }
 .pending-retry-btn:hover {
   background: #fef2f2;
+}
+.pending-retry-cancelled {
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+.pending-retry-cancelled:hover {
+  background: transparent;
+  opacity: 0.85;
 }
 </style>

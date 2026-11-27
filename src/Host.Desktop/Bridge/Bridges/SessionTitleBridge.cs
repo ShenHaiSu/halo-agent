@@ -6,13 +6,14 @@ using System.Threading.Tasks;
 using Host.Desktop.Core.Models;
 using Host.Desktop.Infrastructure.Logging;
 using Host.Desktop.Infrastructure.Network;
+using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.LlmGateway.Models;
 using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
 /// <summary>
-/// need03-03 T2 后端标题精炼（方案 B）：用本轮同模型发一次小请求（无工具、maxTokens 50、20s 熔断），
+/// need03-03 T2 后端标题精炼（方案 B）：用本轮同模型发一次小请求（无工具、maxTokens 10000、20s 熔断），
 /// 解析结构化结果后经 UpdateSessionTitleAsync 回写（自动置 TitleLocked）。失败返回 Fail，前端静默保留 T1 的 5 字。
 /// </summary>
 public sealed partial class HostBridgeFacade
@@ -21,7 +22,8 @@ public sealed partial class HostBridgeFacade
         string workspaceId,
         string sessionId,
         string? providerId = null,
-        string? modelId = null
+        string? modelId = null,
+        bool force = false
     )
     {
         try
@@ -40,28 +42,64 @@ public sealed partial class HostBridgeFacade
             {
                 return BridgeResponse<string>.Fail("SESSION_NOT_FOUND", "会话不存在");
             }
-            if (session.TitleLocked)
+            if (session.TitleLocked && !force)
             {
                 // 已冻结（手动改名或跨刷新后后端已锁）：以专用错误码返回失败，
                 // 避免前端把原值误当作 LLM 精炼结果、进而覆盖用户手改标题。
+                // 列表手动触发允许显式覆盖（force），自动链恒为 false。
                 return BridgeResponse<string>.Fail("TITLE_ALREADY_LOCKED", "标题已冻结");
             }
 
-            var messages = await _workspaceSessionService
-                .GetSessionMessagesAsync(wsId, sessId)
-                .ConfigureAwait(false);
-            var firstUser = messages.FirstOrDefault(m =>
-                string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
-            );
-            if (firstUser == null || string.IsNullOrWhiteSpace(firstUser.Content))
+            var summaryStore = new WorkspaceSessionStore(_storageManager, _sessionRepository);
+            List<TurnSummary> summaries;
+            try
             {
-                return BridgeResponse<string>.Fail("NO_USER_MESSAGE", "首轮用户消息不存在");
+                summaries = await summaryStore.GetSummaryAsync(wsId, sessId).ConfigureAwait(false);
             }
-            var firstAssistant = messages.LastOrDefault(m =>
-                string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<string>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<string>.Fail("UNSUPPORTED_FORMAT", unsupported.Message);
+            }
+            var firstTurn = summaries.FirstOrDefault(s =>
+                !string.IsNullOrWhiteSpace(s.UserContent)
             );
-            string userText = firstUser.Content!.Trim();
-            string assistantText = (firstAssistant?.Content ?? string.Empty).Trim();
+            string userText;
+            string assistantText;
+            if (firstTurn != null && !string.IsNullOrWhiteSpace(firstTurn.UserContent))
+            {
+                var lastTurn = summaries.LastOrDefault(s =>
+                    !string.IsNullOrWhiteSpace(s.FinalContent)
+                    || !string.IsNullOrWhiteSpace(s.FinalPreview)
+                );
+                userText = firstTurn.UserContent!.Trim();
+                assistantText = (
+                    (lastTurn?.FinalContent ?? string.Empty).Length > 0
+                        ? lastTurn!.FinalContent
+                        : (lastTurn?.FinalPreview ?? string.Empty)
+                ).Trim();
+            }
+            else
+            {
+                var fallbackMessages = await _workspaceSessionService
+                    .GetSessionMessagesAsync(wsId, sessId)
+                    .ConfigureAwait(false);
+                var firstUserMsg = fallbackMessages.FirstOrDefault(m =>
+                    string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
+                );
+                if (firstUserMsg == null || string.IsNullOrWhiteSpace(firstUserMsg.Content))
+                {
+                    return BridgeResponse<string>.Fail("NO_USER_MESSAGE", "首轮用户消息不存在");
+                }
+                var lastAssistantMsg = fallbackMessages.LastOrDefault(m =>
+                    string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                );
+                userText = firstUserMsg.Content!.Trim();
+                assistantText = (lastAssistantMsg?.Content ?? string.Empty).Trim();
+            }
             string roundText = "<user>: " + userText + "\n<assistant>: " + assistantText;
             if (roundText.Length > 2000)
                 roundText = roundText.Substring(0, 2000);
@@ -136,15 +174,15 @@ public sealed partial class HostBridgeFacade
             );
 
             const string titleSystemPrompt =
-                "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。";
-            string titleUserPrompt = "对话全文如下：\n---\n" + roundText + "\n---";
+                "你是会话标题生成器。只根据用户首轮对话生成简短干练的中文标题：必须返回汇总性标题，不超过十五个字，不加标点、不加引号、不解释、不换行，只输出标题本身。若无法概括则输出首条消息前5字。";
+            string titleUserPrompt = "对话全文如下：\n---\n" + roundText + "\n---\n请只输出不超过十五个字的标题本身。";
             var titleModel = new ModelConfig
             {
                 Id = model.Id,
                 DisplayName = model.DisplayName,
                 Protocol = model.Protocol,
                 MaxContextTokens = model.MaxContextTokens,
-                MaxOutputTokens = 50,
+                MaxOutputTokens = 10000,
                 Temperature = 0.2,
                 Enabled = true,
                 // 标题与正文共用同一套正文通道语义，否则关掉转写的模型在标题里仍会被剥标签
@@ -267,6 +305,105 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    /// <summary>
+    /// 标题链路首轮取数直读通道。标题读摘要层，与消息门无关，自动/手动标题经 resolveFirstRoundTexts 共用；
+    /// 空会话返回 UserCount=0，由调用方按旧语义早退。
+    /// </summary>
+    public async Task<BridgeResponse<FirstRoundTextsDto>> GetFirstRoundTexts(
+        string workspaceId,
+        string sessionId
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return BridgeResponse<FirstRoundTextsDto>.Fail(
+                    "INVALID_SESSION",
+                    "工作区 ID 与会话 ID 不能为空"
+                );
+            }
+            string wsId = workspaceId.Trim();
+            string sessId = sessionId.Trim();
+
+            var session = await _workspaceSessionService
+                .GetSessionAsync(wsId, sessId)
+                .ConfigureAwait(false);
+            if (session == null)
+            {
+                return BridgeResponse<FirstRoundTextsDto>.Fail("SESSION_NOT_FOUND", "会话不存在");
+            }
+
+            var summaryStore = new WorkspaceSessionStore(_storageManager, _sessionRepository);
+            List<TurnSummary> summaries;
+            try
+            {
+                summaries = await summaryStore.GetSummaryAsync(wsId, sessId).ConfigureAwait(false);
+            }
+            catch (LegacySessionFormatException legacy)
+            {
+                return BridgeResponse<FirstRoundTextsDto>.Fail("LEGACY_SESSION", legacy.Message);
+            }
+            catch (UnsupportedFormatException unsupported)
+            {
+                return BridgeResponse<FirstRoundTextsDto>.Fail(
+                    "UNSUPPORTED_FORMAT",
+                    unsupported.Message
+                );
+            }
+            var userTurns = summaries
+                .Where(s => !string.IsNullOrWhiteSpace(s.UserContent))
+                .ToList();
+            string firstUser;
+            string assistant;
+            int userCount;
+            if (userTurns.Count > 0)
+            {
+                firstUser = userTurns.FirstOrDefault()?.UserContent?.Trim() ?? string.Empty;
+                var lastTurn = summaries.LastOrDefault(s =>
+                    !string.IsNullOrWhiteSpace(s.FinalContent)
+                    || !string.IsNullOrWhiteSpace(s.FinalPreview)
+                );
+                assistant = (
+                    (lastTurn?.FinalContent ?? string.Empty).Length > 0
+                        ? lastTurn!.FinalContent
+                        : (lastTurn?.FinalPreview ?? string.Empty)
+                ).Trim();
+                userCount = userTurns.Count;
+            }
+            else
+            {
+                var fallbackMessages = await _workspaceSessionService
+                    .GetSessionMessagesAsync(wsId, sessId)
+                    .ConfigureAwait(false);
+                var users = fallbackMessages
+                    .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                firstUser = users.FirstOrDefault()?.Content?.Trim() ?? string.Empty;
+                assistant =
+                    fallbackMessages
+                        .LastOrDefault(m =>
+                            string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                        )
+                        ?.Content?.Trim() ?? string.Empty;
+                userCount = users.Count;
+            }
+            return BridgeResponse<FirstRoundTextsDto>.Success(
+                new FirstRoundTextsDto
+                {
+                    FirstUser = firstUser,
+                    Assistant = assistant,
+                    UserCount = userCount
+                }
+            );
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error($"GetFirstRoundTexts failed for session '{sessionId}'", ex);
+            return BridgeResponse<FirstRoundTextsDto>.Fail("FIRST_ROUND_ERROR", ex.Message);
+        }
+    }
+
     private static string ParseSessionTitle(string raw)
     {
         string t =
@@ -296,8 +433,8 @@ public sealed partial class HostBridgeFacade
         var elements = System.Globalization.StringInfo.ParseCombiningCharacters(t);
         if (elements.Length < 2)
             return string.Empty;
-        if (elements.Length <= 12)
+        if (elements.Length <= 15)
             return t;
-        return t.Substring(elements[0], elements[12] - elements[0]);
+        return t.Substring(elements[0], elements[15] - elements[0]);
     }
 }

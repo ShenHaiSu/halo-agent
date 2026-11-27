@@ -9,14 +9,28 @@ import {
   type ContextBudgetStatusDto,
   type UiActiveState,
 } from '@shared/bridge/hostBridge';
-import type { TurnSummary, TimelineBlockContent, TimelineBlockContentsResponse, TimelineToolResult } from '@shared/bridge/hostBridge';
+import type {
+  TurnSummary,
+  TimelineBlockContent,
+  TimelineBlockContentsResponse,
+  TimelineToolResult,
+  HistoryBranchResult,
+} from '@shared/bridge/hostBridge';
+import { historyErrorMessage } from '@shared/bridge/protocol/errors';
+import type {
+  DeleteSessionCommandResult,
+  SessionDeletionOutcome,
+  WorkspaceRemovalCommandResult,
+  WorkspaceRemovalMode,
+  WorkspaceRemovalOutcome,
+} from '@shared/bridge/protocol/domain';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
 import { instantTitleFromUserText, parseTitleResult, refineTitleLocal, truncateRoundText } from '@shared/utils/sessionTitle';
 import { dropPendingUser, turns } from '@features/agent/stores/model';
 import type { PendingUser } from '@features/session/utils/pendingUser';
-import { isPendingExpired, matchConfirmed, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
+import { isPendingExpired, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 import { readNeed02Flags } from '@features/need02/utils/need02Flags';
 import { debug as need02Debug } from '@features/need02/utils/need02Debug';
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -40,7 +54,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const timelineSummaries = ref<TurnSummary[]>([]);
   const blockContentsCache = ref<Record<string, TimelineBlockContent>>({});
   const toolResultCache = ref<Record<string, TimelineToolResult>>({});
-  // 遗留：主链退役中，禁止新增引用；新代码走摘要源（TurnSummary）。子会话只读链豁免。
   /** need02-P1：乐观 overlay（仅视图层，不写 jsonl）。p1 off 时恒回 sessionMessages（旧链）。 */
   function isP1On(): boolean {
     try {
@@ -49,13 +62,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return true;
     }
   }
-  /** S3 增补：v2 时间轴判定（显式版本号为准，无会话时按旧链渲染防白屏）。 */
-  const isV2Timeline = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    return (s.historyVersion ?? 0) === 2;
-  });
-  /** 对账（精确 requestId 优先，启发内容+时间窗兜底）。命中即原位转正并清 pending。 */
+  /** 摘要源精确对账（requestId/lastRequestId），命中即转正并清 pending。 */
   function confirmPendingHit(sid: string, p: PendingUser, confirmedId: string): void {
     need02Debug('pending-confirmed', { requestId: p.requestId, key: p.key, confirmedId });
     dropPendingUser(sid);
@@ -67,8 +74,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!id) return;
       const t = turns.value[id];
       const p = t?.pendingUser;
-      if (!p || p.status !== 'sending') return;
-      if (isPendingExpired(p)) {
+      if (!p || (p.status !== 'sending' && p.status !== 'cancelled')) return;
+      if (p.status === 'sending' && isPendingExpired(p)) {
         try {
           need02Debug('pending-expired-drop', { requestId: p.requestId });
         } catch {
@@ -77,15 +84,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         dropPendingUser(id);
         return;
       }
-      // V2 会话只走摘要源精确对账（jsonl 为空，启发式无意义）；V1 会话保留 jsonl 启发式。
-      if (!isV2Timeline.value) {
-        const hit = matchConfirmed(p, sessionMessages.value);
-        if (hit) {
-          confirmPendingHit(id, p, String((hit as UnifiedChatMessage).id || ''));
-          return;
-        }
-      }
-      // v2 主路径：摘要源 requestId/lastRequestId 精确对账。
+      // 摘要源 requestId/lastRequestId 精确对账；cancelled 态命中同样转正。
       const summaryHit = matchConfirmedBySummary(p, timelineSummaries.value);
       if (summaryHit) {
         confirmPendingHit(id, p, String(p.requestId || ''));
@@ -122,11 +121,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const wid = activeWorkspaceId.value || '';
         const sid = activeSessionId.value || '';
         if (!wid) return;
-        void getHostBridge()
-          .setLastActive(wid, sid)
-          .catch(() => {
-            /* 静默：持久失败不阻断 */
-          });
+        // Promise.resolve 包裹：桥被 mock 或异常实现返回非 Promise 时，
+        // 直接 .catch 会在 teardown 后的 timer 里抛未捕获异常（全量并发下已复现）。
+        void Promise.resolve(getHostBridge().setLastActive(wid, sid)).catch(() => {
+          /* 静默：持久失败不阻断 */
+        });
       }, 300);
     } catch {
       /* ignore */
@@ -166,13 +165,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return sessions.value.find((s) => s.id === activeSessionId.value) || sessions.value[0] || null;
   });
 
-  /** S3 F4：历史版本只读（v1 HistoryVersion !== 2，不可继续/截断/压缩，可分支；v2 全放行）。 */
-  const isHistoryReadonly = computed<boolean>(() => {
-    const s = activeSession.value as unknown as { historyVersion?: number } | null;
-    if (!s) return false;
-    const v = typeof s.historyVersion === 'number' ? s.historyVersion : 0;
-    return v !== 2;
-  });
+  /** 历史只读横幅已随统一仓储退役：现全部会话可写，旧格式由打开时错误码提示。 */
+  const isHistoryReadonly = computed<boolean>(() => false);
 
   const filteredSessions = computed<SessionMetadata[]>(() => {
     const q = searchQuery.value.trim().toLowerCase();
@@ -251,13 +245,45 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return null;
   }
 
-  async function removeWorkspace(workspaceId: string): Promise<boolean> {
+  /**
+   * 双模式移除：只有后端确认 workspaceUnbound 才修改本地列表与 active。
+   * 目标 ID 由调用方捕获传入，响应到达时不读当前 active 猜目标。
+   */
+  async function removeWorkspaceV2(workspaceId: string, mode: WorkspaceRemovalMode): Promise<WorkspaceRemovalCommandResult> {
+    const wid = (workspaceId || '').trim();
+    const failure = (outcome: WorkspaceRemovalOutcome, errorCode?: string | null): WorkspaceRemovalCommandResult => ({
+      outcome,
+      mode,
+      workspaceUnbound: false,
+      sessionData: 'notRequested',
+      haloAgent: 'notRequested',
+      failedPaths: [],
+      warnings: [],
+      errorCode,
+    });
+    if (!wid) return failure('failed', 'INVALID_WORKSPACE_ID');
+
     try {
       const bridge = getHostBridge();
-      const res = await bridge.removeWorkspace(workspaceId);
-      if (res.ok && res.data) {
-        workspaces.value = workspaces.value.filter((w) => w.id !== workspaceId);
-        if (activeWorkspaceId.value === workspaceId) {
+      const res = await bridge.removeWorkspaceV2(wid, mode);
+      if (!res.ok || !res.data) return failure('failed', res.code ?? 'WORKSPACE_REMOVAL_ERROR');
+
+      const data = res.data;
+      const result: WorkspaceRemovalCommandResult = {
+        outcome: data.outcome,
+        mode: data.mode ?? mode,
+        workspaceUnbound: data.workspaceUnbound === true,
+        sessionData: data.sessionData ?? 'notRequested',
+        haloAgent: data.haloAgent ?? 'notRequested',
+        haloAgentReason: data.haloAgentReason ?? null,
+        failedPaths: data.failedPaths ?? [],
+        warnings: data.warnings ?? [],
+        errorCode: data.errorCode ?? null,
+      };
+
+      if (result.workspaceUnbound) {
+        workspaces.value = workspaces.value.filter((w) => w.id !== wid);
+        if (activeWorkspaceId.value === wid) {
           activeWorkspaceId.value = workspaces.value[0]?.id || '';
           activeSessionId.value = '';
           if (activeWorkspaceId.value) {
@@ -271,12 +297,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
         persistLastActive();
-        return true;
       }
+      return result;
     } catch (err) {
-      console.error('[workspaceStore] removeWorkspace failed:', err);
+      console.error('[workspaceStore] removeWorkspaceV2 failed:', err);
+      return failure('failed', 'WORKSPACE_REMOVAL_ERROR');
     }
-    return false;
+  }
+
+  /** 兼容旧调用方：新宿主上始终按安全解绑语义执行，不保留“默认彻底删除”。 */
+  async function removeWorkspace(workspaceId: string): Promise<boolean> {
+    const result = await removeWorkspaceV2(workspaceId, 'unbind');
+    return result.workspaceUnbound;
   }
 
   /**
@@ -386,6 +418,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           // 启动/工作区进入：同样做一次孤儿愈合，脏了才重拉
           if (await healSessionHistory()) await loadSessionMessages(activeSessionId.value);
           await refreshBudget();
+          maybeRefineTitleAfterLoad(activeSessionId.value);
         } else {
           sessionMessages.value = [];
           timelineSummaries.value = [];
@@ -410,6 +443,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     // 进会话检测：孤儿 tool_calls 就地愈合（中断/杀进程残留），脏了才重拉
     if (await healSessionHistory({ signal, epoch })) await loadSessionMessages(sid, { signal, epoch });
     await refreshBudget({ signal, epoch });
+    if (sessionStore.isCurrent(epoch, signal) && sessionStore.activeSessionId === sid) {
+      maybeRefineTitleAfterLoad(sid);
+    }
     persistLastActive();
   }
 
@@ -496,34 +532,67 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return false;
   }
 
-  async function deleteSession(sessionId: string): Promise<boolean> {
-    if (!activeWorkspaceId.value) return false;
+  async function deleteSession(sessionId: string): Promise<DeleteSessionCommandResult> {
+    const failure = (outcome: SessionDeletionOutcome, errorCode?: string, message?: string): DeleteSessionCommandResult => ({
+      outcome,
+      destructiveCommitCompleted: false,
+      deletedSessionIds: [],
+      residualSessionIds: [],
+      errorCode,
+      message,
+      warnings: [],
+    });
+    if (!activeWorkspaceId.value) return failure('failed', 'WORKSPACE_NOT_FOUND', '工作区不存在');
     try {
       const bridge = getHostBridge();
-      const res = await bridge.deleteSession(activeWorkspaceId.value, sessionId);
-      if (res.ok && res.data) {
-        sessions.value = sessions.value.filter((s) => s.id !== sessionId);
-        if (activeSessionId.value === sessionId) {
-          if (sessions.value.length > 0) {
-            await selectSession(sessions.value[0].id);
-          } else {
-            activeSessionId.value = '';
-            sessionMessages.value = [];
-            timelineSummaries.value = [];
-            budgetStatus.value = null;
-            budgetError.value = null;
-            persistLastActive();
-          }
-        }
-        return true;
+      const res = await bridge.deleteSessionV2(activeWorkspaceId.value, sessionId);
+      if (!res.ok || !res.data) {
+        return failure('failed', res.code, res.message || '会话删除失败，请查看日志后重试');
       }
+      const data = res.data;
+      const result: DeleteSessionCommandResult = {
+        outcome: data.outcome,
+        destructiveCommitCompleted: data.destructiveCommitCompleted,
+        deletedSessionIds: [...(data.deletedSessionIds || [])],
+        residualSessionIds: [...(data.residualSessionIds || [])],
+        backupFileName: data.backupFileName ?? null,
+        errorCode: data.errorCode ?? null,
+        message: res.message,
+        warnings: [...(data.warnings || [])],
+      };
+      if (!data.destructiveCommitCompleted) return result;
+
+      const deletedIds = new Set(data.deletedSessionIds?.length ? data.deletedSessionIds : [sessionId]);
+      const residualIds = new Set(data.residualSessionIds || []);
+      for (const id of deletedIds) {
+        if (!residualIds.has(id)) dropPendingUser(id);
+      }
+      sessions.value = sessions.value.filter((item) => !deletedIds.has(item.id) || residualIds.has(item.id));
+      if (deletedIds.has(activeSessionId.value) && !residualIds.has(activeSessionId.value)) {
+        if (sessions.value.length > 0) {
+          await selectSession(sessions.value[0].id);
+        } else {
+          useSessionStore().beginSelect('');
+          activeSessionId.value = '';
+          sessionMessages.value = [];
+          timelineSummaries.value = [];
+          budgetStatus.value = null;
+          budgetError.value = null;
+          clearTimelineCaches();
+          persistLastActive();
+        }
+      }
+      return result;
     } catch (err) {
       console.error('[workspaceStore] deleteSession failed:', err);
+      return failure('failed', 'SESSION_DELETE_ERROR', '会话删除失败，请查看日志后重试');
     }
-    return false;
   }
 
-  async function loadSessionMessages(sessionId: string, opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
+  async function loadSessionMessages(
+    sessionId: string,
+    opts?: { signal?: AbortSignal | null; epoch?: number; preserveBudget?: boolean; background?: boolean }
+  ): Promise<void> {
     if (!activeWorkspaceId.value || !sessionId) {
       sessionMessages.value = [];
       timelineSummaries.value = [];
@@ -539,27 +608,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const epoch = opts?.epoch ?? sessionStore.epoch;
     const signal = opts?.signal ?? null;
     const sid = (sessionId || '').trim();
-    // A全量：await 之前同步清空，视图立即进空态，切会话不闪旧历史
+    // 默认只加载当前会话；后台加载必须显式声明，禁止异步响应清空当前视图。
+    if (!opts?.background && sid !== activeSessionId.value) return;
+    // 发送链保留旧预算，切会话仍清空：消息列表照旧清空防闪旧历史
     sessionMessages.value = [];
     timelineSummaries.value = [];
-    budgetStatus.value = null;
-    budgetError.value = null;
+    if (!opts?.preserveBudget) {
+      budgetStatus.value = null;
+      budgetError.value = null;
+    }
     loadingMessages.value = true;
     try {
       const bridge = getHostBridge();
-      const res = await bridge.getSessionMessages(activeWorkspaceId.value, sid);
+      const api = bridge as unknown as { getTimelineSummary?: (w: string, s: string) => Promise<{ ok: boolean; data?: TurnSummary[] }> };
+      const res =
+        typeof api.getTimelineSummary === 'function'
+          ? await api.getTimelineSummary(activeWorkspaceId.value, sid)
+          : { ok: false as const, data: undefined };
       if (!sessionStore.isCurrent(epoch, signal) || sessionStore.activeSessionId !== sid) {
         sessionStore.discardStale(`loadSessionMessages(${sid.slice(-6)})`);
         return;
       }
-      if (res.ok && res.data) {
-        sessionMessages.value = res.data;
+      if (res.ok && Array.isArray(res.data)) {
+        timelineSummaries.value = res.data;
       } else {
-        sessionMessages.value = [];
+        timelineSummaries.value = [];
       }
-      // 首次回包对账转正（key 不变，只换 id/时间；v2 摘要源二次对账在摘要回包后）。
-      tryConfirmPending(sid);
-      await loadTimelineSummary(sid);
+      // 首屏摘要直达：不再拉全量消息；旧全量字段保留为待删死代码，收尾阶段统一清理。
+      sessionMessages.value = [];
+      // 首次回包对账转正（key 不变，只换 id/时间；摘要回包后直接对账）。
       tryConfirmPending(sid);
     } catch (err) {
       if (!sessionStore.isCurrent(epoch, signal)) {
@@ -734,27 +811,112 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (cur) cur.messageCount = sessionMessages.value.length;
     return true;
   }
+  // 首轮文本取数：以后端落盘为准（轮末重拉会同步清空内存视图），失败回退内存
+  async function resolveFirstRoundTexts(sid: string): Promise<{ firstUser: string; assistant: string; userCount: number }> {
+    let firstUser = '';
+    let assistant = '';
+    let userCount = 0;
+    let countedRemotely = false;
+    try {
+      const wid = activeWorkspaceId.value;
+      if (wid) {
+        const bridge = getHostBridge();
+        // need03-03-B：标题链路统一走后端直读（v2 会话 getSessionMessages 拒服 USE_TIMELINE_API，
+        // 老后端缺方法时 typeof 守卫回退旧链路）。
+        const directApi = bridge as unknown as {
+          getFirstRoundTexts?: (
+            w: string,
+            s: string
+          ) => Promise<{
+            ok: boolean;
+            code?: string;
+            message?: string;
+            data?: { firstUser?: unknown; assistant?: unknown; userCount?: unknown };
+          }>;
+        };
+        if (typeof directApi.getFirstRoundTexts === 'function') {
+          const direct = await directApi.getFirstRoundTexts(wid, sid);
+          if (direct && direct.ok && direct.data) {
+            firstUser = String(direct.data.firstUser ?? '');
+            assistant = String(direct.data.assistant ?? '');
+            const n = Number(direct.data.userCount ?? 0);
+            userCount = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+            countedRemotely = true;
+            // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+            console.debug('[title-debug] firstRound via getFirstRoundTexts', {
+              sid,
+              userCount,
+              firstLen: firstUser.trim().length,
+              assistantLen: assistant.trim().length,
+            });
+          } else if (direct && !direct.ok) {
+            // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+            console.debug('[title-debug] getFirstRoundTexts not ok, fallback legacy', { sid, code: direct.code, message: direct.message });
+          }
+        }
+        if (!countedRemotely) {
+          const remoteApi = bridge as unknown as {
+            getSessionMessages?: (w: string, s: string) => Promise<{ ok: boolean; data?: UnifiedChatMessage[] }>;
+          };
+          if (typeof remoteApi.getSessionMessages === 'function') {
+            const remote = await bridge.getSessionMessages(wid, sid);
+            if (remote && remote.ok && Array.isArray(remote.data)) {
+              const msgs = remote.data as UnifiedChatMessage[];
+              const remoteUsers = msgs.filter((m) => m.role === 'user');
+              userCount = remoteUsers.length;
+              countedRemotely = true;
+              const firstRemote = remoteUsers[0];
+              if (firstRemote) {
+                firstUser = String(firstRemote.content || '');
+                const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+                assistant = String(lastAssistant?.content || '');
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      /* 落盘读取失败则回退内存计数 */
+    }
+    if (!countedRemotely) {
+      const memUsers = sessionMessages.value.filter((m) => m.role === 'user');
+      userCount = memUsers.length;
+      const firstMem = memUsers[0];
+      if (firstMem) {
+        firstUser = String(firstMem.content || '');
+        const lastAssistant = [...sessionMessages.value].reverse().find((m) => m.role === 'assistant');
+        assistant = String(lastAssistant?.content || '');
+      }
+    }
+    return { firstUser, assistant, userCount };
+  }
   // need03-03 T2：首轮响应结束后精炼一次（同模型小请求优先，失败则本地精炼兜底；手动锁/已生成/生成中直接跳过）
   async function generateTitleAfterFirstRound(sessionId: string): Promise<void> {
     const sid = (sessionId || '').trim();
     if (!sid || titleLocked.value[sid] || autoTitleDone.value[sid] || titleGenerating.value[sid]) return;
     const sess = sessions.value.find((s) => s.id === sid);
     if (!sess) return;
-    // 仅首轮：当前内存消息中 user 条数须为 1（后台会话消息未加载时跳过，避免误覆）
+    // 子会话标题由后端锁定展示，不参与自动精炼
+    const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+    if (sessRole === 'sub') return;
+    // 仅当前会话触发，跨会话事件丢弃，避免后台覆盖当前视图
     if (sid !== activeSessionId.value) return;
-    const users = sessionMessages.value.filter((m) => m.role === 'user');
-    if (users.length !== 1) {
-      // 非首轮或空：若标题仍是新建会话则不处理；否则标记完成以冻结
+    // 轮末重拉会同步清空内存视图，计数以后端落盘为准，避免把“没数到”误判成非首轮
+    const { firstUser: firstUserText, assistant: assistantText, userCount } = await resolveFirstRoundTexts(sid);
+    if (userCount === 0) {
+      // 视图尚未就位或落盘尚未可见：跳过本次不冻结，等待下次进入补跑
+      return;
+    }
+    if (userCount > 1) {
+      // 真多轮才冻结，此后不再尝试
       if (sess.title && sess.title !== '新建会话') autoTitleDone.value[sid] = true;
       return;
     }
     titleGenerating.value[sid] = true;
     try {
-      const firstUser = String(users[0].content || '');
-      const firstAssistant = [...sessionMessages.value].reverse().find((m) => m.role === 'assistant');
-      const assistantText = String(firstAssistant?.content || '');
+      const firstUser = firstUserText;
       const t1 = instantTitleFromUserText(firstUser);
-      // 后端同模型小请求优先（无工具/maxTokens 50/20s 熔断，后端已持久化+置锁）；失败则本地精炼兜底
+      // 后端同模型小请求优先（无工具/maxTokens 10000/20s 熔断，后端已持久化+置锁）；失败则本地精炼兜底
       let backendTitle = '';
       try {
         backendTitle = await requestTitleViaLlm(sid, 20000);
@@ -791,14 +953,110 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       titleGenerating.value[sid] = false;
     }
   }
-  // need03-03 T2 后端标题通道：generateSessionTitle（同模型/temperature 0.2/maxTokens 50/20s 熔断在后端内聚）
-  async function requestTitleViaLlm(sessionId: string, timeoutMs: number): Promise<string> {
+  // 会话就位后补跑一次精炼：仅当标题仍是首条即时形态时触发，门闩与后端冻结码天然去重
+  function maybeRefineTitleAfterLoad(sessionId: string): void {
+    try {
+      const sid = (sessionId || '').trim();
+      if (!sid || !activeWorkspaceId.value) return;
+      if (titleLocked.value[sid] || autoTitleDone.value[sid] || titleGenerating.value[sid]) return;
+      const sess = sessions.value.find((s) => s.id === sid);
+      if (!sess) return;
+      const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+      if (sessRole === 'sub') return;
+      if (sid !== activeSessionId.value) return;
+      const title = String(sess.title || '').trim();
+      const isBlank = !title || title === '新建会话' || title === '初始会话';
+      if (!isBlank) {
+        const memUsers = sessionMessages.value.filter((m) => m.role === 'user');
+        if (memUsers.length === 0) {
+          // 消息尚未落盘可见时仍给一次机会，计数以后端为准
+        } else {
+          const expected = instantTitleFromUserText(String(memUsers[0].content || ''));
+          if (title !== expected) return;
+        }
+      }
+      void generateTitleAfterFirstRound(sid).catch(() => undefined);
+    } catch {
+      /* 补跑永不阻断会话切换 */
+    }
+  }
+  // 列表手动触发：显式覆盖已锁标题（force），允许反复跑、多轮也跑；空/sub/生成中由调用方前置拦截
+  async function regenerateTitleManually(sessionId: string): Promise<boolean> {
+    const sid = (sessionId || '').trim();
+    if (!sid || !activeWorkspaceId.value) return false;
+    if (titleGenerating.value[sid]) return false;
+    const sess = sessions.value.find((s) => s.id === sid);
+    if (!sess) return false;
+    const sessRole = String((sess as unknown as { agentRole?: string }).agentRole || '').toLowerCase();
+    if (sessRole === 'sub') return false;
+    titleGenerating.value[sid] = true;
+    try {
+      const { firstUser, assistant, userCount } = await resolveFirstRoundTexts(sid);
+      // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+      console.debug('[title-debug] resolve', { sid, userCount, firstLen: firstUser.trim().length, assistantLen: assistant.trim().length });
+      if (userCount === 0 || !firstUser.trim()) {
+        console.debug('[title-debug] early-return: 无可概括内容', { sid, userCount });
+        return false;
+      }
+      const t1 = instantTitleFromUserText(firstUser);
+      let backendTitle = '';
+      try {
+        backendTitle = await requestTitleViaLlm(sid, 20000, true);
+      } catch (e) {
+        // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+        console.debug('[title-debug] backendTitle failed', {
+          sid,
+          titleCode: (e as { titleCode?: string } | null)?.titleCode,
+          message: e instanceof Error ? e.message : String(e),
+        });
+        backendTitle = '';
+      }
+      console.debug('[title-debug] backendTitle result', {
+        sid,
+        len: backendTitle.trim().length,
+        preview: backendTitle.trim().slice(0, 20),
+      });
+      if (backendTitle) {
+        const parsed = parseTitleResult(backendTitle, t1) || backendTitle;
+        const item = sessions.value.find((s) => s.id === sid);
+        if (!item) return false;
+        // 手动显式覆盖：已锁也直接替换（后端 force 已跳锁，回写后保持锁定）
+        item.title = parsed;
+        titleLocked.value[sid] = true;
+        autoTitleDone.value[sid] = true;
+        return true;
+      }
+      const parsed = refineTitleLocal(assistant, firstUser);
+      // DEBUG-TITLE: 临时诊断日志，定位“标题生成失败”后删除
+      console.debug('[title-debug] local refine', { sid, parsed, titleLocked: !!titleLocked.value[sid] });
+      if (!parsed) return false;
+      if (titleLocked.value[sid]) {
+        const item = sessions.value.find((s) => s.id === sid);
+        if (!item) return false;
+        item.title = parsed;
+        autoTitleDone.value[sid] = true;
+        return true;
+      }
+      const still = sessions.value.find((s) => s.id === sid);
+      if (!still) return false;
+      const ok = await renameSession(sid, parsed, { manual: false });
+      if (ok) autoTitleDone.value[sid] = true;
+      return ok;
+    } catch (err) {
+      console.warn('[workspaceStore] regenerateTitleManually skipped:', err);
+      return false;
+    } finally {
+      titleGenerating.value[sid] = false;
+    }
+  }
+  // need03-03 T2 后端标题通道：generateSessionTitle（同模型/temperature 0.2/maxTokens 10000/20s 熔断在后端内聚）
+  async function requestTitleViaLlm(sessionId: string, timeoutMs: number, force = false): Promise<string> {
     const bridge = getHostBridge();
     const wid = activeWorkspaceId.value;
     if (!wid || !sessionId) throw new Error('no-workspace-session');
     const pId = configStore.activeProvider?.id || '';
     const mId = configStore.activeModel?.id || '';
-    const call = bridge.generateSessionTitle(wid, sessionId, pId, mId);
+    const call = bridge.generateSessionTitle(wid, sessionId, pId, mId, force);
     const timeout = new Promise<never>((_, reject) =>
       window.setTimeout(() => reject(new Error('title-timeout')), Math.max(1000, timeoutMs))
     );
@@ -822,10 +1080,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const mId = configStore.activeModel?.id || '';
       const res = await bridge.compactSession(activeWorkspaceId.value, sessionId, pId, mId, keepLastGroups);
       if (res.ok) {
-        if (sessionId === activeSessionId.value) {
-          await loadSessionMessages(sessionId);
-          await refreshBudget();
-        }
+        // 启动响应只表示命令已受理；timeline/budget 由 CompactCompleted 或 CompactNoOp 事件刷新。
         return true;
       }
       return false;
@@ -847,6 +1102,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       console.error('[workspaceStore] exportSessionMarkdown failed:', err);
     }
     return '';
+  }
+
+  function applyUsagePatch(sid: string, usage: { inputTokens: number; outputTokens?: number; cachedInputTokens?: number | null }): void {
+    if ((sid || '').trim() !== activeSessionId.value) return;
+    const cur = budgetStatus.value;
+    if (!cur) return;
+    const input = Math.trunc(Number(usage?.inputTokens) || 0);
+    if (input <= 0) return;
+    if (String(cur.occupancyBaseline || 'exact') === 'compact-estimate') return;
+    const cachedRaw = usage?.cachedInputTokens;
+    const cached = cachedRaw === null || cachedRaw === undefined ? null : Math.max(0, Math.trunc(Number(cachedRaw) || 0));
+    const total = Math.max(1, cur.totalContextTokens || 128000);
+    const maxOut = cur.maxOutputTokens || 4096;
+    const safety = cur.safetyBuffer || 1024;
+    budgetStatus.value = {
+      ...cur,
+      usedInputTokens: input,
+      lastPromptTokens: input,
+      lastCachedTokens: cached,
+      cacheHitRate: cached === null || input <= 0 ? null : Math.min(1, Math.max(0, cached / input)),
+      usedInputIsEstimated: false,
+      occupancyBaseline: 'exact',
+      occupancyState: 'known',
+      usagePercentage: Math.min(100, Math.round((input / total) * 1000) / 10),
+      availableInputTokens: Math.max(0, total - maxOut - safety - input),
+    };
   }
 
   async function refreshBudget(opts?: { signal?: AbortSignal | null; epoch?: number }): Promise<void> {
@@ -909,29 +1190,48 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // need07：分支（user→排除锚点+草稿预填原文；assistant→含整轮+草稿空）
-  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant'): Promise<boolean> {
-    if (!activeWorkspaceId.value || !activeSessionId.value) return false;
+  /** 分支：捕获源工作区与会话，草稿直接来自目标文本；返回结构化结果供 UI 提示。 */
+  async function branchFromMessage(anchorMessageId: string, kind: 'user' | 'assistant', draftText?: string): Promise<HistoryBranchResult> {
+    const sourceWorkspaceId = activeWorkspaceId.value;
+    const sourceSessionId = activeSessionId.value;
+    if (!sourceWorkspaceId || !sourceSessionId) {
+      return { ok: false, code: 'SESSION_NOT_FOUND', message: '会话不存在' };
+    }
     try {
-      dropPendingUser(activeSessionId.value);
+      dropPendingUser(sourceSessionId);
     } catch {
       /* ignore */
     }
-    const includeAnchor = kind === 'assistant';
-    const anchor = sessionMessages.value.find((m) => String(m.id) === String(anchorMessageId));
-    const draftText = kind === 'user' ? String(anchor?.content || '') : '';
     try {
       const bridge = getHostBridge();
-      const res = await bridge.branchSession(activeWorkspaceId.value, activeSessionId.value, anchorMessageId, includeAnchor);
-      if (!res.ok || !res.data) return false;
+      const res = await bridge.branchSession(sourceWorkspaceId, sourceSessionId, anchorMessageId, kind === 'assistant');
+      if (!res.ok || !res.data) {
+        return {
+          ok: false,
+          code: res.code,
+          message: res.message || historyErrorMessage(res.code),
+          newSessionId: res.newSessionId ?? undefined,
+          failedStage: res.failedStage ?? undefined,
+        };
+      }
       const created = res.data;
       sessions.value = [created, ...sessions.value.filter((s) => s.id !== created.id)];
+      if (sourceWorkspaceId !== activeWorkspaceId.value || sourceSessionId !== activeSessionId.value) {
+        return { ok: true, session: created, switched: false };
+      }
       await selectSession(created.id);
-      haloEventBus.emitLocal('chat:prefill-draft', { text: draftText, sessionId: created.id });
-      return true;
+      haloEventBus.emitLocal('chat:prefill-draft', {
+        text: kind === 'user' ? String(draftText || '') : '',
+        sessionId: created.id,
+      });
+      return { ok: true, session: created, switched: true };
     } catch (err) {
       console.error('[workspaceStore] branchFromMessage failed:', err);
-      return false;
+      return {
+        ok: false,
+        code: 'BRANCH_ERROR',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
   // 孤儿愈合：中断/杀进程残留的 tool_calls 补 synthetic cancelled tool。返回 true=落盘有变，调用方需重拉。
@@ -961,7 +1261,49 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // 删除单条消息（后端先备份再删行，删后自动愈合；生成中拒绝）。
+  /**
+   * 删除锚点所属整轮：入口捕获 ws/sid/epoch，只有数据库事务提交成功才清目标会话 pending；
+   * 响应到达时若已切走会话或 epoch 变化，不刷新当前视图，交给下次进入对账。
+   */
+  async function deleteTurn(
+    anchorMessageId: string
+  ): Promise<{ ok: boolean; message?: string; code?: string; metadataWarning?: string | null }> {
+    const wid = activeWorkspaceId.value;
+    const sid = activeSessionId.value;
+    if (!wid || !sid) return { ok: false, message: '会话不存在' };
+    if (!anchorMessageId) return { ok: false, message: '消息不存在' };
+    const sessionStore = useSessionStore();
+    const epoch = sessionStore.epoch;
+    const signal = sessionStore.currentSignal;
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.deleteSessionTurn(wid, sid, anchorMessageId);
+      if (!res.ok || !res.data || !res.data.destructiveCommitCompleted || !res.data.success) {
+        return {
+          ok: false,
+          code: res.code ?? res.data?.errorCode ?? undefined,
+          message: res.message || historyErrorMessage(res.code, '整轮删除失败'),
+        };
+      }
+      try {
+        dropPendingUser(sid);
+      } catch {
+        /* pending 清理不阻断已提交的结果 */
+      }
+      if (wid === activeWorkspaceId.value && sid === activeSessionId.value && sessionStore.isCurrent(epoch, signal)) {
+        await loadSessionMessages(sid, { epoch, signal });
+        await refreshBudget({ epoch, signal });
+      } else {
+        sessionStore.discardStale(`deleteTurn(${sid.slice(-6)})`);
+      }
+      return { ok: true, metadataWarning: res.data.metadataWarning ?? null };
+    } catch (err) {
+      console.error('[workspaceStore] deleteTurn failed:', err);
+      return { ok: false, code: 'DELETE_TURN_ERROR', message: '整轮删除失败，请刷新后重试' };
+    }
+  }
+
+  // 迁移期兼容入口：新 UI 不再调用，后端仅保留给旧前端。
   async function deleteMessage(messageId: string): Promise<{ ok: boolean; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
     if (!messageId) return { ok: false, message: '消息不存在' };
@@ -1006,7 +1348,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeSessionId,
     activeSession,
     isHistoryReadonly,
-    isV2Timeline,
     sessionMessages,
     timelineSummaries,
     budgetStatus,
@@ -1026,6 +1367,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renameWorkspace,
     workspaceLabel,
     removeWorkspace,
+    removeWorkspaceV2,
     loadSessions,
     touchSessionTime,
     reconcileSessionTimes,
@@ -1042,18 +1384,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     clearTimelineCaches,
     blockContentsCache,
     healSessionHistory,
+    deleteTurn,
     deleteMessage,
     truncateHistory,
     branchFromMessage,
     appendMessage,
     mergePersistedMessage,
     generateTitleAfterFirstRound,
+    maybeRefineTitleAfterLoad,
+    regenerateTitleManually,
     requestTitleViaLlm,
     titleLocked,
     autoTitleDone,
     titleGenerating,
     exportSessionMarkdown,
     compactSession,
+    applyUsagePatch,
     refreshBudget,
   };
 });

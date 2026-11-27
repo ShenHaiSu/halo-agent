@@ -218,7 +218,9 @@ public sealed class Stage16SubDetailTests
         var b = await bridge.BranchSession(ws.Id, sub.Id, "x", true);
         Assert.False(b.Ok);
         Assert.Equal("SUB_READONLY", b.Code);
+#pragma warning disable CS0618 // 旧桥接入口的迁移期兼容断言
         var d = await bridge.DeleteSessionMessage(ws.Id, sub.Id, "x");
+#pragma warning restore CS0618
         Assert.False(d.Ok);
         Assert.Equal("SUB_READONLY", d.Code);
         var msgs = await svc.GetSessionMessagesAsync(ws.Id, sub.Id);

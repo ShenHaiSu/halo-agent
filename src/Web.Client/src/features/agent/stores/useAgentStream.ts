@@ -99,6 +99,9 @@ export function flushSegBufSync(sid: string): void {
 }
 export function dropSegBuf(sid: string): void {
   delete segBufs[sid];
+  // 迟到 tag 覆盖表与 seg 缓冲同生命周期：清桶即丢弃，避免切会话串状态。
+  const t = turns.value[sid];
+  if (t) t.pendingTagOverrides = {};
 }
 
 let listenersBound = false;

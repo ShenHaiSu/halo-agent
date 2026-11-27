@@ -1,4 +1,4 @@
-/** 过渡动画：Live 行直挂流段 + 流式光标。旧轮容器已删除，断言随之更新。 */
+/** 轮内过渡：Live 行直挂流段 + 交接容器单份正文 + 流式光标。守卫以 DOM 行为为准，不再只正则检查 CSS 文本。 */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import naive from 'naive-ui';
@@ -9,10 +9,10 @@ import TimelineView from '@features/agent/components/TimelineView.vue';
 import StreamSegItem from '@features/agent/components/StreamSegItem.vue';
 import { TimelineViewKey, timelineViewFallback } from '@features/agent/composables/timelineViewKey';
 
-const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: null });
+const seg = (key: string, text: string) => ({ kind: 'text', key, text, card: null, tag: 'process' });
 const TIMELINE_SFC = (): string => readFileSync(resolve(process.cwd(), 'src/features/agent/components/TimelineView.vue'), 'utf8');
 
-function mountTimeline(liveSegs: unknown[]) {
+function mountTimeline(liveSegs: unknown[], over: Record<string, unknown> = {}) {
   setActivePinia(createPinia());
   const stub = {
     ...timelineViewFallback(),
@@ -24,6 +24,7 @@ function mountTimeline(liveSegs: unknown[]) {
     renderStream: (t: string) => t,
     isGenerating: true,
     streamMdKillSwitch: true,
+    ...over,
   };
   return mount(TimelineView, {
     props: {
@@ -57,12 +58,33 @@ describe('轮内过渡', () => {
     expect(wrapper.find('[data-testid="active-turn-container"]').exists()).toBe(false);
   });
 
-  it('红线：.seg-leave-active 必须 position:absolute（否则「下移再上移」双重抖动）', () => {
-    const rule = /\.seg-leave-active\s*\{([^}]*)\}/.exec(TIMELINE_SFC());
-    expect(rule).not.toBeNull();
-    expect(rule![1]).toContain('position: absolute');
-    // 同时确认没有对高度做过渡（聊天流只增不减，height 动画会与锚定/跟随打架）
-    expect(rule![1]).not.toContain('height');
+  it('行为守卫：交接窗一开，Live 行让位给交接容器，正文由单一 final 槽承担', () => {
+    const finalSeg = { ...seg('final-1', '交接正文'), tag: 'final' };
+    const wrapper = mountTimeline([seg('r1', '思考'), finalSeg], {
+      handoffActive: true,
+      handoffReduceHeight: false,
+      streamMdKillSwitch: false,
+    });
+    expect(wrapper.find('[data-testid="turn-handoff"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="live-row"]').exists()).toBe(false);
+    const finalSlot = wrapper.find('[data-testid="handoff-final"]');
+    expect(finalSlot.exists()).toBe(true);
+    expect(finalSlot.text()).toContain('交接正文');
+    // 过程段在独立 wrapper 里，不套 .timeline-turn 的 content-visibility（测量才准）。
+    const processWrapper = wrapper.find('[data-testid="handoff-process-wrapper"]');
+    expect(processWrapper.exists()).toBe(true);
+    expect(processWrapper.classes()).not.toContain('timeline-turn');
+  });
+
+  it('行为守卫：热降级 off 时退回原 Live 行，不引入交接容器', () => {
+    window.localStorage.setItem('halo-turn-handoff', 'off');
+    try {
+      const wrapper = mountTimeline([seg('s1', '第一段')], { handoffActive: false });
+      expect(wrapper.find('[data-testid="live-row"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="turn-handoff"]').exists()).toBe(false);
+    } finally {
+      window.localStorage.removeItem('halo-turn-handoff');
+    }
   });
 
   it('轴尾容器与旧开关无残留', () => {
@@ -70,6 +92,9 @@ describe('轮内过渡', () => {
     expect(src).not.toContain('active-turn-container');
     expect(src).not.toContain('showAxis' + 'Tail');
     expect(src).not.toContain('live' + 'Coalesce');
+    // 已删除的 V1 过渡 CSS 不得复活（死代码曾让文本守卫长期假绿）。
+    expect(src).not.toContain('.seg-leave-active');
+    expect(src).not.toContain('.live-turn-enter-active');
   });
 
   it('流式光标只在尾段显示', () => {

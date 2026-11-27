@@ -1,5 +1,6 @@
 /** need22-P5 J4：Mock 业务域方法（workspace/session/history/goal/sub/skill/usage；原 createBrowserMockBridge 后半，行为不变）。 */
 import { haloEventBus } from '@shared/bridge/events';
+import { DEFAULT_APPEARANCE } from '@shared/ui/appearance';
 import { buildMockPreview } from './mockState';
 import type { MockState } from './mockState';
 import type {
@@ -15,7 +16,23 @@ import type {
   UsageFilter,
   UsageRowDto,
   WorkspaceInfo,
+  TurnSummary,
+  HistoryCapabilities,
 } from '@shared/bridge/protocol/types';
+import { UnsupportedHistoryCapabilities } from '@shared/bridge/protocol/domain';
+
+let configuredHistoryCapabilities: HistoryCapabilities = {
+  historyAnchors: true,
+  replayImages: true,
+  atomicHistoryMutex: true,
+  strictBranchRollback: true,
+  turnDelete: true,
+};
+
+/** Mock 能力配置：传入不支持的能力即可复现旧后端降级场景。 */
+export function setMockHistoryCapabilities(capabilities: HistoryCapabilities): void {
+  configuredHistoryCapabilities = { ...capabilities };
+}
 
 export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
   return {
@@ -68,8 +85,39 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
     },
     async removeWorkspace(workspaceId: string) {
       s.mockWorkspaces = s.mockWorkspaces.filter((w) => w.id !== workspaceId);
-      delete s.mockSessions[workspaceId];
       return { ok: true, data: true };
+    },
+    async removeWorkspaceV2(workspaceId: string, mode: 'unbind' | 'purge') {
+      const target = s.mockWorkspaces.find((w) => w.id === workspaceId);
+      if (!target) {
+        return {
+          ok: true,
+          data: {
+            outcome: 'notFound',
+            mode,
+            workspaceUnbound: false,
+            sessionData: 'notRequested',
+            haloAgent: 'notRequested',
+            failedPaths: [],
+            warnings: [],
+          },
+        };
+      }
+      s.mockWorkspaces = s.mockWorkspaces.filter((w) => w.id !== workspaceId);
+      if (mode === 'purge') delete s.mockSessions[workspaceId];
+      return {
+        ok: true,
+        data: {
+          outcome: 'completed',
+          mode,
+          workspaceUnbound: true,
+          sessionData: mode === 'purge' ? 'deleted' : 'notRequested',
+          haloAgent: mode === 'purge' ? 'deleted' : 'retained',
+          haloAgentReason: mode === 'purge' ? 'EMPTY' : 'VALID_ENTRIES',
+          failedPaths: [],
+          warnings: [],
+        },
+      };
     },
     async renameWorkspace(workspaceId: string, alias?: string | null) {
       const ws = s.mockWorkspaces.find((w) => w.id === workspaceId);
@@ -161,7 +209,7 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       return { ok: false, message: '会话不存在', data: false };
     },
     // need03-03 T2 Mock：固定精炼标题短路，保证 Web 调试同样走两阶段
-    async generateSessionTitle(workspaceId: string, sessionId: string) {
+    async generateSessionTitle(workspaceId: string, sessionId: string, _providerId?: string, _modelId?: string, _force?: boolean) {
       const list = s.mockSessions[workspaceId] || [];
       const sess = list.find((s) => s.id === sessionId);
       if (!sess) return { ok: false, message: '会话不存在', data: '' };
@@ -182,6 +230,20 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       sess.updatedAtUtc = new Date().toISOString();
       return { ok: true, data: title };
     },
+    // need03-03-B Mock：首轮取数直读短路（与后端 GetFirstRoundTexts 同语义；v2 会话同样返回）。
+    async getFirstRoundTexts(_workspaceId: string, sessionId: string) {
+      const msgs = s.mockMessages[sessionId] || [];
+      const users = msgs.filter((m) => m.role === 'user');
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+      return {
+        ok: true,
+        data: {
+          firstUser: String(users[0]?.content || ''),
+          assistant: String(lastAssistant?.content || ''),
+          userCount: users.length,
+        },
+      };
+    },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
       const list = s.mockSessions[workspaceId] || [];
       const sess = list.find((s) => s.id === sessionId);
@@ -198,6 +260,51 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       }
       delete s.mockMessages[sessionId];
       return { ok: true, data: true };
+    },
+    async deleteSessionV2(workspaceId: string, sessionId: string) {
+      const list = s.mockSessions[workspaceId] || [];
+      if (!list.some((item) => item.id === sessionId)) {
+        return {
+          ok: true,
+          data: {
+            outcome: 'notFound' as const,
+            destructiveCommitCompleted: false,
+            deletedSessionIds: [],
+            residualSessionIds: [],
+            database: 'notRequested' as const,
+            directories: 'notRequested' as const,
+            index: 'notRequested' as const,
+            warnings: [],
+          },
+        };
+      }
+      const ids = new Set<string>([sessionId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const item of list) {
+          if (item.parentSessionId && ids.has(item.parentSessionId) && !ids.has(item.id)) {
+            ids.add(item.id);
+            changed = true;
+          }
+        }
+      }
+      s.mockSessions[workspaceId] = list.filter((item) => !ids.has(item.id));
+      for (const id of ids) delete s.mockMessages[id];
+      return {
+        ok: true,
+        data: {
+          outcome: 'deleted' as const,
+          destructiveCommitCompleted: true,
+          backupFileName: 'history.db.bak',
+          deletedSessionIds: [...ids],
+          residualSessionIds: [],
+          database: 'completed' as const,
+          directories: 'completed' as const,
+          index: 'completed' as const,
+          warnings: [],
+        },
+      };
     },
     async exportSessionMarkdown(_workspaceId: string, sessionId: string) {
       const msgs = s.mockMessages[sessionId] || [];
@@ -360,7 +467,13 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         },
       };
     },
-    // need07 mock：与真后端同语义（轮次展开 + 前驱 user 切面）
+    async getHistoryCapabilities() {
+      return {
+        ok: true,
+        data: { ...(configuredHistoryCapabilities ?? UnsupportedHistoryCapabilities) },
+      };
+    },
+    // 与真后端同语义（轮次展开 + 前驱 user 切面）
     async truncateSessionHistory(_workspaceId: string, sessionId: string, anchorMessageId: string) {
       const msgs = s.mockMessages[sessionId] || [];
       const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
@@ -381,9 +494,28 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       const kept = msgs.slice(0, cut);
       const removed = msgs.length - kept.length;
       s.mockMessages[sessionId] = kept;
+      const replayImages = (msgs[cut]?.images || []).map((image) => ({
+        imageId: String(image.imageId || ''),
+        fileName: String(image.fileName || ''),
+        mime: String(image.mime || ''),
+        width: Number(image.width || 0),
+        height: Number(image.height || 0),
+        sizeBytes: Number(image.sizeBytes || 0),
+        sha16: String(image.sha16 || ''),
+        lost: false,
+      }));
       return {
         ok: true,
-        data: { success: true, keptMessages: kept.length, removedMessages: removed, replayText, backupFileName: 'mock-replay-bak' },
+        data: {
+          success: true,
+          keptMessages: kept.length,
+          removedMessages: removed,
+          replayText,
+          replayImages,
+          backupFileName: 'mock-replay-bak',
+          destructiveCommitCompleted: true,
+          recoveryToken: 'replay:' + sessionId + ':' + anchorMessageId,
+        },
       };
     },
     async branchSession(workspaceId: string, sourceSessionId: string, anchorMessageId: string, includeAnchor: boolean) {
@@ -430,8 +562,63 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
         data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' },
       };
     },
-    async getTimelineSummary(_workspaceId: string, _sessionId: string) {
-      return { ok: true, data: [] };
+    async deleteSessionTurn(_workspaceId: string, sessionId: string, anchorMessageId: string) {
+      const msgs = s.mockMessages[sessionId] || [];
+      const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
+      if (idx < 0) return { ok: false, code: 'ANCHOR_NOT_FOUND', message: '锚点已变化' };
+      let start = idx;
+      while (start > 0 && String(msgs[start - 1].role || '').toLowerCase() !== 'user') start--;
+      let end = idx + 1;
+      while (end < msgs.length && String(msgs[end].role || '').toLowerCase() !== 'user') end++;
+      const kept = msgs.slice(0, start).concat(msgs.slice(end));
+      s.mockMessages[sessionId] = kept;
+      return {
+        ok: true,
+        data: {
+          success: true,
+          deletedTurnId: 'uturn-' + String(msgs[start].id || ''),
+          deletedMessages: end - start,
+          keptMessages: kept.length,
+          syntheticAppended: 0,
+          orphanToolsRemoved: 0,
+          backupFileName: 'mock-turn-delete-bak',
+          destructiveCommitCompleted: true,
+        },
+      };
+    },
+    async getTimelineSummary(_workspaceId: string, sessionId: string) {
+      const messages = s.mockMessages[sessionId] || [];
+      const summaries: Array<Record<string, unknown>> = [];
+      let index = 0;
+      while (index < messages.length) {
+        const role = String(messages[index].role || '').toLowerCase();
+        if (role !== 'user') {
+          index++;
+          continue;
+        }
+        const userMessage = messages[index];
+        let end = index + 1;
+        while (end < messages.length && String(messages[end].role || '').toLowerCase() !== 'user') end++;
+        let assistantId: string | null = null;
+        for (let k = end - 1; k >= index; k--) {
+          if (String(messages[k].role || '').toLowerCase() === 'assistant') {
+            assistantId = String(messages[k].id || '');
+            break;
+          }
+        }
+        summaries.push({
+          turnId: 'uturn-' + String(userMessage.id || ''),
+          turnSeq: summaries.length,
+          userPreview: String(userMessage.content || '').slice(0, 40),
+          userContent: String(userMessage.content || ''),
+          finalPreview: '',
+          userMessageId: String(userMessage.id || ''),
+          assistantMessageId: assistantId,
+          kind: 'compact_stub' === String(userMessage.kind || '') ? 'compact' : 'turn',
+        });
+        index = end;
+      }
+      return { ok: true, data: summaries as unknown as TurnSummary[] };
     },
     async getBlockContents(_w: string, _s: string, _ids: string[]) {
       return { ok: true, data: { items: {}, missing: [..._ids] } };
@@ -670,5 +857,20 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
     async setLastActive() {
       return { ok: true, data: true };
     },
+    async getAppearance() {
+      return { ok: true, data: { ...mockAppearance } };
+    },
+    async setAppearance(settingsJson: string) {
+      try {
+        const parsed = JSON.parse(settingsJson) as Partial<typeof mockAppearance>;
+        mockAppearance = { ...mockAppearance, ...parsed };
+      } catch {
+        /* mock：坏 JSON 静默忽略 */
+      }
+      return { ok: true, data: true };
+    },
   };
 }
+
+/** 外观配置 mock 内存态：让 ?mock 模式下 set/get 往返可验证（真实实现落后端 appearance.json）。 */
+let mockAppearance: typeof DEFAULT_APPEARANCE = { ...DEFAULT_APPEARANCE };

@@ -1,0 +1,1 @@
+{"outcome":"partial","errorCode":"SESSION_DELETION_PARTIAL","destructiveCommitCompleted":true,"backupFileName":"history.db.bak","deletedSessionIds":["sess-root","sess-child"],"residualSessionIds":["sess-child"],"database":"completed","directories":"failed","index":"completed","warnings":["DIRECTORY_DELETE_FAILED"]}

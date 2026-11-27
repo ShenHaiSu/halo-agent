@@ -24,14 +24,23 @@ public sealed partial class AgentOrchestrator
         string userText,
         string? providerId,
         string? modelId,
-        CancellationToken cancellationToken,
+        TurnCancellation tokens,
         string? turnRequestId = null
     )
     {
         TurnPrepared End(AgentTurnResult t) => new() { Terminal = t };
-        if (cancellationToken.IsCancellationRequested)
+        if (tokens.Linked.IsCancellationRequested)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-before-start" });
+            PublishTurnEvent(
+                sessionId,
+                "TurnCancelled",
+                new
+                {
+                    reason = "cancelled-before-start",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
+            );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
@@ -45,7 +54,7 @@ public sealed partial class AgentOrchestrator
             UserText = userText,
             ProviderId = providerId,
             ModelId = modelId,
-            CancellationToken = cancellationToken,
+            CancellationToken = tokens.Linked,
             TurnRequestId = string.IsNullOrWhiteSpace(turnRequestId)
                 ? string.Empty
                 : turnRequestId.Trim(),
@@ -53,15 +62,24 @@ public sealed partial class AgentOrchestrator
         try
         {
             ctx.Workspace = await _sessionService
-                .GetWorkspaceAsync(workspaceId, cancellationToken)
+                .GetWorkspaceAsync(workspaceId, tokens.Linked)
                 .ConfigureAwait(false);
             ctx.Session = await _sessionService
-                .GetSessionAsync(workspaceId, sessionId, cancellationToken)
+                .GetSessionAsync(workspaceId, sessionId, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { reason = "cancelled-during-load" });
+            PublishTurnEvent(
+                sessionId,
+                "TurnCancelled",
+                new
+                {
+                    reason = "cancelled-during-load",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
+            );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         if (ctx.Workspace == null)
@@ -99,7 +117,7 @@ public sealed partial class AgentOrchestrator
         try
         {
             await _sessionService
-                .AppendSessionMessageAsync(workspaceId, sessionId, userMessage, cancellationToken)
+                .AppendSessionMessageAsync(workspaceId, sessionId, userMessage, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -107,7 +125,12 @@ public sealed partial class AgentOrchestrator
             PublishTurnEvent(
                 sessionId,
                 "TurnCancelled",
-                new { reason = "cancelled-during-append" }
+                new
+                {
+                    reason = "cancelled-during-append",
+                    userMessagePersisted = false,
+                    timelineFinalized = false,
+                }
             );
             return End(AgentTurnResult.Cancelled(0, 0));
         }
@@ -254,11 +277,8 @@ public sealed partial class AgentOrchestrator
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(
-                sessionId,
-                "TurnCancelled",
-                new { reason = "cancelled-during-prompt" }
-            );
+            await FinalizeCancelledTurnAsync(ctx, sessionId, 0, "cancelled-during-prompt")
+                .ConfigureAwait(false);
             return End(AgentTurnResult.Cancelled(0, 0));
         }
         catch (Exception ex)
@@ -293,16 +313,24 @@ public sealed partial class AgentOrchestrator
                 ctx.CfgToolsDeny = cfg.ToolsDenylist;
                 ctx.CfgClosedWorld = cfg.StrictToolsMode != StrictToolsMode.Off;
                 ctx.CfgEnableJsonRepair = cfg.EnableJsonRepair;
-                if (cfg.MaxIterations == 0)
-                    effectiveMax = 0;
-                else if (cfg.MaxIterations > 0)
-                    effectiveMax = Math.Min(cfg.MaxIterations, AgentDefaults.HardIterationsCeil);
-                else
+                // 子实例的轮次上限来自 spawn 参数（或子默认设置），已在构造值中 clamp；
+                // 全局轮次上限只作用于主轮，避免覆盖子实例各自独立的预算。
+                if (!string.Equals(AgentRole, "sub", StringComparison.OrdinalIgnoreCase))
                 {
-                    HaloLogger.App.Warn(
-                        $"[Agent] agent.json 轮次非法（{cfg.MaxIterations}），已回退构造值 {MaxIterations}"
-                    );
-                    effectiveMax = MaxIterations;
+                    if (cfg.MaxIterations == 0)
+                        effectiveMax = 0;
+                    else if (cfg.MaxIterations > 0)
+                        effectiveMax = Math.Min(
+                            cfg.MaxIterations,
+                            AgentDefaults.HardIterationsCeil
+                        );
+                    else
+                    {
+                        HaloLogger.App.Warn(
+                            $"[Agent] agent.json 轮次非法（{cfg.MaxIterations}），已回退构造值 {MaxIterations}"
+                        );
+                        effectiveMax = MaxIterations;
+                    }
                 }
             }
         }

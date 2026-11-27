@@ -163,13 +163,14 @@ public sealed class TimelineS5Tests : IDisposable
         const string ws = "ws-s5";
         const string sess = "sess-s5old";
         const string turn = "uturn-u1";
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
-                + " VALUES('s5:old-call', $tid, 1, 1, 'tool_call', 'process', 'call-old', NULL, 2, '{}', '{}', NULL, 0);";
+                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, 's5:old-call', $tid, 1, 1, 'tool_call', 'process', 'call-old', NULL, 2, '{}', '{}', NULL, 0);";
+            cmd.Parameters.AddWithValue("$sid", sess);
             cmd.Parameters.AddWithValue("$tid", turn);
             cmd.ExecuteNonQuery();
         }
@@ -188,7 +189,7 @@ public sealed class TimelineS5Tests : IDisposable
     {
         const string ws = "ws-s5";
         const string sess = "sess-s5migrate";
-        string dbPath = _db.GetDbPath(ws, sess);
+        string dbPath = _storageManager.GetWorkspaceDbPath(ws);
         string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
         {
@@ -198,33 +199,18 @@ public sealed class TimelineS5Tests : IDisposable
         {
             File.Delete(dbPath);
         }
+        _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
-            using var ddl = conn.CreateCommand();
-            ddl.CommandText =
-                "CREATE TABLE IF NOT EXISTS blocks("
-                + "block_id TEXT PRIMARY KEY,"
-                + "turn_id TEXT NOT NULL,"
-                + "iter INT NOT NULL,"
-                + "seq INT NOT NULL,"
-                + "kind TEXT NOT NULL,"
-                + "tag TEXT NOT NULL,"
-                + "call_id TEXT,"
-                + "char_count INT NOT NULL DEFAULT 0,"
-                + "preview TEXT NOT NULL DEFAULT '',"
-                + "content TEXT NOT NULL DEFAULT '',"
-                + "content_ref TEXT,"
-                + "truncated INT NOT NULL DEFAULT 0"
-                + ");";
-            ddl.ExecuteNonQuery();
             using var ins = conn.CreateCommand();
             ins.CommandText =
-                "INSERT INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, char_count, preview, content)"
-                + " VALUES('old:b1', 'uturn-old', 1, 1, 'text', 'process', NULL, 5, 'hello', 'hello');";
+                "INSERT INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, char_count, preview, content)"
+                + " VALUES($sid, 'old:b1', 'uturn-old', 1, 1, 'text', 'process', NULL, 5, 'hello', 'hello');";
+            ins.Parameters.AddWithValue("$sid", sess);
             ins.ExecuteNonQuery();
         }
 
-        _db.EnsureDatabase(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
 
         using (var check = SessionHistoryDb.OpenConnection(dbPath))
         {
@@ -404,13 +390,14 @@ public sealed class TimelineS5Tests : IDisposable
         const string ws = "ws-s5";
         const string sess = "sess-s5legacy";
         const string turn = "uturn-u1";
-        string dbPath = _db.EnsureDatabase(ws, sess);
+        string dbPath = _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
-                + " VALUES('s5:legacy-result', $tid, 1, 1, 'tool_result', 'process', 'call-legacy', 'read_file', 5, 'hello', 'hello', NULL, 0);";
+                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, 's5:legacy-result', $tid, 1, 1, 'tool_result', 'process', 'call-legacy', 'read_file', 5, 'hello', 'hello', NULL, 0);";
+            cmd.Parameters.AddWithValue("$sid", sess);
             cmd.Parameters.AddWithValue("$tid", turn);
             cmd.ExecuteNonQuery();
         }
@@ -432,7 +419,7 @@ public sealed class TimelineS5Tests : IDisposable
     {
         const string ws = "ws-s5";
         const string sess = "sess-s5successmigrate";
-        string dbPath = _db.GetDbPath(ws, sess);
+        string dbPath = _storageManager.GetWorkspaceDbPath(ws);
         string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
         {
@@ -442,35 +429,19 @@ public sealed class TimelineS5Tests : IDisposable
         {
             File.Delete(dbPath);
         }
+        _db.EnsureWorkspaceDatabase(ws);
         using (var conn = SessionHistoryDb.OpenConnection(dbPath))
         {
-            using var ddl = conn.CreateCommand();
-            ddl.CommandText =
-                "CREATE TABLE IF NOT EXISTS blocks("
-                + "block_id TEXT PRIMARY KEY,"
-                + "turn_id TEXT NOT NULL,"
-                + "iter INT NOT NULL,"
-                + "seq INT NOT NULL,"
-                + "kind TEXT NOT NULL,"
-                + "tag TEXT NOT NULL,"
-                + "call_id TEXT,"
-                + "function_name TEXT,"
-                + "char_count INT NOT NULL DEFAULT 0,"
-                + "preview TEXT NOT NULL DEFAULT '',"
-                + "content TEXT NOT NULL DEFAULT '',"
-                + "content_ref TEXT,"
-                + "truncated INT NOT NULL DEFAULT 0"
-                + ");";
-            ddl.ExecuteNonQuery();
             using var ins = conn.CreateCommand();
             ins.CommandText =
-                "INSERT INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, char_count, preview, content)"
-                + " VALUES('old:b1', 'uturn-old', 1, 1, 'tool_result', 'process', 'call-old', 5, 'hello', 'hello');";
+                "INSERT INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, char_count, preview, content)"
+                + " VALUES($sid, 'old:b1', 'uturn-old', 1, 1, 'tool_result', 'process', 'call-old', 5, 'hello', 'hello');";
+            ins.Parameters.AddWithValue("$sid", sess);
             ins.ExecuteNonQuery();
         }
 
-        _db.EnsureDatabase(ws, sess);
-        _db.EnsureDatabase(ws, sess);
+        _db.EnsureWorkspaceDatabase(ws);
+        _db.EnsureWorkspaceDatabase(ws);
 
         using (var check = SessionHistoryDb.OpenConnection(dbPath))
         {

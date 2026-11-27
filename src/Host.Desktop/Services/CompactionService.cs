@@ -14,11 +14,11 @@ using Host.Desktop.LlmGateway.Models;
 namespace Host.Desktop.Services;
 
 /// <summary>
-/// need05-03：/compact 上下文压缩服务（模型摘要 + 原子重写 + 不可中断）。
-/// 学 znaide compact_context（system+摘要+最近 N 条，失败不动，累计不清零），
-/// deliberate 差异：本项目 messages.jsonl 即请求源，必须重写（bak 保留可审计）。
-/// need22-P1 T5：三段式（快照拷贝→释锁→LLM 摘要→重加锁重写），压缩耗时不再占用追加锁临界区；
-/// 压缩中查询/追加可用；取消经 ct 接入（HostBridgeFacade.cancelCompaction）。
+/// 上下文压缩服务（模型摘要 + 原子重写 + 不可中断）。
+/// 压缩语义对齐上游压缩上下文（系统提示 + 摘要 + 最近若干轮，失败不动，累计不清零），
+/// 本项目以工作区库为请求源，重写后保留可审计备份。
+/// 三段式（快照拷贝→释锁→模型摘要→重加锁重写），压缩耗时不再占用追加锁临界区；
+/// 压缩中查询与追加可用；取消经调用方接入。
 /// </summary>
 public sealed partial class CompactionService : ICompactionService
 {
@@ -40,6 +40,8 @@ public sealed partial class CompactionService : ICompactionService
     private readonly ILlmGatewayClient _gatewayClient;
     private readonly ProviderConfigService? _providerConfigService;
     private readonly UsageMetricsService? _usageMetrics;
+    private readonly CompactionSummaryPlanner _summaryPlanner;
+    private readonly CompactionSummaryExecutor _summaryExecutor;
 
     public CompactionService(
         IWorkspaceSessionService sessionService,
@@ -54,6 +56,12 @@ public sealed partial class CompactionService : ICompactionService
         _gatewayClient = gatewayClient ?? throw new ArgumentNullException(nameof(gatewayClient));
         _providerConfigService = providerConfigService;
         _usageMetrics = usageMetrics;
+        _summaryPlanner = new CompactionSummaryPlanner(_budgetService);
+        _summaryExecutor = new CompactionSummaryExecutor(
+            _gatewayClient,
+            _budgetService,
+            _usageMetrics
+        );
     }
 
     public async Task<CompactionResult> CompactAsync(
@@ -73,13 +81,19 @@ public sealed partial class CompactionService : ICompactionService
         if (_sessionService is not WorkspaceSessionService concrete)
             return CompactionResult.Fail("UNSUPPORTED_SERVICE", "当前会话服务不支持压缩重写");
 
-        // Phase 1（持锁，短临界区）：快照拷贝（messages 复制 + 摘要 body 拼接 + 请求预组装），随后立即释锁。
-        CompactSnapshot? snapshot;
+        CompactPreparation preparation;
         var appendLock = concrete.GetSessionAppendLock(sessionId);
-        await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            snapshot = await BuildSnapshotAsync(
+            await appendLock.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return CompactionResult.Fail("COMPACT_CANCELLED", "压缩被取消");
+        }
+        try
+        {
+            preparation = await BuildSnapshotAsync(
                     concrete,
                     workspaceId,
                     sessionId,
@@ -90,94 +104,61 @@ public sealed partial class CompactionService : ICompactionService
                 )
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            return CompactionResult.Fail("COMPACT_CANCELLED", "压缩被取消");
+        }
+        catch (CompactionSummaryException ex)
+        {
+            return CompactionResult.Fail(ex.Code, ex.Message);
+        }
         finally
         {
             appendLock.Release();
         }
-        if (snapshot == null)
-            return CompactionResult.NoOp();
+        if (!string.IsNullOrWhiteSpace(preparation.NoOpReason))
+            return CompactionResult.NoOp(preparation.NoOpReason);
+        var snapshot = preparation.Snapshot!;
 
-        // Phase 2（无锁）：经网关发起一次非流式调用（复用 StreamAsync 累积文本，不新增 HTTP 通道；tools 置空）。
-        // ct 直连调用方：HostBridgeFacade.cancelCompaction 可中断，取消落 COMPACT_CANCELLED。
-        var request = snapshot.Request;
-        var summaryAcc = new StringBuilder();
-        UnifiedTokenUsage? compactUsage = null;
-        string compactStatus = "ok";
-        string compactError = string.Empty;
+        CompactionSummaryResult summaryResult;
         try
         {
-            await foreach (var evt in _gatewayClient.StreamAsync(request, ct).ConfigureAwait(false))
-            {
-                if (
-                    evt.Kind == UnifiedStreamEventKind.TextDelta
-                    && !string.IsNullOrEmpty(evt.TextDelta)
+            summaryResult = await _summaryExecutor
+                .ExecuteAsync(
+                    snapshot.SummaryPlan,
+                    new CompactionSummaryExecutionContext(
+                        snapshot.Provider,
+                        snapshot.Model,
+                        snapshot.HeaderContext,
+                        workspaceId,
+                        sessionId
+                    ),
+                    snapshot.PrevSummary,
+                    ct
                 )
-                    summaryAcc.Append(evt.TextDelta);
-                else if (evt.Kind == UnifiedStreamEventKind.UsageUpdated && evt.Usage != null)
-                    compactUsage = evt.Usage;
-                else if (evt.Kind == UnifiedStreamEventKind.StreamError)
-                {
-                    compactStatus = "error";
-                    compactError = evt.ErrorMessage ?? "摘要模型调用失败";
-                    break;
-                }
-                else if (evt.Kind == UnifiedStreamEventKind.StreamCancelled)
-                {
-                    compactStatus = "cancelled";
-                    compactError = "压缩被取消";
-                    break;
-                }
-            }
+                .ConfigureAwait(false);
+        }
+        catch (CompactionSummaryException ex)
+        {
+            return CompactionResult.Fail(ex.Code, ex.Message);
         }
         catch (OperationCanceledException)
         {
-            compactStatus = "cancelled";
-            compactError = "压缩被取消";
+            return CompactionResult.Fail("COMPACT_SUMMARY_CANCELLED", "压缩被取消");
         }
         catch (Exception ex)
         {
-            compactStatus = "error";
-            compactError = ex.Message;
+            return CompactionResult.Fail("COMPACT_LLM_ERROR", "摘要模型调用失败：" + ex.Message);
         }
-        // need12-P1/P2：压缩请求同样落袋（成功/取消/失败都记；有实测用实测，无实测用估算）。
+
         try
         {
-            var compactRows = new List<PendingUsageRow>();
-            UsageRecorder.CollectAuto(
-                compactRows,
-                snapshot.Provider,
-                snapshot.Model,
-                compactUsage,
-                UsageRecorder.EstimateInput(request.Messages, request.SystemInstructions),
-                UsageRecorder.EstimateOutput(summaryAcc.ToString()),
-                compactStatus,
-                request.RequestId,
-                sessionId,
-                workspaceId,
-                UsageRecorder.SourceCompact
-            );
-            UsageRecorder.Flush(_usageMetrics, compactRows, sessionId, workspaceId);
+            await appendLock.WaitAsync(ct).ConfigureAwait(false);
         }
-        catch
-        { /* 用量落袋永不影响压缩主流程 */
+        catch (OperationCanceledException)
+        {
+            return CompactionResult.Fail("COMPACT_CANCELLED", "压缩被取消");
         }
-        if (compactStatus == "cancelled")
-            return CompactionResult.Fail(
-                "COMPACT_CANCELLED",
-                string.IsNullOrEmpty(compactError) ? "压缩被取消" : compactError
-            );
-        if (compactStatus == "error")
-            return CompactionResult.Fail(
-                "COMPACT_LLM_ERROR",
-                string.IsNullOrEmpty(compactError) ? "摘要模型调用失败" : compactError
-            );
-        string summary = summaryAcc.ToString().Trim();
-        if (string.IsNullOrWhiteSpace(summary))
-            return CompactionResult.Fail("COMPACT_EMPTY", "摘要模型返回为空");
-
-        // Phase 3（重加锁，短临界区）：stub=append-only 桩写入；legacy=旧物理重写（M5 下线）。
-        // P007：mode 唯一口径 snapshot.FrozenCompactMode（会话冻结优先，全局次之，M1 保持 legacy 默认）。
-        await appendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             string mode = string.IsNullOrWhiteSpace(snapshot.FrozenCompactMode)
@@ -185,20 +166,24 @@ public sealed partial class CompactionService : ICompactionService
                 : snapshot.FrozenCompactMode.Trim();
             if (string.Equals(mode, CompactMode.Stub, StringComparison.OrdinalIgnoreCase))
             {
-                // P007：stub 下备份失败只告警不阻断（backupFile=null，后续恢复工具不可用需明示）。
                 string? backupFile = null;
                 try
                 {
-                    backupFile = await concrete
-                        .SessionRepository.BackupMessagesJsonlAsync(workspaceId, sessionId, ct)
+                    var workspaceStore = new WorkspaceSessionStore(
+                        concrete.SessionRepository.Storage
+                    );
+                    var backupInfo = await workspaceStore
+                        .BackupWorkspaceAsync(workspaceId, ct)
                         .ConfigureAwait(false);
+                    backupFile = backupInfo?.BackupPath;
                 }
                 catch (Exception ex)
                 {
                     try
                     {
                         Infrastructure.Logging.HaloLogger.App.Warn(
-                            $"[Compact] stub backup failed, continue without backup: {ex.Message}"
+                            "[Compact] stub backup failed, continue without backup: "
+                                + ex.GetType().Name
                         );
                     }
                     catch { }
@@ -209,14 +194,13 @@ public sealed partial class CompactionService : ICompactionService
                         workspaceId,
                         sessionId,
                         snapshot,
-                        summary,
-                        compactUsage,
+                        summaryResult,
                         backupFile,
                         ct
                     )
                     .ConfigureAwait(false);
             }
-            return await RewriteAsync(concrete, workspaceId, sessionId, snapshot, summary, ct)
+            return await RewriteAsync(concrete, workspaceId, sessionId, snapshot, summaryResult, ct)
                 .ConfigureAwait(false);
         }
         finally
@@ -225,31 +209,39 @@ public sealed partial class CompactionService : ICompactionService
         }
     }
 
-    /// <summary>need22-P1 T5：压缩快照（锁内拷贝，锁外消费）。</summary>
+    private sealed class CompactPreparation
+    {
+        public CompactSnapshot? Snapshot { get; init; }
+        public string? NoOpReason { get; init; }
+
+        public static CompactPreparation NoOp(string reason) => new() { NoOpReason = reason };
+
+        public static CompactPreparation Ready(CompactSnapshot snapshot) =>
+            new() { Snapshot = snapshot };
+    }
+
+    /// <summary>压缩快照（锁内拷贝，锁外消费）。</summary>
     private sealed class CompactSnapshot
     {
-        // P007：以下三字段仅 legacy 重写路径使用（stub 只读 OldCount/SnapshotCount/FromSeq/Provider/Model/Request/PrevSummary）。
         public UnifiedChatMessage? OrigSystem;
         public List<UnifiedChatMessage> AnchorMessages = new();
         public List<UnifiedChatMessage> TailMessages = new();
         public int OldCount;
         public int SnapshotCount;
-
-        // P007：桩区间（DB 路径可得；纯 jsonl 会话为 null）。
         public long? FromSeq;
         public long? ToSeq;
-
-        // P007：快照时解析的压缩模型（会话级冻结优先，全局次之）。
-        public string FrozenCompactMode = "legacy";
-
-        // P007：上轮桩摘要（stub 多轮压缩经 prevSummary 通道装配，不进 body）。
+        public string? CoveredFromMessageId;
+        public string? CoveredToMessageId;
+        public string? PreviousStubId;
+        public string FrozenCompactMode = CompactMode.Legacy;
         public string? PrevSummary;
         public ProviderConfig Provider = null!;
         public ModelConfig Model = null!;
-        public UnifiedLlmRequest Request = null!;
+        public HeaderResolutionContext HeaderContext = null!;
+        public CompactionSummaryPlan SummaryPlan = null!;
     }
 
-    private async Task<CompactSnapshot?> BuildSnapshotAsync(
+    private async Task<CompactPreparation> BuildSnapshotAsync(
         WorkspaceSessionService service,
         string workspaceId,
         string sessionId,
@@ -259,59 +251,51 @@ public sealed partial class CompactionService : ICompactionService
         CancellationToken ct
     )
     {
-        // P007：stub 先行（活跃切片语义，见 CompactionService.Stub.BuildStubSnapshotAsync）；
-        // legacy 走旧全量快照（M5 下线）。
-        SessionMetadata? earlySession = null;
+        SessionMetadata? session = null;
         try
         {
-            earlySession = await service
+            session = await service
                 .GetSessionAsync(workspaceId, sessionId, ct)
                 .ConfigureAwait(false);
         }
         catch { }
-        if (
-            string.Equals(
-                ResolveCompactMode(earlySession, service),
-                CompactMode.Stub,
-                StringComparison.OrdinalIgnoreCase
-            )
-        )
+        string mode = await ResolveCompactModeAsync(session, service, workspaceId, sessionId, ct)
+            .ConfigureAwait(false);
+        if (string.Equals(mode, CompactMode.Stub, StringComparison.OrdinalIgnoreCase))
             return await BuildStubSnapshotAsync(
                     service,
-                    earlySession,
+                    session,
                     workspaceId,
                     sessionId,
                     providerId,
                     modelId,
-                    keepLastGroups,
                     ct
                 )
                 .ConfigureAwait(false);
 
-        // 1. load messages；太短 → null（外层转 NoOp，不动盘、无 bak，前端提示“还短无需压缩”）
         var messages =
             await service.GetSessionMessagesAsync(workspaceId, sessionId, ct).ConfigureAwait(false)
             ?? new List<UnifiedChatMessage>();
+        if (messages.Count == 0)
+            return CompactPreparation.NoOp(CompactionNoOpReasons.Empty);
         if (messages.Count <= keepLastGroups + 2)
-            return null;
+            return CompactPreparation.NoOp(CompactionNoOpReasons.TooShort);
 
-        // 2. 原子组切分（排除首条 system 后的全部）；anchor = 首个含 user 组及之前；tail = 末 keepLastGroups 组
         UnifiedChatMessage? origSystem = null;
         IReadOnlyList<UnifiedChatMessage> rest = messages;
-        if (
-            messages.Count > 0
-            && string.Equals(messages[0].Role, "system", StringComparison.OrdinalIgnoreCase)
-        )
+        if (string.Equals(messages[0].Role, "system", StringComparison.OrdinalIgnoreCase))
         {
             origSystem = messages[0];
             rest = messages.Skip(1).ToList();
         }
         var groups = _budgetService.GroupIntoAtomicTurns(rest);
         if (groups.Count == 0)
-            return null;
+            return CompactPreparation.NoOp(CompactionNoOpReasons.TooShort);
 
-        int firstUserGroupIndex = groups.FindIndex(g =>
-            g.Messages.Any(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+        int firstUserGroupIndex = groups.FindIndex(group =>
+            group.Messages.Any(message =>
+                string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase)
+            )
         );
         if (firstUserGroupIndex < 0)
             firstUserGroupIndex = 0;
@@ -322,95 +306,12 @@ public sealed partial class CompactionService : ICompactionService
             .Take(Math.Max(0, tailStart - anchorCount))
             .ToList();
         var tailGroups = groups.Skip(tailStart).ToList();
-        int oldCount = oldGroups.Sum(g => g.Messages.Count);
+        var oldRegion = oldGroups.SelectMany(group => group.Messages).ToList();
+        int oldCount = oldRegion.Count;
         if (oldCount == 0)
-            return null;
+            return CompactPreparation.NoOp(CompactionNoOpReasons.TooShort);
 
-        // 3. body 拼接（tool 参数 ArgumentsJson 同截 2000；v2 D8=B：process 折计数、final 保留）
-        bool isV2 = false;
-        try
-        {
-            var v2sess = await service
-                .GetSessionAsync(workspaceId, sessionId, ct)
-                .ConfigureAwait(false);
-            isV2 = v2sess != null && v2sess.HistoryVersion == 2;
-        }
-        catch
-        {
-            isV2 = false;
-        }
-        var body = new StringBuilder();
-        if (isV2)
-        {
-            foreach (var g in oldGroups)
-            {
-                foreach (var m in g.Messages)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    string role = (m.Role ?? string.Empty).ToLowerInvariant();
-                    if (string.Equals(role, "tool", StringComparison.Ordinal))
-                    {
-                        body.AppendLine("[工具结果折叠：1条过程块，计数保留，原文不展开]");
-                    }
-                    else if (string.Equals(role, "assistant", StringComparison.Ordinal))
-                    {
-                        if (m.ToolCalls != null && m.ToolCalls.Count > 0)
-                        {
-                            foreach (var tc in m.ToolCalls)
-                                body.Append(
-                                        Truncate(
-                                            tc.FunctionName
-                                                + ":"
-                                                + (tc.ArgumentsJson ?? string.Empty),
-                                            TruncPerMessage
-                                        )
-                                    )
-                                    .Append(' ');
-                            body.AppendLine();
-                        }
-                        // final 保留：正文全留（截 2000 与旧盘一致）
-                        body.Append("[助手正文保留] ")
-                            .AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                    }
-                    else
-                    {
-                        body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
-                        body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                    }
-                }
-            }
-        }
-        else
-        {
-            foreach (var g in oldGroups)
-            {
-                foreach (var m in g.Messages)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    body.Append('[').Append(RoleLabel(m.Role)).Append("] ");
-                    if (m.ToolCalls != null && m.ToolCalls.Count > 0)
-                    {
-                        foreach (var tc in m.ToolCalls)
-                            body.Append(
-                                    Truncate(
-                                        tc.FunctionName + ":" + (tc.ArgumentsJson ?? string.Empty),
-                                        TruncPerMessage
-                                    )
-                                )
-                                .Append(' ');
-                    }
-                    body.AppendLine(Truncate(m.Content ?? string.Empty, TruncPerMessage));
-                    // P007 legacy 说明：摘要里的技能标记属于噪音，未来可在此处剥离；本期不改，保持原样。
-                    // 当前标记短、语义可接受，直接保留。
-                }
-            }
-        }
-
-        // 4. 预组装网关请求（provider/model/header 均在锁内快照，锁外直接使用）
         var workspace = await service.GetWorkspaceAsync(workspaceId, ct).ConfigureAwait(false);
-        var session = await service
-            .GetSessionAsync(workspaceId, sessionId, ct)
-            .ConfigureAwait(false);
         var (provider, model) = ResolveProviderAndModel(providerId, modelId, session);
         string sessionHash = !string.IsNullOrWhiteSpace(session?.SessionHash)
             ? session!.SessionHash
@@ -426,53 +327,42 @@ public sealed partial class CompactionService : ICompactionService
             model.Id,
             Guid.NewGuid().ToString("N")
         );
-        var request = new UnifiedLlmRequest
-        {
-            RequestId = headerContext.RequestId,
-            Provider = provider,
-            Model = model,
-            HeaderContext = headerContext,
-            SystemInstructions = CompressorSystemPrompt,
-            Messages = new List<UnifiedChatMessage> { UnifiedChatMessage.User(body.ToString()) },
-            Tools = Array.Empty<UnifiedToolDefinition>(),
-        };
-
+        var plan = _summaryPlanner.Plan(oldRegion, null, model, ct);
         var snapshot = new CompactSnapshot
         {
             OrigSystem = origSystem,
             OldCount = oldCount,
             SnapshotCount = messages.Count,
-            // P007：M1 仍读全量；From/ToSeq 暂 null（DB 快路径 M2 接线）。
-            FromSeq = null,
-            ToSeq = null,
-            FrozenCompactMode = ResolveCompactMode(session, service),
+            CoveredFromMessageId = oldRegion.FirstOrDefault()?.Id,
+            CoveredToMessageId = oldRegion.LastOrDefault()?.Id,
+            FrozenCompactMode = mode,
             Provider = provider,
             Model = model,
-            Request = request,
+            HeaderContext = headerContext,
+            SummaryPlan = plan,
         };
         for (int i = 0; i < anchorCount; i++)
             snapshot.AnchorMessages.AddRange(groups[i].Messages);
-        foreach (var g in tailGroups)
-            snapshot.TailMessages.AddRange(g.Messages);
-        return snapshot;
+        foreach (var group in tailGroups)
+            snapshot.TailMessages.AddRange(group.Messages);
+        return CompactPreparation.Ready(snapshot);
     }
 
-    /// <summary>P007 legacy：仅在 CompactMode=legacy 下使用，下个版本删除（保留一个版本周期）。压缩期间新增搬运仅 legacy 保留。</summary>
-    // P007 legacy：stub 路径零调用本方法；三处破坏性调用仅 legacy 分支保留。
+    /// <summary>旧模式全量重写：工作区快照兜底，分区重写消息并截断被摘要覆盖的旧轮次。</summary>
     private async Task<CompactionResult> RewriteAsync(
         WorkspaceSessionService service,
         string workspaceId,
         string sessionId,
         CompactSnapshot snapshot,
-        string summary,
+        CompactionSummaryResult summaryResult,
         CancellationToken ct
     )
     {
-        // 6-7. 组装 newMessages = [origSystem] + anchorGroups + [summaryMsg] + tailGroups + 压缩期间新追加
+        string summary = summaryResult.Summary;
+        // 组装 newMessages = [origSystem] + anchorGroups + [summaryMsg] + tailGroups + 压缩期间新追加
         var summaryMsg = UnifiedChatMessage.User(
             "【上下文摘要：压缩自此前 " + snapshot.OldCount + " 条，由模型自动生成，细节以备份为准】\n" + summary
         );
-        // P007 legacy：新写 legacy 摘要显式标 chat，幂等回填（仅 kind IS NULL）只认 M5 前老桩，不误伤本版本 legacy 摘要。
         summaryMsg.Kind = MessageKind.Chat;
         var newMessages = new List<UnifiedChatMessage>();
         if (snapshot.OrigSystem != null)
@@ -492,200 +382,138 @@ public sealed partial class CompactionService : ICompactionService
         { /* 重载失败则按快照重写，不阻塞压缩 */
         }
 
-        // 8. 原子落盘：备份 → 重写 → meta（MessageCount/UpdatedAt；Cumulative*/Total* 不动，账单不清零）
-        var repository = service.SessionRepository;
-        string backupFileName = await repository
-            .BackupMessagesJsonlAsync(workspaceId, sessionId, ct)
-            .ConfigureAwait(false);
-        // S3 M12：v2 压缩前整库 checkpoint 备份 .bak（成功后删，失败回滚）
-        bool isV2 = false;
-        string? dbBakPath = null;
-        SessionHistoryStore? v2store = null;
+        // 工作区快照兜底（快照内已做临时文件加原子替换，直接使用返回的备份路径）。
+        var storage = service.SessionRepository.Storage;
+        var historyStore = new SessionHistoryStore(new SessionHistoryDb(storage));
+        string workspaceBackupPath;
         try
         {
-            var m0 = await service
-                .GetSessionAsync(workspaceId, sessionId, ct)
+            var workspaceStore = new WorkspaceSessionStore(storage);
+            var backupInfo = await workspaceStore
+                .BackupWorkspaceAsync(workspaceId, ct)
                 .ConfigureAwait(false);
-            isV2 = m0 != null && m0.HistoryVersion == 2;
-            if (isV2)
-            {
-                var storage = repository.Storage;
-                var db = new SessionHistoryDb(storage);
-                try
-                {
-                    db.Checkpoint(workspaceId, sessionId);
-                }
-                catch { }
-                string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
-                dbBakPath = storage.GetHistoryBackupPath(workspaceId, sessionId);
-                if (File.Exists(dbPath))
-                {
-                    try
-                    {
-                        File.Copy(dbPath, dbBakPath, overwrite: true);
-                    }
-                    catch
-                    {
-                        dbBakPath = null;
-                    }
-                }
-                else
-                    dbBakPath = null;
-                v2store = new SessionHistoryStore(db);
-            }
-        }
-        catch
-        {
-            isV2 = false;
-            dbBakPath = null;
-            v2store = null;
-        }
-        try
-        {
-            await repository
-                .RewriteMessagesJsonlAsync(workspaceId, sessionId, newMessages, ct)
-                .ConfigureAwait(false);
+            workspaceBackupPath = string.IsNullOrWhiteSpace(backupInfo?.BackupPath)
+                ? storage.GetWorkspaceBackupPath(workspaceId)
+                : backupInfo.BackupPath;
         }
         catch (Exception ex)
         {
-            return CompactionResult.Fail("COMPACT_REWRITE_ERROR", "重写失败（备份已保留）：" + ex.Message);
+            return CompactionResult.Fail("COMPACT_REWRITE_ERROR", "工作区快照失败，未改动数据：" + ex.Message);
         }
-        // S3 v2：DB 同步（DELETE old turns/blocks + INSERT summary turn/block + 重写 messages，单事务；失败 .bak 恢复）
-        if (isV2 && v2store != null)
+
+        try
         {
+            // 消息分区按新序列全量重写。
+            await historyStore
+                .RewriteMessagesAsync(workspaceId, sessionId, newMessages, ct)
+                .ConfigureAwait(false);
+
+            // 被摘要覆盖的旧轮次：按保留集合算出最小受影响序号后截断。
+            var summaries = await historyStore
+                .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            var keepUserIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var m in snapshot.AnchorMessages)
+                if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    keepUserIds.Add(m.Id);
+            foreach (var m in snapshot.TailMessages)
+                if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    keepUserIds.Add(m.Id);
+            foreach (var m in newMessages)
+                if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                    keepUserIds.Add(m.Id);
+            // 摘要消息本身为 user，加入保持集合。
+            keepUserIds.Add(summaryMsg.Id);
+            long minDoomed = long.MaxValue;
+            foreach (var s in summaries)
+            {
+                string tid = s.TurnId ?? string.Empty;
+                string suffix = tid.StartsWith("uturn-", StringComparison.Ordinal)
+                    ? tid.Substring(6)
+                    : tid;
+                if (
+                    !keepUserIds.Contains(suffix)
+                    && !string.Equals(suffix, summaryMsg.Id, StringComparison.Ordinal)
+                )
+                {
+                    if (s.TurnSeq < minDoomed)
+                        minDoomed = s.TurnSeq;
+                }
+            }
+            if (minDoomed != long.MaxValue)
+                await historyStore
+                    .TruncateFromTurnSeqAsync(workspaceId, sessionId, minDoomed, ct)
+                    .ConfigureAwait(false);
+
+            // 摘要消息已随分区重写落盘；这里只补零 block 的 compact 展示轮。
+            var sumTurnId = "uturn-" + summaryMsg.Id;
+            long seqBase = 0;
+            var currentTurns = await historyStore
+                .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
+                .ConfigureAwait(false);
+            foreach (var turn in currentTurns)
+                if (turn.TurnSeq > seqBase)
+                    seqBase = turn.TurnSeq;
+            var sumTurn = new TurnSummary
+            {
+                TurnId = sumTurnId,
+                TurnSeq = seqBase + 1,
+                Kind = TurnKind.Compact,
+                IterEnd = 1,
+                UserPreview = summary.Length > 15 ? summary.Substring(0, 15) : summary,
+                UserContent = summary,
+                RemovedMessages = snapshot.OldCount,
+                FinalBlockId = null,
+                FinalPreview = string.Empty,
+                Blocks = 0,
+                Tools = 0,
+                Status = TimelineTurnStatus.Completed,
+                UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
+            };
+            await historyStore
+                .AppendTurnAsync(
+                    workspaceId,
+                    sessionId,
+                    new List<UnifiedChatMessage> { summaryMsg },
+                    Array.Empty<TimelineBlock>(),
+                    sumTurn,
+                    ct
+                )
+                .ConfigureAwait(false);
+
+            // 回收孤儿工具输出。
             try
             {
-                await v2store!
-                    .RewriteMessagesAsync(workspaceId, sessionId, newMessages, ct)
+                await historyStore
+                    .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
                     .ConfigureAwait(false);
-                // old turns：不在 Anchor/Tail 中的 turn_seq（按 user Id 映射）
-                var summaries = await v2store!
-                    .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
-                    .ConfigureAwait(false);
-                var keepUserIds = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var m in snapshot.AnchorMessages)
-                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
-                        keepUserIds.Add(m.Id);
-                foreach (var m in snapshot.TailMessages)
-                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
-                        keepUserIds.Add(m.Id);
-                foreach (var m in newMessages)
-                    if (string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
-                        keepUserIds.Add(m.Id);
-                // summaryMsg 本身是 user，加入保持
-                keepUserIds.Add(summaryMsg.Id);
-                long minDoomed = long.MaxValue;
-                foreach (var s in summaries)
-                {
-                    string tid = s.TurnId ?? string.Empty;
-                    string suffix = tid.StartsWith("uturn-", StringComparison.Ordinal)
-                        ? tid.Substring(6)
-                        : tid;
-                    if (
-                        !keepUserIds.Contains(suffix)
-                        && !string.Equals(suffix, summaryMsg.Id, StringComparison.Ordinal)
-                    )
-                    {
-                        if (s.TurnSeq < minDoomed)
-                            minDoomed = s.TurnSeq;
-                    }
-                }
-                if (minDoomed != long.MaxValue)
-                    await v2store!
-                        .TruncateFromTurnSeqAsync(workspaceId, sessionId, minDoomed, ct)
-                        .ConfigureAwait(false);
-                // 插入摘要轮（final 保留：summary 作为 final 文本块）
-                try
-                {
-                    var sumTurnId = "uturn-" + summaryMsg.Id;
-                    long seqBase = 0;
-                    try
-                    {
-                        var cur = await v2store!
-                            .GetTimelineSummaryAsync(workspaceId, sessionId, ct)
-                            .ConfigureAwait(false);
-                        foreach (var s in cur)
-                            if (s.TurnSeq > seqBase)
-                                seqBase = s.TurnSeq;
-                    }
-                    catch { }
-                    var sumTurn = new Host.Desktop.Core.Models.TurnSummary
-                    {
-                        TurnId = sumTurnId,
-                        TurnSeq = seqBase + 1,
-                        IterEnd = 1,
-                        UserPreview = summary.Length > 15 ? summary.Substring(0, 15) : summary,
-                        UserContent = summary,
-                        FinalBlockId = "compact:" + sumTurnId + ":final",
-                        FinalPreview = summary.Length > 60 ? summary.Substring(0, 60) : summary,
-                        Blocks = 1,
-                        Tools = 0,
-                        Status = Host.Desktop.Core.Models.TimelineTurnStatus.Completed,
-                        UpdatedAtUtc = DateTime.UtcNow.ToString("o"),
-                    };
-                    var sumBlock = new Host.Desktop.Core.Models.TimelineBlock
-                    {
-                        BlockId = sumTurn.FinalBlockId!,
-                        TurnId = sumTurnId,
-                        Iteration = 1,
-                        Sequence = 1,
-                        Kind = Host.Desktop.Core.Models.TimelineBlockKind.Text,
-                        Tag = Host.Desktop.Core.Models.TimelineBlockTag.Final,
-                        CharCount = summary.Length,
-                        Preview = summary.Length > 200 ? summary.Substring(0, 200) : summary,
-                        Content = summary,
-                    };
-                    await v2store!
-                        .AppendTurnAsync(
-                            workspaceId,
-                            sessionId,
-                            new List<Host.Desktop.Core.Models.UnifiedChatMessage> { summaryMsg },
-                            new List<Host.Desktop.Core.Models.TimelineBlock> { sumBlock },
-                            sumTurn,
-                            ct
-                        )
-                        .ConfigureAwait(false);
-                }
-                catch { }
-                try
-                {
-                    await v2store!
-                        .CollectOrphanToolOutputsAsync(workspaceId, sessionId, ct)
-                        .ConfigureAwait(false);
-                }
-                catch { }
-                // 成功后删 .bak
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(dbBakPath) && File.Exists(dbBakPath))
-                        File.Delete(dbBakPath);
-                }
-                catch { }
             }
-            catch (Exception ex)
+            catch { }
+
+            // 成功后删除工作区快照。
+            try
             {
-                // 失败回滚 .bak
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(dbBakPath) && File.Exists(dbBakPath))
-                    {
-                        var storage = repository.Storage;
-                        string dbPath = storage.GetHistoryDbPath(workspaceId, sessionId);
-                        try
-                        {
-                            new SessionHistoryDb(storage).Checkpoint(workspaceId, sessionId);
-                        }
-                        catch { }
-                        File.Copy(dbBakPath, dbPath, overwrite: true);
-                    }
-                }
-                catch { }
-                return CompactionResult.Fail(
-                    "COMPACT_REWRITE_ERROR",
-                    "DB 同步失败已回滚（备份保留）：" + ex.Message
+                if (File.Exists(workspaceBackupPath))
+                    File.Delete(workspaceBackupPath);
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            // 按会话分区从快照库回滚当前会话，其他会话不受影响。
+            try
+            {
+                RestoreSessionPartitionFromBackup(
+                    storage,
+                    workspaceId,
+                    sessionId,
+                    workspaceBackupPath
                 );
             }
+            catch { }
+            return CompactionResult.Fail("COMPACT_REWRITE_ERROR", "重写失败已回滚（备份保留）：" + ex.Message);
         }
+
         var meta = await service.GetSessionAsync(workspaceId, sessionId, ct).ConfigureAwait(false);
         if (meta != null)
         {
@@ -696,10 +524,99 @@ public sealed partial class CompactionService : ICompactionService
                 .ConfigureAwait(false);
         }
 
-        // 9. 成功（占用快照 TotalInput/TotalCached 保持旧值不动，LastPrompt 下轮 usage 到账前为 unknown，前端画 ?）
+        // 成功（累计用量保持旧值不动；下轮用量到账前上一轮展示为未知）。
         string preview = summary.Length > 200 ? summary.Substring(0, 200) : summary;
-        int keptTail = snapshot.TailMessages.Count;
-        return CompactionResult.Ok(snapshot.OldCount, keptTail, preview, backupFileName);
+        return CompactionResult.Ok(
+            snapshot.OldCount,
+            newMessages.Count,
+            preview,
+            workspaceBackupPath,
+            summaryResult.FinalSummaryTokens,
+            summaryResult.LlmCallCount
+        );
+    }
+
+    /// <summary>重写失败时按会话分区从快照库覆盖回滚（仅本会话，不整库替换）。</summary>
+    private static void RestoreSessionPartitionFromBackup(
+        StoragePathManager storage,
+        string workspaceId,
+        string sessionId,
+        string backupPath
+    )
+    {
+        if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
+            return;
+        string dbPath = storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return;
+        try
+        {
+            new SessionHistoryDb(storage).CheckpointWorkspace(workspaceId);
+        }
+        catch { }
+        string escaped = backupPath.Replace("'", "''");
+        using var conn = SessionHistoryDb.OpenConnection(dbPath);
+        using (var attach = conn.CreateCommand())
+        {
+            attach.CommandText = "ATTACH '" + escaped + "' AS compact_bak;";
+            attach.ExecuteNonQuery();
+        }
+        try
+        {
+            using var tx = conn.BeginTransaction();
+            using (var delMessages = conn.CreateCommand())
+            {
+                delMessages.Transaction = tx;
+                delMessages.CommandText = "DELETE FROM messages WHERE session_id = $sid;";
+                delMessages.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                delMessages.ExecuteNonQuery();
+            }
+            using (var copyMessages = conn.CreateCommand())
+            {
+                copyMessages.Transaction = tx;
+                copyMessages.CommandText =
+                    "INSERT INTO messages SELECT * FROM compact_bak.messages WHERE session_id = $sid;";
+                copyMessages.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                copyMessages.ExecuteNonQuery();
+            }
+            using (var delBlocks = conn.CreateCommand())
+            {
+                delBlocks.Transaction = tx;
+                delBlocks.CommandText = "DELETE FROM blocks WHERE session_id = $sid;";
+                delBlocks.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                delBlocks.ExecuteNonQuery();
+            }
+            using (var copyBlocks = conn.CreateCommand())
+            {
+                copyBlocks.Transaction = tx;
+                copyBlocks.CommandText =
+                    "INSERT INTO blocks SELECT * FROM compact_bak.blocks WHERE session_id = $sid;";
+                copyBlocks.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                copyBlocks.ExecuteNonQuery();
+            }
+            using (var delTurns = conn.CreateCommand())
+            {
+                delTurns.Transaction = tx;
+                delTurns.CommandText = "DELETE FROM turns WHERE session_id = $sid;";
+                delTurns.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                delTurns.ExecuteNonQuery();
+            }
+            using (var copyTurns = conn.CreateCommand())
+            {
+                copyTurns.Transaction = tx;
+                copyTurns.CommandText =
+                    "INSERT INTO turns SELECT * FROM compact_bak.turns WHERE session_id = $sid;";
+                copyTurns.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+                copyTurns.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        finally
+        {
+            using var detach = conn.CreateCommand();
+            detach.CommandText = "DETACH compact_bak;";
+            detach.ExecuteNonQuery();
+        }
     }
 
     private (ProviderConfig Provider, ModelConfig Model) ResolveProviderAndModel(
@@ -758,14 +675,25 @@ public sealed partial class CompactionService : ICompactionService
         return (provider, model);
     }
 
-    /// <summary>P007：压缩模型唯一口径（会话级冻结优先，全局次之；默认 legacy）。</summary>
-    private static string ResolveCompactMode(
+    /// <summary>已有桩的会话强制 stub；否则会话显式模式优先于全局模式。</summary>
+    private static async Task<string> ResolveCompactModeAsync(
         SessionMetadata? session,
-        WorkspaceSessionService service
+        WorkspaceSessionService service,
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct
     )
     {
-        if (!string.IsNullOrWhiteSpace(session?.CompactMode))
-            return session!.CompactMode!.Trim();
+        string? explicitMode = string.IsNullOrWhiteSpace(session?.CompactMode)
+            ? null
+            : session!.CompactMode!.Trim();
+        var stub = await service
+            .GetLastCompactStubAsync(workspaceId, sessionId, ct)
+            .ConfigureAwait(false);
+        if (stub != null)
+            return CompactMode.Stub;
+        if (!string.IsNullOrWhiteSpace(explicitMode))
+            return explicitMode;
         try
         {
             var global = service.SessionRepository.Storage.LoadAppSettings();
@@ -774,25 +702,5 @@ public sealed partial class CompactionService : ICompactionService
         }
         catch { }
         return CompactMode.Legacy;
-    }
-
-    private static string RoleLabel(string? role)
-    {
-        if (string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
-            return "用户";
-        if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
-            return "助手";
-        if (string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
-            return "工具结果";
-        if (string.Equals(role, "system", StringComparison.OrdinalIgnoreCase))
-            return "系统";
-        return role ?? "未知";
-    }
-
-    private static string Truncate(string s, int max)
-    {
-        if (string.IsNullOrEmpty(s) || s.Length <= max)
-            return s ?? string.Empty;
-        return s.Substring(0, max);
     }
 }

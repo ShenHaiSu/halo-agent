@@ -32,6 +32,10 @@ jobs:
       - name: Install (--frozen-lockfile)
         run: pnpm install --frozen-lockfile
 
+      - name: Architecture assertions
+        working-directory: .
+        run: node build/check-architecture.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

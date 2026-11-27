@@ -1,13 +1,17 @@
 <template>
   <section v-if="flatTurns.length > 0 || pending" ref="rootRef" class="timeline-summary-section" data-testid="timeline-summary-section">
-    <TimelineProcessBox
-      v-for="turn in flatTurns"
-      :key="turn.key"
-      :turn="turn"
-      @expand-change="onExpandChange"
-      @user-menu="(ev, id) => emit('user-menu', ev, id)"
-      @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
-    />
+    <template v-for="turn in flatTurns" :key="turn.key">
+      <CompactTurn v-if="isCompactTurn(turn)" :turn="turn" />
+      <TimelineProcessBox
+        v-else
+        :turn="turn"
+        :hide-final="handoffActive && turn.key === lastTurnKey"
+        :initial-markdown="handoffActive && turn.key === lastTurnKey ? handoffFinalText : ''"
+        @expand-change="onExpandChange"
+        @user-menu="(ev, id) => emit('user-menu', ev, id)"
+        @assistant-menu="(ev, id) => emit('assistant-menu', ev, id)"
+      />
+    </template>
     <PendingBubble
       v-if="pending"
       :pending="pending"
@@ -21,15 +25,21 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { useTimelineNav } from '@features/agent/composables/useTimelineNav';
+import CompactTurn from './CompactTurn.vue';
 import TimelineProcessBox from './TimelineProcessBox.vue';
 import PendingBubble from './PendingBubble.vue';
 import type { PendingUser } from '../utils/pendingUser';
+import { isCompactTurn } from '../utils/compactTurn';
 import { setTurnExpanded } from '../utils/timelineExpansion';
-import { flatBlocks, summaryAnchorKeys } from '../utils/timelineSummary';
+import { flatBlocks, isEmptyTerminalTurn, summaryAnchorKeys } from '../utils/timelineSummary';
 
 const props = defineProps<{
   summaries: TurnSummary[];
   pending?: PendingUser | null;
+  /** 交接窗激活：隐藏刚完成轮在摘要区的正文，正文唯一实例由 Live 交接容器承担。 */
+  handoffActive?: boolean;
+  /** 交接期 Live 正文文本，喂给稳态盒作首帧 markdown 种子。 */
+  handoffFinalText?: string;
 }>();
 
 const emit = defineEmits<{
@@ -41,8 +51,27 @@ const emit = defineEmits<{
 const nav = useTimelineNav();
 const rootRef = ref<HTMLElement | null>(null);
 const flatTurns = computed(() => flatBlocks(props.summaries));
+// 交接窗里刚完成轮必是摘要最后一条（pendingUser 已在 finishTurn 清理），
+// 只对这一条隐藏正文；历史轮正文照常显示。
+const lastTurnKey = computed(() => flatTurns.value[flatTurns.value.length - 1]?.key ?? '');
 const pendingKey = computed(() => String(props.pending?.requestId || props.pending?.key || 'pending'));
 const registered = ref<string[]>([]);
+
+/** 同一 requestId 不应同时存在于摘要与 pending：命中只记 Warn，不在渲染层隐藏，避免掩盖 store 对账问题。 */
+watch(
+  [flatTurns, () => props.pending?.requestId],
+  ([turns, requestId]) => {
+    try {
+      const rid = String(requestId || '').trim();
+      if (!rid || !props.pending) return;
+      const hit = turns.some((turn) => String(turn.lastRequestId || '').trim() === rid);
+      if (hit) console.warn('[timeline-summary] pending duplicated with summary, expect store reconcile:', { requestId: rid });
+    } catch {
+      /* 诊断永不阻断渲染 */
+    }
+  },
+  { immediate: true }
+);
 
 function onExpandChange(turnId: string, expanded: boolean): void {
   try {
@@ -80,7 +109,8 @@ function collectAnchors(): void {
       nav.register(anchors.user, turnEl);
       keys.push(anchors.user);
     }
-    if ((turn as { kind?: string }).kind === 'compact') continue; // P007：桩只注册 user 锚点
+    if (isCompactTurn(turn)) continue;
+    if (isEmptyTerminalTurn(turn)) continue; // 零块终态轮只注册 user 锚点，无过程/final 锚点
     const processEl = root.querySelector(`[data-testid="timeline-process-head-${safeId}"]`);
     if (processEl instanceof HTMLElement) {
       nav.register(anchors.process, processEl);
@@ -100,7 +130,7 @@ function collectAnchors(): void {
 onMounted(() => {
   void nextTick(collectAnchors);
 });
-watch(flatTurns, () => {
+watch([flatTurns, () => props.handoffActive], () => {
   void nextTick(collectAnchors);
 });
 onUnmounted(releaseAnchors);

@@ -17,6 +17,7 @@ public sealed partial class SubAgentCoordinator
         string parentSessionId,
         IReadOnlyList<SubHandle> handles,
         IReadOnlyList<(string CallId, string FailText)> rejected,
+        // 用户取消令牌：只在用户停止时中止等待；主轮超时不传入，故不会打断子收敛。
         CancellationToken mainCt,
         TimeSpan? overallTimeout = null
     )
@@ -67,7 +68,8 @@ public sealed partial class SubAgentCoordinator
                     {
                         total = handles.Count,
                         timedOut = timedOutHandles.Count,
-                        budgetMs = (long)budget.TotalMilliseconds
+                        budgetMs = (long)budget.TotalMilliseconds,
+                        subIds = timedOutHandles.Select(h => h.SubSessionId).ToArray()
                     }
                 );
             }
@@ -221,7 +223,8 @@ public sealed partial class SubAgentCoordinator
                         callId = x.CallId,
                         subId = x.SubSessionId,
                         success = x.Success,
-                        timedOut = x.TimedOut
+                        timedOut = x.TimedOut,
+                        errorCode = x.ErrorCode
                     })
                     .ToArray(),
                 billedPrompt = results.Sum(x => x.InputTokens),

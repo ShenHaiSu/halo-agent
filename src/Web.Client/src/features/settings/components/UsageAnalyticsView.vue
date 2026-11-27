@@ -127,7 +127,7 @@
     <!-- 图1：用量趋势堆叠柱 -->
     <div class="rounded border border-subtle p-2">
       <div class="flex items-center justify-between mb-1">
-        <span class="text-[13px] font-medium">用量趋势（按模型堆叠）</span>
+        <span class="text-[13px] font-medium">用量趋势（按模型堆叠，单位：tokens）</span>
         <n-radio-group v-model:value="store.metric" size="small" data-testid="usage-metric-switch" @update:value="store.refresh()">
           <n-radio-button value="in">输入</n-radio-button>
           <n-radio-button value="out">输出</n-radio-button>
@@ -329,6 +329,9 @@ function fmtInt(n: number): string {
 function fmtToken(n: number): string {
   return formatTokenShort(n);
 }
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function hitColor(h: number): string {
   if (h >= 0.6) return '#10b981';
   if (h >= 0.3) return '#f59e0b';
@@ -408,10 +411,11 @@ function baseText(): Record<string, unknown> {
 function baseAxisLabel(fontSize: number): Record<string, unknown> {
   return { fontFamily: FONT, fontSize, color: chartMuted() };
 }
-function tooltipBox(): Record<string, unknown> {
+function tooltipBox(fontSize?: number): Record<string, unknown> {
+  const textStyle = { color: chartFg(), ...(fontSize === undefined ? {} : { fontSize }) };
   return isDark.value
-    ? { backgroundColor: '#212a36', borderColor: '#283241', textStyle: { color: '#e6edf3' } }
-    : { backgroundColor: '#ffffff', borderColor: '#e2e8f0', textStyle: { color: '#0f172a' } };
+    ? { backgroundColor: '#212a36', borderColor: '#283241', textStyle }
+    : { backgroundColor: '#ffffff', borderColor: '#e2e8f0', textStyle };
 }
 
 function renderStacked(): void {
@@ -432,25 +436,20 @@ function renderStacked(): void {
     color: STACK_COLORS,
     textStyle: baseText(),
     tooltip: {
-      trigger: 'axis',
-      ...tooltipBox(),
-      axisPointer: { lineStyle: { color: chartSplit() } },
+      trigger: 'item',
+      ...tooltipBox(12),
+      axisPointer: { type: 'line', lineStyle: { color: chartSplit() } },
       formatter: (params: unknown): string => {
-        const arr = params as Array<{ seriesName: string; value: number; color: string }>;
-        if (!arr || !arr.length) return '';
-        const idx = (arr[0] as unknown as { dataIndex: number }).dataIndex;
-        const date = dates[idx] || '';
-        let html = date;
-        let sum = 0;
-        for (const p of arr) {
-          const v = Number(p.value) || 0;
-          sum += v;
-          html += '<br/>' + p.seriesName + ': ' + v.toLocaleString('en-US');
-        }
-        const hr = store.trend.hitRates[idx];
-        html += '<br/>合计: ' + sum.toLocaleString('en-US');
-        if (hr !== undefined) html += ' · 命中率: ' + (hr * 100).toFixed(1) + '%';
-        return html;
+        const p = params as { seriesName?: string; value?: number | string; dataIndex?: number };
+        const idx = Number(p.dataIndex);
+        const date = Number.isInteger(idx) ? dates[idx] || '' : '';
+        const raw = Number(p.value);
+        const v = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+        const metricLabel = store.metric === 'in' ? '输入' : store.metric === 'out' ? '输出' : '总量';
+        const short = fmtToken(v);
+        const exact = fmtInt(v);
+        const valueHtml = short === exact ? `${exact} tokens` : `${short} tokens <span style="opacity: .72">(${exact})</span>`;
+        return [escapeHtml(date), escapeHtml(String(p.seriesName || '-')), `${metricLabel}: ${valueHtml}`].join('<br/>');
       },
     },
     legend: {

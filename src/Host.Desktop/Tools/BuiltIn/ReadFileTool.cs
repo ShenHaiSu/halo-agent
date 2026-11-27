@@ -105,15 +105,57 @@ public sealed class ReadFileTool : IToolHandler
             // need22-P0 S1：读路径强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
             string fullPath;
             {
+                // 会话输出目录只读豁免：本会话落盘全文可分页读回。
                 var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
                     workspaceRoot,
-                    filePathArg
+                    filePathArg,
+                    SessionOutputRoots.GetSessionReadAllowedRoots(context)
                 );
                 if (!ok)
                 {
                     return Task.FromResult(
                         ToolResult.Fail(err!, durationMs: sw.ElapsedMilliseconds)
                     );
+                }
+                // 落盘唯一形态为 call_*.txt：命中本会话输出目录但非该形态的单文件仍按越界拒；
+                // 目录本身放行（后续走 IS_A_DIRECTORY 分支）。
+                if (!SessionOutputRoots.IsSessionOutputFileName(resolved))
+                {
+                    string spillDir = SessionOutputRoots.BuildSessionToolOutputsDir(
+                        context.DataRoot,
+                        context.WorkspaceId,
+                        context.SessionId
+                    );
+                    try
+                    {
+                        string normalizedResolved = Path.GetFullPath(resolved)
+                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        string normalizedSpillDir = Path.GetFullPath(spillDir)
+                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        if (
+                            !string.Equals(
+                                normalizedResolved,
+                                normalizedSpillDir,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                            && normalizedResolved.StartsWith(
+                                normalizedSpillDir + Path.DirectorySeparatorChar,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        {
+                            return Task.FromResult(
+                                ToolResult.Fail(
+                                    $"{PathSafetyValidator.Codes.OutsideWorkspace}：拒绝工作区之外的读取：'{PathSafetyValidator.ToDisplayPath(workspaceRoot, resolved)}'。请使用工作区内相对路径后重试。",
+                                    durationMs: sw.ElapsedMilliseconds
+                                )
+                            );
+                        }
+                    }
+                    catch
+                    {
+                        // 路径规范化失败则沿用已放行的 resolved，不额外拦截。
+                    }
                 }
                 fullPath = resolved;
             }

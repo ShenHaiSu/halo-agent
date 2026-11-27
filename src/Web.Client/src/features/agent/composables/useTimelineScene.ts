@@ -1,8 +1,9 @@
 import type { ComputedRef, UnwrapNestedRefs } from 'vue';
 import type { TurnSummary } from '@shared/bridge/hostBridge';
 import { provideTimelineView } from './timelineViewKey';
-import type { TimelineViewModel } from './timelineViewKey';
+import type { TimelineLiveSeg, TimelineViewModel } from './timelineViewKey';
 import type { TimelineViewModelState } from './useTimelineViewModel';
+import { isHandoffEnabled, splitHandoffSegs } from '@features/agent/utils/handoffGrouping';
 
 /** 装配源：聚合状态经响应式解包后的形态（与装配层本地读取一致）。 */
 export type SceneSource = UnwrapNestedRefs<TimelineViewModelState>;
@@ -56,6 +57,33 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
     get handoffAnim() {
       return !!t.handoffAnim;
     },
+    get handoffActive() {
+      // 交接窗 = 稳态已对账落屏 + Live 容器还在；热降级开关一票否决。
+      return isHandoffEnabled() && !!t.liveCompleting && !!t.steadyReady;
+    },
+    get handoffFinalText() {
+      // 真相源优先级：稳态已对账且 requestId 精确匹配的摘要全文 > 唯一 live final 段。
+      // 绝不用整轮 streamingText 兜底——那会包含早期迭代过程正文，污染稳态种子。
+      let requestId = '';
+      try {
+        const active = t.turn?.activeTurn;
+        requestId = String(active?.handoffRequestId || active?.requestId || '');
+      } catch {
+        requestId = '';
+      }
+      if (t.steadyReady && requestId) {
+        const summaries = opts.summaryList.value || [];
+        const matched = summaries.find((s) => String(s.lastRequestId || '') === requestId);
+        const persisted = String(matched?.finalContent || '');
+        if (persisted) return persisted;
+      }
+      const segs = (t.liveInclusiveSegs || []) as unknown as TimelineLiveSeg[];
+      const { final } = splitHandoffSegs(segs);
+      return final.length ? String(final[0]?.text || '') : '';
+    },
+    get handoffReduceHeight() {
+      return isHandoffEnabled() && !!t.handoffAnim;
+    },
     get singleProcess() {
       return opts.singleProcess;
     },
@@ -83,13 +111,28 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
         output: tele.outputTokens,
       };
     },
+    get pendingReplay() {
+      return t.turn.currentPendingReplay ?? null;
+    },
     get menu() {
+      const busy = t.menu.menuBusy;
+      const reason = String(t.menu.menuState.target?.actionDisabledReason || '');
+      const replayDisabled = busy || t.menu.menuState.target?.canReplay === false;
+      const branchDisabled = busy || t.menu.menuState.target?.canBranch === false;
       return {
         visible: t.menu.menuState.visible,
         x: t.menu.menuState.x,
         y: t.menu.menuState.y,
-        busy: t.menu.menuBusy,
+        busy,
         canCopy: t.menu.menuCanCopy,
+        canCopyTurn: t.menu.menuCanCopyTurn,
+        copyLabel: t.menu.menuCopyLabel,
+        replayDisabled,
+        branchDisabled,
+        replayTitle: reason || '截断该轮并重新生成',
+        branchTitle: reason || '从这里创建分支会话',
+        deleteDisabled: !t.menu.menuCanDelete,
+        deleteTitle: t.menu.menuCanDelete ? '删除该轮提问、回复及工具记录（先备份）' : '当前后端不支持整轮删除，请升级',
       };
     },
   } as TimelineViewModel;

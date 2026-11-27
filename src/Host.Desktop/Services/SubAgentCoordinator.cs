@@ -127,6 +127,7 @@ public sealed partial class SubAgentCoordinator
         string mainProviderId,
         string mainModelId,
         SubPolicySnapshot policy,
+        // 用户取消令牌：子 CTS 只 linked 用户取消，主轮超时不级联到子。
         CancellationToken mainCt
     )
     {
@@ -233,6 +234,7 @@ public sealed partial class SubAgentCoordinator
                             RunSubTurnAsync(
                                 workspaceId,
                                 subId,
+                                mainSessionId,
                                 taskText,
                                 providerId,
                                 modelId,
@@ -294,6 +296,7 @@ public sealed partial class SubAgentCoordinator
     private async Task<AgentTurnResult> RunSubTurnAsync(
         string workspaceId,
         string subSessionId,
+        string parentSessionId,
         string task,
         string providerId,
         string modelId,
@@ -307,7 +310,7 @@ public sealed partial class SubAgentCoordinator
         {
             await SetSubStatusAsync(workspaceId, subSessionId, "running").ConfigureAwait(false);
             Publish(
-                subSessionId,
+                parentSessionId,
                 "SubAgentProgress",
                 new { subId = subSessionId, status = "running" }
             );
@@ -329,20 +332,12 @@ public sealed partial class SubAgentCoordinator
             var r = await subOrch
                 .RunAgentTurnAsync(workspaceId, subSessionId, task, providerId, modelId, subCt)
                 .ConfigureAwait(false);
-            await SetSubStatusAsync(
-                    workspaceId,
-                    subSessionId,
-                    r.WasCancelled ? "cancelled" : (r.Success ? "succeeded" : "failed")
-                )
-                .ConfigureAwait(false);
+            string subStatus = MapSubStatus(r);
+            await SetSubStatusAsync(workspaceId, subSessionId, subStatus).ConfigureAwait(false);
             Publish(
-                subSessionId,
+                parentSessionId,
                 "SubAgentProgress",
-                new
-                {
-                    subId = subSessionId,
-                    status = r.WasCancelled ? "cancelled" : (r.Success ? "succeeded" : "failed")
-                }
+                new { subId = subSessionId, status = subStatus }
             );
             return r;
         }
@@ -366,4 +361,16 @@ public sealed partial class SubAgentCoordinator
             return AgentTurnResult.Failed("SUB_EXEC_ERROR", ex.Message);
         }
     }
+
+    /// <summary>
+    /// 子轮结果到会话终态的单一映射；截断单列，避免与 Barrier 的失败判定口径漂移。
+    /// </summary>
+    private static string MapSubStatus(AgentTurnResult result) =>
+        result.WasCancelled
+            ? "cancelled"
+            : result.WasTruncated
+                ? "truncated"
+                : result.Success
+                    ? "succeeded"
+                    : "failed";
 }

@@ -71,6 +71,8 @@ export interface TurnSummary {
   userContent?: string;
   finalBlockId?: string | null;
   finalPreview: string;
+  /** 末轮正文全文（超限摘要为空，需按 finalBlockId 回读 block）；交接期优先于内存态拼接文本。 */
+  finalContent?: string;
   blocks: number;
   tools: number;
   failed: number;
@@ -85,6 +87,80 @@ export interface TurnSummary {
   kind?: 'turn' | 'compact' | string;
   /** P007：本次压缩覆盖的消息条数（仅 compact 轮）。 */
   removedMessages?: number;
+  /** 后端投影的真实用户消息主键；只用于历史操作，不参与导航渲染。 */
+  userMessageId?: string | null;
+  /** 后端投影的本轮末条助手消息主键；失败轮或压缩轮为空。 */
+  assistantMessageId?: string | null;
+}
+
+/** 重放图片引用：lost 的图片只产生警告，不参与重新发送。 */
+export interface HistoryReplayImageDto {
+  imageId: string;
+  fileName: string;
+  mime: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  sha16: string;
+  lost: boolean;
+}
+
+/** 历史能力位：探测失败、字段缺失或旧后端方法不存在均归一为全部不支持。 */
+export interface HistoryCapabilities {
+  historyAnchors: boolean;
+  replayImages: boolean;
+  atomicHistoryMutex: boolean;
+  strictBranchRollback: boolean;
+  turnDelete: boolean;
+}
+
+export const UnsupportedHistoryCapabilities: HistoryCapabilities = {
+  historyAnchors: false,
+  replayImages: false,
+  atomicHistoryMutex: false,
+  strictBranchRollback: false,
+  turnDelete: false,
+};
+
+/** 能力归一：字段缺失、类型错误或探测失败一律视为不支持，禁止伪造支持。 */
+export function normalizeHistoryCapabilities(raw: unknown): HistoryCapabilities {
+  if (!raw || typeof raw !== 'object') return { ...UnsupportedHistoryCapabilities };
+  const source = raw as Record<string, unknown>;
+  const flag = (key: keyof HistoryCapabilities): boolean => (typeof source[key] === 'boolean' ? (source[key] as boolean) : false);
+  return {
+    historyAnchors: flag('historyAnchors'),
+    replayImages: flag('replayImages'),
+    atomicHistoryMutex: flag('atomicHistoryMutex'),
+    strictBranchRollback: flag('strictBranchRollback'),
+    turnDelete: flag('turnDelete'),
+  };
+}
+
+/** 成功结果内的警告，IMAGE_MISSING 不作为 Bridge 失败码。 */
+export interface HistoryOperationWarning {
+  code: 'IMAGE_MISSING';
+  message: string;
+}
+
+export interface HistoryOperationResult {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  warnings?: HistoryOperationWarning[];
+}
+
+export interface HistoryReplayResult extends HistoryOperationResult {
+  replayText: string;
+  replayImages: HistoryReplayImageDto[];
+  destructiveCommitCompleted: boolean;
+  recoveryToken?: string;
+}
+
+export interface HistoryBranchResult extends HistoryOperationResult {
+  session?: unknown;
+  newSessionId?: string;
+  failedStage?: string;
+  switched?: boolean;
 }
 export interface TimelineBlockContent {
   blockId: string;
@@ -150,6 +226,12 @@ export interface UnifiedChatMessage {
   /** P007：桩元数据 JSON 原文（前端仅在需要 removedCount 时解析）。 */
   metaJson?: string | null;
 }
+/** need03-03-B：标题链路首轮取数（后端 GetFirstRoundTexts 直读存储，v2 会话可用）。 */
+export interface FirstRoundTexts {
+  firstUser: string;
+  assistant: string;
+  userCount: number;
+}
 
 export interface ContextBudgetStatusDto {
   totalContextTokens: number;
@@ -176,20 +258,41 @@ export interface ContextBudgetStatusDto {
   prefixDivergenceBlock?: string | null;
 }
 
+export type CompactionOutcome = 'completed' | 'noop' | 'failed';
+
 export interface CompactionResultDto {
   success: boolean;
+  outcome?: CompactionOutcome;
   errorCode?: string | null;
   errorMessage?: string | null;
+  noOpReason?: string | null;
   removedMessages: number;
   keptMessages: number;
   summaryPreview: string;
   backupFileName?: string | null;
-}
-/** P007：压缩完成事件增量载荷（见 10-§2，键只增不改）。 */
-export interface CompactCompletedPayload {
   stubMessageId?: string | null;
+  stubTurnId?: string | null;
+  summaryOutputTokens?: number;
+  compactLlmCallCount?: number | null;
+  metadataWarning?: string | null;
+}
+/** 压缩完成事件增量载荷，字段只增不改。 */
+export interface CompactCompletedPayload {
+  removedMessages?: number;
+  keptMessages?: number;
+  summaryPreview?: string | null;
+  backupFileName?: string | null;
+  stubMessageId?: string | null;
+  stubTurnId?: string | null;
   summaryTokens?: number;
+  compactLlmCallCount?: number | null;
   occupancyBaseline?: string;
+  metadataWarning?: string | null;
+  updatedAtUtc?: string | null;
+}
+export interface CompactNoOpPayload {
+  noOpReason?: string | null;
+  updatedAtUtc?: string | null;
 }
 export interface PromptConfigDocument {
   version: number;
@@ -340,15 +443,75 @@ export interface PromptDiagnosticsDto {
   compressorPromptPreview: string;
   titlePromptPreview: string;
 }
-// need07：历史右键（截断/分支）
+/** 历史右键截断结果（分支与重放共享 DTO 基线）。 */
 export interface HistoryTruncateResultDto {
   success: boolean;
   errorCode?: string | null;
   keptMessages: number;
   removedMessages: number;
   replayText?: string | null;
+  replayImages?: HistoryReplayImageDto[] | null;
   backupFileName?: string | null;
+  destructiveCommitCompleted: boolean;
+  recoveryToken?: string | null;
 }
+export type SessionDeletionOutcome = 'deleted' | 'partial' | 'failed' | 'notFound';
+export type SessionDeletionStage = 'notRequested' | 'completed' | 'failed';
+
+export interface SessionDeletionResultDto {
+  outcome: SessionDeletionOutcome;
+  errorCode?: string | null;
+  destructiveCommitCompleted: boolean;
+  backupFileName?: string | null;
+  deletedSessionIds: string[];
+  residualSessionIds: string[];
+  database: SessionDeletionStage;
+  directories: SessionDeletionStage;
+  index: SessionDeletionStage;
+  warnings: string[];
+}
+
+export interface DeleteSessionCommandResult {
+  outcome: SessionDeletionOutcome;
+  destructiveCommitCompleted: boolean;
+  deletedSessionIds: string[];
+  residualSessionIds: string[];
+  backupFileName?: string | null;
+  errorCode?: string | null;
+  message?: string;
+  warnings: string[];
+}
+
+/** 工作区移除模式：解绑保留物理数据，彻底删除只清两个明确根目录。 */
+export type WorkspaceRemovalMode = 'unbind' | 'purge';
+export type WorkspaceRemovalOutcome = 'completed' | 'completedWithWarnings' | 'failed' | 'notFound';
+export type WorkspaceResourceStatus = 'notRequested' | 'deleted' | 'retained' | 'failed';
+
+export interface WorkspaceRemovalResultDto {
+  outcome: WorkspaceRemovalOutcome;
+  mode: WorkspaceRemovalMode;
+  errorCode?: string | null;
+  workspaceUnbound: boolean;
+  sessionData: WorkspaceResourceStatus;
+  haloAgent: WorkspaceResourceStatus;
+  haloAgentReason?: string | null;
+  failedPaths: string[];
+  warnings: string[];
+}
+
+/** Store 层命令结果：与 DTO 同构，前端只按 workspaceUnbound 决定是否移除本地项。 */
+export interface WorkspaceRemovalCommandResult {
+  outcome: WorkspaceRemovalOutcome;
+  mode: WorkspaceRemovalMode;
+  workspaceUnbound: boolean;
+  sessionData: WorkspaceResourceStatus;
+  haloAgent: WorkspaceResourceStatus;
+  haloAgentReason?: string | null;
+  failedPaths: string[];
+  warnings: string[];
+  errorCode?: string | null;
+}
+
 export type SkillMemoryKind = 'skill' | 'memory';
 export type SkillMemoryScope = 'global' | 'project';
 export interface HistoryHealResultDto {
@@ -366,6 +529,21 @@ export interface HistoryDeleteResultDto {
   syntheticAppended: number;
   orphanToolsRemoved: number;
   backupFileName?: string | null;
+}
+
+/** 整轮删除结果：success 只代表数据库事务已提交，辅助阶段问题进 metadataWarning。 */
+export interface HistoryTurnDeleteResultDto {
+  success: boolean;
+  errorCode?: string | null;
+  deletedTurnId?: string | null;
+  deletedMessages: number;
+  keptMessages: number;
+  syntheticAppended: number;
+  orphanToolsRemoved: number;
+  backupFileName?: string | null;
+  destructiveCommitCompleted: boolean;
+  metadataWarning?: string | null;
+  projectionDeleted?: boolean;
 }
 export type SkillMemoryScopeFilter = 'global' | 'project' | 'all';
 export interface SkillMemoryListItem {
@@ -486,4 +664,17 @@ export interface UsageDbStatus {
 export interface UiActiveState {
   workspaceId: string | null;
   sessionId: string | null;
+}
+// 外观设置真相源（后端 config/appearance.json）。字段与 shared/ui/appearance.ts 的
+// AppearanceSettings 严格对齐；dev(http://localhost:5173)/release(app://local) 的
+// localStorage 按 origin 隔离，故不再由浏览器 localStorage 充当真相源。
+export interface AppearanceSettingsDto {
+  themeMode: 'dark' | 'light';
+  themeColor: string;
+  fontSize: number;
+  chineseFont: string;
+  englishFont: string;
+  monoFont: string;
+  chatWidthMode: 'centered' | 'full';
+  sendKeyMode: 'enter' | 'ctrl-enter';
 }

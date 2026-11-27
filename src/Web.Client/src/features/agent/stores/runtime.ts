@@ -1,25 +1,24 @@
-/** need21-F03：agent 域运行时上下文 DI（旧 store 直读 workspace/session/config/askUser 的替代）。
+/** agent 域运行时上下文 DI（旧 store 直读 workspace/session/config/askUser 的替代）。
  * 旧转发（stores/agentStore.ts）注册实现，新 store 只调 agentRuntime() 接口；单测可注入假实现。
  */
+import type { HistoryReplayResult } from '@shared/bridge/protocol/domain';
+
 export interface AgentRuntimeContext {
   workspaceId(): string;
   providerId(): string;
   modelId(): string;
   maxImages(): number;
-  findMessageContent(sessionId: string, msgId: string): string;
-  truncateHistory(
-    workspaceId: string,
-    sessionId: string,
-    msgId: string,
-    removeAnchor: boolean
-  ): Promise<{ ok: boolean; replayText: string }>;
-  loadSessionMessages(sessionId: string): Promise<void>;
+  truncateHistory(workspaceId: string, sessionId: string, msgId: string, removeAnchor: boolean): Promise<HistoryReplayResult>;
+  loadSessionMessages(sessionId: string, opts?: { preserveBudget?: boolean; background?: boolean }): Promise<void>;
+  applyUsagePatch(sessionId: string, usage: { inputTokens: number; cachedInputTokens?: number | null }): void;
   refreshBudget(): Promise<void>;
   touchSessionTime(sessionId: string, iso?: string): void;
   generateTitle(sessionId: string): void;
   reconcileTimes(): void;
   askPending(sessionId: string): boolean;
   clearAskPending(sessionId: string): void;
+  /** 摘要确认：同一 requestId 的 TurnSummary 是否已在当前视图就位；未接线默认 false，保证不误清。 */
+  hasTurnSummary(sessionId: string, requestId: string): boolean;
   /** need23-R1：把后端已落盘的单条消息增量合并进视图（不触发全量重拉）。返回是否真的插入。 */
   mergePersistedMessage(sessionId: string, msg: unknown): boolean;
 }
@@ -28,15 +27,23 @@ const noopRuntime: AgentRuntimeContext = {
   providerId: () => '',
   modelId: () => '',
   maxImages: () => 4,
-  findMessageContent: () => '',
-  truncateHistory: () => Promise.resolve({ ok: false, replayText: '' }),
+  truncateHistory: () =>
+    Promise.resolve({
+      ok: false,
+      replayText: '',
+      replayImages: [],
+      destructiveCommitCompleted: false,
+      warnings: [],
+    }),
   loadSessionMessages: () => Promise.resolve(),
+  applyUsagePatch: () => undefined,
   refreshBudget: () => Promise.resolve(),
   touchSessionTime: () => undefined,
   generateTitle: () => undefined,
   reconcileTimes: () => undefined,
   askPending: () => false,
   clearAskPending: () => undefined,
+  hasTurnSummary: () => false,
   mergePersistedMessage: () => false,
 };
 let runtimeCtx: AgentRuntimeContext = noopRuntime;

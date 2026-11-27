@@ -8,13 +8,16 @@ using Microsoft.Data.Sqlite;
 namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
-/// Per-session timeline write and summary read.
-/// Single writer per session, short-lived connections, full single-transaction turn commit.
+/// Workspace timeline write and summary read.
+/// Single writer per workspace, short-lived connections, full single-transaction turn commit.
 /// </summary>
 public sealed partial class SessionHistoryStore
 {
     public const long LargeBlockThresholdBytes = 64L * 1024;
     public const int LargeBlockPreviewChars = 4096;
+
+    /// <summary>历史缺失 user 单批查询上限，避免 IN 参数膨胀成慢查询。</summary>
+    public const int UserTurnQueryBatchSize = 200;
 
     private readonly SessionHistoryDb _db;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _writeLocks = new();
@@ -27,10 +30,42 @@ public sealed partial class SessionHistoryStore
     public SessionHistoryStore(StoragePathManager storage)
         : this(new SessionHistoryDb(storage)) { }
 
+    private static bool IsDatabaseBusy(Exception ex)
+    {
+        return ex is SqliteException sql
+            && (
+                sql.SqliteErrorCode == 5
+                || sql.SqliteExtendedErrorCode == 5
+                || sql.SqliteExtendedErrorCode == 262
+                || sql.SqliteExtendedErrorCode == 517
+            );
+    }
+
+    internal static async Task<long> ExecuteWithBusyRetryAsync(
+        Func<int, Task<long>> operation,
+        CancellationToken ct = default
+    )
+    {
+        if (operation == null)
+            throw new ArgumentNullException(nameof(operation));
+        const int maxAttempts = 6;
+        for (int attempt = 1; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation(attempt).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+            {
+                await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     private SemaphoreSlim GetWriteLock(string workspaceId, string sessionId)
     {
-        string key =
-            (workspaceId ?? string.Empty).Trim() + "/" + (sessionId ?? string.Empty).Trim();
+        string key = "ws:" + (workspaceId ?? string.Empty).Trim().ToLowerInvariant();
         return _writeLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
     }
 
@@ -48,17 +83,30 @@ public sealed partial class SessionHistoryStore
         var watch = Stopwatch.StartNew();
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
             ApplyLargeBlockPolicy(workspaceId, sessionId, blocks);
-            using var conn = _db.Open(workspaceId, sessionId);
-            ApplyFullSynchronous(conn);
-            using var tx = conn.BeginTransaction();
-            long turnSeq = ResolveTurnSeq(conn, tx, turn);
-            FlipStaleFinal(conn, tx, turn.TurnId, ResolveNewIter(blocks, turn));
-            InsertMessages(conn, tx, messages);
-            InsertBlocks(conn, tx, blocks);
-            UpsertTurn(conn, tx, turn, turnSeq);
-            tx.Commit();
+            long turnSeq = 0;
+            const int maxAttempts = 6;
+            for (int attempt = 1; ; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    using var conn = _db.OpenWorkspace(workspaceId);
+                    using var tx = conn.BeginTransaction();
+                    turnSeq = ResolveTurnSeq(conn, tx, sessionId, turn);
+                    FlipStaleFinal(conn, tx, sessionId, turn.TurnId, ResolveNewIter(blocks, turn));
+                    InsertMessages(conn, tx, sessionId, messages);
+                    InsertBlocks(conn, tx, sessionId, blocks);
+                    UpsertTurn(conn, tx, sessionId, turn, turnSeq);
+                    tx.Commit();
+                    break;
+                }
+                catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+                {
+                    await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+                }
+            }
             watch.Stop();
             try
             {
@@ -108,12 +156,12 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var tx = conn.BeginTransaction();
-            CollectStaleFinal(conn, tx, turnId, newIter, flipped);
-            FlipStaleFinal(conn, tx, turnId, newIter);
-            ClearFinalRefIfFlipped(conn, tx, turnId, flipped);
+            CollectStaleFinal(conn, tx, sessionId, turnId, newIter, flipped);
+            FlipStaleFinal(conn, tx, sessionId, turnId, newIter);
+            ClearFinalRefIfFlipped(conn, tx, sessionId, turnId, flipped);
             tx.Commit();
             return flipped;
         }
@@ -123,55 +171,181 @@ public sealed partial class SessionHistoryStore
         }
     }
 
-    /// <summary>发货加固：轮次以非完成态终结时落盘终态（截断/取消/错误），并把残留 final 降回 process。</summary>
-    /// <returns>命中已落盘轮次返回 true；轮次尚无落盘行返回 false（调用方无需重试）。</returns>
-    public async Task<bool> MarkTurnEndedAsync(
+    /// <summary>只更新已落盘轮次的终态；缺失轮次返回 false，不创建展示摘要。</summary>
+    public Task<bool> MarkTurnEndedAsync(
         string workspaceId,
         string sessionId,
         string turnId,
         string status,
         CancellationToken ct = default
+    ) => EnsureTurnEndedAsync(workspaceId, sessionId, turnId, status, null, ct);
+
+    /// <summary>在同一事务内补建或更新轮次终态，保证取消收尾幂等且不覆盖已有块统计。</summary>
+    public async Task<bool> EnsureTurnEndedAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        string status,
+        TurnSummary? fallback,
+        CancellationToken ct = default
     )
     {
-        if (string.IsNullOrWhiteSpace(turnId))
+        if (
+            string.IsNullOrWhiteSpace(workspaceId)
+            || string.IsNullOrWhiteSpace(sessionId)
+            || string.IsNullOrWhiteSpace(turnId)
+        )
         {
             return false;
         }
+        if (fallback != null && !string.Equals(fallback.TurnId, turnId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("补建摘要的轮次标识与目标轮次不一致。", nameof(fallback));
+        }
+        return await EnsureTurnEndedCoreAsync(workspaceId, sessionId, turnId, status, fallback, ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> EnsureTurnEndedCoreAsync(
+        string workspaceId,
+        string sessionId,
+        string turnId,
+        string status,
+        TurnSummary? fallback,
+        CancellationToken ct
+    )
+    {
         string ended = NormalizeStatus(status);
-        var gate = GetWriteLock(workspaceId, sessionId);
+        string sid = sessionId ?? string.Empty;
+        var gate = GetWriteLock(workspaceId, sid);
         await gate.WaitAsync(ct).ConfigureAwait(false);
+        var watch = Stopwatch.StartNew();
+        const int maxAttempts = 6;
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
-            using var tx = conn.BeginTransaction();
-            using var mark = conn.CreateCommand();
-            mark.Transaction = tx;
-            mark.CommandText = "UPDATE turns SET status=$st, updated_at=$now WHERE turn_id=$tid;";
-            mark.Parameters.AddWithValue("$st", ended);
-            mark.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
-            mark.Parameters.AddWithValue("$tid", turnId);
-            if (mark.ExecuteNonQuery() == 0)
+            for (int attempt = 1; ; attempt++)
             {
-                tx.Rollback();
-                return false;
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    _db.EnsureWorkspaceDatabase(workspaceId);
+                    using var conn = _db.OpenWorkspace(workspaceId);
+                    using var tx = conn.BeginTransaction();
+                    string now = DateTime.UtcNow.ToString("o");
+                    bool exists;
+                    using (var query = conn.CreateCommand())
+                    {
+                        query.Transaction = tx;
+                        query.CommandText =
+                            "SELECT 1 FROM turns WHERE session_id=$sid AND turn_id=$tid LIMIT 1;";
+                        query.Parameters.AddWithValue("$sid", sid);
+                        query.Parameters.AddWithValue("$tid", turnId);
+                        exists = query.ExecuteScalar() != null;
+                    }
+
+                    bool created = false;
+                    if (exists)
+                    {
+                        using var mark = conn.CreateCommand();
+                        mark.Transaction = tx;
+                        mark.CommandText =
+                            "UPDATE turns SET status=$st, updated_at=$now WHERE session_id=$sid AND turn_id=$tid;";
+                        mark.Parameters.AddWithValue("$st", ended);
+                        mark.Parameters.AddWithValue("$now", now);
+                        mark.Parameters.AddWithValue("$sid", sid);
+                        mark.Parameters.AddWithValue("$tid", turnId);
+                        mark.ExecuteNonQuery();
+                        if (
+                            !string.Equals(
+                                ended,
+                                TimelineTurnStatus.Completed,
+                                StringComparison.Ordinal
+                            )
+                        )
+                        {
+                            using var demote = conn.CreateCommand();
+                            demote.Transaction = tx;
+                            demote.CommandText =
+                                "UPDATE blocks SET tag='process' WHERE session_id=$sid AND turn_id=$tid AND tag='final';";
+                            demote.Parameters.AddWithValue("$sid", sid);
+                            demote.Parameters.AddWithValue("$tid", turnId);
+                            demote.ExecuteNonQuery();
+                            using var clear = conn.CreateCommand();
+                            clear.Transaction = tx;
+                            clear.CommandText =
+                                "UPDATE turns SET final_block_id=NULL WHERE session_id=$sid AND turn_id=$tid;";
+                            clear.Parameters.AddWithValue("$sid", sid);
+                            clear.Parameters.AddWithValue("$tid", turnId);
+                            clear.ExecuteNonQuery();
+                        }
+                    }
+                    else if (fallback != null)
+                    {
+                        fallback.Status = ended;
+                        fallback.UpdatedAtUtc = now;
+                        long turnSeq = ResolveTurnSeq(conn, tx, sid, fallback);
+                        UpsertTurn(conn, tx, sid, fallback, turnSeq);
+                        created = true;
+                    }
+                    else
+                    {
+                        tx.Rollback();
+                        return false;
+                    }
+
+                    tx.Commit();
+                    watch.Stop();
+                    string requestId = fallback?.LastRequestId ?? string.Empty;
+                    if (created)
+                    {
+                        HaloLogger.App.Info(
+                            "[Timeline] turn finalize created sess="
+                                + sid
+                                + " turn="
+                                + turnId
+                                + " request="
+                                + requestId
+                                + " status="
+                                + ended
+                                + " elapsedMs="
+                                + watch.ElapsedMilliseconds
+                        );
+                    }
+                    else
+                    {
+                        HaloLogger.App.Debug(
+                            "[Timeline] turn finalize updated sess="
+                                + sid
+                                + " turn="
+                                + turnId
+                                + " request="
+                                + requestId
+                                + " status="
+                                + ended
+                                + " elapsedMs="
+                                + watch.ElapsedMilliseconds
+                        );
+                    }
+                    return true;
+                }
+                catch (Exception ex) when (IsDatabaseBusy(ex) && attempt < maxAttempts)
+                {
+                    await Task.Delay(25 * attempt, ct).ConfigureAwait(false);
+                }
             }
-            if (!string.Equals(ended, TimelineTurnStatus.Completed, StringComparison.Ordinal))
-            {
-                using var demote = conn.CreateCommand();
-                demote.Transaction = tx;
-                demote.CommandText =
-                    "UPDATE blocks SET tag='process' WHERE turn_id=$tid AND tag='final';";
-                demote.Parameters.AddWithValue("$tid", turnId);
-                demote.ExecuteNonQuery();
-                using var clear = conn.CreateCommand();
-                clear.Transaction = tx;
-                clear.CommandText = "UPDATE turns SET final_block_id=NULL WHERE turn_id=$tid;";
-                clear.Parameters.AddWithValue("$tid", turnId);
-                clear.ExecuteNonQuery();
-            }
-            tx.Commit();
-            return true;
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Warn(
+                "[Timeline] turn finalize failed sess="
+                    + sid
+                    + " turn="
+                    + turnId
+                    + " status="
+                    + ended,
+                ex
+            );
+            throw;
         }
         finally
         {
@@ -237,6 +411,7 @@ public sealed partial class SessionHistoryStore
     private static void CollectStaleFinal(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         string turnId,
         int newIter,
         List<string> sink
@@ -245,7 +420,8 @@ public sealed partial class SessionHistoryStore
         using var q = conn.CreateCommand();
         q.Transaction = tx;
         q.CommandText =
-            "SELECT block_id FROM blocks WHERE turn_id=$tid AND tag='final' AND iter < $iter;";
+            "SELECT block_id FROM blocks WHERE session_id=$sid AND turn_id=$tid AND tag='final' AND iter < $iter;";
+        q.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         q.Parameters.AddWithValue("$tid", turnId);
         q.Parameters.AddWithValue("$iter", newIter);
         using var r = q.ExecuteReader();
@@ -265,6 +441,7 @@ public sealed partial class SessionHistoryStore
     private static void FlipStaleFinal(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         string? turnId,
         int newIter
     )
@@ -276,7 +453,8 @@ public sealed partial class SessionHistoryStore
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText =
-            "UPDATE blocks SET tag='process' WHERE turn_id=$tid AND tag='final' AND iter < $iter;";
+            "UPDATE blocks SET tag='process' WHERE session_id=$sid AND turn_id=$tid AND tag='final' AND iter < $iter;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         cmd.Parameters.AddWithValue("$tid", turnId);
         cmd.Parameters.AddWithValue("$iter", newIter);
         cmd.ExecuteNonQuery();
@@ -285,6 +463,7 @@ public sealed partial class SessionHistoryStore
     private static void ClearFinalRefIfFlipped(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         string turnId,
         List<string> flipped
     )
@@ -298,8 +477,9 @@ public sealed partial class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
-                "UPDATE turns SET final_block_id=NULL, updated_at=$now WHERE turn_id=$tid AND final_block_id=$bid;";
+                "UPDATE turns SET final_block_id=NULL, updated_at=$now WHERE session_id=$sid AND turn_id=$tid AND final_block_id=$bid;";
             cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             cmd.Parameters.AddWithValue("$tid", turnId);
             cmd.Parameters.AddWithValue("$bid", id);
             cmd.ExecuteNonQuery();
@@ -310,7 +490,7 @@ public sealed partial class SessionHistoryStore
     {
         try
         {
-            string dbPath = _db.GetDbPath(workspaceId, sessionId);
+            string dbPath = _db.GetWorkspaceDbPath(workspaceId);
             string walPath = dbPath + "-wal";
             if (!File.Exists(walPath))
             {
@@ -343,7 +523,7 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
             ApplyLargeBlockPolicy(workspaceId, sessionId, new[] { resultBlock });
             resultBlock.TurnId = string.IsNullOrWhiteSpace(resultBlock.TurnId)
                 ? (turnId ?? string.Empty)
@@ -358,17 +538,18 @@ public sealed partial class SessionHistoryStore
             {
                 resultBlock.Tag = TimelineBlockTag.Process;
             }
-            using var conn = _db.Open(workspaceId, sessionId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var tx = conn.BeginTransaction();
-            InsertBlocks(conn, tx, new[] { resultBlock });
+            InsertBlocks(conn, tx, sessionId, new[] { resultBlock });
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
                 "UPDATE turns SET tools = tools + 1, failed = failed + $failed,"
-                + " chars = chars + $chars, updated_at = $updated WHERE turn_id = $tid;";
+                + " chars = chars + $chars, updated_at = $updated WHERE session_id = $sid AND turn_id = $tid;";
             cmd.Parameters.AddWithValue("$failed", isFailed ? 1 : 0);
             cmd.Parameters.AddWithValue("$chars", resultBlock.CharCount);
             cmd.Parameters.AddWithValue("$updated", DateTime.UtcNow.ToString("o"));
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             cmd.Parameters.AddWithValue("$tid", turnId ?? string.Empty);
             cmd.ExecuteNonQuery();
             tx.Commit();
@@ -385,22 +566,23 @@ public sealed partial class SessionHistoryStore
         CancellationToken ct = default
     )
     {
-        _db.EnsureDatabase(workspaceId, sessionId);
+        _db.EnsureWorkspaceDatabase(workspaceId);
         var result = new List<TurnSummary>();
-        using var conn = _db.Open(workspaceId, sessionId);
+        using var conn = _db.OpenWorkspace(workspaceId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id,"
-            + " (SELECT preview FROM blocks WHERE block_id = turns.final_block_id) AS final_preview,"
+            + " (SELECT preview FROM blocks WHERE block_id = turns.final_block_id AND session_id = turns.session_id) AS final_preview,"
             + " blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at"
-            + " FROM turns ORDER BY turn_seq;";
+            + " FROM turns WHERE session_id = $sid ORDER BY turn_seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            string turnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            string summaryTurnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
             var summary = new TurnSummary
             {
-                TurnId = turnId,
+                TurnId = summaryTurnId,
                 TurnSeq = reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
                 IterEnd = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
                 UserPreview = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
@@ -414,13 +596,12 @@ public sealed partial class SessionHistoryStore
                 Chars = reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
                 Status = reader.IsDBNull(12) ? TimelineTurnStatus.Completed : reader.GetString(12),
                 LastRequestId = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
-                // P007：桩轮标记与覆盖条数（老行默认 turn/0）。
                 Kind = reader.IsDBNull(14) ? "turn" : reader.GetString(14),
                 RemovedMessages = reader.IsDBNull(15) ? 0 : reader.GetInt32(15),
                 UpdatedAtUtc = reader.IsDBNull(16) ? string.Empty : reader.GetString(16),
             };
             summary.CreatedAtUtc = summary.UpdatedAtUtc;
-            summary.AnchorKey = turnId;
+            summary.AnchorKey = summaryTurnId;
             result.Add(summary);
         }
         return result;
@@ -450,8 +631,8 @@ public sealed partial class SessionHistoryStore
         {
             return (items, missing);
         }
-        _db.EnsureDatabase(workspaceId, sessionId);
-        using var conn = _db.Open(workspaceId, sessionId);
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (string blockId in distinct)
         {
@@ -462,7 +643,8 @@ public sealed partial class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
                 "SELECT block_id, kind, tag, call_id, function_name, seq, char_count, preview, content, content_ref, truncated, success"
-                + " FROM blocks WHERE block_id = $bid LIMIT 1;";
+                + " FROM blocks WHERE session_id = $sid AND block_id = $bid LIMIT 1;";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             cmd.Parameters.AddWithValue("$bid", blockId);
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             if (!await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -484,7 +666,7 @@ public sealed partial class SessionHistoryStore
             string? resolvedRef = contentRef;
             if (!string.IsNullOrWhiteSpace(contentRef))
             {
-                string? fromFile = TryReadContentRef(workspaceId, sessionId, contentRef);
+                string? fromFile = TryReadContentRef(workspaceId, sessionId!, contentRef);
                 if (fromFile != null)
                 {
                     resolved = fromFile;
@@ -549,10 +731,12 @@ public sealed partial class SessionHistoryStore
         {
             return result;
         }
-        _db.EnsureDatabase(workspaceId, sessionId);
-        using var conn = _db.Open(workspaceId, sessionId);
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT block_id FROM blocks WHERE turn_id = $tid ORDER BY seq;";
+        cmd.CommandText =
+            "SELECT block_id FROM blocks WHERE session_id = $sid AND turn_id = $tid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         cmd.Parameters.AddWithValue("$tid", turnId);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -577,28 +761,29 @@ public sealed partial class SessionHistoryStore
         {
             return null;
         }
-        _db.EnsureDatabase(workspaceId, sessionId);
-        using var conn = _db.Open(workspaceId, sessionId);
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText =
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var toolConn = _db.OpenWorkspace(workspaceId);
+        using var toolCmd = toolConn.CreateCommand();
+        toolCmd.CommandText =
             "SELECT kind, content, content_ref, function_name, success FROM blocks"
-            + " WHERE turn_id = $tid AND call_id = $cid ORDER BY seq DESC LIMIT 1;";
-        cmd.Parameters.AddWithValue("$tid", turnId);
-        cmd.Parameters.AddWithValue("$cid", callId);
-        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            + " WHERE session_id = $sid AND turn_id = $tid AND call_id = $cid ORDER BY seq DESC LIMIT 1;";
+        toolCmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        toolCmd.Parameters.AddWithValue("$tid", turnId);
+        toolCmd.Parameters.AddWithValue("$cid", callId);
+        using var toolReader = await toolCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await toolReader.ReadAsync(ct).ConfigureAwait(false))
         {
             return null;
         }
-        string kind = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-        string content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-        string? contentRef = reader.IsDBNull(2) ? null : reader.GetString(2);
-        string? functionName = reader.IsDBNull(3) ? null : reader.GetString(3);
-        bool? success = reader.IsDBNull(4) ? null : (reader.GetInt32(4) != 0);
+        string kind = toolReader.IsDBNull(0) ? string.Empty : toolReader.GetString(0);
+        string content = toolReader.IsDBNull(1) ? string.Empty : toolReader.GetString(1);
+        string? contentRef = toolReader.IsDBNull(2) ? null : toolReader.GetString(2);
+        string? functionName = toolReader.IsDBNull(3) ? null : toolReader.GetString(3);
+        bool? success = toolReader.IsDBNull(4) ? null : (toolReader.GetInt32(4) != 0);
         string resolved = content;
         if (!string.IsNullOrWhiteSpace(contentRef))
         {
-            string? fromFile = TryReadContentRef(workspaceId, sessionId, contentRef);
+            string? fromFile = TryReadContentRef(workspaceId, sessionId!, contentRef);
             if (fromFile != null)
             {
                 resolved = fromFile;
@@ -608,10 +793,11 @@ public sealed partial class SessionHistoryStore
         {
             try
             {
-                using var callCmd = conn.CreateCommand();
+                using var callCmd = toolConn.CreateCommand();
                 callCmd.CommandText =
-                    "SELECT function_name FROM blocks WHERE turn_id = $tid AND call_id = $cid"
+                    "SELECT function_name FROM blocks WHERE session_id = $sid AND turn_id = $tid AND call_id = $cid"
                     + " AND kind = 'tool_call' ORDER BY seq LIMIT 1;";
+                callCmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 callCmd.Parameters.AddWithValue("$tid", turnId);
                 callCmd.Parameters.AddWithValue("$cid", callId);
                 using var callReader = await callCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -657,6 +843,115 @@ public sealed partial class SessionHistoryStore
         };
     }
 
+    /// <summary>锚点投影专用：只取 id / role / kind，库不存在时返回空列表，结构异常向上抛。</summary>
+    public async Task<List<HistoryMessageRef>> GetMessageRefsAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    )
+    {
+        var result = new List<HistoryMessageRef>();
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return result;
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, role, kind FROM messages WHERE session_id = $sid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (reader.IsDBNull(0))
+                continue;
+            string id = reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            string role = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            string? kind = reader.IsDBNull(2) ? null : reader.GetString(2);
+            result.Add(new HistoryMessageRef(id, role, kind));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 历史缺失 user 的只读正文查询：只取 id/content/created_utc/seq，不碰图片与工具字段。
+    /// 库不存在返回空；查询失败向上抛，由 Bridge 归一为 TIMELINE_ERROR，不伪装成“没有孤儿”。
+    /// </summary>
+    public async Task<List<HistoryUserTurn>> GetUserTurnsAsync(
+        string workspaceId,
+        string sessionId,
+        IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default
+    )
+    {
+        var result = new List<HistoryUserTurn>();
+        if (messageIds == null || messageIds.Count == 0)
+            return result;
+
+        // 去重、过滤空白，ID 只来自数据库侧传入，仍做一次防御性规范化。
+        var ids = new List<string>(messageIds.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string? id in messageIds)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            if (seen.Add(id))
+                ids.Add(id);
+        }
+        if (ids.Count == 0)
+            return result;
+
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return result;
+        _db.EnsureWorkspaceDatabase(workspaceId);
+
+        using var conn = _db.OpenWorkspace(workspaceId);
+        for (int offset = 0; offset < ids.Count; offset += UserTurnQueryBatchSize)
+        {
+            int take = Math.Min(UserTurnQueryBatchSize, ids.Count - offset);
+            var names = new List<string>(take);
+            using var cmd = conn.CreateCommand();
+            var sql = new System.Text.StringBuilder();
+            sql.Append(
+                "SELECT id, content, created_utc, seq FROM messages"
+                    + " WHERE session_id = $sid AND id IN ("
+            );
+            for (int i = 0; i < take; i++)
+            {
+                string name = "$uid" + i;
+                names.Add(name);
+                if (i > 0)
+                    sql.Append(',');
+                sql.Append(name);
+                var parameter = cmd.CreateParameter();
+                parameter.ParameterName = name;
+                parameter.Value = ids[offset + i];
+                cmd.Parameters.Add(parameter);
+            }
+            sql.Append(") ORDER BY seq;");
+            cmd.CommandText = sql.ToString();
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+
+            using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (reader.IsDBNull(0))
+                    continue;
+                string id = reader.GetString(0);
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+                string content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                string created = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                long seq = reader.IsDBNull(3) ? 0 : reader.GetInt64(3);
+                result.Add(new HistoryUserTurn(id, content, created, seq));
+            }
+        }
+        return result;
+    }
+
     /// <summary>S3：DB messages 全量读（组包/预算/压缩统一入口，ORDER BY seq）。</summary>
     public async Task<List<UnifiedChatMessage>> GetMessagesAsync(
         string workspaceId,
@@ -665,24 +960,25 @@ public sealed partial class SessionHistoryStore
     )
     {
         var result = new List<UnifiedChatMessage>();
-        string dbPath = _db.Storage.GetHistoryDbPath(workspaceId, sessionId);
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
         if (!File.Exists(dbPath))
         {
             return result;
         }
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
         }
         catch
         {
             return result;
         }
-        using var conn = _db.Open(workspaceId, sessionId);
+        using var conn = _db.OpenWorkspace(workspaceId);
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
-            + " FROM messages ORDER BY seq;";
+            + " FROM messages WHERE session_id = $sid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -769,12 +1065,15 @@ public sealed partial class SessionHistoryStore
             return;
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
+            long nextSeq = ReadMaxMessageSeq(conn, sessionId) + 1;
             using var cmd = conn.CreateCommand();
             cmd.CommandText =
-                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
-                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
+                "INSERT OR IGNORE INTO messages(session_id, seq, id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
+                + " VALUES($sid, $seq, $id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+            cmd.Parameters.AddWithValue("$seq", nextSeq);
             cmd.Parameters.AddWithValue("$id", msg.Id);
             cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
             cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
@@ -815,7 +1114,25 @@ public sealed partial class SessionHistoryStore
             cmd.Parameters.AddWithValue("$utc", msg.CreatedAtUtc.ToString("o"));
             cmd.ExecuteNonQuery();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            try
+            {
+                HaloLogger.App.Error(
+                    "[Storage] message.append.failed ws="
+                        + workspaceId
+                        + " sess="
+                        + sessionId
+                        + " msg="
+                        + msg.Id
+                        + " error="
+                        + ex.GetType().Name,
+                    ex
+                );
+            }
+            catch { }
+            throw;
+        }
     }
 
     /// <summary>S3：按 turn_seq 截断（DELETE WHERE turn_seq &gt;= cut + 同步 messages/blocks）。</summary>
@@ -830,14 +1147,16 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var tx = conn.BeginTransaction();
             var doomed = new List<string>();
             using (var q = conn.CreateCommand())
             {
                 q.Transaction = tx;
-                q.CommandText = "SELECT turn_id FROM turns WHERE turn_seq >= $cut;";
+                q.CommandText =
+                    "SELECT turn_id FROM turns WHERE session_id = $sid AND turn_seq >= $cut;";
+                q.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 q.Parameters.AddWithValue("$cut", cutTurnSeq);
                 using var r = q.ExecuteReader();
                 while (r.Read())
@@ -850,12 +1169,14 @@ public sealed partial class SessionHistoryStore
             {
                 using var d1 = conn.CreateCommand();
                 d1.Transaction = tx;
-                d1.CommandText = "DELETE FROM blocks WHERE turn_id = $tid;";
+                d1.CommandText = "DELETE FROM blocks WHERE session_id = $sid AND turn_id = $tid;";
+                d1.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 d1.Parameters.AddWithValue("$tid", tid);
                 d1.ExecuteNonQuery();
                 using var d2 = conn.CreateCommand();
                 d2.Transaction = tx;
-                d2.CommandText = "DELETE FROM turns WHERE turn_id = $tid;";
+                d2.CommandText = "DELETE FROM turns WHERE session_id = $sid AND turn_id = $tid;";
+                d2.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 d2.Parameters.AddWithValue("$tid", tid);
                 d2.ExecuteNonQuery();
             }
@@ -882,16 +1203,17 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var tx = conn.BeginTransaction();
             using (var del = conn.CreateCommand())
             {
                 del.Transaction = tx;
-                del.CommandText = "DELETE FROM messages;";
+                del.CommandText = "DELETE FROM messages WHERE session_id = $sid;";
+                del.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 del.ExecuteNonQuery();
             }
-            InsertMessages(conn, tx, kept);
+            InsertMessages(conn, tx, sessionId!, kept);
             tx.Commit();
         }
         finally
@@ -914,10 +1236,11 @@ public sealed partial class SessionHistoryStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM messages WHERE id = $id;";
+            cmd.CommandText = "DELETE FROM messages WHERE session_id = $sid AND id = $id;";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             cmd.Parameters.AddWithValue("$id", messageId);
             cmd.ExecuteNonQuery();
         }
@@ -937,27 +1260,30 @@ public sealed partial class SessionHistoryStore
     {
         if (prefix == null || prefix.Count == 0)
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
             return;
         }
         var gate = GetWriteLock(workspaceId, sessionId);
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             long maxTurnSeq = 0;
             long maxSeq = 0;
             using (var q = conn.CreateCommand())
             {
-                q.CommandText = "SELECT COALESCE(MAX(turn_seq),0) FROM turns;";
+                q.CommandText =
+                    "SELECT COALESCE(MAX(turn_seq),0) FROM turns WHERE session_id = $sid;";
+                q.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 object? v = q.ExecuteScalar();
                 if (v != null && v != DBNull.Value)
                     maxTurnSeq = Convert.ToInt64(v);
             }
             using (var q2 = conn.CreateCommand())
             {
-                q2.CommandText = "SELECT COALESCE(MAX(seq),0) FROM blocks;";
+                q2.CommandText = "SELECT COALESCE(MAX(seq),0) FROM blocks WHERE session_id = $sid;";
+                q2.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
                 object? v = q2.ExecuteScalar();
                 if (v != null && v != DBNull.Value)
                     maxSeq = Convert.ToInt64(v);
@@ -1087,10 +1413,10 @@ public sealed partial class SessionHistoryStore
                 i = j;
             }
             using var tx = conn.BeginTransaction();
-            InsertMessages(conn, tx, allMsgs);
-            InsertBlocks(conn, tx, allBlocks);
+            InsertMessages(conn, tx, sessionId!, allMsgs);
+            InsertBlocks(conn, tx, sessionId!, allBlocks);
             foreach (var t in turns)
-                UpsertTurn(conn, tx, t, t.TurnSeq);
+                UpsertTurn(conn, tx, sessionId!, t, t.TurnSeq);
             tx.Commit();
         }
         finally
@@ -1148,13 +1474,13 @@ public sealed partial class SessionHistoryStore
     {
         try
         {
-            string existingDb = _db.GetDbPath(workspaceId, sessionId);
+            string existingDb = _db.GetWorkspaceDbPath(workspaceId);
             if (!File.Exists(existingDb))
             {
                 return (true, "no-db");
             }
-            _db.EnsureDatabase(workspaceId, sessionId);
-            using var conn = _db.Open(workspaceId, sessionId);
+            _db.EnsureWorkspaceDatabase(workspaceId);
+            using var conn = _db.OpenWorkspace(workspaceId);
             using var c1 = conn.CreateCommand();
             c1.CommandText = "PRAGMA integrity_check;";
             object? v = await c1.ExecuteScalarAsync(ct).ConfigureAwait(false);
@@ -1170,7 +1496,8 @@ public sealed partial class SessionHistoryStore
             }
             using var c2 = conn.CreateCommand();
             c2.CommandText =
-                "SELECT turn_id, blocks, (SELECT COUNT(*) FROM blocks b WHERE b.turn_id = turns.turn_id) FROM turns;";
+                "SELECT turn_id, blocks, (SELECT COUNT(*) FROM blocks b WHERE b.session_id = turns.session_id AND b.turn_id = turns.turn_id) FROM turns WHERE session_id = $sid;";
+            c2.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             using var r = await c2.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await r.ReadAsync(ct).ConfigureAwait(false))
             {
@@ -1188,7 +1515,7 @@ public sealed partial class SessionHistoryStore
                     return (false, "group-mismatch:" + (r.IsDBNull(0) ? "?" : r.GetString(0)));
                 }
             }
-            ReportWalSize(workspaceId, sessionId);
+            ReportWalSize(workspaceId, sessionId!);
             try
             {
                 TimelineObservability.ReportIntegrity(true);
@@ -1202,6 +1529,496 @@ public sealed partial class SessionHistoryStore
         }
     }
 
+    /// <summary>工作区库会话注册：在 sessions 注册表登记路由（元数据文件为权威源，注册表为派生缓存）。</summary>
+    public Task RegisterSessionAsync(
+        string workspaceId,
+        string sessionId,
+        int storageFormat,
+        string sessionKind,
+        CancellationToken ct = default
+    )
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.CompletedTask;
+        }
+        string kind = NormalizeSessionKind(sessionKind);
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO sessions(session_id, storage_format, session_kind, created_utc)"
+            + " VALUES($sid, $fmt, $kind, $utc)"
+            + " ON CONFLICT(session_id) DO UPDATE SET storage_format=excluded.storage_format,"
+            + " session_kind=excluded.session_kind;";
+        cmd.Parameters.AddWithValue("$sid", sessionId);
+        cmd.Parameters.AddWithValue("$fmt", storageFormat);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>工作区库会话删除：按稳定顺序在单事务内删除全部会话分区。</summary>
+    public Task DeleteSessionPartitionsAsync(
+        string workspaceId,
+        IReadOnlyCollection<string> sessionIds,
+        CancellationToken ct = default
+    )
+    {
+        ct.ThrowIfCancellationRequested();
+        var stableIds = sessionIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(id => id, StringComparer.Ordinal)
+            .ToList();
+        if (stableIds.Count == 0)
+            return Task.CompletedTask;
+
+        string dbPath = _db.Storage.GetWorkspaceDbPath(workspaceId);
+        if (!File.Exists(dbPath))
+            return Task.CompletedTask;
+
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
+        using var tx = conn.BeginTransaction();
+        foreach (string sessionId in stableIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (string table in new[] { "messages", "blocks", "turns", "sessions" })
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText =
+                    "DELETE FROM " + table + " WHERE session_id = $sid COLLATE NOCASE;";
+                cmd.Parameters.AddWithValue("$sid", sessionId);
+                cmd.ExecuteNonQuery();
+            }
+        }
+        tx.Commit();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>工作区库会话删除：单 ID 便捷入口，委托批量事务。</summary>
+    public Task DeleteSessionPartitionAsync(
+        string workspaceId,
+        string sessionId,
+        CancellationToken ct = default
+    ) => DeleteSessionPartitionsAsync(workspaceId, new[] { sessionId ?? string.Empty }, ct);
+
+    private static string NormalizeSessionKind(string? kind)
+    {
+        if (string.Equals(kind, "sub", StringComparison.OrdinalIgnoreCase))
+        {
+            return "sub";
+        }
+        if (string.Equals(kind, "archived", StringComparison.OrdinalIgnoreCase))
+        {
+            return "archived";
+        }
+        return "main";
+    }
+
+    // 分区分发：同库复制沿用源标识；块与轮次主键全局唯一，调用方须保证源标识全局不碰撞，否则按覆盖处理。
+    private void CopySessionPartition(
+        string srcWorkspaceId,
+        string srcSessionId,
+        string dstWorkspaceId,
+        string dstSessionId
+    )
+    {
+        string srcDb = _db.Storage.GetWorkspaceDbPath(srcWorkspaceId);
+        string dstDb = _db.Storage.GetWorkspaceDbPath(dstWorkspaceId);
+        if (string.Equals(srcDb, dstDb, StringComparison.OrdinalIgnoreCase))
+        {
+            using var conn = _db.OpenWorkspace(srcWorkspaceId);
+            using var tx = conn.BeginTransaction();
+            CopyPartitionInConnection(conn, tx, srcSessionId, dstSessionId);
+            tx.Commit();
+            return;
+        }
+        using var srcConn = _db.OpenWorkspace(srcWorkspaceId);
+        var messages = ReadSessionMessages(srcConn, srcSessionId);
+        var blocks = ReadSessionBlocks(srcConn, srcSessionId);
+        var turns = ReadSessionTurns(srcConn, srcSessionId);
+        using var dstConn = _db.OpenWorkspace(dstWorkspaceId);
+        using var dstTx = dstConn.BeginTransaction();
+        WriteSessionPartition(dstConn, dstTx, dstSessionId, messages, blocks, turns);
+        dstTx.Commit();
+    }
+
+    private static void CopyPartitionInConnection(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx,
+        string srcSessionId,
+        string dstSessionId
+    )
+    {
+        string src = srcSessionId ?? string.Empty;
+        string dst = dstSessionId ?? string.Empty;
+        using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM messages WHERE session_id = $dst;";
+            del.Parameters.AddWithValue("$dst", dst);
+            del.ExecuteNonQuery();
+        }
+        using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM blocks WHERE session_id = $dst;";
+            del.Parameters.AddWithValue("$dst", dst);
+            del.ExecuteNonQuery();
+        }
+        using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM turns WHERE session_id = $dst;";
+            del.Parameters.AddWithValue("$dst", dst);
+            del.ExecuteNonQuery();
+        }
+        using (var cp = conn.CreateCommand())
+        {
+            cp.Transaction = tx;
+            cp.CommandText =
+                "INSERT OR IGNORE INTO messages(session_id, seq, id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
+                + " SELECT $dst, seq, id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
+                + " FROM messages WHERE session_id = $src;";
+            cp.Parameters.AddWithValue("$dst", dst);
+            cp.Parameters.AddWithValue("$src", src);
+            cp.ExecuteNonQuery();
+        }
+        var blockRows =
+            new List<(
+                string BlockId,
+                string TurnId,
+                int Iter,
+                long Seq,
+                string Kind,
+                string Tag,
+                string? CallId,
+                string? FunctionName,
+                int? Success,
+                int CharCount,
+                string Preview,
+                string Content,
+                string? ContentRef,
+                int Truncated
+            )>();
+        using (var readBlocks = conn.CreateCommand())
+        {
+            readBlocks.Transaction = tx;
+            readBlocks.CommandText =
+                "SELECT block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated FROM blocks WHERE session_id = $src;";
+            readBlocks.Parameters.AddWithValue("$src", src);
+            using (var reader = readBlocks.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    string blockId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(blockId))
+                        continue;
+                    blockRows.Add(
+                        (
+                            blockId,
+                            reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                            reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                            reader.IsDBNull(3) ? 0 : reader.GetInt64(3),
+                            reader.IsDBNull(4) ? "text" : reader.GetString(4),
+                            reader.IsDBNull(5) ? "process" : reader.GetString(5),
+                            reader.IsDBNull(6) ? null : reader.GetString(6),
+                            reader.IsDBNull(7) ? null : reader.GetString(7),
+                            reader.IsDBNull(8) ? null : (int?)reader.GetInt32(8),
+                            reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                            reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                            reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                            reader.IsDBNull(12) ? null : reader.GetString(12),
+                            reader.IsDBNull(13) ? 0 : reader.GetInt32(13)
+                        )
+                    );
+                }
+            }
+        }
+        foreach (var row in blockRows)
+        {
+            // 全局主键重映射：新标识绑定目标会话，避免搬走源分区。
+            string newBlockId = row.BlockId + "__" + dst;
+            string newTurnId = row.TurnId + "__" + dst;
+            using var ins = conn.CreateCommand();
+            ins.Transaction = tx;
+            ins.CommandText =
+                "INSERT OR IGNORE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, $bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $success, $chars, $preview, $content, $ref, $trunc);";
+            ins.Parameters.AddWithValue("$sid", dst);
+            ins.Parameters.AddWithValue("$bid", newBlockId);
+            ins.Parameters.AddWithValue("$tid", newTurnId);
+            ins.Parameters.AddWithValue("$iter", row.Iter);
+            ins.Parameters.AddWithValue("$seq", row.Seq);
+            ins.Parameters.AddWithValue("$kind", row.Kind);
+            ins.Parameters.AddWithValue("$tag", row.Tag);
+            ins.Parameters.AddWithValue("$call", (object?)row.CallId ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$fn", (object?)row.FunctionName ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$success", (object?)row.Success ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$chars", row.CharCount);
+            ins.Parameters.AddWithValue("$preview", row.Preview);
+            ins.Parameters.AddWithValue("$content", row.Content);
+            ins.Parameters.AddWithValue("$ref", (object?)row.ContentRef ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$trunc", row.Truncated);
+            ins.ExecuteNonQuery();
+        }
+        var turnRows =
+            new List<(
+                string TurnId,
+                long TurnSeq,
+                int IterEnd,
+                string UserPreview,
+                string UserContent,
+                string? FinalBlockId,
+                int Blocks,
+                int Tools,
+                int Failed,
+                long DurationMs,
+                int Chars,
+                string Status,
+                string LastRequestId,
+                string Kind,
+                int Removed,
+                string UpdatedAt
+            )>();
+        using (var readTurns = conn.CreateCommand())
+        {
+            readTurns.Transaction = tx;
+            readTurns.CommandText =
+                "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at FROM turns WHERE session_id = $src;";
+            readTurns.Parameters.AddWithValue("$src", src);
+            using (var reader = readTurns.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    string turnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                    if (string.IsNullOrWhiteSpace(turnId))
+                        continue;
+                    turnRows.Add(
+                        (
+                            turnId,
+                            reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+                            reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                            reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                            reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                            reader.IsDBNull(5) ? null : reader.GetString(5),
+                            reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
+                            reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
+                            reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+                            reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
+                            reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                            reader.IsDBNull(11) ? "completed" : reader.GetString(11),
+                            reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                            reader.IsDBNull(13) ? "turn" : reader.GetString(13),
+                            reader.IsDBNull(14) ? 0 : reader.GetInt32(14),
+                            reader.IsDBNull(15)
+                                ? DateTime.UtcNow.ToString("o")
+                                : reader.GetString(15)
+                        )
+                    );
+                }
+            }
+        }
+        foreach (var row in turnRows)
+        {
+            string newTurnId = row.TurnId + "__" + dst;
+            string? newFinal = string.IsNullOrWhiteSpace(row.FinalBlockId)
+                ? row.FinalBlockId
+                : row.FinalBlockId + "__" + dst;
+            using var ins = conn.CreateCommand();
+            ins.Transaction = tx;
+            ins.CommandText =
+                "INSERT OR IGNORE INTO turns(session_id, turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
+                + " VALUES($sid, $tid, $seq, $iterEnd, $upreview, $ucontent, $final, $blocks, $tools, $failed, $dur, $chars, $status, $req, $kind, $removed, $updated);";
+            ins.Parameters.AddWithValue("$sid", dst);
+            ins.Parameters.AddWithValue("$tid", newTurnId);
+            ins.Parameters.AddWithValue("$seq", row.TurnSeq);
+            ins.Parameters.AddWithValue("$iterEnd", row.IterEnd);
+            ins.Parameters.AddWithValue("$upreview", row.UserPreview);
+            ins.Parameters.AddWithValue("$ucontent", row.UserContent);
+            ins.Parameters.AddWithValue("$final", (object?)newFinal ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$blocks", row.Blocks);
+            ins.Parameters.AddWithValue("$tools", row.Tools);
+            ins.Parameters.AddWithValue("$failed", row.Failed);
+            ins.Parameters.AddWithValue("$dur", row.DurationMs);
+            ins.Parameters.AddWithValue("$chars", row.Chars);
+            ins.Parameters.AddWithValue("$status", row.Status);
+            ins.Parameters.AddWithValue("$req", row.LastRequestId);
+            ins.Parameters.AddWithValue("$kind", row.Kind);
+            ins.Parameters.AddWithValue("$removed", row.Removed);
+            ins.Parameters.AddWithValue("$updated", row.UpdatedAt);
+            ins.ExecuteNonQuery();
+        }
+    }
+
+    private static List<UnifiedChatMessage> ReadSessionMessages(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        string sessionId
+    )
+    {
+        var list = new List<UnifiedChatMessage>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc"
+            + " FROM messages WHERE session_id = $sid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            string id = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+            var msg = new UnifiedChatMessage { Id = id };
+            msg.Role = reader.IsDBNull(1) ? "assistant" : reader.GetString(1);
+            msg.Content = reader.IsDBNull(2) ? null : reader.GetString(2);
+            msg.ReasoningContent = reader.IsDBNull(3) ? null : reader.GetString(3);
+            if (!reader.IsDBNull(5))
+            {
+                msg.ToolCallId = reader.GetString(5);
+            }
+            if (!reader.IsDBNull(6))
+            {
+                msg.Name = reader.GetString(6);
+            }
+            if (!reader.IsDBNull(8))
+            {
+                msg.InputTokens = reader.GetInt64(8);
+            }
+            if (!reader.IsDBNull(9))
+            {
+                msg.OutputTokens = reader.GetInt64(9);
+            }
+            if (!reader.IsDBNull(10))
+            {
+                msg.CachedTokens = reader.GetInt64(10);
+            }
+            if (!reader.IsDBNull(11))
+            {
+                msg.Kind = reader.GetString(11);
+            }
+            if (!reader.IsDBNull(12))
+            {
+                msg.MetaJson = reader.GetString(12);
+            }
+            list.Add(msg);
+        }
+        return list;
+    }
+
+    private static List<TimelineBlock> ReadSessionBlocks(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        string sessionId
+    )
+    {
+        var list = new List<TimelineBlock>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated"
+            + " FROM blocks WHERE session_id = $sid ORDER BY seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            string blockId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(blockId))
+            {
+                continue;
+            }
+            list.Add(
+                new TimelineBlock
+                {
+                    BlockId = blockId,
+                    TurnId = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    Iteration = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                    Sequence = reader.IsDBNull(3) ? 0 : reader.GetInt64(3),
+                    Kind = reader.IsDBNull(4) ? TimelineBlockKind.Text : reader.GetString(4),
+                    Tag = reader.IsDBNull(5) ? TimelineBlockTag.Process : reader.GetString(5),
+                    CallId = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    FunctionName = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    Success = reader.IsDBNull(8) ? null : (reader.GetInt32(8) != 0),
+                    CharCount = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                    Preview = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                    Content = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                    ContentRef = reader.IsDBNull(12) ? null : reader.GetString(12),
+                    Truncated = !reader.IsDBNull(13) && reader.GetInt32(13) != 0,
+                }
+            );
+        }
+        return list;
+    }
+
+    private static List<TurnSummary> ReadSessionTurns(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        string sessionId
+    )
+    {
+        var list = new List<TurnSummary>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at"
+            + " FROM turns WHERE session_id = $sid ORDER BY turn_seq;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            string turnId = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(turnId))
+            {
+                continue;
+            }
+            list.Add(
+                new TurnSummary
+                {
+                    TurnId = turnId,
+                    TurnSeq = reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+                    IterEnd = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+                    UserPreview = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    UserContent = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    FinalBlockId = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    Blocks = reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
+                    Tools = reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
+                    Failed = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+                    DurationMs = reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
+                    Chars = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                    Status = reader.IsDBNull(11)
+                        ? TimelineTurnStatus.Completed
+                        : reader.GetString(11),
+                    LastRequestId = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                    Kind = reader.IsDBNull(13) ? "turn" : reader.GetString(13),
+                    RemovedMessages = reader.IsDBNull(14) ? 0 : reader.GetInt32(14),
+                    UpdatedAtUtc = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
+                }
+            );
+        }
+        return list;
+    }
+
+    private static void WriteSessionPartition(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx,
+        string sessionId,
+        List<UnifiedChatMessage> messages,
+        List<TimelineBlock> blocks,
+        List<TurnSummary> turns
+    )
+    {
+        InsertMessages(conn, tx, sessionId, messages);
+        InsertBlocks(conn, tx, sessionId, blocks);
+        foreach (var turn in turns)
+        {
+            UpsertTurn(conn, tx, sessionId, turn, turn.TurnSeq);
+        }
+    }
+
     public async Task<bool> CopyHistoryForBranchAsync(
         string srcWorkspaceId,
         string srcSessionId,
@@ -1210,25 +2027,21 @@ public sealed partial class SessionHistoryStore
         CancellationToken ct = default
     )
     {
-        string srcDb = _db.Storage.GetHistoryDbPath(srcWorkspaceId, srcSessionId);
+        string srcDb = _db.Storage.GetWorkspaceDbPath(srcWorkspaceId);
         if (!File.Exists(srcDb))
         {
             return false;
         }
         try
         {
-            _db.Checkpoint(srcWorkspaceId, srcSessionId);
+            _db.CheckpointWorkspace(srcWorkspaceId);
         }
         catch { }
-        string dstDb = _db.Storage.GetHistoryDbPath(dstWorkspaceId, dstSessionId);
-        string? dstDir = Path.GetDirectoryName(dstDb);
-        if (!string.IsNullOrEmpty(dstDir))
-        {
-            Directory.CreateDirectory(dstDir);
-        }
+        _db.EnsureWorkspaceDatabase(srcWorkspaceId);
+        _db.EnsureWorkspaceDatabase(dstWorkspaceId);
         try
         {
-            File.Copy(srcDb, dstDb, overwrite: true);
+            CopySessionPartition(srcWorkspaceId, srcSessionId, dstWorkspaceId, dstSessionId);
         }
         catch
         {
@@ -1291,10 +2104,12 @@ public sealed partial class SessionHistoryStore
     )
     {
         var result = new List<string>();
-        _db.EnsureDatabase(workspaceId, sessionId);
-        using var conn = _db.Open(workspaceId, sessionId);
+        _db.EnsureWorkspaceDatabase(workspaceId);
+        using var conn = _db.OpenWorkspace(workspaceId);
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT DISTINCT content_ref FROM blocks WHERE content_ref IS NOT NULL;";
+        cmd.CommandText =
+            "SELECT DISTINCT content_ref FROM blocks WHERE session_id = $sid AND content_ref IS NOT NULL;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -1485,9 +2300,23 @@ public sealed partial class SessionHistoryStore
         }
     }
 
+    private static long ReadMaxMessageSeq(SqliteConnection conn, string sessionId)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COALESCE(MAX(seq),0) FROM messages WHERE session_id = $sid;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        object? value = cmd.ExecuteScalar();
+        if (value == null || value == DBNull.Value)
+        {
+            return 0;
+        }
+        return Convert.ToInt64(value);
+    }
+
     private static long ResolveTurnSeq(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         TurnSummary turn
     )
     {
@@ -1495,7 +2324,9 @@ public sealed partial class SessionHistoryStore
         {
             using var exists = conn.CreateCommand();
             exists.Transaction = tx;
-            exists.CommandText = "SELECT turn_seq FROM turns WHERE turn_id = $id LIMIT 1;";
+            exists.CommandText =
+                "SELECT turn_seq FROM turns WHERE session_id = $sid AND turn_id = $id LIMIT 1;";
+            exists.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             exists.Parameters.AddWithValue("$id", turn.TurnId);
             object? hit = exists.ExecuteScalar();
             if (hit != null && hit != DBNull.Value)
@@ -1505,7 +2336,8 @@ public sealed partial class SessionHistoryStore
         }
         using var max = conn.CreateCommand();
         max.Transaction = tx;
-        max.CommandText = "SELECT COALESCE(MAX(turn_seq), 0) FROM turns;";
+        max.CommandText = "SELECT COALESCE(MAX(turn_seq), 0) FROM turns WHERE session_id = $sid;";
+        max.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         object? current = max.ExecuteScalar();
         long baseSeq = current == null || current == DBNull.Value ? 0 : Convert.ToInt64(current);
         if (turn.TurnSeq > baseSeq)
@@ -1515,9 +2347,28 @@ public sealed partial class SessionHistoryStore
         return baseSeq + 1;
     }
 
+    private static long ReadMaxMessageSeqInTransaction(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        string sessionId
+    )
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT COALESCE(MAX(seq),0) FROM messages WHERE session_id = $sid;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+        object? value = cmd.ExecuteScalar();
+        if (value == null || value == DBNull.Value)
+        {
+            return 0;
+        }
+        return Convert.ToInt64(value);
+    }
+
     private static void InsertMessages(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         IReadOnlyList<UnifiedChatMessage>? messages
     )
     {
@@ -1525,17 +2376,21 @@ public sealed partial class SessionHistoryStore
         {
             return;
         }
+        long nextMessageSeq = ReadMaxMessageSeqInTransaction(conn, tx, sessionId);
         foreach (var msg in messages)
         {
             if (msg == null || string.IsNullOrWhiteSpace(msg.Id))
             {
                 continue;
             }
+            nextMessageSeq++;
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText = cmd.CommandText =
-                "INSERT OR IGNORE INTO messages(id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
-                + " VALUES($id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
+            cmd.CommandText =
+                "INSERT OR IGNORE INTO messages(session_id, seq, id, role, content, reasoning, tool_calls_json, tool_call_id, name, images_json, input_tokens, output_tokens, cached_tokens, kind, meta_json, created_utc)"
+                + " VALUES($sid, $seq, $id, $role, $content, $reasoning, $tools, $tcid, $name, $imgs, $inTok, $outTok, $cached, $kind, $meta, $utc);";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
+            cmd.Parameters.AddWithValue("$seq", nextMessageSeq);
             cmd.Parameters.AddWithValue("$id", msg.Id);
             cmd.Parameters.AddWithValue("$role", msg.Role ?? "assistant");
             cmd.Parameters.AddWithValue("$content", (object?)msg.Content ?? DBNull.Value);
@@ -1582,6 +2437,7 @@ public sealed partial class SessionHistoryStore
     private static void InsertBlocks(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         IReadOnlyList<TimelineBlock>? blocks
     )
     {
@@ -1603,8 +2459,9 @@ public sealed partial class SessionHistoryStore
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText =
-                "INSERT OR REPLACE INTO blocks(block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
-                + " VALUES($bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $success, $chars, $preview, $content, $ref, $trunc);";
+                "INSERT OR REPLACE INTO blocks(session_id, block_id, turn_id, iter, seq, kind, tag, call_id, function_name, success, char_count, preview, content, content_ref, truncated)"
+                + " VALUES($sid, $bid, $tid, $iter, $seq, $kind, $tag, $call, $fn, $success, $chars, $preview, $content, $ref, $trunc);";
+            cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
             cmd.Parameters.AddWithValue("$bid", block.BlockId);
             cmd.Parameters.AddWithValue("$tid", block.TurnId ?? string.Empty);
             cmd.Parameters.AddWithValue("$iter", block.Iteration);
@@ -1635,15 +2492,16 @@ public sealed partial class SessionHistoryStore
     private static void UpsertTurn(
         SqliteConnection conn,
         SqliteTransaction tx,
+        string sessionId,
         TurnSummary turn,
         long turnSeq
     )
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = cmd.CommandText =
-            "INSERT INTO turns(turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
-            + " VALUES($tid, $seq, $iterEnd, $userPreview, $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $kind, $removed, $updated)"
+        cmd.CommandText =
+            "INSERT INTO turns(session_id, turn_id, turn_seq, iter_end, user_preview, user_content, final_block_id, blocks, tools, failed, duration_ms, chars, status, last_request_id, kind, removed_messages, updated_at)"
+            + " VALUES($sid, $tid, $seq, $iterEnd, $userPreview, $userContent, $finalBid, $blocks, $tools, $failed, $dur, $chars, $status, $req, $kind, $removed, $updated)"
             + " ON CONFLICT(turn_id) DO UPDATE SET"
             + " iter_end=excluded.iter_end,"
             + " blocks=turns.blocks+excluded.blocks,"
@@ -1658,6 +2516,7 @@ public sealed partial class SessionHistoryStore
             + " kind=excluded.kind,"
             + " removed_messages=excluded.removed_messages,"
             + " updated_at=excluded.updated_at;";
+        cmd.Parameters.AddWithValue("$sid", sessionId ?? string.Empty);
         cmd.Parameters.AddWithValue("$tid", turn.TurnId);
         cmd.Parameters.AddWithValue("$seq", turnSeq);
         cmd.Parameters.AddWithValue("$iterEnd", turn.IterEnd);

@@ -136,11 +136,11 @@ public sealed partial class HostBridgeFacade
                 var meta = await _workspaceSessionService
                     .GetSessionAsync(wsId, sessId)
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<CompactionResult>.Fail(
-                        "HISTORY_READONLY",
-                        "历史版本只读，不可压缩，可分支"
-                    );
+                if (
+                    meta != null
+                    && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
+                )
+                    return BridgeResponse<CompactionResult>.Fail("SUB_READONLY", "子会话只读，不可压缩");
             }
             catch { }
             string? provId = string.IsNullOrWhiteSpace(providerId) ? null : providerId.Trim();
@@ -151,6 +151,37 @@ public sealed partial class HostBridgeFacade
             if (_activeSessionTokens.ContainsKey(compactKey))
             {
                 return BridgeResponse<CompactionResult>.Fail("COMPACT_BUSY", "压缩进行中，请稍候");
+            }
+            SessionOperationLease? operationLease = null;
+            if (
+                !_sessionOperations.TryAcquire(
+                    wsId,
+                    sessId,
+                    SessionOperationKind.Compact,
+                    out operationLease
+                )
+            )
+            {
+                string conflictCode = _sessionOperations.TryGetHolderKind(
+                    wsId,
+                    sessId,
+                    out var holder
+                )
+                    ? holder switch
+                    {
+                        SessionOperationKind.History => "HISTORY_OPERATION_IN_PROGRESS",
+                        SessionOperationKind.Agent => "TURN_IN_PROGRESS",
+                        _ => "COMPACT_BUSY"
+                    }
+                    : "COMPACT_BUSY";
+                return BridgeResponse<CompactionResult>.Fail(
+                    conflictCode,
+                    conflictCode == "HISTORY_OPERATION_IN_PROGRESS"
+                        ? "当前会话正在执行历史操作，请稍后重试"
+                        : conflictCode == "TURN_IN_PROGRESS"
+                            ? "当前会话正在生成，请稍后再压缩"
+                            : "压缩进行中，请稍候"
+                );
             }
 
             JsEventDispatcher.Publish(
@@ -176,7 +207,7 @@ public sealed partial class HostBridgeFacade
                         var result = await CompactionService
                             .CompactAsync(wsId, sessId, provId, modId, keep, cts.Token)
                             .ConfigureAwait(false);
-                        if (result.Success)
+                        if (result.Outcome == CompactionOutcome.Completed)
                         {
                             // P007：占用基线取压缩后即时重算的实值（通常为 compact-estimate），禁止写死。
                             string occupancyBaseline = "compact-estimate";
@@ -220,8 +251,28 @@ public sealed partial class HostBridgeFacade
                                         summaryPreview = result.SummaryPreview,
                                         backupFileName = result.BackupFileName,
                                         stubMessageId = result.StubMessageId,
+                                        stubTurnId = result.StubTurnId,
                                         summaryTokens = result.SummaryOutputTokens,
+                                        compactLlmCallCount = result.CompactLlmCallCount,
                                         occupancyBaseline,
+                                        metadataWarning = result.MetadataWarning,
+                                        updatedAtUtc = DateTime.UtcNow.ToString("o")
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                }
+                            );
+                        }
+                        else if (result.Outcome == CompactionOutcome.NoOp)
+                        {
+                            JsEventDispatcher.Publish(
+                                "agent:turn-event",
+                                new
+                                {
+                                    sessionId = sessId,
+                                    kind = "CompactNoOp",
+                                    payload = new
+                                    {
+                                        noOpReason = result.NoOpReason,
                                         updatedAtUtc = DateTime.UtcNow.ToString("o")
                                     },
                                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -271,6 +322,7 @@ public sealed partial class HostBridgeFacade
                     {
                         _activeSessionTokens.TryRemove(compactKey, out _);
                         cts.Dispose();
+                        operationLease?.Dispose();
                     }
                 },
                 CancellationToken.None
@@ -285,22 +337,16 @@ public sealed partial class HostBridgeFacade
         }
     }
 
-    /// <summary>need05-03：列出压缩备份文件名（审计用），返回 JSON 数组字符串。</summary>
+    /// <summary>列出工作区库快照备份（审计用），返回 JSON 数组字符串。</summary>
     public Task<BridgeResponse<string>> GetCompactBackupList(string workspaceId, string sessionId)
     {
         try
         {
-            string sessionDir = _sessionRepository.GetSessionDirectory(workspaceId, sessionId);
             var names = new List<string>();
-            if (Directory.Exists(sessionDir))
+            string backupPath = _storageManager.GetWorkspaceBackupPath(workspaceId);
+            if (File.Exists(backupPath))
             {
-                names = Directory
-                    .GetFiles(sessionDir, "messages.compact-bak-*.jsonl")
-                    .Select(Path.GetFileName)
-                    .Where(n => !string.IsNullOrEmpty(n))
-                    .Select(n => n!)
-                    .OrderByDescending(n => n, StringComparer.Ordinal)
-                    .ToList();
+                names.Add(Path.GetFileName(backupPath));
             }
             string json = JsonSerializer.Serialize(names, HaloJsonOptions.IndentedCamelCase);
             return Task.FromResult(BridgeResponse<string>.Success(json));

@@ -21,6 +21,8 @@ public sealed partial class HostBridgeFacade
 {
     public Task<BridgeResponse<string>> StartSessionRun(string requestJson)
     {
+        IDisposable? workspaceLease = null;
+        bool workspaceLeaseHandedOff = false;
         try
         {
             var req = JsonSerializer.Deserialize<UnifiedLlmRequest>(
@@ -38,18 +40,42 @@ public sealed partial class HostBridgeFacade
                 ? req.HeaderContext.SessionId
                 : req.RequestId;
 
-            // 取消可能已经存在的旧会话生成任务
-            if (_activeSessionTokens.TryRemove(sessionId, out var oldCts))
+            string workspaceId = req.HeaderContext?.WorkspaceId ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(workspaceId))
             {
-                try
+                workspaceLease = _workspaceSessionService.TryAcquireWorkspaceSharedLease(
+                    workspaceId.Trim()
+                );
+                if (workspaceLease == null)
                 {
-                    oldCts.Cancel();
-                    oldCts.Dispose();
+                    return Task.FromResult(
+                        BridgeResponse<string>.Fail("WORKSPACE_BUSY", "工作区正在执行会话删除，请稍后重试")
+                    );
                 }
-                catch
-                {
-                    // 忽略旧任务清理异常
-                }
+            }
+            SessionOperationLease? operationLease = null;
+            if (
+                !_sessionOperations.TryAcquire(
+                    workspaceId,
+                    sessionId,
+                    SessionOperationKind.Agent,
+                    out operationLease
+                )
+            )
+            {
+                string conflictCode =
+                    _sessionOperations.TryGetHolderKind(workspaceId, sessionId, out var holder)
+                    && holder == SessionOperationKind.History
+                        ? "HISTORY_OPERATION_IN_PROGRESS"
+                        : "SESSION_BUSY";
+                return Task.FromResult(
+                    BridgeResponse<string>.Fail(
+                        conflictCode,
+                        conflictCode == "HISTORY_OPERATION_IN_PROGRESS"
+                            ? "当前会话正在执行历史操作，请稍后重试"
+                            : "当前会话已有生成任务，请稍后重试"
+                    )
+                );
             }
 
             var cts = new CancellationTokenSource();
@@ -160,10 +186,13 @@ public sealed partial class HostBridgeFacade
                         }
                         _activeSessionTokens.TryRemove(sessionId, out _);
                         cts.Dispose();
+                        operationLease?.Dispose();
+                        workspaceLease?.Dispose();
                     }
                 },
                 CancellationToken.None
             );
+            workspaceLeaseHandedOff = true;
 
             return Task.FromResult(BridgeResponse<string>.Success(sessionId, "流式请求已启动"));
         }
@@ -171,6 +200,11 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("StartSessionRun failed", ex);
             return Task.FromResult(BridgeResponse<string>.Fail("SESSION_START_ERROR", ex.Message));
+        }
+        finally
+        {
+            if (!workspaceLeaseHandedOff)
+                workspaceLease?.Dispose();
         }
     }
 

@@ -299,7 +299,7 @@ public sealed class TimelineS3Tests : IDisposable
             WorkspaceId = ws,
             SessionHash = "hash-v2",
             Title = "v2-export",
-            HistoryVersion = 2,
+            StorageFormatVersion = WorkspaceHistorySchema.CurrentFormatVersion,
         };
         await repo.SaveSessionMetaAsync(ws, meta);
         await _store.AppendTurnAsync(
@@ -390,10 +390,10 @@ public sealed class TimelineS3Tests : IDisposable
             WorkspaceId = ws,
             SessionHash = "hash-v1",
             Title = "v1-export",
-            HistoryVersion = 1,
+            StorageFormatVersion = null,
         };
         await repo.SaveSessionMetaAsync(ws, meta);
-        await repo.RewriteMessagesJsonlAsync(
+        await _store.RewriteMessagesAsync(
             ws,
             sess,
             new List<UnifiedChatMessage>

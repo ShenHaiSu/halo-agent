@@ -22,6 +22,7 @@ import {
   type TurnEventPayload,
 } from './model';
 import { agentRuntime } from './runtime';
+import { countTerminalItems, mapSubStatus } from './subAgentStatus';
 import { flushSegBufSync } from './useAgentStream';
 
 let listenersBound = false;
@@ -51,7 +52,6 @@ function handleSubEvent(sid: string, kind: string, payload: Record<string, unkno
   const p = payload ?? {};
   if (kind === 'SubAgentsStarted') {
     const subs = Array.isArray(p['subs']) ? (p['subs'] as Array<Record<string, unknown>>) : [];
-    t.subAgents.total = typeof p['total'] === 'number' ? (p['total'] as number) : subs.length;
     t.subAgents.waiting = true;
     for (const s of subs) {
       const subId = String(s['subId'] ?? '');
@@ -59,6 +59,8 @@ function handleSubEvent(sid: string, kind: string, payload: Record<string, unkno
         t.subAgents.items.push({ subId, label: String(s['label'] ?? ''), status: 'running' });
       }
     }
+    // total 按已知 item 数累计（只增不减），避免多批 spawn 时用单批 total 覆盖成 2/5 错配。
+    t.subAgents.total = Math.max(t.subAgents.total, t.subAgents.items.length);
     touch(t);
     return;
   }
@@ -70,15 +72,24 @@ function handleSubEvent(sid: string, kind: string, payload: Record<string, unkno
       if (ex) ex.status = status;
       else t.subAgents.items.push({ subId, label: String(p['label'] ?? ''), status });
     }
-    t.subAgents.done = t.subAgents.items.filter(
-      (i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled'
-    ).length;
+    t.subAgents.done = countTerminalItems(t.subAgents.items);
     touch(t);
     return;
   }
   if (kind === 'SubAgentsBarrier') {
     t.subAgents.waiting = true;
-    if (typeof p['total'] === 'number') t.subAgents.total = p['total'] as number;
+    t.subAgents.total = Math.max(t.subAgents.total, t.subAgents.items.length);
+    touch(t);
+    return;
+  }
+  if (kind === 'SubAgentsBarrierTimeout') {
+    // 主轮还在等结果回填，waiting 保持 true；只把点名的子标成 timedOut。
+    const subIds = Array.isArray(p['subIds']) ? (p['subIds'] as unknown[]).map((x) => String(x)) : [];
+    for (const subId of subIds) {
+      const ex = t.subAgents.items.find((i) => i.subId === subId);
+      if (ex) ex.status = 'timedOut';
+    }
+    t.subAgents.done = countTerminalItems(t.subAgents.items);
     touch(t);
     return;
   }
@@ -88,9 +99,11 @@ function handleSubEvent(sid: string, kind: string, payload: Record<string, unkno
     for (const s of subs) {
       const subId = String(s['subId'] ?? s['callId'] ?? '');
       const ex = t.subAgents.items.find((i) => i.subId === subId);
-      if (ex) ex.status = (s['success'] as boolean) ? 'succeeded' : 'failed';
+      if (ex) ex.status = mapSubStatus(s);
     }
-    t.subAgents.done = t.subAgents.total || t.subAgents.items.length;
+    // done 由真实终态数决定，不再用 total 覆盖（取消/超时语义不会被抹平）。
+    t.subAgents.done = countTerminalItems(t.subAgents.items);
+    t.subAgents.total = Math.max(t.subAgents.total, t.subAgents.items.length);
     touch(t);
     return;
   }
@@ -284,6 +297,7 @@ function handleCardEvent(kind: string, payload: Record<string, unknown>, sid: st
     kind === 'SubAgentsStarted' ||
     kind === 'SubAgentProgress' ||
     kind === 'SubAgentsBarrier' ||
+    kind === 'SubAgentsBarrierTimeout' ||
     kind === 'SubAgentsBarrierReleased' ||
     kind === 'agent:sub-event'
   ) {

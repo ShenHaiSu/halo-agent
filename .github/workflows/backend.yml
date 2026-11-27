@@ -32,6 +32,9 @@ jobs:
       - name: Restore
         run: dotnet restore HaloAgent.sln -r win-x64
 
+      - name: Architecture assertions
+        run: node build/check-architecture.mjs
+
       - name: Format check (csharpier)
         run: |
           dotnet tool restore
@@ -47,7 +50,7 @@ jobs:
         run: |
           $tag = ""
           try { $tag = (git describe --tags --abbrev=0 2>$null) } catch { $tag = "" }
-          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.0" }
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.4" }
           $ver = $tag.TrimStart("v")
           echo "MYAPPVERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           echo "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -61,15 +64,19 @@ jobs:
           -p:VersionPrefix=${{ env.MYAPPVERSION }}
           -o artifacts/publish/win-x64
 
-      # 铁律门禁：CefSharp 109 原生件要求多文件；一旦 PublishSingleFile=true 即炸
-      - name: Assert NOT single-file (E3)
+      - name: Publish (win-x86, self-contained, multi-file)
+        run: >
+          dotnet publish src/Host.Desktop/Host.Desktop.csproj -c Release
+          -r win-x86 --self-contained true
+          -p:Platform=x86 -p:PublishSingleFile=false -p:PublishReadyToRun=false
+          -p:VersionPrefix=${{ env.MYAPPVERSION }}
+          -o artifacts/publish/win-x86
+
+      # 铁律门禁：CefSharp 109 原生件要求多文件；架构与 RID 必须一致
+      - name: Assert publish artifacts (win-x64 / win-x86)
         run: |
-          $dir = "artifacts/publish/win-x64"
-          if (-not (Test-Path "$dir/Host.Desktop.exe")) { Write-Error "publish output missing Host.Desktop.exe"; exit 1 }
-          if (-not (Test-Path "$dir/libcef.dll")) { Write-Error "SINGLE-FILE SUSPECTED: libcef.dll missing in $dir (PublishSingleFile must stay false)"; exit 1 }
-          $count = (Get-ChildItem $dir -File | Measure-Object).Count
-          Write-Host "publish files: $count (multi-file OK)"
-          if ($count -lt 10) { Write-Error "SINGLE-FILE SUSPECTED: only $count files published"; exit 1 }
+          node build/check-publish-artifacts.mjs win-x64
+          node build/check-publish-artifacts.mjs win-x86
 
       # H6：签名状态输出（无证书=自签占位，不阻断）
       - name: Sign status

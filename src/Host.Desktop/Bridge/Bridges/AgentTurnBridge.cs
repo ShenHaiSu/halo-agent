@@ -45,6 +45,8 @@ public sealed partial class HostBridgeFacade
         string? requestId = null
     )
     {
+        IDisposable? workspaceLease = null;
+        bool workspaceLeaseHandedOff = false;
         try
         {
             try
@@ -55,8 +57,6 @@ public sealed partial class HostBridgeFacade
                         sessionId?.Trim() ?? string.Empty
                     )
                     .ConfigureAwait(false);
-                if (meta != null && meta.HistoryVersion != 2)
-                    return BridgeResponse<string>.Fail("HISTORY_READONLY", "历史版本只读，不可继续对话，可分支");
                 if (
                     meta != null
                     && string.Equals(meta.AgentRole, "sub", StringComparison.OrdinalIgnoreCase)
@@ -72,6 +72,14 @@ public sealed partial class HostBridgeFacade
             {
                 return BridgeResponse<string>.Fail("EMPTY_PROMPT", "用户输入不能为空");
             }
+            workspaceLease = _workspaceSessionService.TryAcquireWorkspaceSharedLease(
+                workspaceId.Trim()
+            );
+            if (workspaceLease == null)
+            {
+                return BridgeResponse<string>.Fail("WORKSPACE_BUSY", "工作区正在执行会话删除，请稍后重试");
+            }
+
             string turnKey = "agent:" + sessionId.Trim();
             // need22-P1 T1：sendPrompt requestId 回显去重（重复投递直接成功回显，不重起一轮）。
             string turnRequestId = string.IsNullOrWhiteSpace(requestId)
@@ -100,6 +108,39 @@ public sealed partial class HostBridgeFacade
                     "TURN_IN_PROGRESS",
                     $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝，旧轮不受影响"
                 );
+            }
+            SessionOperationLease? operationLease = null;
+            if (
+                !_sessionOperations.TryAcquire(
+                    workspaceId,
+                    sessionId,
+                    SessionOperationKind.Agent,
+                    out operationLease
+                )
+            )
+            {
+                string activeRequestId = _activeAgentRequestIds.TryGetValue(turnKey, out var ar)
+                    ? ar
+                    : "unknown";
+                string conflictCode = _sessionOperations.TryGetHolderKind(
+                    workspaceId,
+                    sessionId,
+                    out var holder
+                )
+                    ? holder switch
+                    {
+                        SessionOperationKind.History => "HISTORY_OPERATION_IN_PROGRESS",
+                        SessionOperationKind.Compact => "COMPACTING",
+                        _ => "TURN_IN_PROGRESS"
+                    }
+                    : "TURN_IN_PROGRESS";
+                string conflictMessage = conflictCode switch
+                {
+                    "HISTORY_OPERATION_IN_PROGRESS" => "当前会话正在执行历史操作，请稍后重试",
+                    "COMPACTING" => "该会话正在压缩上下文，新一轮请稍候",
+                    _ => $"上一轮仍在进行中（activeRequestId={activeRequestId}），本发已拒绝"
+                };
+                return BridgeResponse<string>.Fail(conflictCode, conflictMessage);
             }
             var cts = new CancellationTokenSource();
             _activeSessionTokens[turnKey] = cts;
@@ -142,7 +183,12 @@ public sealed partial class HostBridgeFacade
                     {
                         JsEventDispatcher.Publish(
                             "agent:turn-event",
-                            new { sessionId = sessId, kind = "TurnCancelled" }
+                            new
+                            {
+                                sessionId = sessId,
+                                kind = "TurnCancelled",
+                                payload = new { reason = "bridge-cancel-fallback" },
+                            }
                         );
                     }
                     catch (Exception ex)
@@ -166,10 +212,13 @@ public sealed partial class HostBridgeFacade
                         _activeSessionTokens.TryRemove(turnKey, out _);
                         _activeAgentRequestIds.TryRemove(turnKey, out _);
                         cts.Dispose();
+                        operationLease?.Dispose();
+                        workspaceLease?.Dispose();
                     }
                 },
                 CancellationToken.None
             );
+            workspaceLeaseHandedOff = true;
 
             return BridgeResponse<string>.Success(sessId, "Agent 推理已启动");
         }
@@ -177,6 +226,11 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("StartAgentTurn failed", ex);
             return BridgeResponse<string>.Fail("AGENT_START_ERROR", ex.Message);
+        }
+        finally
+        {
+            if (!workspaceLeaseHandedOff)
+                workspaceLease?.Dispose();
         }
     }
 

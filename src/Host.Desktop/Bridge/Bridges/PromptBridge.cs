@@ -205,7 +205,7 @@ public sealed partial class HostBridgeFacade
                 PreviewEqualsLastSent = equals,
                 CompressorPromptPreview = Services.CompactionService.CompressorSystemPrompt,
                 TitlePromptPreview =
-                    "你是会话标题生成器。只根据用户首轮对话生成 4-10 个汉字的简短标题，不加标点、不加引号、不解释，只输出标题本身。若无法概括则输出首条消息前5字。（对话正文已脱除）",
+                    "你是会话标题生成器。只根据用户首轮对话生成简短干练的中文标题：必须返回汇总性标题，不超过十五个字，不加标点、不加引号、不解释、不换行，只输出标题本身。若无法概括则输出首条消息前5字。（对话正文已脱除）",
             };
             return BridgeResponse<PromptDiagnosticsDto>.Success(dto);
         }

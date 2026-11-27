@@ -2,11 +2,11 @@
  * 4 小 store 与旧转发共用同一份 state，响应式语义与旧 agentStore.ts 一致；跨 store 读经此处参数/事件，不直 import 其他 store。
  */
 import { ref } from 'vue';
-import type { ChatImageRef, UnifiedChatMessage } from '@shared/bridge/hostBridge';
+import type { ChatImageRef } from '@shared/bridge/hostBridge';
 import { haloEventBus } from '@shared/bridge/hostBridge';
 
 /** 本地乐观用户形态（与会话域同形，避免跨层引用触边界门）。 */
-export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'superseded';
+export type AgentPendingStatus = 'sending' | 'confirmed' | 'failed' | 'cancelled' | 'superseded';
 export interface PendingUser {
   key: string;
   requestId: string;
@@ -34,6 +34,12 @@ export interface StreamSeg {
   callId?: string;
   persisted?: boolean;
 }
+/** 迟到 tag 事件：delta 仍在 rAF 缓冲时先记 override，seg 建成再消费。只存标签不存正文。 */
+export interface PendingTagOverride {
+  tag: 'process' | 'final';
+  reason: 'demote' | 'finalize' | 'flip';
+}
+
 export type AgentToolCardStatus = 'running' | 'done' | 'error';
 
 export interface AgentToolCard {
@@ -52,7 +58,7 @@ export interface AgentToolCard {
   /** need12 R1：工具落盘字节（WriteFileTool 完成态回填）。 */
   fileBytes?: number | null;
   images?: ChatImageRef[];
-  /** need23-R1：该工具消息在 messages.jsonl 中的 id（空=尚未落盘）。 */
+  /** 该工具消息在统一仓储中的标识（空=尚未落盘）。 */
   messageId?: string;
   /** need23-R1：结果是否已落盘（ToolMessagePersisted 到达后为 true）。 */
   persisted?: boolean;
@@ -61,12 +67,34 @@ export interface AgentToolCard {
   errorCode?: string | null;
 }
 
-/** need09-04：sendPrompt 可选第二参附件项 */
+/** sendPrompt 可选第二参：base64 附件（老形状兼容，kind 可省略）。 */
 export interface AgentSendAttachment {
+  kind?: 'base64';
   attId: string;
   fileName: string;
   mime: string;
   base64: string;
+}
+
+/** 复用会话内已存储图片：只传 imageId，不接受 relPath。 */
+export interface AgentSendStoredMedia {
+  kind: 'stored';
+  imageId: string;
+  fileName: string;
+  mime: string;
+}
+
+export type AgentSendMedia = AgentSendAttachment | AgentSendStoredMedia;
+
+/** 截断已提交但尚未成功发送的恢复项，仅存活于当前应用生命周期。 */
+export interface PendingReplay {
+  workspaceId: string;
+  sessionId: string;
+  anchorMessageId: string;
+  text: string;
+  media: AgentSendMedia[];
+  recoveryToken?: string;
+  createdAt: number;
 }
 
 export interface AgentTelemetry {
@@ -95,6 +123,8 @@ export interface AgentTurnState {
   streamingReasoning: string;
   streamingActive: boolean;
   isGenerating: boolean;
+  /** 显式压缩忙态；不得由提示文案嗅探。 */
+  compacting: boolean;
   toolCards: AgentToolCard[];
   /** 已落盘轮次剪掉的工具卡终态快照：供流态装配继续渲染本轮历史；只追加、轮末随容器清空、有界。 */
   graduatedCards: AgentToolCard[];
@@ -107,14 +137,22 @@ export interface AgentTurnState {
   requestId: string;
   /** need22-P2 F5：失败重试用原文（成功/新发后清空） */
   lastPrompt: string;
-  /** need02-P1：失败重试用附件（含图重发带图；成功/新发后更新） */
+  /** 失败重试用附件（含图重发带图；成功/新发后更新） */
   lastAttachments: AgentSendAttachment[];
+  /** 本轮完整媒体（base64 + stored），失败重试继续携带。 */
+  lastMedia: AgentSendMedia[];
+  /** 截断已提交但尚未发送的恢复项（仅内存态，重启不恢复）。 */
+  pendingReplay: PendingReplay | null;
   /** need02-P1：乐观 user（分桶天然隔离；null=无 pending；仅视图层 overlay，不写 jsonl） */
   pendingUser: PendingUser | null;
   /** need02-P3：轮末交接窗（reloadNow 已就位、流容器尚未清空的 300ms；内嵌 LiveBody 与终态交叉淡入淡出用）。 */
   liveCompleting: boolean;
   /** 轮末对账（重新拉取落盘消息）已完成，稳态块可以上屏。 */
   steadyReady: boolean;
+  /** 交接窗内冻结的本轮 requestId：requestId 会在收尾清空，摘要对账仍须按轮精确匹配。 */
+  handoffRequestId: string;
+  /** 迟到 BlockTagUpdated 的轻量覆盖表（key=blockId）；建 seg 时消费，清桶时丢弃。 */
+  pendingTagOverrides: Record<string, PendingTagOverride>;
   updatedAt: number;
   /** need13：主会话子进度（瞬态，不持久化） */
   subAgents: { total: number; done: number; waiting: boolean; items: Array<{ subId: string; label: string; status: string }> };
@@ -146,8 +184,6 @@ export const activeSessionId = ref<string>('');
 export const activeWorkspaceId = ref<string>('');
 /** 回退协议（旧转发自 configStore 同步；resetTurnState 用）。 */
 export const fallbackProtocol = ref<string>('chat');
-/** 持久消息投影（主链纯 V2 不再同步 jsonl，保留符号供子会话只读链）。 */
-export const persistedMessages = ref<UnifiedChatMessage[]>([]);
 
 export const turnStartMarks: Record<string, number> = {};
 
@@ -173,6 +209,7 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     streamingReasoning: '',
     streamingActive: false,
     isGenerating: false,
+    compacting: false,
     toolCards: [],
     graduatedCards: [],
     telemetry: emptyTelemetry(protocol),
@@ -182,9 +219,13 @@ export function emptyTurnState(sessionId: string, protocol = 'chat'): AgentTurnS
     requestId: '',
     lastPrompt: '',
     lastAttachments: [],
+    lastMedia: [],
+    pendingReplay: null,
     pendingUser: null,
     liveCompleting: false,
     steadyReady: false,
+    handoffRequestId: '',
+    pendingTagOverrides: {},
     updatedAt: Date.now(),
     subAgents: { total: 0, done: 0, waiting: false, items: [] },
     curIteration: 0,
@@ -313,10 +354,11 @@ export function pushTextSeg(
     if (blockId && !tail.blockId) tail.blockId = blockId;
     if (typeof seq === 'number' && seq > 0 && !(tail.seq && tail.seq > 0)) tail.seq = seq;
     if (tag && !tail.tag) tail.tag = tag;
+    consumePendingTag(t, tail);
     return;
   }
   const n = t.segs.length;
-  t.segs.push({
+  const seg: StreamSeg = {
     key: segKeyOf(t.sessionId, kind, t.curIteration, n),
     kind,
     iteration: t.curIteration,
@@ -325,7 +367,27 @@ export function pushTextSeg(
     blockId: blockId ?? null,
     seq: seq ?? null,
     tag: tag ?? null,
-  });
+  };
+  t.segs.push(seg);
+  consumePendingTag(t, seg);
+}
+
+/** 唯一 final：新 final 出现时旧 final 必须让位，与后端 FlipStaleFinal 语义对齐。 */
+export function markSoleFinal(t: AgentTurnState, seg: StreamSeg): void {
+  for (const s of t.segs) {
+    if (s.tag === 'final' && s !== seg) s.tag = 'process';
+  }
+  seg.tag = 'final';
+}
+
+/** seg 建成或补齐 blockId 后消费迟到 tag；命中 final 时顺带维持唯一性。 */
+function consumePendingTag(t: AgentTurnState, seg: StreamSeg): void {
+  const bid = String(seg.blockId || '');
+  const override = bid ? t.pendingTagOverrides[bid] : undefined;
+  if (!override) return;
+  if (override.tag === 'final') markSoleFinal(t, seg);
+  else seg.tag = override.tag;
+  delete t.pendingTagOverrides[bid];
 }
 
 export function demotePending(t: AgentTurnState): void {
@@ -335,12 +397,16 @@ export function demotePending(t: AgentTurnState): void {
 }
 
 export function finalizePending(t: AgentTurnState): string | null {
+  // 先清旧 final，再从后往前选最后一个非空 text：轮末任何时刻全轮至多一个 final。
+  for (const s of t.segs) {
+    if (s.tag === 'final') s.tag = 'process';
+  }
   let finalId: string | null = null;
   for (let i = t.segs.length - 1; i >= 0; i--) {
     const s = t.segs[i];
     if (s.kind !== 'text') continue;
     if (!s.text || !s.text.trim()) continue;
-    s.tag = 'final';
+    markSoleFinal(t, s);
     finalId = s.blockId || s.key;
     break;
   }

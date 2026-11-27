@@ -6,13 +6,30 @@
           v-if="summaryList.length > 0 || pendingUser"
           :summaries="summaryList"
           :pending="pendingUser"
+          :handoff-active="showLiveHandoff"
+          :handoff-final-text="handoffFinalText"
           @user-menu="onSummaryUserMenu"
           @assistant-menu="onSummaryAssistantMenu"
           @retry-pending="emit('retry-pending', liveList[0] ?? ({ key: 'live-pending', kind: 'live' } as TimelineEntry))"
         />
         <TimelineEmptyState v-if="isEmpty" />
         <template v-for="entry in liveList" :key="entry.key">
-          <TimelineRow :item="entry" :is-last="true" v-on="rowHandlers" />
+          <TurnHandoff
+            v-if="showLiveHandoff"
+            :segs="view.liveSegsFor(entry)"
+            :completing="showLiveHandoff"
+            :reduce-height="handoffReduceHeight"
+            @handoff-done="onHandoffDone"
+          />
+          <TimelineRow v-else-if="!handoffActive" :item="entry" :is-last="true" v-on="rowHandlers" />
+          <TimelineAlerts
+            v-if="showLiveHandoff && noticeInTurn && (turnNotice || lastError)"
+            :notice="turnNotice"
+            :error="lastError"
+            :show-retry="showRetry"
+            @retry="emit('retry')"
+            @dismiss="emit('dismiss')"
+          />
         </template>
         <!-- 主链纯 V2：只留摘要区 + Live 条 + 全局区。 -->
         <n-alert v-if="turnNotice && !noticeInTurn" type="info" :show-icon="false" class="text-xs">
@@ -41,11 +58,25 @@
           :y="menu.y"
           :busy="menu.busy"
           :can-copy="menu.canCopy"
+          :can-copy-turn="menu.canCopyTurn"
+          :copy-label="menu.copyLabel"
+          :replay-disabled="menu.replayDisabled"
+          :branch-disabled="menu.branchDisabled"
+          :replay-title="menu.replayTitle"
+          :branch-title="menu.branchTitle"
+          :delete-disabled="menu.deleteDisabled"
+          :delete-title="menu.deleteTitle"
           @copy="emit('menu-copy')"
+          @copy-turn="emit('menu-copy-turn')"
           @replay="emit('menu-replay')"
           @branch="emit('menu-branch')"
           @delete="emit('menu-delete')"
         />
+        <div v-if="pendingReplay" data-testid="replay-recovery" class="replay-recovery">
+          <span>历史已截断，本次未发送。可从这里继续重放。</span>
+          <button data-testid="replay-resume" type="button" @click="emit('resume-replay')">继续重放</button>
+          <button data-testid="replay-discard" type="button" @click="emit('discard-replay')">放弃</button>
+        </div>
       </div>
     </div>
     <TimelineJumpButton :visible="showJumpVisible" @jump="emit('jump-latest')" />
@@ -53,16 +84,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, useTemplateRef } from 'vue';
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue';
 import type { TimelineEntry } from '@features/session/utils/turnGroup';
 import TimelineRow from './TimelineRow.vue';
+import TurnHandoff from './userturn/TurnHandoff.vue';
+import TimelineAlerts from './timeline/TimelineAlerts.vue';
 import TimelineEmptyState from './timeline/TimelineEmptyState.vue';
 import TimelineJumpButton from './timeline/TimelineJumpButton.vue';
 import TimelineSummarySection from '@features/session/components/TimelineSummarySection.vue';
 import MessageContextMenu from './MessageContextMenu.vue';
 import { timelineViewFallback, useTimelineViewOptional } from '@features/agent/composables/timelineViewKey';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { TurnSummary } from '@shared/bridge/hostBridge';
 
 /** 滚动容器 + 摘要区 + Live 条 + 全局区；行内派生全部经视图模型取用。 */
 const props = defineProps<{
@@ -81,9 +113,12 @@ const emit = defineEmits<{
   retry: [];
   dismiss: [];
   'menu-copy': [];
+  'menu-copy-turn': [];
   'menu-replay': [];
   'menu-branch': [];
   'menu-delete': [];
+  'resume-replay': [];
+  'discard-replay': [];
   'jump-latest': [];
   'retry-pending': [item: TimelineEntry];
 }>();
@@ -93,6 +128,19 @@ const view = computed(() => useTimelineViewOptional() ?? timelineViewFallback())
 const summaryList = computed(() => view.value.summaryList ?? []);
 const pendingUser = computed(() => view.value.pendingUser ?? null);
 const hasActiveTurn = computed(() => view.value.hasActiveTurn);
+
+// 交接窗：正文全程单份且满高。收缩完成后原子换手——撤 Live 容器、显稳态正文，两件事同一帧。
+const handoffActive = computed(() => !!view.value.handoffActive);
+const handoffFinalText = computed(() => view.value.handoffFinalText || '');
+const handoffReduceHeight = computed(() => !!view.value.handoffReduceHeight);
+const handoffDone = ref(false);
+watch(handoffActive, (v) => {
+  if (!v) handoffDone.value = false;
+});
+const showLiveHandoff = computed(() => handoffActive.value && !handoffDone.value);
+function onHandoffDone(): void {
+  handoffDone.value = true;
+}
 
 // 直播挂载不需要轮容器：有活跃轮即新建 live 兜底条目直挂流段，key 绑定会话切会话即换。
 const liveList = computed<TimelineEntry[]>(() => {
@@ -107,6 +155,7 @@ const lastError = computed(() => view.value.lastError);
 const showRetry = computed(() => view.value.showRetry);
 const liveTelemetry = computed(() => view.value.liveTelemetry);
 const menu = computed(() => view.value.menu);
+const pendingReplay = computed(() => view.value.pendingReplay ?? null);
 
 const rowHandlers = {
   'user-menu': (e: MouseEvent, item: TimelineEntry) => emit('user-menu', e, item),
@@ -117,45 +166,20 @@ const rowHandlers = {
   dismiss: () => emit('dismiss'),
 };
 
-/** 按 turnId 从摘要列表取对应条目：V2 稳态下摘要是唯一携带原文的数据源。 */
-function findSummary(turnId: string): TurnSummary | null {
-  return summaryList.value.find((s) => String(s.turnId) === turnId) ?? null;
-}
-
 /**
- * V2 摘要区右键桥接：纯转发 turnId，菜单内容组装走摘要源，不再造 V1 兜底 entry。
+ * V2 摘要区右键桥接：纯转发 turnId，菜单内容组装走 useTimelineRowActions（摘要源唯一组装点）。
  */
 async function onSummaryUserMenu(ev: MouseEvent, turnId: string): Promise<void> {
-  const summary = findSummary(turnId);
-  if (!summary) return;
-  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
-  const anchors = summaryAnchorIds(summary);
-  const text = summaryCopyText(summary, '');
   rowHandlers['user-menu'](ev, {
     kind: 'live',
     key: `live-${turnId}`,
-    msg: { id: anchors.userId, content: text },
   } as unknown as TimelineEntry);
 }
 
 async function onSummaryAssistantMenu(ev: MouseEvent, turnId: string): Promise<void> {
-  const summary = findSummary(turnId);
-  if (!summary) return;
-  const { summaryAnchorIds, summaryCopyText } = await import('@features/session/utils/summaryMenu');
-  const anchors = summaryAnchorIds(summary);
-  const finalBlockId = String(summary?.finalBlockId || '').trim();
-  let text = '';
-  if (finalBlockId) {
-    const { items } = await useWorkspaceStore().getBlockContents([finalBlockId]);
-    const block = items[finalBlockId];
-    text = String(block?.markdown || block?.preview || '');
-  }
-  if (!text) text = String(summary?.finalPreview || '');
-  void summaryCopyText;
   rowHandlers['assistant-menu'](ev, {
     kind: 'live',
     key: `live-${turnId}`,
-    msg: { id: anchors.assistantId, content: text },
   } as unknown as TimelineEntry);
 }
 
@@ -172,52 +196,28 @@ onUnmounted(() => emit('ready', null));
   overflow-anchor: auto;
   scrollbar-gutter: stable;
 }
-/* 过渡动画核心约束：高度不做任何动画；leave 必须 absolute 脱流，
-   否则段毕业时会「下移（leaving 仍占位）→ 上移（移除）」两次抖动，比不加动画更糟。 */
-.live-turn-enter-active {
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
+.replay-recovery {
+  position: sticky;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  margin: 8px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--bg-surface, #1e1e1e);
+  font-size: 12px;
 }
-.live-turn-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
+.replay-recovery span {
+  flex: 1;
 }
-.live-turn-leave-active {
-  transition: opacity 0.14s ease;
-}
-.live-turn-leave-to {
-  opacity: 0;
-}
-.seg-list {
-  /* TransitionGroup 的 leave 元素 absolute 化后需要一个定位容器 */
-  position: relative;
-}
-.seg-enter-active {
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-.seg-enter-from {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-.seg-leave-active {
-  position: absolute;
-  left: 0;
-  right: 0;
-  transition: opacity 0.12s ease;
-  pointer-events: none;
-}
-.seg-leave-to {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .live-turn-enter-active,
-  .live-turn-leave-active,
-  .seg-enter-active,
-  .seg-leave-active {
-    transition: none;
-  }
+.replay-recovery button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 </style>

@@ -117,9 +117,11 @@ public sealed class ListDirTool : IToolHandler
             // need22-P0 S1：读路径强制 ValidateRead（越界一律 PATH_OUTSIDE_WORKSPACE，不得降级）
             string fullPath;
             {
+                // 会话输出目录只读豁免：允许对本会话落盘目录对账。
                 var (ok, err, resolved, _) = PathSafetyValidator.ValidateRead(
                     workspaceRoot,
-                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg
+                    string.IsNullOrWhiteSpace(pathArg) ? "." : pathArg,
+                    SessionOutputRoots.GetSessionReadAllowedRoots(context)
                 );
                 if (!ok)
                 {

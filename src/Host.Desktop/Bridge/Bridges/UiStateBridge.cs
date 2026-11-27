@@ -25,7 +25,7 @@ public sealed partial class HostBridgeFacade
         {
             HaloLogger.App.Error("GetLastActive failed", ex);
             return Task.FromResult(
-                BridgeResponse<UiActiveStateDto>.Fail(ex.Message, "UISTATE_ERROR")
+                BridgeResponse<UiActiveStateDto>.Fail("UISTATE_ERROR", ex.Message)
             );
         }
     }

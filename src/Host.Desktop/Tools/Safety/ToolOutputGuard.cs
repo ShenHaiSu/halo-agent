@@ -65,8 +65,12 @@ public static class ToolOutputGuard
         string spillDir;
         try
         {
-            string root = string.IsNullOrWhiteSpace(dataRoot) ? Path.GetTempPath() : dataRoot;
-            spillDir = Path.Combine(root, "sessions", workspaceId, sessionId, "tool-outputs");
+            // 会话输出目录与只读豁免同源，避免两处手拼漂移。
+            spillDir = SessionOutputRoots.BuildSessionToolOutputsDir(
+                dataRoot,
+                workspaceId,
+                sessionId
+            );
             Directory.CreateDirectory(spillDir);
         }
         catch (Exception)

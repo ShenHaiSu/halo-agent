@@ -13,7 +13,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import naive, { NDatePicker } from 'naive-ui';
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
 
 const { chartInstances } = vi.hoisted(() => ({ chartInstances: [] as unknown[] }));
 
@@ -91,7 +91,17 @@ const FILTER_OPTIONS = {
   sources: [{ id: 'agent', name: 'Agent 对话' }],
 };
 
-type ChartLike = { getOption: () => { series?: Array<{ data?: unknown }>; xAxis?: Array<{ data?: unknown }> } };
+type ChartLike = {
+  getOption: () => {
+    series?: Array<{ data?: unknown }>;
+    xAxis?: Array<{ data?: unknown }>;
+    tooltip?: Array<{
+      trigger?: string;
+      formatter?: (params: unknown) => string;
+      textStyle?: { fontSize?: number };
+    }>;
+  };
+};
 
 const Host = defineComponent({
   setup() {
@@ -160,6 +170,50 @@ describe('UsageAnalyticsView（用量分析筛选 → 图表刷新）', () => {
     await mountView(pinia);
     const stacked = chartInstances[0] as ChartLike;
     expect(stacked.getOption().series?.length).toBe(3);
+  });
+
+  it('堆叠图 Tooltip 只展示鼠标所在模型，并明确标注 tokens 单位', async () => {
+    const w = await mountView(pinia);
+    const stacked = chartInstances[0] as ChartLike;
+    const tooltip = stacked.getOption().tooltip?.[0];
+
+    expect(w.text()).toContain('用量趋势（按模型堆叠，单位：tokens）');
+    expect(tooltip?.trigger).toBe('item');
+    expect(tooltip?.textStyle?.fontSize).toBe(12);
+    expect(tooltip?.formatter).toBeTypeOf('function');
+
+    const html = tooltip?.formatter?.({ seriesName: 'P1/m2', value: 5, dataIndex: 1 }) ?? '';
+    expect(html).toContain('2026-10-20');
+    expect(html).toContain('P1/m2');
+    expect(html).toContain('总量: 5 tokens');
+    expect(html).not.toContain('P1/m1');
+    expect(html).not.toContain('P2/m3');
+    expect(html).not.toContain('合计');
+    expect(html).not.toContain('命中率');
+  });
+
+  it('堆叠图 Tooltip 跟随指标口径，转义模型名并保留精确 token 数', async () => {
+    await mountView(pinia);
+    const stacked = chartInstances[0] as ChartLike;
+    const store = useUsageAnalyticsStore();
+    const cases = [
+      ['in', '输入'],
+      ['out', '输出'],
+      ['total', '总量'],
+    ] as const;
+
+    for (const [metric, label] of cases) {
+      store.metric = metric;
+      await nextTick();
+      const formatter = stacked.getOption().tooltip?.[0]?.formatter;
+      const html = formatter?.({ seriesName: '<P1>/m1', value: 1234, dataIndex: 0 }) ?? '';
+
+      expect(html).toContain(`${label}:`);
+      expect(html).toContain('1.2K tokens');
+      expect(html).toContain('(1,234)');
+      expect(html).toContain('&lt;P1&gt;/m1');
+      expect(html).not.toContain('<P1>/m1');
+    }
   });
 
   it('筛选后堆叠图不残留被筛掉的旧系列（旧数据必须消失）', async () => {

@@ -15,7 +15,7 @@ namespace Host.Desktop.Infrastructure.Storage;
 
 /// <summary>
 /// 多工作区与多会话持久化仓储服务。
-/// 管理 workspaces-index.json、sessions-index.json、meta.json 以及 messages.jsonl。
+/// 管理 workspaces-index.json、sessions-index.json 以及 meta.json，消息真相源为工作区单库。
 /// </summary>
 public sealed partial class SessionRepository : ISessionRepository
 {
@@ -46,9 +46,6 @@ public sealed partial class SessionRepository : ISessionRepository
 
     public string GetSessionMetaPath(string workspaceId, string sessionId) =>
         Path.Combine(_storageManager.SessionsDirectory, workspaceId, sessionId, "meta.json");
-
-    public string GetMessagesJsonlPath(string workspaceId, string sessionId) =>
-        Path.Combine(_storageManager.SessionsDirectory, workspaceId, sessionId, "messages.jsonl");
 
     /// <summary>need09-05：会话附件根目录。</summary>
     public string GetAttachmentsDirectory(string workspaceId, string sessionId) =>
@@ -124,18 +121,49 @@ public sealed partial class SessionRepository : ISessionRepository
         await _workspacesIndexLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct)
-                .ConfigureAwait(false);
-            var list = JsonSerializer.Deserialize<List<WorkspaceInfo>>(
-                json,
-                HaloJsonOptions.IndentedCamelCase
-            );
-            return list ?? new List<WorkspaceInfo>();
+            return await LoadWorkspacesIndexNoLockAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             HaloLogger.App.Error("Failed to load workspaces index", ex);
             return new List<WorkspaceInfo>();
+        }
+        finally
+        {
+            _workspacesIndexLock.Release();
+        }
+    }
+
+    /// <summary>内部读取，不取锁；异常向上传播，供破坏性索引变更判定权威失败。</summary>
+    private async Task<List<WorkspaceInfo>> LoadWorkspacesIndexNoLockAsync(CancellationToken ct)
+    {
+        if (!File.Exists(GetWorkspacesIndexPath()))
+            return new List<WorkspaceInfo>();
+        string json = await File.ReadAllTextAsync(GetWorkspacesIndexPath(), Encoding.UTF8, ct)
+            .ConfigureAwait(false);
+        return JsonSerializer.Deserialize<List<WorkspaceInfo>>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? new List<WorkspaceInfo>();
+    }
+
+    public async Task<WorkspaceInfo?> MutateWorkspacesIndexAsync(
+        Func<List<WorkspaceInfo>, WorkspaceInfo?> mutate,
+        CancellationToken ct = default
+    )
+    {
+        if (mutate == null)
+            throw new ArgumentNullException(nameof(mutate));
+
+        await _workspacesIndexLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var workspaces = await LoadWorkspacesIndexNoLockAsync(ct).ConfigureAwait(false);
+            var removed = mutate(workspaces);
+            await AtomicFileWriter
+                .WriteJsonAtomicAsync(GetWorkspacesIndexPath(), workspaces, ct)
+                .ConfigureAwait(false);
+            return removed;
         }
         finally
         {
@@ -166,21 +194,58 @@ public sealed partial class SessionRepository : ISessionRepository
     )
     {
         if (string.IsNullOrWhiteSpace(workspaceId))
-        {
             return new List<SessionMetadata>();
-        }
 
+        var wsLock = GetSessionsIndexLock(workspaceId);
+        await wsLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await LoadSessionsIndexNoLockAsync(workspaceId, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            wsLock.Release();
+        }
+    }
+
+    public async Task<List<SessionMetadata>> LoadSessionsIndexStrictAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return new List<SessionMetadata>();
+
+        string path = GetSessionsIndexPath(workspaceId);
+        if (!File.Exists(path))
+            return new List<SessionMetadata>();
+
+        string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct).ConfigureAwait(false);
+        var list =
+            JsonSerializer.Deserialize<List<SessionMetadata>>(
+                json,
+                HaloJsonOptions.IndentedCamelCase
+            ) ?? new List<SessionMetadata>();
+        foreach (var metadata in list)
+            HealSessionTimes(metadata, null);
+        return list;
+    }
+
+    /// <summary>
+    /// 读 sessions-index.json 的内部实现，不取工作区锁。
+    /// 仅供已持有该锁的调用方使用（如 MutateSessionsIndexAsync），避免不可重入锁自锁。
+    /// </summary>
+    private async Task<List<SessionMetadata>> LoadSessionsIndexNoLockAsync(
+        string workspaceId,
+        CancellationToken ct = default
+    )
+    {
         string path = GetSessionsIndexPath(workspaceId);
         if (!File.Exists(path))
         {
             return new List<SessionMetadata>();
         }
 
-        var wsLock = _workspaceSessionIndexLocks.GetOrAdd(
-            workspaceId,
-            _ => new SemaphoreSlim(1, 1)
-        );
-        await wsLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             string json = await File.ReadAllTextAsync(path, Encoding.UTF8, ct)
@@ -203,11 +268,10 @@ public sealed partial class SessionRepository : ISessionRepository
             );
             return new List<SessionMetadata>();
         }
-        finally
-        {
-            wsLock.Release();
-        }
     }
+
+    private SemaphoreSlim GetSessionsIndexLock(string workspaceId) =>
+        _workspaceSessionIndexLocks.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
 
     private static void HealSessionTimes(SessionMetadata m, string? metaPath)
     {
@@ -281,6 +345,35 @@ public sealed partial class SessionRepository : ISessionRepository
         }
     }
 
+    public async Task MutateSessionsIndexAsync(
+        string workspaceId,
+        Action<List<SessionMetadata>> mutate,
+        CancellationToken ct = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId))
+            return;
+        if (mutate == null)
+            throw new ArgumentNullException(nameof(mutate));
+
+        var wsLock = GetSessionsIndexLock(workspaceId);
+        await wsLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // SemaphoreSlim 不可重入：这里必须调用不加锁的内部读，否则自锁死锁。
+            var sessions = await LoadSessionsIndexNoLockAsync(workspaceId, ct)
+                .ConfigureAwait(false);
+            mutate(sessions);
+            await AtomicFileWriter
+                .WriteJsonAtomicAsync(GetSessionsIndexPath(workspaceId), sessions, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            wsLock.Release();
+        }
+    }
+
     public async Task<SessionMetadata?> LoadSessionMetaAsync(
         string workspaceId,
         string sessionId,
@@ -343,24 +436,25 @@ public sealed partial class SessionRepository : ISessionRepository
         await sessionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (meta.HistoryVersion == 2)
+            string path = GetSessionMetaPath(workspaceId, meta.Id);
+            await AtomicFileWriter.WriteJsonAtomicAsync(path, meta, ct).ConfigureAwait(false);
+            if (meta.StorageFormatVersion == WorkspaceHistorySchema.CurrentFormatVersion)
             {
                 try
                 {
                     var timelineDb = new SessionHistoryDb(_storageManager);
-                    timelineDb.EnsureDatabase(workspaceId, meta.Id);
-                    timelineDb.Checkpoint(workspaceId, meta.Id);
+                    timelineDb.EnsureWorkspaceDatabase(workspaceId);
+                    timelineDb.CheckpointWorkspace(workspaceId);
                 }
                 catch (Exception ex)
                 {
                     HaloLogger.App.Warn(
-                        "[SessionRepository] timeline database bootstrap failed, meta save continues: "
+                        "[SessionRepository] workspace database bootstrap failed, meta save continues: "
                             + ex.Message
                     );
                 }
             }
-            string path = GetSessionMetaPath(workspaceId, meta.Id);
-            await AtomicFileWriter.WriteJsonAtomicAsync(path, meta, ct).ConfigureAwait(false);
+            // 旧每会话库分支已随写入切换删除，仅保留工作区单库引导。
         }
         finally
         {

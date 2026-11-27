@@ -4,11 +4,11 @@ import type { UnifiedChatMessage } from '@shared/bridge/hostBridge';
 import { makePendingUser, matchConfirmedBySummary } from '@features/session/utils/pendingUser';
 
 describe('pendingBubbleRendersWithoutOverlayMessage', () => {
-  it('V2 下 overlay 恒等于 sessionMessages，气泡走摘要区直渲染', () => {
+  it('摘要直渲染：气泡恒等于基础消息，不依赖旧链', () => {
     const base = [{ id: 'u1' }] as UnifiedChatMessage[];
-    const isV2Timeline = ref(true);
+    const timelineReady = ref(true);
     const pendingOverlayMessages = computed<UnifiedChatMessage[]>(() => {
-      if (isV2Timeline.value) return base;
+      if (timelineReady.value) return base;
       return base;
     });
     expect(pendingOverlayMessages.value).toBe(base);
@@ -18,7 +18,7 @@ describe('pendingBubbleRendersWithoutOverlayMessage', () => {
 });
 
 describe('pendingConfirmedBySummaryOnly', () => {
-  it('摘要命中即转正，V2 不走 jsonl 启发式', () => {
+  it('摘要命中即转正，不走旧启发式', () => {
     const pending = makePendingUser({ requestId: 'req-9', sessionId: 's1', content: 'hi' });
     const hit = matchConfirmedBySummary(pending, [{ lastRequestId: 'req-9' }]);
     expect(hit).not.toBeNull();

@@ -63,6 +63,18 @@ exit /b 1
 
 echo ==^> [3/3] Copying publish output to .\%DIST_DIR%\ ...
 if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
+REM Clear stale dist\wwwroot before copying: hashed frontend assets from previous
+REM builds would otherwise pile up, because robocopy without /MIR never deletes
+REM extra files on the destination. The source wwwroot is already clean (pnpm
+REM prebuild/clean-assets.mjs + fresh dotnet publish), so robocopy refills it.
+if exist "%DIST_DIR%\wwwroot" (
+echo     Clearing stale "%DIST_DIR%\wwwroot" ...
+rmdir /s /q "%DIST_DIR%\wwwroot"
+if exist "%DIST_DIR%\wwwroot" (
+echo [ERROR] Failed to clear "%DIST_DIR%\wwwroot" ^(file still in use?^).
+exit /b 1
+)
+)
 robocopy "%PUBLISH_DIR%" "%DIST_DIR%" /E /NFL /NDL /NJH /NJS
 set "COPY_CODE=%ERRORLEVEL%"
 REM Robocopy exit 0-7 = success (copied / extra files), 8+ = failure.
@@ -71,8 +83,14 @@ echo [ERROR] Copy to dist failed ^(robocopy exit %COPY_CODE%^).
 exit /b 1
 )
 
+echo {"useLocalData": true} > "%DIST_DIR%\portable.data.json"
+if errorlevel 1 (
+echo [ERROR] Failed to write %DIST_DIR%\portable.data.json.
+exit /b 1
+)
 echo.
 echo [OK] Done. Test binary is in .\%DIST_DIR%\ ^(%RUNTIME%^).
 echo      Example: .\%DIST_DIR%\Host.Desktop.exe
+echo      Data will be stored in .\%DIST_DIR%\.local-data\Data.
 endlocal
 pause

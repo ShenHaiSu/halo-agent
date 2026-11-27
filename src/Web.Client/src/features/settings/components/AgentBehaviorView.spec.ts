@@ -1,5 +1,5 @@
 /**
- * need23：智能体行为页（设置与诊断中心 → 智能体行为）集成测试。
+ * 智能体行为页（设置与诊断中心 → 智能体行为）集成测试。
  *
  * 覆盖此前全是**静默失败**的三类问题：
  * 1. 子代理配置卡 / 子运行监控卡：模板用了但没 import → Vue 编译成 resolveComponent("Xxx")
@@ -14,7 +14,7 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import naive from 'naive-ui';
 import { defineComponent, h } from 'vue';
 
-const { bridgeStub, enterSubMock } = vi.hoisted(() => ({
+const { bridgeStub, enterSubMock, dialogStub } = vi.hoisted(() => ({
   bridgeStub: {
     getAgentConfig: vi.fn(),
     saveAgentConfig: vi.fn(),
@@ -23,6 +23,7 @@ const { bridgeStub, enterSubMock } = vi.hoisted(() => ({
     cancelAgentTree: vi.fn(),
   },
   enterSubMock: vi.fn(),
+  dialogStub: { warning: vi.fn(), error: vi.fn(), success: vi.fn() },
 }));
 
 vi.mock('@shared/bridge/hostBridge', async (importOriginal) => {
@@ -45,12 +46,14 @@ vi.mock('naive-ui', async (importOriginal) => {
       info: vi.fn(),
       warning: vi.fn(),
     }),
-    useDialog: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }),
+    useDialog: () => dialogStub,
   };
 });
 
 import AgentBehaviorView from './AgentBehaviorView.vue';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useAgentConfigStore } from '@/stores/agentConfigStore';
+import { haloEventBus } from '@shared/bridge/hostBridge';
 
 const FULL_SUB_ID = 'sess_abcdef0123456789';
 
@@ -116,10 +119,12 @@ describe('AgentBehaviorView（设置与诊断中心 → 智能体行为）', () 
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
-    bridgeStub.getAgentConfig.mockReset().mockResolvedValue({ ok: true, data: agentConfigDoc });
-    bridgeStub.getSubRuntime.mockReset().mockResolvedValue({ ok: true, data: runtimeInfo });
+    bridgeStub.getAgentConfig.mockReset().mockResolvedValue({ ok: true, data: structuredClone(agentConfigDoc) });
+    bridgeStub.getSubRuntime.mockReset().mockResolvedValue({ ok: true, data: structuredClone(runtimeInfo) });
     bridgeStub.cancelAgentTree.mockReset().mockResolvedValue({ ok: true, data: true });
     enterSubMock.mockReset().mockResolvedValue(undefined);
+    dialogStub.warning.mockReset();
+    dialogStub.error.mockReset();
     const ws = useWorkspaceStore();
     ws.activeWorkspaceId = 'ws-1';
     ws.activeSessionId = 'sess-main';
@@ -168,5 +173,139 @@ describe('AgentBehaviorView（设置与诊断中心 → 智能体行为）', () 
     await flushPromises();
     expect(enterSubMock).toHaveBeenCalledTimes(1);
     expect(enterSubMock.mock.calls[0][2]).toBe(FULL_SUB_ID);
+  });
+
+  it('装配 5 张独占卡片，不存在模块内二级导航', async () => {
+    const w = await mountView(pinia);
+    expect(w.find('[role="tablist"]').exists()).toBe(false);
+    expect(w.find('[data-testid="agent-section-nav"]').exists()).toBe(false);
+    for (const id of [
+      'agent-card-timeout',
+      'agent-card-iterations',
+      'agent-card-subagents',
+      'agent-card-monitor',
+      'agent-card-rejection',
+    ]) {
+      expect(w.find(`[data-testid="${id}"]`).exists(), id).toBe(true);
+    }
+    for (const id of ['timeout', 'iterations', 'subagents']) {
+      expect(w.get(`[data-testid="agent-card-${id}"] .agent-card-toggle`).attributes('aria-expanded')).toBe('true');
+    }
+    for (const id of ['monitor', 'rejection']) {
+      expect(w.get(`[data-testid="agent-card-${id}"] .agent-card-toggle`).attributes('aria-expanded')).toBe('false');
+    }
+  });
+
+  it('修改超时只标记超时卡片及其字段行', async () => {
+    const w = await mountView(pinia);
+    await w.get('[data-testid="agent-timeout-default-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 45000);
+    await flushPromises();
+    expect(w.get('[data-testid="agent-card-timeout"]').find('[data-testid="agent-card-dirty-timeout"]').exists()).toBe(true);
+    expect(w.get('[data-testid="agent-card-timeout"]').find('.agent-setting-row.is-changed').exists()).toBe(true);
+    expect(w.get('[data-testid="agent-card-iterations"]').find('.agent-card-dirty').exists()).toBe(false);
+    expect(w.get('[data-testid="agent-card-subagents"]').find('.agent-card-dirty').exists()).toBe(false);
+  });
+
+  it('保存成功后脏态清零', async () => {
+    bridgeStub.saveAgentConfig.mockReset().mockResolvedValue({ ok: true, data: structuredClone(agentConfigDoc) });
+    const w = await mountView(pinia);
+    await w.get('[data-testid="agent-timeout-default-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 45000);
+    await w.get('[data-testid="agent-save"]').trigger('click');
+    await flushPromises();
+    expect((w.get('[data-testid="agent-save"]').element as HTMLButtonElement).disabled).toBe(true);
+    expect(w.find('[data-testid="agent-card-timeout"] .agent-card-dirty').exists()).toBe(false);
+  });
+
+  it('放弃更改恢复到最后一次保存值', async () => {
+    const w = await mountView(pinia);
+    const store = useAgentConfigStore();
+    await w.get('[data-testid="agent-timeout-default-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 45000);
+    expect(store.config?.execDefaultTimeoutMs).toBe(45000);
+    await w.get('[data-testid="agent-discard"]').trigger('click');
+    await flushPromises();
+    expect(store.config?.execDefaultTimeoutMs).toBe(120000);
+  });
+
+  it('恢复全部走确认弹窗并调用后端 resetAll', async () => {
+    bridgeStub.resetAgentConfig.mockReset().mockResolvedValue({ ok: true, data: structuredClone(agentConfigDoc) });
+    dialogStub.warning.mockImplementation((options: { onPositiveClick?: () => Promise<void> }) => {
+      void options.onPositiveClick?.();
+    });
+    const w = await mountView(pinia);
+    await w.get('[data-testid="agent-reset-all"]').trigger('click');
+    await flushPromises();
+    expect(bridgeStub.resetAgentConfig).toHaveBeenCalledWith('');
+  });
+
+  it('整卡恢复按后端别名串行调用', async () => {
+    bridgeStub.resetAgentConfig.mockReset().mockResolvedValue({ ok: true, data: structuredClone(agentConfigDoc) });
+    const w = await mountView(pinia);
+    const card = w.get('[data-testid="agent-card-timeout"]');
+    const button = card.findAll('button').find((item) => item.text().includes('恢复本卡默认'));
+    expect(button).toBeDefined();
+    await button?.trigger('click');
+    await flushPromises();
+    expect(bridgeStub.resetAgentConfig.mock.calls.map((call) => call[0])).toEqual(['defaultTimeout', 'maxTimeout']);
+  });
+
+  it('前端校验失败时展开卡片并展示定位提示', async () => {
+    bridgeStub.getAgentConfig.mockReset().mockResolvedValue({
+      ok: true,
+      data: { ...agentConfigDoc, execDefaultTimeoutMs: 3600001 },
+    });
+    const w = await mountView(pinia);
+    await w.get('[data-testid="agent-timeout-max-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 500000);
+    const toggle = w.get('[data-testid="agent-card-timeout"] .agent-card-toggle');
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+    await w.get('[data-testid="agent-save"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="agent-validation-alert"]').exists()).toBe(true);
+    expect(w.get('[data-testid="agent-card-timeout"] .agent-card-toggle').attributes('aria-expanded')).toBe('true');
+  });
+
+  it('后端校验失败按 lastError.field 定位到子代理卡片', async () => {
+    bridgeStub.saveAgentConfig.mockReset().mockResolvedValue({
+      ok: false,
+      code: 'AGENT_VALIDATION',
+      message: 'invalid subMaxParallel',
+    });
+    const w = await mountView(pinia);
+    await w.get('[data-testid="agent-sub-parallel-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 5);
+    await w.get('[data-testid="agent-save"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-testid="agent-validation-alert"]').text()).toContain('invalid subMaxParallel');
+    expect(w.get('[data-testid="agent-card-subagents"] .agent-card-toggle').attributes('aria-expanded')).toBe('true');
+  });
+
+  it('外部 storage 变更不覆盖未保存编辑', async () => {
+    const w = await mountView(pinia);
+    const store = useAgentConfigStore();
+    await w.get('[data-testid="agent-timeout-default-input"]').findComponent({ name: 'InputNumber' }).vm.$emit('update:value', 45000);
+    haloEventBus.emitLocal('storage:changed', {});
+    await flushPromises();
+    expect(store.config?.execDefaultTimeoutMs).toBe(45000);
+    expect(store.externalChangePending).toBe(true);
+  });
+
+  it('查看拒绝告警展开拒绝记录卡', async () => {
+    const w = await mountView(pinia);
+    expect(w.get('[data-testid="agent-card-rejection"] .agent-card-toggle').attributes('aria-expanded')).toBe('false');
+    await w.get('[data-testid="agent-sub-view-rejection"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-testid="agent-card-rejection"] .agent-card-toggle').attributes('aria-expanded')).toBe('true');
+  });
+
+  it('生效说明不再常驻，改由保存按钮 title 承载', async () => {
+    const w = await mountView(pinia);
+    expect(w.text()).not.toContain('生效范围：全局 config/agent.json');
+    expect(w.get('[data-testid="agent-save"]').attributes('title')).toContain('下一轮对话起生效');
+  });
+
+  it('运行监控只保留正文一个刷新入口', async () => {
+    const w = await mountView(pinia);
+    const card = w.get('[data-testid="agent-card-monitor"]');
+    expect(card.findAll('button').filter((btn) => btn.text().trim() === '刷新')).toHaveLength(1);
+    expect(w.findAll('[data-testid="agent-sub-refresh"]')).toHaveLength(1);
   });
 });

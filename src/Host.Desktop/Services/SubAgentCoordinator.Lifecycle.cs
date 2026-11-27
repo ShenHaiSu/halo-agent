@@ -11,8 +11,9 @@ namespace Host.Desktop.Services;
 
 public sealed partial class SubAgentCoordinator
 {
-    /// <summary>need22-P1 T4：Barrier 总体超时预算（子数×单子超时+buffer；单子超时取 turnTimeoutMs）。</summary>
-    private TimeSpan ResolveBarrierBudget(int subCount)
+    /// <summary>Barrier 总体超时预算（子数×单子超时+buffer，clamp 到 [1000, HardTimeoutCeilMs×8]）。
+    /// 取消源拆分后 Barrier 按用户令牌等待，可合法超过主轮超时，故不再联动压低预算。</summary>
+    internal TimeSpan ResolveBarrierBudget(int subCount)
     {
         try
         {
@@ -76,23 +77,29 @@ public sealed partial class SubAgentCoordinator
     public int CancelTree(string parentSessionId)
     {
         int n = 0;
-        if (_trees.TryGetValue(parentSessionId, out var list))
+        if (!_trees.TryGetValue(parentSessionId, out var list))
+            return n;
+
+        List<SubHandle> snap;
+        lock (list)
         {
-            List<SubHandle> snap;
-            lock (list)
+            snap = list.ToList();
+        }
+        var failures = new List<Exception>();
+        foreach (var h in snap)
+        {
+            try
             {
-                snap = list.ToList();
+                h.Cts.Cancel();
+                n++;
             }
-            foreach (var h in snap)
+            catch (Exception ex)
             {
-                try
-                {
-                    h.Cts.Cancel();
-                    n++;
-                }
-                catch { }
+                failures.Add(ex);
             }
         }
+        if (failures.Count > 0)
+            throw new AggregateException("One or more sub-agent cancellations failed.", failures);
         return n;
     }
 
@@ -159,8 +166,10 @@ public sealed partial class SubAgentCoordinator
                         continue;
                     try
                     {
-                        m.SubStatus = "cancelled";
-                        m.UpdatedAtUtc = DateTime.UtcNow;
+                        // 显式落盘终态，避免随后 Append 用旧 meta 覆盖回 running/pending。
+                        await _sessions
+                            .UpdateSubStatusAsync(ws.Id, m.Id, "cancelled")
+                            .ConfigureAwait(false);
                         await _sessions
                             .AppendSessionMessageAsync(
                                 ws.Id,
@@ -185,22 +194,10 @@ public sealed partial class SubAgentCoordinator
     {
         try
         {
-            var meta = await _sessions
-                .GetSessionAsync(workspaceId, subSessionId)
-                .ConfigureAwait(false);
-            if (meta == null)
-                return;
-            meta.SubStatus = status;
-            meta.UpdatedAtUtc = DateTime.UtcNow;
+            // 状态经显式入口写入 meta 与 index，不再靠 [SubStatus] 消息的副作用。
             await _sessions
-                .AppendSessionMessageAsync(
-                    workspaceId,
-                    subSessionId,
-                    UnifiedChatMessage.Assistant($"[SubStatus] {status}"),
-                    CancellationToken.None
-                )
+                .UpdateSubStatusAsync(workspaceId, subSessionId, status)
                 .ConfigureAwait(false);
-            // Append 已刷 index（含 SubStatus）；无需额外写 meta
         }
         catch { }
     }

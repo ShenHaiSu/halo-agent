@@ -46,6 +46,26 @@ public sealed class UiActiveStateDto
 }
 
 /// <summary>
+/// 位于 &lt;DataRootPath&gt;\config\appearance.json 的前端外观真相源。
+/// 独立文件：dev(http://localhost:5173) 与 release(app://local) 的 localStorage 按 origin 隔离，
+/// 故外观配置不再以浏览器 localStorage 为真相源，统一落到后端数据根，两种模式共享。
+/// 默认值与前端 shared/ui/appearance.ts 的 DEFAULT_APPEARANCE 严格对齐。
+/// </summary>
+public sealed class AppearanceState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string ThemeMode { get; set; } = "dark";
+    public string ThemeColor { get; set; } = "#3b82f6";
+    public int FontSize { get; set; } = 13;
+    public string ChineseFont { get; set; } = "Microsoft YaHei UI";
+    public string EnglishFont { get; set; } = "Segoe UI";
+    public string MonoFont { get; set; } = "Consolas";
+    public string ChatWidthMode { get; set; } = "centered";
+    public string SendKeyMode { get; set; } = "enter";
+    public string LastUpdatedUtc { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+}
+
+/// <summary>
 /// 宿主系统运行环境与诊断信息 DTO。
 /// </summary>
 public sealed class SystemRuntimeInfo
@@ -118,12 +138,62 @@ public sealed class StorageValidationResult
     public string? RiskCode { get; init; }
 }
 
-/// <summary>单个受管子目录的存储占用明细。</summary>
+/// <summary>单个受管子目录的存储占用明细。SizeBytes 始终是物理字节总和。</summary>
 public sealed class StorageBreakdownItem
 {
     public string Name { get; init; } = string.Empty;
     public long SizeBytes { get; init; }
     public int FileCount { get; init; }
+
+    /// <summary>
+    /// 仅 sessions 行填充：每个工作区主库的页级明细。不存在时为 null，老前端忽略。
+    /// </summary>
+    public List<WorkspaceDatabaseStorageDetail>? DatabaseDetails { get; init; }
+}
+
+/// <summary>
+/// 单个工作区历史库的页级存储明细：逻辑占用与物理文件的双口径对照。
+/// 页统计只针对主库文件，不含备份与会话私有目录。
+/// </summary>
+public sealed class WorkspaceDatabaseStorageDetail
+{
+    public string WorkspaceId { get; init; } = string.Empty;
+    public string DatabasePath { get; init; } = string.Empty;
+    public long PhysicalBytes { get; init; }
+    public long PageSizeBytes { get; init; }
+    public long PageCount { get; init; }
+    public long FreePageCount { get; init; }
+    public long UsedPageBytes { get; init; }
+    public long ReclaimablePageBytes { get; init; }
+    public long BackupBytes { get; init; }
+    public long WalBytes { get; init; }
+    public long ShmBytes { get; init; }
+    public long TempBytes { get; init; }
+    public bool Measured { get; init; }
+    public string? Warning { get; init; }
+    public string MeasuredAtUtc { get; init; } = string.Empty;
+}
+
+/// <summary>工作区历史库手动压实结果：权威写失败绝不报成功，辅助阶段只记告警。</summary>
+public sealed class WorkspaceCompactionResult
+{
+    public bool Success { get; init; }
+    public string? ErrorCode { get; init; }
+    public long BeforeBytes { get; init; }
+    public long AfterBytes { get; init; }
+    public long ReclaimedBytes => Math.Max(0, BeforeBytes - AfterBytes);
+    public bool WalCheckpointed { get; init; }
+    public string? Warning { get; init; }
+}
+
+/// <summary>工作区历史库备份清理结果：只删备份与过期临时文件，主库与 WAL/SHM 永不触碰。</summary>
+public sealed class WorkspaceBackupCleanupResult
+{
+    public bool Success { get; init; }
+    public string? ErrorCode { get; init; }
+    public long FreedBytes { get; init; }
+    public bool BackupExisted { get; init; }
+    public string? Warning { get; init; }
 }
 
 /// <summary>数据根目录按子目录聚合的存储分布。</summary>

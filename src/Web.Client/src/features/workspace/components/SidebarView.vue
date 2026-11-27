@@ -105,16 +105,33 @@
                     <ExternalLink class="w-3.5 h-3.5" />
                   </template>
                 </n-button>
-                <n-popconfirm v-if="workspaces.length > 1" @positive-click="emit('remove-workspace', ws.id)">
-                  <template #trigger>
-                    <n-button quaternary circle size="tiny" type="error" title="从工作区列表移除">
-                      <template #icon>
-                        <Trash2 class="w-3.5 h-3.5" />
-                      </template>
-                    </n-button>
+                <n-button
+                  v-if="workspaces.length > 1 && canRemoveWorkspace"
+                  quaternary
+                  circle
+                  size="tiny"
+                  type="error"
+                  title="移除或彻底删除工作区"
+                  :data-testid="`workspace-remove-btn-${ws.id}`"
+                  @click="emit('request-remove-workspace', ws.id)"
+                >
+                  <template #icon>
+                    <Trash2 class="size-3.5" />
                   </template>
-                  确认从列表移除该工作路径？（不会删除磁盘文件）
-                </n-popconfirm>
+                </n-button>
+                <n-button
+                  v-else-if="workspaces.length > 1"
+                  quaternary
+                  circle
+                  size="tiny"
+                  type="error"
+                  disabled
+                  title="当前宿主不支持工作区双模式移除，请升级宿主后重试"
+                >
+                  <template #icon>
+                    <Trash2 class="size-3.5" />
+                  </template>
+                </n-button>
               </div>
             </div>
           </div>
@@ -166,10 +183,12 @@
               :active="sess.id === activeSessionId"
               :armed="armedId === sess.id"
               :running="runningIds.includes(sess.id)"
+              :generating="generatingIds.includes(sess.id)"
               :editing="editingId === sess.id"
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
               :deleting="deletingId === sess.id"
+              :can-delete-session="canDeleteSession"
               :menu-open="menuId === sess.id"
               :now-tick="nowTick"
               @select="emit('select-session', $event)"
@@ -195,10 +214,12 @@
               :active="sess.id === activeSessionId"
               :armed="armedId === sess.id"
               :running="runningIds.includes(sess.id)"
+              :generating="generatingIds.includes(sess.id)"
               :editing="editingId === sess.id"
               :draft="draft"
               :ask-pending="askIds.includes(sess.id)"
               :deleting="deletingId === sess.id"
+              :can-delete-session="canDeleteSession"
               :menu-open="menuId === sess.id"
               :now-tick="nowTick"
               @select="emit('select-session', $event)"
@@ -270,9 +291,12 @@ defineProps<{
   draft: string;
   armedId: string | null;
   deletingId: string | null;
+  canDeleteSession: boolean;
+  canRemoveWorkspace: boolean;
   menuId: string | null;
   nowTick: number;
   runningIds: string[];
+  generatingIds: string[];
   askIds: string[];
   editingWorkspaceId: string | null;
   workspaceDraft: string;
@@ -283,7 +307,7 @@ const emit = defineEmits<{
   'update:draft': [v: string];
   'select-workspace': [id: string];
   'open-explorer': [path: string];
-  'remove-workspace': [id: string];
+  'request-remove-workspace': [id: string];
   'add-workspace': [];
   'rename-workspace-start': [ws: WorkspaceInfo];
   'update:workspace-draft': [v: string];

@@ -23,7 +23,8 @@ public sealed partial class StoragePathManager
         "cef-cache",
         "skills",
         "memory",
-        "metrics"
+        "metrics",
+        "backups"
     };
 
     private static readonly string[] MigratableSubDirectories =
@@ -34,7 +35,8 @@ public sealed partial class StoragePathManager
         "logs",
         "skills",
         "memory",
-        "metrics"
+        "metrics",
+        "backups"
     };
 
     private readonly object _stateLock = new();
@@ -101,27 +103,17 @@ public sealed partial class StoragePathManager
     public string GetSessionDirectory(string workspaceId, string sessionId) =>
         Path.Combine(SessionsDirectory, workspaceId ?? string.Empty, sessionId ?? string.Empty);
 
-    public string GetHistoryDbPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db"
-        );
+    public string GetWorkspaceDbPath(string workspaceId) =>
+        Path.Combine(SessionsDirectory, workspaceId ?? string.Empty, "history.db");
 
-    public string GetHistoryDbWalPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-wal";
+    public string GetWorkspaceDbWalPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + "-wal";
 
-    public string GetHistoryDbShmPath(string workspaceId, string sessionId) =>
-        GetHistoryDbPath(workspaceId, sessionId) + "-shm";
+    public string GetWorkspaceDbShmPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + "-shm";
 
-    public string GetHistoryBackupPath(string workspaceId, string sessionId) =>
-        Path.Combine(
-            SessionsDirectory,
-            workspaceId ?? string.Empty,
-            sessionId ?? string.Empty,
-            "history.db.bak"
-        );
+    public string GetWorkspaceBackupPath(string workspaceId) =>
+        GetWorkspaceDbPath(workspaceId) + ".bak";
 
     public string GetSessionToolOutputsDir(string workspaceId, string sessionId) =>
         Path.Combine(GetSessionDirectory(workspaceId, sessionId), "tool-outputs");
@@ -135,6 +127,9 @@ public sealed partial class StoragePathManager
 
     /// <summary>UI 活跃状态文件（独立于 app-settings，避免多写者读-改-写覆盖；随数据根迁移）。</summary>
     public string UiStateFilePath => Path.Combine(ConfigDirectory, "ui-state.json");
+
+    /// <summary>外观配置真相源文件（dev/release 共用同一数据根，规避 localStorage 按 origin 隔离）。</summary>
+    public string AppearanceFilePath => Path.Combine(ConfigDirectory, "appearance.json");
 
     private StoragePathManager(
         string bootstrapFilePath,
@@ -166,40 +161,25 @@ public sealed partial class StoragePathManager
     public static StoragePathManager Initialize(
         string? customBootstrapFilePath = null,
         string? customDefaultDataRoot = null,
-        string? customFallbackDataRoot = null
+        string? customFallbackDataRoot = null,
+        string? exeDirectory = null
     )
     {
-        var localAppData = Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData
+        var location = ResolveDataLocation(
+            customBootstrapFilePath,
+            customDefaultDataRoot,
+            customFallbackDataRoot,
+            exeDirectory
         );
-        var haloLocalAppDataDir = Path.Combine(localAppData, "HaloAgent");
-
-        var envBootstrap = Environment.GetEnvironmentVariable("HALO_BOOTSTRAP_PATH");
-        var bootstrapPath = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customBootstrapFilePath)
-                ? customBootstrapFilePath
-                : !string.IsNullOrWhiteSpace(envBootstrap)
-                    ? envBootstrap
-                    : Path.Combine(haloLocalAppDataDir, "bootstrap.json")
-        );
-
-        var defaultRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customDefaultDataRoot)
-                ? customDefaultDataRoot
-                : DefaultCDriveDataRoot
-        );
-
-        var fallbackRoot = Path.GetFullPath(
-            !string.IsNullOrWhiteSpace(customFallbackDataRoot)
-                ? customFallbackDataRoot
-                : Path.Combine(haloLocalAppDataDir, "Data")
-        );
+        var bootstrapPath = location.BootstrapPath;
+        var defaultRoot = location.DataRootPath;
+        var fallbackRoot = location.FallbackDataRootPath;
 
         Directory.CreateDirectory(Path.GetDirectoryName(bootstrapPath)!);
 
-        var existingBootstrap = AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(
-            bootstrapPath
-        );
+        var existingBootstrap = location.IsPortable
+            ? null
+            : AtomicFileWriter.ReadJsonOrDefault<StorageBootstrapConfig>(bootstrapPath);
         var preferredPath = !string.IsNullOrWhiteSpace(existingBootstrap?.DataRootPath)
             ? existingBootstrap!.DataRootPath
             : defaultRoot;
@@ -358,6 +338,22 @@ public sealed partial class StoragePathManager
         state.LastActiveAtUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         await AtomicFileWriter
             .WriteJsonAtomicAsync(UiStateFilePath, state, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>读取外观配置（无文件/空/坏 JSON 一律回默认，永不抛）。</summary>
+    public AppearanceState LoadAppearance()
+    {
+        var state = AtomicFileWriter.ReadJsonOrDefault<AppearanceState>(AppearanceFilePath);
+        return state ?? new AppearanceState();
+    }
+
+    /// <summary>保存外观配置（原子落盘）。</summary>
+    public async Task SaveAppearanceAsync(AppearanceState state, CancellationToken ct = default)
+    {
+        state.LastUpdatedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        await AtomicFileWriter
+            .WriteJsonAtomicAsync(AppearanceFilePath, state, ct)
             .ConfigureAwait(false);
     }
 

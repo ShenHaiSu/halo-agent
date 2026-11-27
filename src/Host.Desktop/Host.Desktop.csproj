@@ -4,9 +4,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- TFM/Nullable/ImplicitUsings/LangVersion/SelfContained/VersionPrefix 见 develop/Directory.Build.props（P4 H1/H7），此处不重复 -->
     <!-- 明确指定平台架构与 RuntimeIdentifier，确保 CefSharp 109 非托管与混合模式运行时 DLL 自动平铺到输出目录 -->
-    <PlatformTarget>x64</PlatformTarget>
+    <!-- 平台与 RID 显式对应：发布命令传 -p:Platform=x86 -r win-x86 时不得被工程值覆盖 -->
+    <PlatformTarget Condition="'$(Platform)' == 'x86'">x86</PlatformTarget>
+    <PlatformTarget Condition="'$(Platform)' != 'x86'">x64</PlatformTarget>
     <Platforms>x64;x86</Platforms>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
 

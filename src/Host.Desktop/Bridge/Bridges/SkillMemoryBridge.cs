@@ -4,7 +4,6 @@ using Host.Desktop.Services;
 
 namespace Host.Desktop.Bridge;
 
-
 /// <summary>need21-B02: SkillMemory 垂直切片（DTO 见 SkillMemoryModels；OpenSkillMemoryFolder 已移入 ShellBridge）。</summary>
 public sealed partial class HostBridgeFacade
 {

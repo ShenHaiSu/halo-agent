@@ -126,7 +126,9 @@ export function useTimelineWindow(deps: WindowDeps) {
       if (!el || !paneVisible.value) return;
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       const pinnedNow = distanceFromBottom <= PIN_TOLERANCE_PX;
-      if (pinnedNow !== follow.pinnedRef.value) {
+      // 交接期摘要插入/正文收缩会短暂改变几何，不能用距离判据解除跟随（用户在交接结束时还要回底）。
+      // 交接锁只挡这条几何路径；用户主动 wheel/touch/keydown 仍经 bindUserScroll 立即解锁。
+      if (pinnedNow !== follow.pinnedRef.value && !uiStore.handoffLocked) {
         if (pinnedNow) {
           follow.ingest(distanceFromBottom, 'unknown');
           clearReadingWindow();

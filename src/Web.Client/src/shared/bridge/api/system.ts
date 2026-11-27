@@ -1,6 +1,7 @@
 /** need21-F02: 系统域 API（旧 client.ts wrapNativeHostBridge 系统/存储/技能/用量/活跃态方法迁移，签名不变）。 */
 import type { BridgeTransport } from '../transport/transport';
 import type {
+  AppearanceSettingsDto,
   BridgeResponse,
   HostBridgeApi,
   SkillMemoryDetail,
@@ -16,6 +17,8 @@ import type {
   StorageValidationResult,
   SystemRuntimeInfo,
   UiActiveState,
+  WorkspaceBackupCleanupResult,
+  WorkspaceCompactionResult,
   UsageDbStatus,
   UsageFilter,
   UsageFilterOptions,
@@ -43,6 +46,8 @@ export function createSystemApi(
   | 'writeDiagnosticLog'
   | 'setWindowTitle'
   | 'getStorageBreakdown'
+  | 'compactWorkspaceHistory'
+  | 'deleteWorkspaceBackup'
   | 'getRecentHostEvents'
   | 'cleanupImageAttachments'
   | 'listSkillMemory'
@@ -58,6 +63,8 @@ export function createSystemApi(
   | 'getUsageDbStatus'
   | 'getLastActive'
   | 'setLastActive'
+  | 'getAppearance'
+  | 'setAppearance'
 > {
   return {
     async getSystemInfo() {
@@ -115,6 +122,28 @@ export function createSystemApi(
       } catch (e) {
         console.warn('[bridge] getStorageBreakdown unsupported:', (e as Error)?.message ?? e);
         return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '存储分布通道不可用' };
+      }
+    },
+    async compactWorkspaceHistory(workspaceId: string) {
+      try {
+        if (!t.supports('compactWorkspaceHistory')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '历史库压实通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<WorkspaceCompactionResult>>(
+          await t.call('compactWorkspaceHistory', workspaceId ?? '')
+        );
+      } catch (e) {
+        console.warn('[bridge] compactWorkspaceHistory unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '历史库压实通道不可用' };
+      }
+    },
+    async deleteWorkspaceBackup(workspaceId: string) {
+      try {
+        if (!t.supports('deleteWorkspaceBackup')) return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '备份清理通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<WorkspaceBackupCleanupResult>>(
+          await t.call('deleteWorkspaceBackup', workspaceId ?? '')
+        );
+      } catch (e) {
+        console.warn('[bridge] deleteWorkspaceBackup unsupported:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'STORAGE_UNSUPPORTED', message: '备份清理通道不可用' };
       }
     },
     async getRecentHostEvents(limit = 20) {
@@ -270,6 +299,24 @@ export function createSystemApi(
       } catch (e) {
         console.warn('[bridge] UISTATE_UNSUPPORTED:', (e as Error)?.message ?? e);
         return { ok: false, code: 'USAGE_UNSUPPORTED', message: '活跃状态通道不可用' };
+      }
+    },
+    async getAppearance() {
+      try {
+        if (!t.supports('getAppearance')) return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<AppearanceSettingsDto>>(await t.call('getAppearance'));
+      } catch (e) {
+        console.warn('[bridge] APPEARANCE_UNSUPPORTED:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+      }
+    },
+    async setAppearance(settingsJson: string) {
+      try {
+        if (!t.supports('setAppearance')) return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
+        return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('setAppearance', settingsJson));
+      } catch (e) {
+        console.warn('[bridge] APPEARANCE_UNSUPPORTED:', (e as Error)?.message ?? e);
+        return { ok: false, code: 'APPEARANCE_UNSUPPORTED', message: '外观配置通道不可用' };
       }
     },
   };

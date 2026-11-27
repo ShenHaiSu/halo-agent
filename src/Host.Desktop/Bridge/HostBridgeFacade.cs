@@ -23,9 +23,11 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
     private readonly ISessionRepository _sessionRepository;
     private readonly IWorkspaceSessionService _workspaceSessionService;
     private readonly ITokenBudgetService _tokenBudgetService;
+    private readonly SessionOperationCoordinator _sessionOperations;
     private ToolRegistry? _toolRegistry;
     private IAgentOrchestrator? _agentOrchestrator;
     private ICompactionService? _compactionService;
+    private WorkspaceStorageMaintenanceService? _storageMaintenance;
     private SubAgentCoordinator? _subCoordinator;
     private readonly bool _gpuDisabled;
 
@@ -56,6 +58,14 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
 
     private ToolRegistry ToolRegistryInternal => _toolRegistry ??= new ToolRegistry();
 
+    private WorkspaceStorageMaintenanceService StorageMaintenance =>
+        _storageMaintenance ??= new WorkspaceStorageMaintenanceService(
+            _storageManager,
+            _sessionRepository,
+            _sessionOperations,
+            WorkspaceLifecycleGate.Shared
+        );
+
     public HostBridgeFacade(
         Form? mainForm,
         StoragePathManager storageManager,
@@ -72,7 +82,8 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         AgentConfigService? agentConfigService = null,
         SkillMemoryService? skillMemoryService = null,
         SubAgentCoordinator? subCoordinator = null,
-        ToolRegistry? toolRegistry = null
+        ToolRegistry? toolRegistry = null,
+        SessionOperationCoordinator? sessionOperationCoordinator = null
     )
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
@@ -85,8 +96,15 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         _llmGatewayClient =
             llmGatewayClient ?? new LlmGatewayClient(_storageManager, _httpClientFactory);
         _sessionRepository = sessionRepository ?? new SessionRepository(_storageManager);
+        _sessionOperations = sessionOperationCoordinator ?? SessionOperationCoordinator.Shared;
         _workspaceSessionService =
-            workspaceSessionService ?? new WorkspaceSessionService(_sessionRepository);
+            workspaceSessionService
+            ?? new WorkspaceSessionService(
+                _sessionRepository,
+                _sessionOperations,
+                WorkspaceLifecycleGate.Shared,
+                id => _subCoordinator?.CancelTree(id)
+            );
         _tokenBudgetService =
             tokenBudgetService
             ?? new TokenBudgetService(_providerConfigService, _workspaceSessionService);

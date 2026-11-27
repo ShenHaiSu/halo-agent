@@ -167,7 +167,7 @@ public sealed partial class AgentOrchestrator
         string sessionId,
         Dictionary<string, PendingToolCall> pendingTools,
         List<string> toolOrder,
-        CancellationToken cancellationToken
+        TurnCancellation tokens
     )
     {
         var completedCalls = new List<UnifiedToolCall>();
@@ -217,20 +217,19 @@ public sealed partial class AgentOrchestrator
         try
         {
             await _sessionService
-                .AppendSessionMessageAsync(
-                    workspaceId,
-                    sessionId,
-                    assistantMessage,
-                    cancellationToken
-                )
+                .AppendSessionMessageAsync(workspaceId, sessionId, assistantMessage, tokens.Linked)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
-            // need12-P0：assistant 落盘时被取消，本 iteration 已落袋，保住前面行。
+            // assistant 落盘时被取消，本迭代已落袋，保住前面行。
             UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-            await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    iteration,
+                    "cancelled-during-assistant-persist"
+                )
                 .ConfigureAwait(false);
             return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
         }
@@ -250,12 +249,51 @@ public sealed partial class AgentOrchestrator
                         messagesForDb,
                         timelineBlocks,
                         timelineTurn,
-                        cancellationToken
+                        tokens.Linked
                     )
                     .ConfigureAwait(false);
             }
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+            UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await FinalizeCancelledTurnAsync(
+                    ctx,
+                    sessionId,
+                    iteration,
+                    "cancelled-during-turn-persist"
+                )
+                .ConfigureAwait(false);
+            return PhaseOutcome.End(AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions));
+        }
+        catch (Exception ex)
+        {
+            Infrastructure.Logging.HaloLogger.App.Warn(
+                "[Timeline] assistant turn persist failed sess=" + sessionId,
+                ex
+            );
+            UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
+            await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Error)
+                .ConfigureAwait(false);
+            PublishTurnEvent(
+                sessionId,
+                "TurnError",
+                new
+                {
+                    iteration,
+                    errorCode = "TIMELINE_PERSIST_FAILED",
+                    errorMessage = ex.Message,
+                }
+            );
+            return PhaseOutcome.End(
+                AgentTurnResult.Failed(
+                    "TIMELINE_PERSIST_FAILED",
+                    ex.Message,
+                    iteration,
+                    ctx.ToolExecutions
+                )
+            );
+        }
         PublishTurnEvent(
             sessionId,
             "AssistantMessagePersisted",
@@ -315,15 +353,19 @@ public sealed partial class AgentOrchestrator
                             workspaceId,
                             sessionId,
                             UnifiedChatMessage.Tool(ecid, emptyText, "unknown"),
-                            cancellationToken
+                            tokens.Linked
                         )
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
-                    PublishTurnEvent(sessionId, "TurnCancelled", new { iteration });
                     UsageRecorder.Flush(_usageMetrics, ctx.UsageRows, sessionId, workspaceId);
-                    await MarkTimelineTurnEndedAsync(ctx, Core.Models.TimelineTurnStatus.Cancelled)
+                    await FinalizeCancelledTurnAsync(
+                            ctx,
+                            sessionId,
+                            iteration,
+                            "cancelled-during-empty-tool-persist"
+                        )
                         .ConfigureAwait(false);
                     return PhaseOutcome.End(
                         AgentTurnResult.Cancelled(iteration, ctx.ToolExecutions)

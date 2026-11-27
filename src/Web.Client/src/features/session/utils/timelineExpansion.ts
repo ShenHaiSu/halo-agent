@@ -1,5 +1,10 @@
 const expandedTurns = new Set<string>();
 
+export function isTurnExpanded(turnId: string): boolean {
+  const id = String(turnId || '').trim();
+  return !!id && expandedTurns.has(id);
+}
+
 export function setTurnExpanded(turnId: string, expanded: boolean): void {
   const id = String(turnId || '').trim();
   if (!id) return;

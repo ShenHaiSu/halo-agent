@@ -107,10 +107,10 @@ public sealed class Stage05CompactTests : IDisposable
         await _service.AppendSessionMessageAsync(wsId, sessId, la);
     }
 
-    private static int JsonlLineCount(string wsDir, string sessId)
+    private async Task<List<UnifiedChatMessage>> DbMessagesAsync(string wsId, string sessId)
     {
-        string path = Path.Combine(wsDir, sessId, "messages.jsonl");
-        return File.ReadAllLines(path).Length;
+        var store = new SessionHistoryStore(new SessionHistoryDb(_storageManager));
+        return await store.GetMessagesAsync(wsId, sessId);
     }
 
     [Fact(DisplayName = "S05-03: 短历史 NoOp，不动盘、无 bak")]
@@ -124,6 +124,10 @@ public sealed class Stage05CompactTests : IDisposable
                 UnifiedChatMessage.User($"q{i}")
             );
 
+        var before = await DbMessagesAsync(wsId, sessId);
+        string bakPath = _storageManager.GetWorkspaceBackupPath(wsId);
+        bool bakBefore = File.Exists(bakPath);
+
         var compaction = new CompactionService(
             _service,
             _budgetService,
@@ -133,9 +137,10 @@ public sealed class Stage05CompactTests : IDisposable
         Assert.True(result.Success);
         Assert.Equal(0, result.RemovedMessages);
 
-        string sessionDir = _repository.GetSessionDirectory(wsId, sessId);
-        Assert.Equal(5, JsonlLineCount(_repository.GetWorkspaceDirectory(wsId), sessId));
-        Assert.Empty(Directory.GetFiles(sessionDir, "messages.compact-bak-*.jsonl"));
+        var after = await DbMessagesAsync(wsId, sessId);
+        Assert.Equal(before.Count, after.Count);
+        Assert.Equal(before.Select(m => m.Id).ToList(), after.Select(m => m.Id).ToList());
+        Assert.Equal(bakBefore, File.Exists(bakPath));
     }
 
     [Fact(DisplayName = "S05-03: 重写为 system+摘要+尾部，bak 存在，tool 无孤儿")]
@@ -143,9 +148,8 @@ public sealed class Stage05CompactTests : IDisposable
     {
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId);
-        string wsDir = _repository.GetWorkspaceDirectory(wsId);
-        int before = JsonlLineCount(wsDir, sessId);
-        Assert.True(before >= 15);
+        var before = await DbMessagesAsync(wsId, sessId);
+        Assert.True(before.Count >= 15);
 
         var compaction = new CompactionService(
             _service,
@@ -175,11 +179,12 @@ public sealed class Stage05CompactTests : IDisposable
             var rids = results.Select(r => r.ToolCallId!).ToHashSet();
             Assert.Subset(ids, rids);
         }
-        // bak 存在且行数=压缩前
-        string sessionDir = _repository.GetSessionDirectory(wsId, sessId);
-        var baks = Directory.GetFiles(sessionDir, "messages.compact-bak-*.jsonl");
-        Assert.Single(baks);
-        Assert.Equal(before, File.ReadAllLines(baks[0]).Length);
+        // DB 对比：压缩后 = 压缩前 - 移除数 + 摘要 1 条
+        Assert.Equal(before.Count - result.RemovedMessages + 1, after.Count);
+        // 成功即删工作区库快照
+        Assert.False(File.Exists(_storageManager.GetWorkspaceBackupPath(wsId)));
+        if (!string.IsNullOrWhiteSpace(result.BackupFileName))
+            Assert.False(File.Exists(result.BackupFileName));
         // meta.MessageCount 同步
         var meta = await _service.GetSessionAsync(wsId, sessId);
         Assert.Equal(after.Count, meta!.MessageCount);
@@ -190,8 +195,7 @@ public sealed class Stage05CompactTests : IDisposable
     {
         var (wsId, sessId) = await NewSessionAsync();
         await BuildHistoryAsync(wsId, sessId);
-        string jsonlPath = _repository.GetMessagesJsonlPath(wsId, sessId);
-        byte[] beforeBytes = await File.ReadAllBytesAsync(jsonlPath);
+        var beforeMsgs = await _service.GetSessionMessagesAsync(wsId, sessId);
         var metaBefore = await _service.GetSessionAsync(wsId, sessId);
         long billP = metaBefore!.CumulativePromptTokens;
         long billC = metaBefore.CumulativeCompletionTokens;
@@ -199,7 +203,8 @@ public sealed class Stage05CompactTests : IDisposable
         var compaction = new CompactionService(_service, _budgetService, new ThrowingGateway());
         var result = await compaction.CompactAsync(wsId, sessId);
         Assert.False(result.Success);
-        Assert.Equal(beforeBytes, await File.ReadAllBytesAsync(jsonlPath));
+        var afterMsgs = await _service.GetSessionMessagesAsync(wsId, sessId);
+        Assert.Equal(beforeMsgs.Select(m => m.Id).ToList(), afterMsgs.Select(m => m.Id).ToList());
         var metaAfter = await _service.GetSessionAsync(wsId, sessId);
         Assert.Equal(billP, metaAfter!.CumulativePromptTokens);
         Assert.Equal(billC, metaAfter.CumulativeCompletionTokens);

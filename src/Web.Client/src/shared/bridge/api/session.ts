@@ -6,8 +6,13 @@ import type {
   ContextBudgetStatusDto,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
+  HistoryTurnDeleteResultDto,
+  FirstRoundTexts,
+  HistoryCapabilities,
   HistoryTruncateResultDto,
   HostBridgeApi,
+  SessionDeletionResultDto,
+  WorkspaceRemovalResultDto,
   SessionGoalDto,
   SessionMetadata,
   SubRuntimeInfo,
@@ -19,6 +24,7 @@ import type {
   WorkspaceInfo,
 } from '../protocol/types';
 import { normalizeBridgePayload } from './normalize';
+import { UnsupportedHistoryCapabilities, normalizeHistoryCapabilities } from '../protocol/domain';
 
 export function createSessionApi(
   t: BridgeTransport
@@ -28,6 +34,7 @@ export function createSessionApi(
   | 'addWorkspace'
   | 'renameWorkspace'
   | 'removeWorkspace'
+  | 'removeWorkspaceV2'
   | 'browseWorkspaceFolder'
   | 'getSessions'
   | 'createSession'
@@ -35,8 +42,10 @@ export function createSessionApi(
   | 'appendSessionMessage'
   | 'updateSessionTitle'
   | 'generateSessionTitle'
+  | 'getFirstRoundTexts'
   | 'setSessionPinned'
   | 'deleteSession'
+  | 'deleteSessionV2'
   | 'exportSessionMarkdown'
   | 'getContextBudget'
   | 'compactSession'
@@ -50,10 +59,12 @@ export function createSessionApi(
   | 'clearGoal'
   | 'getSubSessionDetail'
   | 'getSubSessionMessages'
+  | 'getHistoryCapabilities'
   | 'truncateSessionHistory'
   | 'branchSession'
   | 'healSessionHistory'
   | 'deleteSessionMessage'
+  | 'deleteSessionTurn'
   | 'getTimelineSummary'
   | 'getBlockContents'
   | 'getToolResult'
@@ -71,6 +82,16 @@ export function createSessionApi(
     },
     async removeWorkspace(workspaceId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('removeWorkspace', workspaceId));
+    },
+    async removeWorkspaceV2(workspaceId: string, mode: 'unbind' | 'purge') {
+      if (!t.supports('removeWorkspaceV2')) {
+        return {
+          ok: false,
+          code: 'WORKSPACE_REMOVAL_UNSUPPORTED',
+          message: '当前宿主不支持工作区双模式移除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<WorkspaceRemovalResultDto>>(await t.call('removeWorkspaceV2', workspaceId ?? '', mode));
     },
     async browseWorkspaceFolder(initialPath?: string) {
       return normalizeBridgePayload<BridgeResponse<string | null>>(await t.call('browseWorkspaceFolder', initialPath ?? ''));
@@ -93,9 +114,15 @@ export function createSessionApi(
     async updateSessionTitle(workspaceId: string, sessionId: string, title: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('updateSessionTitle', workspaceId, sessionId, title));
     },
-    async generateSessionTitle(workspaceId: string, sessionId: string, providerId?: string, modelId?: string) {
+    async generateSessionTitle(workspaceId: string, sessionId: string, providerId?: string, modelId?: string, force?: boolean) {
       return normalizeBridgePayload<BridgeResponse<string>>(
-        await t.call('generateSessionTitle', workspaceId, sessionId, providerId ?? '', modelId ?? '')
+        await t.call('generateSessionTitle', workspaceId, sessionId, providerId ?? '', modelId ?? '', force ?? false)
+      );
+    },
+    /** need03-03-B：首轮取数直读（v2 会话可用；老后端缺方法时抛 BRIDGE_NOT_CONNECTED 由调用方回退）。 */
+    async getFirstRoundTexts(workspaceId: string, sessionId: string) {
+      return normalizeBridgePayload<BridgeResponse<FirstRoundTexts>>(
+        await t.call('getFirstRoundTexts', workspaceId ?? '', sessionId ?? '')
       );
     },
     async setSessionPinned(workspaceId: string, sessionId: string, isPinned: boolean) {
@@ -103,6 +130,18 @@ export function createSessionApi(
     },
     async deleteSession(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('deleteSession', workspaceId, sessionId));
+    },
+    async deleteSessionV2(workspaceId: string, sessionId: string) {
+      if (!t.supports('deleteSessionV2')) {
+        return {
+          ok: false,
+          code: 'SESSION_DELETE_UNSUPPORTED',
+          message: '当前宿主不支持安全会话删除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<SessionDeletionResultDto>>(
+        await t.call('deleteSessionV2', workspaceId ?? '', sessionId ?? '')
+      );
     },
     async exportSessionMarkdown(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<string>>(await t.call('exportSessionMarkdown', workspaceId, sessionId));
@@ -255,6 +294,22 @@ export function createSessionApi(
         return { ok: true, data: [] as UnifiedChatMessage[] };
       }
     },
+    async getHistoryCapabilities(workspaceId: string, sessionId: string) {
+      if (!t.supports('getHistoryCapabilities')) {
+        return { ok: true, data: { ...UnsupportedHistoryCapabilities } } as BridgeResponse<HistoryCapabilities>;
+      }
+      try {
+        const response = normalizeBridgePayload<BridgeResponse<HistoryCapabilities>>(
+          await t.call('getHistoryCapabilities', workspaceId ?? '', sessionId ?? '')
+        );
+        if (!response.ok) return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
+        const normalized = normalizeHistoryCapabilities(response.data);
+        // 破坏性能力必须同时满足宿主声明与传输层真实存在的方法，缺一即禁用。
+        return { ...response, data: { ...normalized, turnDelete: normalized.turnDelete && t.supports('deleteSessionTurn') } };
+      } catch {
+        return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
+      }
+    },
     async truncateSessionHistory(workspaceId: string, sessionId: string, anchorMessageId: string, removeAnchor: boolean) {
       return normalizeBridgePayload<BridgeResponse<HistoryTruncateResultDto>>(
         await t.call('truncateSessionHistory', workspaceId ?? '', sessionId ?? '', anchorMessageId ?? '', removeAnchor ?? true)
@@ -275,17 +330,35 @@ export function createSessionApi(
         await t.call('deleteSessionMessage', workspaceId ?? '', sessionId ?? '', messageId ?? '')
       );
     },
+    async deleteSessionTurn(workspaceId: string, sessionId: string, anchorMessageId: string) {
+      if (!t.supports('deleteSessionTurn')) {
+        return {
+          ok: false,
+          code: 'TURN_DELETE_UNSUPPORTED',
+          message: '当前宿主不支持整轮删除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<HistoryTurnDeleteResultDto>>(
+        await t.call('deleteSessionTurn', workspaceId ?? '', sessionId ?? '', anchorMessageId ?? '')
+      );
+    },
     async getTimelineSummary(workspaceId: string, sessionId: string) {
       return normalizeBridgePayload<BridgeResponse<TurnSummary[]>>(await t.call('getTimelineSummary', workspaceId ?? '', sessionId ?? ''));
     },
     async getBlockContents(workspaceId: string, sessionId: string, blockIds: string[]) {
-      return normalizeBridgePayload<BridgeResponse<TimelineBlockContentsResponse>>(await t.call('getBlockContents', workspaceId ?? '', sessionId ?? '', blockIds ?? []));
+      return normalizeBridgePayload<BridgeResponse<TimelineBlockContentsResponse>>(
+        await t.call('getBlockContents', workspaceId ?? '', sessionId ?? '', blockIds ?? [])
+      );
     },
     async getToolResult(workspaceId: string, sessionId: string, turnId: string, callId: string) {
-      return normalizeBridgePayload<BridgeResponse<TimelineToolResult>>(await t.call('getToolResult', workspaceId ?? '', sessionId ?? '', turnId ?? '', callId ?? ''));
+      return normalizeBridgePayload<BridgeResponse<TimelineToolResult>>(
+        await t.call('getToolResult', workspaceId ?? '', sessionId ?? '', turnId ?? '', callId ?? '')
+      );
     },
     async getTurnBlockIds(workspaceId: string, sessionId: string, turnId: string) {
-      return normalizeBridgePayload<BridgeResponse<string[]>>(await t.call('getTurnBlockIds', workspaceId ?? '', sessionId ?? '', turnId ?? ''));
+      return normalizeBridgePayload<BridgeResponse<string[]>>(
+        await t.call('getTurnBlockIds', workspaceId ?? '', sessionId ?? '', turnId ?? '')
+      );
     },
   };
 }

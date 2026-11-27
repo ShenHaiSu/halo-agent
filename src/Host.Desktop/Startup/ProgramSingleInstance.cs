@@ -70,7 +70,7 @@ public static class ProgramSingleInstance
         Action<string> warn
     )
     {
-        if (SingleInstanceGuard.ShouldBypass())
+        if (SingleInstanceGuard.ShouldBypassDataLock())
             return true;
         SingleInstanceGuard? guard;
         string mutexName;
