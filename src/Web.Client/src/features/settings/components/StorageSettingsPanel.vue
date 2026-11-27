@@ -101,6 +101,62 @@
             </span>
           </div>
           <div class="text-[11px] text-secondary font-mono">合计：{{ formatBytes(breakdown.totalBytes) }}</div>
+          <div v-if="databaseDetails.length > 0" class="space-y-1.5 border-t border-subtle pt-2" data-testid="storage-database-details">
+            <div class="text-xs font-medium text-secondary">历史库双口径（物理总量不变，仅解释“删会话后文件为何没立刻缩小”）</div>
+            <div class="text-[11px] text-secondary font-mono" data-testid="storage-database-summary">
+              主库已用页 {{ formatBytes(maintenanceSummary.totalUsedPageBytes) }} · 可压缩回收
+              {{ formatBytes(maintenanceSummary.totalReclaimableBytes) }} · 备份 {{ formatBytes(maintenanceSummary.totalBackupBytes) }} ·
+              WAL/SHM {{ formatBytes(maintenanceSummary.totalWalBytes) }}
+            </div>
+            <div class="text-[11px] text-secondary">瞬时估算，不等同于文件系统实际分配；统计失败行不计入可回收估算。</div>
+            <div
+              v-for="detail in databaseDetails"
+              :key="detail.workspaceId"
+              class="font-mono text-[11px]"
+              :data-testid="`database-detail-${detail.workspaceId}`"
+            >
+              <template v-if="detail.measured">
+                {{ detail.workspaceId }}：已用 {{ formatBytes(detail.usedPageBytes) }} / 空闲
+                {{ formatBytes(detail.reclaimablePageBytes) }} / 备份 {{ formatBytes(detail.backupBytes) }} / WAL
+                {{ formatBytes(detail.walBytes + detail.shmBytes) }}
+              </template>
+              <template v-else>
+                {{ detail.workspaceId }}：数据库明细不可用（{{ detail.warning || '未测量' }}），不显示 0 字节进度
+              </template>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap pt-1">
+              <n-input
+                v-model:value="maintenanceWorkspaceId"
+                size="small"
+                placeholder="输入工作区 ID（如 ws_xxx），默认首个已测量工作区"
+                class="font-mono text-xs min-w-52 flex-1"
+                data-testid="maintenance-workspace-input"
+              />
+              <n-button
+                size="small"
+                secondary
+                :loading="compacting"
+                :disabled="!canCompact || compacting || cleaningBackup || !activeMaintenanceWorkspaceId"
+                data-testid="compact-history-btn"
+                @click="handleCompactHistory"
+              >
+                压缩历史库…
+              </n-button>
+              <n-button
+                size="small"
+                secondary
+                :loading="cleaningBackup"
+                :disabled="!canDeleteBackup || compacting || cleaningBackup || !activeMaintenanceWorkspaceId"
+                data-testid="cleanup-backup-btn"
+                @click="handleCleanupBackup"
+              >
+                清理备份…
+              </n-button>
+            </div>
+            <div v-if="!canCompact || !canDeleteBackup" class="text-[11px] text-secondary" data-testid="maintenance-unsupported-tip">
+              当前宿主不支持历史库维护能力，请升级后重试。
+            </div>
+          </div>
         </div>
 
         <!-- 操作按钮组 -->
@@ -293,7 +349,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { useMessage } from 'naive-ui';
+import { useMessage, useDialog } from 'naive-ui';
 import {
   FolderSync,
   ExternalLink,
@@ -320,11 +376,25 @@ import {
   healthTagType,
   isLogChannelEmpty,
 } from '../composables/storageDisplay';
+import { selectDatabaseDetails, summarizeDatabaseDetails, useStorageMaintenance } from '../composables/useStorageMaintenance';
 import StorageDiagnosticCard from './StorageDiagnosticCard.vue';
 import StorageEventTimelineCard from './StorageEventTimelineCard.vue';
 
 const systemStore = useSystemStore();
 const message = useMessage();
+const dialog = useDialog();
+const maintenance = useStorageMaintenance();
+const { compacting, cleaningBackup, canCompact, canDeleteBackup } = maintenance;
+const maintenanceWorkspaceId = ref('');
+
+const databaseDetails = computed(() => selectDatabaseDetails(breakdown.value));
+const maintenanceSummary = computed(() => summarizeDatabaseDetails(databaseDetails.value));
+const activeMaintenanceWorkspaceId = computed(() => {
+  const input = maintenanceWorkspaceId.value.trim();
+  if (input) return input;
+  const firstMeasured = databaseDetails.value.find((d) => d.measured);
+  return firstMeasured?.workspaceId ?? databaseDetails.value[0]?.workspaceId ?? '';
+});
 
 const showMigrationDialog = ref(false);
 const pendingTargetPath = ref('');
@@ -501,6 +571,56 @@ async function handleCleanupExpiredLogs() {
   } else {
     message.error(res.message || '清理过期日志失败');
   }
+}
+
+function handleCompactHistory() {
+  const target = activeMaintenanceWorkspaceId.value;
+  if (!target) {
+    message.warning('请先输入要维护的工作区 ID');
+    return;
+  }
+  const detail = databaseDetails.value.find((d) => d.workspaceId === target);
+  const reclaimText = detail?.measured ? formatBytes(detail.reclaimablePageBytes) : '未知';
+  dialog.warning({
+    title: '压缩历史库',
+    content: `将对工作区 ${target} 执行原地 VACUUM，预计可回收 ${reclaimText}。压实前建议先备份，大库可能耗时数秒，期间请勿关闭窗口。确认继续？`,
+    positiveText: '确认压缩',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      const res = await maintenance.compactWorkspace(target);
+      if (res.ok && res.data) {
+        message.success(`历史库压实完成，已回收 ${formatBytes(res.data.reclaimedBytes)}`);
+        await systemStore.refreshAll();
+        await loadBreakdown();
+      } else {
+        message.error(res.message || '历史库压实失败');
+      }
+    },
+  });
+}
+
+function handleCleanupBackup() {
+  const target = activeMaintenanceWorkspaceId.value;
+  if (!target) {
+    message.warning('请先输入要维护的工作区 ID');
+    return;
+  }
+  dialog.warning({
+    title: '清理历史库备份',
+    content: `将删除工作区 ${target} 的 history.db.bak 与残留临时文件，主库与 WAL/SHM 不受影响。删除后无法从该备份恢复，确认继续？`,
+    positiveText: '确认删除备份',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      const res = await maintenance.deleteWorkspaceBackup(target);
+      if (res.ok && res.data) {
+        message.success(res.data.backupExisted ? `备份已清理，已释放 ${formatBytes(res.data.freedBytes)}` : '备份不存在，无需清理');
+        await systemStore.refreshAll();
+        await loadBreakdown();
+      } else {
+        message.error(res.message || '备份清理失败');
+      }
+    },
+  });
 }
 
 async function handleRetentionDaysCommit() {

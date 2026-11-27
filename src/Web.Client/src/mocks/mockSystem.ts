@@ -156,13 +156,66 @@ export function mockSystemMethods(s: MockState): Partial<HostBridgeApi> {
           rootPath: s.mockDataRoot,
           totalBytes: 8960,
           items: [
-            { name: 'sessions', sizeBytes: 2048, fileCount: 8 },
+            {
+              name: 'sessions',
+              sizeBytes: 2048,
+              fileCount: 8,
+              databaseDetails: [
+                {
+                  workspaceId: 'ws_mock',
+                  databasePath: `${s.mockDataRoot}\\sessions\\ws_mock\\history.db`,
+                  physicalBytes: 1536,
+                  pageSizeBytes: 4096,
+                  pageCount: 8,
+                  freePageCount: 5,
+                  usedPageBytes: 12288,
+                  reclaimablePageBytes: 20480,
+                  backupBytes: 512,
+                  walBytes: 0,
+                  shmBytes: 32,
+                  tempBytes: 0,
+                  measured: true,
+                  warning: null,
+                  measuredAtUtc: new Date().toISOString(),
+                },
+              ],
+            },
             { name: 'config', sizeBytes: 1024, fileCount: 4 },
             { name: 'logs', sizeBytes: 4096, fileCount: 2 },
             { name: 'backups', sizeBytes: 1024, fileCount: 3 },
             { name: 'attachments', sizeBytes: 512, fileCount: 2 },
             { name: 'other', sizeBytes: 256, fileCount: 1 },
           ],
+        },
+      };
+    },
+    async compactWorkspaceHistory(workspaceId: string) {
+      return {
+        ok: true,
+        message: '历史库压实完成（Mock），无可回收空间',
+        data: {
+          success: true,
+          errorCode: null,
+          beforeBytes: 1536,
+          afterBytes: 1536,
+          reclaimedBytes: 0,
+          walCheckpointed: true,
+          warning: null,
+          workspaceId,
+        },
+      };
+    },
+    async deleteWorkspaceBackup(workspaceId: string) {
+      return {
+        ok: true,
+        message: '历史库备份已清理（Mock）',
+        data: {
+          success: true,
+          errorCode: null,
+          freedBytes: 512,
+          backupExisted: true,
+          warning: null,
+          workspaceId,
         },
       };
     },

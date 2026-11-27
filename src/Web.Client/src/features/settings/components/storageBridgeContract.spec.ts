@@ -30,6 +30,14 @@ describe('存储增强桥契约一致性', () => {
     await api.getStorageBreakdown();
     expect(call).toHaveBeenLastCalledWith('getStorageBreakdown');
 
+    call.mockResolvedValue({ ok: true, data: { success: true, beforeBytes: 10, afterBytes: 8, reclaimedBytes: 2, walCheckpointed: true } });
+    await api.compactWorkspaceHistory('ws_a');
+    expect(call).toHaveBeenLastCalledWith('compactWorkspaceHistory', 'ws_a');
+
+    call.mockResolvedValue({ ok: true, data: { success: true, freedBytes: 4, backupExisted: true } });
+    await api.deleteWorkspaceBackup('ws_a');
+    expect(call).toHaveBeenLastCalledWith('deleteWorkspaceBackup', 'ws_a');
+
     call.mockResolvedValue({ ok: true, data: [] });
     await api.getRecentHostEvents(5);
     expect(call).toHaveBeenLastCalledWith('getRecentHostEvents', 5);
@@ -49,6 +57,8 @@ describe('存储增强桥契约一致性', () => {
     const mockApi = mockSystemMethods({ mockDataRoot: 'D:\\Data' } as never);
     expect(typeof mockApi.setLogRetentionDays).toBe('function');
     expect(typeof mockApi.getStorageBreakdown).toBe('function');
+    expect(typeof mockApi.compactWorkspaceHistory).toBe('function');
+    expect(typeof mockApi.deleteWorkspaceBackup).toBe('function');
     expect(typeof mockApi.getRecentHostEvents).toBe('function');
     expect(typeof mockApi.cleanupImageAttachments).toBe('function');
 
@@ -62,5 +72,13 @@ describe('存储增强桥契约一致性', () => {
     const breakdown = await api.getStorageBreakdown();
     expect(breakdown.ok).toBe(true);
     expect(breakdown.data?.totalBytes).toBe(breakdown.data?.items.reduce((sum, item) => sum + item.sizeBytes, 0));
+
+    const compact = await api.compactWorkspaceHistory('ws_mock');
+    expect(compact.ok).toBe(true);
+    expect(compact.data?.success).toBe(true);
+
+    const backupCleanup = await api.deleteWorkspaceBackup('ws_mock');
+    expect(backupCleanup.ok).toBe(true);
+    expect(backupCleanup.data?.success).toBe(true);
   });
 });

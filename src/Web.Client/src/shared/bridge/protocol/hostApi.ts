@@ -7,6 +7,8 @@ import type {
   StorageMigrationResult,
   StorageValidationResult,
   SystemRuntimeInfo,
+  WorkspaceBackupCleanupResult,
+  WorkspaceCompactionResult,
 } from './base';
 import type {
   GlobalNetworkSettings,
@@ -74,6 +76,10 @@ export interface HostBridgeApi {
   writeDiagnosticLog: (channel: string, message: string) => Promise<BridgeResponse<boolean>>;
   setWindowTitle: (title: string) => Promise<BridgeResponse<boolean>>;
   getStorageBreakdown: () => Promise<BridgeResponse<StorageBreakdown>>;
+  /** 手动压实工作区历史库；旧宿主缺失时由 transport 探测禁用。 */
+  compactWorkspaceHistory: (workspaceId: string) => Promise<BridgeResponse<WorkspaceCompactionResult>>;
+  /** 手动清理工作区历史库备份；旧宿主缺失时由 transport 探测禁用。 */
+  deleteWorkspaceBackup: (workspaceId: string) => Promise<BridgeResponse<WorkspaceBackupCleanupResult>>;
   getRecentHostEvents: (limit?: number) => Promise<BridgeResponse<StorageEventDto[]>>;
   cleanupImageAttachments: (retentionDays?: number, dryRun?: boolean) => Promise<BridgeResponse<string>>;
 

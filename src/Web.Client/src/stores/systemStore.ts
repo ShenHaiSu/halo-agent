@@ -131,6 +131,14 @@ export const useSystemStore = defineStore('system', () => {
     return getHostBridge().getStorageBreakdown();
   }
 
+  async function compactWorkspaceHistory(workspaceId: string) {
+    return getHostBridge().compactWorkspaceHistory(workspaceId);
+  }
+
+  async function deleteWorkspaceBackup(workspaceId: string) {
+    return getHostBridge().deleteWorkspaceBackup(workspaceId);
+  }
+
   async function getUsageDbStatus() {
     return getHostBridge().getUsageDbStatus();
   }
@@ -202,6 +210,8 @@ export const useSystemStore = defineStore('system', () => {
     writeTestLogEntry,
     validateStoragePath,
     getStorageBreakdown,
+    compactWorkspaceHistory,
+    deleteWorkspaceBackup,
     getUsageDbStatus,
     getRecentHostEvents,
     setLogRetentionDays,

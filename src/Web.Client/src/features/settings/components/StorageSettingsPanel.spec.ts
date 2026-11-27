@@ -3,9 +3,11 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import naive from 'naive-ui';
 
-const { bridgeStub, messageStub } = vi.hoisted(() => ({
+const { bridgeStub, messageStub, dialogStub } = vi.hoisted(() => ({
   bridgeStub: {
     getStorageBreakdown: vi.fn(),
+    compactWorkspaceHistory: vi.fn(),
+    deleteWorkspaceBackup: vi.fn(),
     getUsageDbStatus: vi.fn(),
     cleanupImageAttachments: vi.fn(),
     cleanupExpiredLogs: vi.fn(),
@@ -13,6 +15,9 @@ const { bridgeStub, messageStub } = vi.hoisted(() => ({
     validateStoragePath: vi.fn(),
     getStorageConfig: vi.fn(),
     getSystemInfo: vi.fn(),
+  },
+  dialogStub: {
+    warning: vi.fn(),
   },
   messageStub: {
     success: vi.fn(),
@@ -22,20 +27,21 @@ const { bridgeStub, messageStub } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@shared/bridge/hostBridge', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@shared/bridge/hostBridge')>();
-  return { ...actual, getHostBridge: () => bridgeStub };
-});
-
 vi.mock('naive-ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('naive-ui')>();
   return {
     ...actual,
     useMessage: () => messageStub,
-    useDialog: () => ({
-      warning: (opts: { onPositiveClick?: () => void }) => opts.onPositiveClick?.(),
-      error: vi.fn(),
-    }),
+    useDialog: () => dialogStub,
+  };
+});
+
+vi.mock('@shared/bridge/hostBridge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/bridge/hostBridge')>();
+  return {
+    ...actual,
+    getHostBridge: () => bridgeStub,
+    supportsHostBridgeMethod: () => true,
   };
 });
 
@@ -134,6 +140,16 @@ describe('StorageSettingsPanel（存储与日志面板展示增强）', () => {
     });
     bridgeStub.getStorageConfig.mockReset().mockResolvedValue({ ok: true, data: baseConfig });
     bridgeStub.getSystemInfo.mockReset().mockResolvedValue({ ok: true, data: { logsDirectory: 'D:\\HaloAgentData\\logs' } });
+    dialogStub.warning.mockReset().mockImplementation((opts: { onPositiveClick?: () => void | Promise<void> }) => opts.onPositiveClick?.());
+    bridgeStub.compactWorkspaceHistory
+      .mockReset()
+      .mockResolvedValue({
+        ok: true,
+        data: { success: true, beforeBytes: 2048, afterBytes: 1024, reclaimedBytes: 1024, walCheckpointed: true },
+      });
+    bridgeStub.deleteWorkspaceBackup
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { success: true, freedBytes: 512, backupExisted: true } });
     messageStub.success.mockReset();
     messageStub.error.mockReset();
     messageStub.warning.mockReset();
@@ -261,5 +277,152 @@ describe('StorageSettingsPanel（存储与日志面板展示增强）', () => {
   it('事件时间线空态展示提示', async () => {
     const wrapper = await mountPanel(pinia);
     expect(wrapper.find('[data-testid="storage-events-empty"]').exists()).toBe(true);
+  });
+
+  it('双口径明细渲染已用/空闲/备份/WAL，未测量行显示告警而不显示 0', async () => {
+    bridgeStub.getStorageBreakdown.mockResolvedValue({
+      ok: true,
+      data: {
+        rootPath: 'D:\\HaloAgentData',
+        totalBytes: 4096,
+        items: [
+          {
+            name: 'sessions',
+            sizeBytes: 2048,
+            fileCount: 8,
+            databaseDetails: [
+              {
+                workspaceId: 'ws_a',
+                databasePath: 'D:\\HaloAgentData\\sessions\\ws_a\\history.db',
+                physicalBytes: 1536,
+                pageSizeBytes: 4096,
+                pageCount: 8,
+                freePageCount: 4,
+                usedPageBytes: 16384,
+                reclaimablePageBytes: 16384,
+                backupBytes: 512,
+                walBytes: 64,
+                shmBytes: 32,
+                tempBytes: 0,
+                measured: true,
+                warning: null,
+                measuredAtUtc: '2026-11-27T00:00:00Z',
+              },
+              {
+                workspaceId: 'ws_b',
+                databasePath: 'D:\\HaloAgentData\\sessions\\ws_b\\history.db',
+                physicalBytes: 0,
+                pageSizeBytes: 0,
+                pageCount: 0,
+                freePageCount: 0,
+                usedPageBytes: 0,
+                reclaimablePageBytes: 0,
+                backupBytes: 0,
+                walBytes: 0,
+                shmBytes: 0,
+                tempBytes: 0,
+                measured: false,
+                warning: 'READ_FAILED',
+                measuredAtUtc: '2026-11-27T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const wrapper = await mountPanel(pinia);
+    expect(wrapper.find('[data-testid="storage-database-details"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="storage-database-summary"]').text()).toContain('可压缩回收');
+    expect(wrapper.find('[data-testid="database-detail-ws_a"]').text()).toContain('ws_a');
+    expect(wrapper.find('[data-testid="database-detail-ws_b"]').text()).toContain('数据库明细不可用');
+  });
+
+  it('压缩历史库经二次确认后调用桥接并刷新统计', async () => {
+    bridgeStub.getStorageBreakdown.mockResolvedValue({
+      ok: true,
+      data: {
+        rootPath: 'D:\\HaloAgentData',
+        totalBytes: 2048,
+        items: [
+          {
+            name: 'sessions',
+            sizeBytes: 2048,
+            fileCount: 4,
+            databaseDetails: [
+              {
+                workspaceId: 'ws_a',
+                databasePath: 'D:\\HaloAgentData\\sessions\\ws_a\\history.db',
+                physicalBytes: 2048,
+                pageSizeBytes: 4096,
+                pageCount: 8,
+                freePageCount: 4,
+                usedPageBytes: 16384,
+                reclaimablePageBytes: 16384,
+                backupBytes: 0,
+                walBytes: 0,
+                shmBytes: 0,
+                tempBytes: 0,
+                measured: true,
+                warning: null,
+                measuredAtUtc: '2026-11-27T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const wrapper = await mountPanel(pinia);
+    await wrapper.find('[data-testid="compact-history-btn"]').trigger('click');
+    await flushPromises();
+    expect(dialogStub.warning).toHaveBeenCalled();
+    expect(bridgeStub.compactWorkspaceHistory).toHaveBeenCalledWith('ws_a');
+    expect(messageStub.success).toHaveBeenCalled();
+  });
+
+  it('清理备份经二次确认后调用桥接，失败按错误码提示', async () => {
+    bridgeStub.deleteWorkspaceBackup.mockResolvedValueOnce({
+      ok: false,
+      code: 'STORAGE_MAINTENANCE_BUSY',
+      message: '存储维护正在进行，请稍后重试',
+    });
+    bridgeStub.getStorageBreakdown.mockResolvedValue({
+      ok: true,
+      data: {
+        rootPath: 'D:\\HaloAgentData',
+        totalBytes: 2048,
+        items: [
+          {
+            name: 'sessions',
+            sizeBytes: 2048,
+            fileCount: 4,
+            databaseDetails: [
+              {
+                workspaceId: 'ws_a',
+                databasePath: 'D:\\HaloAgentData\\sessions\\ws_a\\history.db',
+                physicalBytes: 2048,
+                pageSizeBytes: 4096,
+                pageCount: 8,
+                freePageCount: 0,
+                usedPageBytes: 32768,
+                reclaimablePageBytes: 0,
+                backupBytes: 512,
+                walBytes: 0,
+                shmBytes: 0,
+                tempBytes: 0,
+                measured: true,
+                warning: null,
+                measuredAtUtc: '2026-11-27T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const wrapper = await mountPanel(pinia);
+    await wrapper.find('[data-testid="cleanup-backup-btn"]').trigger('click');
+    await flushPromises();
+    expect(dialogStub.warning).toHaveBeenCalled();
+    expect(bridgeStub.deleteWorkspaceBackup).toHaveBeenCalledWith('ws_a');
+    expect(messageStub.error).toHaveBeenCalled();
   });
 });
