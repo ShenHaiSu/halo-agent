@@ -1,7 +1,7 @@
 param(
     [ValidateSet("win-x64", "win-x86")]
     [string]$Runtime = "win-x64",
-    # need22-P4 H7：版本号（默认取 git tag，失败回退 0.6.0），与 Assembly VersionPrefix、installer.iss 对齐（E6）
+    # 版本号（默认取 git tag，失败回退 0.6.1），与程序集和安装包版本对齐
     [string]$Version = "",
     # need22-P4 H6：置位后引入 Microsoft.Sbom.Targets 产出 sbom（默认关闭，不影响常规构建）
     [switch]$GenerateSbom
@@ -12,14 +12,14 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     try { $tag = (git -C $RepoRoot describe --tags "--match" "v*" --abbrev=0 2>$null) } catch { $tag = "" }
-    if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.0" }
+    if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.1" }
     $Version = $tag -replace '^[vV]', ''
     if ($Version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
-        Write-Warning "Git tag '$tag' is not a valid version. Fallback to 0.6.0. Use -Version to override."
-        $Version = "0.6.0"
+        Write-Warning "Git tag '$tag' is not a valid version. Fallback to 0.6.1. Use -Version to override."
+        $Version = "0.6.1"
     }
 } elseif ($Version -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') {
-    throw "Invalid -Version '$Version'. Expected like 0.6.0."
+    throw "Invalid -Version '$Version'. Expected like 0.6.1."
 }
 Write-Host "==> Version: $Version (tag-aligned, E6)" -ForegroundColor Cyan
 
