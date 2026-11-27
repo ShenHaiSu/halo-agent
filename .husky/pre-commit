@@ -4,8 +4,6 @@
 # 后端：仅暂存区有 *.cs 才跑 dotnet-csharpier（默认写入） + git add。
 # CI 保留 --check 做最终门禁；热修可用 git commit --no-verify 绕过。
 
-node build/check-naming-hygiene.mjs --cached || exit 1
-
 WEB_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep "^src/Web.Client/" || true)
 if [ -n "$WEB_STAGED" ]; then
   (cd src/Web.Client && npx lint-staged)

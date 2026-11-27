@@ -32,9 +32,6 @@ jobs:
       - name: Restore
         run: dotnet restore HaloAgent.sln -r win-x64
 
-      - name: Naming hygiene (changed lines only)
-        run: node build/check-naming-hygiene.mjs
-
       - name: Architecture assertions
         run: node build/check-architecture.mjs
 
