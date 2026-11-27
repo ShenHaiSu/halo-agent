@@ -26,6 +26,7 @@ public sealed class HistoryContractTests
         Assert.Contains("\"replayImages\":true", json);
         Assert.Contains("\"atomicHistoryMutex\":true", json);
         Assert.Contains("\"strictBranchRollback\":true", json);
+        Assert.Contains("\"turnDelete\":true", json);
     }
 
     [Fact]

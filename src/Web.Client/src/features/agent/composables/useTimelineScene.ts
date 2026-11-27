@@ -118,6 +118,8 @@ export function provideTimelineScene(t: SceneSource, opts: SceneOpts): TimelineV
         branchDisabled,
         replayTitle: reason || '截断该轮并重新生成',
         branchTitle: reason || '从这里创建分支会话',
+        deleteDisabled: !t.menu.menuCanDelete,
+        deleteTitle: t.menu.menuCanDelete ? '删除该轮提问、回复及工具记录（先备份）' : '当前后端不支持整轮删除，请升级',
       };
     },
   } as TimelineViewModel;

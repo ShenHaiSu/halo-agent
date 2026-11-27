@@ -47,6 +47,7 @@ public sealed class HistoryCapabilities
     public bool ReplayImages { get; init; }
     public bool AtomicHistoryMutex { get; init; }
     public bool StrictBranchRollback { get; init; }
+    public bool TurnDelete { get; init; }
 
     public static HistoryCapabilities Supported { get; } =
         new()
@@ -54,7 +55,8 @@ public sealed class HistoryCapabilities
             HistoryAnchors = true,
             ReplayImages = true,
             AtomicHistoryMutex = true,
-            StrictBranchRollback = true
+            StrictBranchRollback = true,
+            TurnDelete = true
         };
 
     public static HistoryCapabilities Unsupported { get; } = new();

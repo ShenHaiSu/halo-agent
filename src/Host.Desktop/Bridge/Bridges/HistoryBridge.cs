@@ -25,6 +25,9 @@ public sealed partial class HostBridgeFacade
             ["TRUNCATE_COMMIT_ERROR"] = "历史截断提交状态不确定，请勿重复操作",
             ["BRANCH_COPY_ERROR"] = "分支复制失败，已回滚，原会话未改动",
             ["BRANCH_ROLLBACK_FAILED"] = "分支清理失败，存在残留会话，请手动处理",
+            ["BACKUP_FAILED"] = "删除前备份失败，未删除任何数据，请检查磁盘或权限",
+            ["DELETE_COMMIT_FAILED"] = "整轮删除提交失败，已回滚，请刷新后重试",
+            ["DELETE_COMMIT_UNKNOWN"] = "提交状态不确定，请勿重复删除，请刷新对账",
             ["SESSION_NOT_FOUND"] = "会话不存在或已被删除"
         };
 
@@ -353,6 +356,7 @@ public sealed partial class HostBridgeFacade
         }
     }
 
+    [Obsolete("迁移期兼容入口：新 UI 使用 DeleteSessionTurn，仅保留给旧前端。")]
     public async Task<BridgeResponse<HistoryDeleteResult>> DeleteSessionMessage(
         string workspaceId,
         string sessionId,
@@ -401,6 +405,59 @@ public sealed partial class HostBridgeFacade
             return BridgeResponse<HistoryDeleteResult>.Fail(
                 "DELETE_ERROR",
                 HistoryErrorMessage("DELETE_ERROR", "删除失败")
+            );
+        }
+    }
+
+    /// <summary>删除锚点所属整轮：新 UI 唯一删除入口，失败按稳定错误码返回。</summary>
+    public async Task<BridgeResponse<HistoryTurnDeleteResult>> DeleteSessionTurn(
+        string workspaceId,
+        string sessionId,
+        string anchorMessageId
+    )
+    {
+        try
+        {
+            if (await IsSubSessionAsync(workspaceId, sessionId).ConfigureAwait(false))
+                return BridgeResponse<HistoryTurnDeleteResult>.Fail(
+                    "SUB_READONLY",
+                    HistoryErrorMessage("SUB_READONLY", "子会话不可操作")
+                );
+            var lease = AcquireHistoryLock(workspaceId, sessionId, out var busyCode);
+            if (lease == null)
+                return BridgeResponse<HistoryTurnDeleteResult>.Fail(
+                    busyCode!,
+                    HistoryErrorMessage(busyCode, "会话忙")
+                );
+            bool handedOff = false;
+            try
+            {
+                var result = await _workspaceSessionService
+                    .DeleteSessionTurnAsync(workspaceId, sessionId, anchorMessageId, default, lease)
+                    .ConfigureAwait(false);
+                handedOff = true;
+                if (!result.Success)
+                    return BridgeResponse<HistoryTurnDeleteResult>.Fail(
+                        result.ErrorCode ?? "DELETE_FAILED",
+                        HistoryErrorMessage(result.ErrorCode, "整轮删除失败")
+                    );
+                return BridgeResponse<HistoryTurnDeleteResult>.Success(result);
+            }
+            finally
+            {
+                if (!handedOff)
+                    lease.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            HaloLogger.App.Error(
+                $"DeleteSessionTurn failed for session '{sessionId}' anchor '{anchorMessageId}'",
+                ex
+            );
+            return BridgeResponse<HistoryTurnDeleteResult>.Fail(
+                "DELETE_ERROR",
+                HistoryErrorMessage("DELETE_ERROR", "整轮删除失败")
             );
         }
     }

@@ -23,6 +23,7 @@ const supported = {
   replayImages: true,
   atomicHistoryMutex: true,
   strictBranchRollback: true,
+  turnDelete: true,
 };
 
 function replayResult(over: Record<string, unknown> = {}) {

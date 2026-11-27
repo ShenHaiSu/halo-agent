@@ -37,6 +37,8 @@ export interface TimelineMenuState {
   branchDisabled?: boolean;
   replayTitle?: string;
   branchTitle?: string;
+  deleteDisabled?: boolean;
+  deleteTitle?: string;
 }
 
 /**
@@ -126,6 +128,16 @@ export function timelineViewFallback(): TimelineViewModel {
     showRetry: false,
     liveTelemetry: null,
     pendingReplay: null,
-    menu: { visible: false, x: 0, y: 0, busy: false, canCopy: false, canCopyTurn: false, copyLabel: '复制此消息' },
+    menu: {
+      visible: false,
+      x: 0,
+      y: 0,
+      busy: false,
+      canCopy: false,
+      canCopyTurn: false,
+      copyLabel: '复制此消息',
+      deleteDisabled: true,
+      deleteTitle: '当前后端不支持整轮删除，请升级',
+    },
   };
 }

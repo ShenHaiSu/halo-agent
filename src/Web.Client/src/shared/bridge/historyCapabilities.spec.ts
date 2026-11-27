@@ -9,6 +9,7 @@ const full = {
   replayImages: true,
   atomicHistoryMutex: true,
   strictBranchRollback: true,
+  turnDelete: true,
 };
 
 describe('历史能力位与协议版本契约', () => {
@@ -42,9 +43,16 @@ describe('历史能力位与协议版本契约', () => {
       ok: true,
       data: full,
     });
-    const api = createHostBridgeApi(new CefTransport({ getHistoryCapabilities }));
+    const api = createHostBridgeApi(new CefTransport({ getHistoryCapabilities, deleteSessionTurn: async () => undefined }));
     const response = await api.getHistoryCapabilities('ws', 'sess');
     expect(response.data).toEqual(full);
+  });
+
+  it('破坏性能力需要传输层真实存在 deleteSessionTurn，否则归一为不支持', async () => {
+    const getHistoryCapabilities = vi.fn().mockResolvedValue({ ok: true, data: full });
+    const api = createHostBridgeApi(new CefTransport({ getHistoryCapabilities }));
+    const response = await api.getHistoryCapabilities('ws', 'sess');
+    expect(response.data?.turnDelete).toBe(false);
   });
 
   it('能力探测失败归一为不支持，不升级成应用错误', async () => {

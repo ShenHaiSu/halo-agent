@@ -50,12 +50,12 @@
     <button
       data-testid="context-menu-delete"
       class="history-context-menu-item history-context-menu-danger"
-      :disabled="busy"
-      :title="busy ? '生成中不可操作，请稍后再试' : '删除这条消息（先备份，可从备份恢复）'"
+      :disabled="busy || deleteDisabled"
+      :title="busy ? '生成中不可操作，请稍后再试' : deleteTitle || '删除该轮提问、回复及工具记录（先备份）'"
       @click="emit('delete')"
     >
       <Trash2 class="w-3.5 h-3.5 shrink-0" />
-      <span>删除此消息</span>
+      <span>删除本轮</span>
     </button>
   </div>
 </template>
@@ -74,6 +74,8 @@ defineProps<{
   branchDisabled?: boolean;
   replayTitle?: string;
   branchTitle?: string;
+  deleteDisabled?: boolean;
+  deleteTitle?: string;
 }>();
 
 const emit = defineEmits<{

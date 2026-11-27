@@ -6,6 +6,7 @@ import type {
   ContextBudgetStatusDto,
   HistoryDeleteResultDto,
   HistoryHealResultDto,
+  HistoryTurnDeleteResultDto,
   FirstRoundTexts,
   HistoryCapabilities,
   HistoryTruncateResultDto,
@@ -63,6 +64,7 @@ export function createSessionApi(
   | 'branchSession'
   | 'healSessionHistory'
   | 'deleteSessionMessage'
+  | 'deleteSessionTurn'
   | 'getTimelineSummary'
   | 'getBlockContents'
   | 'getToolResult'
@@ -301,7 +303,9 @@ export function createSessionApi(
           await t.call('getHistoryCapabilities', workspaceId ?? '', sessionId ?? '')
         );
         if (!response.ok) return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
-        return { ...response, data: normalizeHistoryCapabilities(response.data) };
+        const normalized = normalizeHistoryCapabilities(response.data);
+        // 破坏性能力必须同时满足宿主声明与传输层真实存在的方法，缺一即禁用。
+        return { ...response, data: { ...normalized, turnDelete: normalized.turnDelete && t.supports('deleteSessionTurn') } };
       } catch {
         return { ok: true, data: { ...UnsupportedHistoryCapabilities } };
       }
@@ -324,6 +328,18 @@ export function createSessionApi(
     async deleteSessionMessage(workspaceId: string, sessionId: string, messageId: string) {
       return normalizeBridgePayload<BridgeResponse<HistoryDeleteResultDto>>(
         await t.call('deleteSessionMessage', workspaceId ?? '', sessionId ?? '', messageId ?? '')
+      );
+    },
+    async deleteSessionTurn(workspaceId: string, sessionId: string, anchorMessageId: string) {
+      if (!t.supports('deleteSessionTurn')) {
+        return {
+          ok: false,
+          code: 'TURN_DELETE_UNSUPPORTED',
+          message: '当前宿主不支持整轮删除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<HistoryTurnDeleteResultDto>>(
+        await t.call('deleteSessionTurn', workspaceId ?? '', sessionId ?? '', anchorMessageId ?? '')
       );
     },
     async getTimelineSummary(workspaceId: string, sessionId: string) {

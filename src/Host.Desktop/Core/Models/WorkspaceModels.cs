@@ -383,6 +383,54 @@ public sealed class HistoryDeleteResult
         new() { Success = false, ErrorCode = code };
 }
 
+/// <summary>整轮删除结果：数据库单事务提交才算成功，辅助阶段问题只记录告警。</summary>
+public sealed class HistoryTurnDeleteResult
+{
+    public bool Success { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? DeletedTurnId { get; init; }
+    public int DeletedMessages { get; init; }
+    public int KeptMessages { get; init; }
+    public int SyntheticAppended { get; init; }
+    public int OrphanToolsRemoved { get; init; }
+    public string? BackupFileName { get; init; }
+    public bool DestructiveCommitCompleted { get; init; }
+    public string? MetadataWarning { get; init; }
+    public bool ProjectionDeleted { get; init; }
+
+    public static HistoryTurnDeleteResult Fail(string code) =>
+        new()
+        {
+            Success = false,
+            ErrorCode = code,
+            DestructiveCommitCompleted = false
+        };
+
+    public static HistoryTurnDeleteResult Ok(
+        string turnId,
+        int deletedMessages,
+        int kept,
+        int synthetic,
+        int removed,
+        string? backupFileName,
+        string? metadataWarning,
+        bool projectionDeleted
+    ) =>
+        new()
+        {
+            Success = true,
+            DeletedTurnId = turnId,
+            DeletedMessages = deletedMessages,
+            KeptMessages = kept,
+            SyntheticAppended = synthetic,
+            OrphanToolsRemoved = removed,
+            BackupFileName = backupFileName,
+            DestructiveCommitCompleted = true,
+            MetadataWarning = metadataWarning,
+            ProjectionDeleted = projectionDeleted,
+        };
+}
+
 /// <summary>P007：压缩恢复结果（运维操作：删桩与全量重写唯一入口）。</summary>
 public sealed class HistoryRestoreResult
 {

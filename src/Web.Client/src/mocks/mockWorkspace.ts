@@ -26,6 +26,7 @@ let configuredHistoryCapabilities: HistoryCapabilities = {
   replayImages: true,
   atomicHistoryMutex: true,
   strictBranchRollback: true,
+  turnDelete: true,
 };
 
 /** Mock 能力配置：传入不支持的能力即可复现旧后端降级场景。 */
@@ -559,6 +560,30 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
       return {
         ok: true,
         data: { success: true, keptMessages: kept.length, syntheticAppended: 0, orphanToolsRemoved: 0, backupFileName: 'mock-delete-bak' },
+      };
+    },
+    async deleteSessionTurn(_workspaceId: string, sessionId: string, anchorMessageId: string) {
+      const msgs = s.mockMessages[sessionId] || [];
+      const idx = msgs.findIndex((m) => String(m.id) === String(anchorMessageId));
+      if (idx < 0) return { ok: false, code: 'ANCHOR_NOT_FOUND', message: '锚点已变化' };
+      let start = idx;
+      while (start > 0 && String(msgs[start - 1].role || '').toLowerCase() !== 'user') start--;
+      let end = idx + 1;
+      while (end < msgs.length && String(msgs[end].role || '').toLowerCase() !== 'user') end++;
+      const kept = msgs.slice(0, start).concat(msgs.slice(end));
+      s.mockMessages[sessionId] = kept;
+      return {
+        ok: true,
+        data: {
+          success: true,
+          deletedTurnId: 'uturn-' + String(msgs[start].id || ''),
+          deletedMessages: end - start,
+          keptMessages: kept.length,
+          syntheticAppended: 0,
+          orphanToolsRemoved: 0,
+          backupFileName: 'mock-turn-delete-bak',
+          destructiveCommitCompleted: true,
+        },
       };
     },
     async getTimelineSummary(_workspaceId: string, sessionId: string) {

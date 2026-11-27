@@ -29,6 +29,7 @@ import type {
   HistoryDeleteResultDto,
   HistoryHealResultDto,
   HistoryTruncateResultDto,
+  HistoryTurnDeleteResultDto,
   PromptConfigDocument,
   PromptDiagnosticsDto,
   PromptPreviewDto,
@@ -197,6 +198,11 @@ export interface HostBridgeApi {
   ) => Promise<BridgeResponse<HistoryTruncateResultDto>>;
   healSessionHistory: (workspaceId: string, sessionId: string) => Promise<BridgeResponse<HistoryHealResultDto>>;
   deleteSessionMessage: (workspaceId: string, sessionId: string, messageId: string) => Promise<BridgeResponse<HistoryDeleteResultDto>>;
+  deleteSessionTurn: (
+    workspaceId: string,
+    sessionId: string,
+    anchorMessageId: string
+  ) => Promise<BridgeResponse<HistoryTurnDeleteResultDto>>;
   // need10：技能与记忆只读管理（查/开关/删除；无新建与编辑）
   listSkillMemory: (
     kind: SkillMemoryKind,

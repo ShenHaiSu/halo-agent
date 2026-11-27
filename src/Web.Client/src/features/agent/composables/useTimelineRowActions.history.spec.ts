@@ -30,6 +30,7 @@ const supported = {
   replayImages: true,
   atomicHistoryMutex: true,
   strictBranchRollback: true,
+  turnDelete: true,
 };
 
 describe('历史行菜单只消费真实消息锚点', () => {
@@ -48,6 +49,8 @@ describe('历史行菜单只消费真实消息锚点', () => {
     expect(menu.targets[0]?.id).toBe('u1');
     expect(menu.targets[0]?.draftText).toBe('用户全文');
     expect(menu.targets[0]?.canReplay).toBe(true);
+    expect(menu.targets[0]).not.toHaveProperty('turnIds');
+    expect(menu.targets[0]).not.toHaveProperty('turnLabel');
   });
 
   it('助手菜单 id 为 assistantMessageId，正文仍按 finalBlockId 拉取', async () => {
@@ -63,6 +66,8 @@ describe('历史行菜单只消费真实消息锚点', () => {
     expect(menu.targets[0]?.id).toBe('a2');
     expect(getBlockMarkdown).toHaveBeenCalledWith('b-final');
     expect(menu.targets[0]?.draftText).toBe('');
+    expect(menu.targets[0]).not.toHaveProperty('turnIds');
+    expect(menu.targets[0]).not.toHaveProperty('turnLabel');
   });
 
   it('缺少用户锚点时禁用破坏性操作但保留复制', () => {

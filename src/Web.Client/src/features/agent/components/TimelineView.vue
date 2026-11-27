@@ -64,6 +64,8 @@
           :branch-disabled="menu.branchDisabled"
           :replay-title="menu.replayTitle"
           :branch-title="menu.branchTitle"
+          :delete-disabled="menu.deleteDisabled"
+          :delete-title="menu.deleteTitle"
           @copy="emit('menu-copy')"
           @copy-turn="emit('menu-copy-turn')"
           @replay="emit('menu-replay')"

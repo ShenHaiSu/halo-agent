@@ -66,6 +66,7 @@ beforeEach(() => {
     replayImages: true,
     atomicHistoryMutex: true,
     strictBranchRollback: true,
+    turnDelete: true,
   });
   setActiveSessionId('s1');
   setActiveWorkspaceId('w1');

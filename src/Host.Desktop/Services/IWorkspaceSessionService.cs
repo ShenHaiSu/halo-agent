@@ -184,6 +184,15 @@ public interface IWorkspaceSessionService
         CancellationToken ct = default,
         SessionOperationLease? lease = null
     );
+
+    /// <summary>删除锚点所属整轮：messages/turns/blocks 单事务提交，失败全部回滚。</summary>
+    Task<HistoryTurnDeleteResult> DeleteSessionTurnAsync(
+        string workspaceId,
+        string sessionId,
+        string anchorMessageId,
+        CancellationToken ct = default,
+        SessionOperationLease? lease = null
+    );
     Task<bool> UpdateSessionTitleAsync(
         string workspaceId,
         string sessionId,

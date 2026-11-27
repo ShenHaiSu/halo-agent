@@ -68,6 +68,23 @@ public sealed class BridgeResponseSnapshotTests
     }
 
     [Fact]
+    public void HistoryTurnDeleteResult_MatchesSnapshot()
+    {
+        var result = Host.Desktop.Core.Models.HistoryTurnDeleteResult.Ok(
+            "uturn-msg-user",
+            2,
+            3,
+            1,
+            0,
+            "history.db.bak",
+            "METADATA_REFRESH_FAILED",
+            true
+        );
+        string json = JsonSerializer.Serialize(result, HaloJsonOptions.CompactCamelCase);
+        Assert.Equal(ReadSnapshot("history_turn_delete_result.json"), json);
+    }
+
+    [Fact]
     public void SessionDeletionEnumsMapToExplicitCamelCaseStrings()
     {
         var mapped = Host.Desktop.Core.Models.SessionDeletionResultDto.FromResult(

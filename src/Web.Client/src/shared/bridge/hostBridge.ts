@@ -254,6 +254,7 @@ export type {
   HistoryReplayImageDto,
   HistoryReplayResult,
   HistoryTruncateResultDto,
+  HistoryTurnDeleteResultDto,
   HostBridgeApi,
   HostEventEnvelope,
   LastSentPromptSnapshot,

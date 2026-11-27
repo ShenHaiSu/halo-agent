@@ -109,6 +109,7 @@ export interface HistoryCapabilities {
   replayImages: boolean;
   atomicHistoryMutex: boolean;
   strictBranchRollback: boolean;
+  turnDelete: boolean;
 }
 
 export const UnsupportedHistoryCapabilities: HistoryCapabilities = {
@@ -116,6 +117,7 @@ export const UnsupportedHistoryCapabilities: HistoryCapabilities = {
   replayImages: false,
   atomicHistoryMutex: false,
   strictBranchRollback: false,
+  turnDelete: false,
 };
 
 /** 能力归一：字段缺失、类型错误或探测失败一律视为不支持，禁止伪造支持。 */
@@ -128,6 +130,7 @@ export function normalizeHistoryCapabilities(raw: unknown): HistoryCapabilities 
     replayImages: flag('replayImages'),
     atomicHistoryMutex: flag('atomicHistoryMutex'),
     strictBranchRollback: flag('strictBranchRollback'),
+    turnDelete: flag('turnDelete'),
   };
 }
 
@@ -524,6 +527,21 @@ export interface HistoryDeleteResultDto {
   syntheticAppended: number;
   orphanToolsRemoved: number;
   backupFileName?: string | null;
+}
+
+/** 整轮删除结果：success 只代表数据库事务已提交，辅助阶段问题进 metadataWarning。 */
+export interface HistoryTurnDeleteResultDto {
+  success: boolean;
+  errorCode?: string | null;
+  deletedTurnId?: string | null;
+  deletedMessages: number;
+  keptMessages: number;
+  syntheticAppended: number;
+  orphanToolsRemoved: number;
+  backupFileName?: string | null;
+  destructiveCommitCompleted: boolean;
+  metadataWarning?: string | null;
+  projectionDeleted?: boolean;
 }
 export type SkillMemoryScopeFilter = 'global' | 'project' | 'all';
 export interface SkillMemoryListItem {

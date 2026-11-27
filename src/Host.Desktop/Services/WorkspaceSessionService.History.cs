@@ -721,7 +721,7 @@ public sealed partial class WorkspaceSessionService : IWorkspaceSessionService
         }
     }
 
-    /// <summary>删除单条消息（先备份 → 删行 → 同一次重写内愈合，失败不动盘）。</summary>
+    /// <summary>迁移期兼容入口：单条消息删除，新 UI 不再调用；整轮删除走 DeleteSessionTurnAsync。</summary>
     public async Task<HistoryDeleteResult> DeleteSessionMessageAsync(
         string workspaceId,
         string sessionId,

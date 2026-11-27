@@ -1261,7 +1261,49 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // 删除单条消息（后端先备份再删行，删后自动愈合；生成中拒绝）。
+  /**
+   * 删除锚点所属整轮：入口捕获 ws/sid/epoch，只有数据库事务提交成功才清目标会话 pending；
+   * 响应到达时若已切走会话或 epoch 变化，不刷新当前视图，交给下次进入对账。
+   */
+  async function deleteTurn(
+    anchorMessageId: string
+  ): Promise<{ ok: boolean; message?: string; code?: string; metadataWarning?: string | null }> {
+    const wid = activeWorkspaceId.value;
+    const sid = activeSessionId.value;
+    if (!wid || !sid) return { ok: false, message: '会话不存在' };
+    if (!anchorMessageId) return { ok: false, message: '消息不存在' };
+    const sessionStore = useSessionStore();
+    const epoch = sessionStore.epoch;
+    const signal = sessionStore.currentSignal;
+    try {
+      const bridge = getHostBridge();
+      const res = await bridge.deleteSessionTurn(wid, sid, anchorMessageId);
+      if (!res.ok || !res.data || !res.data.destructiveCommitCompleted || !res.data.success) {
+        return {
+          ok: false,
+          code: res.code ?? res.data?.errorCode ?? undefined,
+          message: res.message || historyErrorMessage(res.code, '整轮删除失败'),
+        };
+      }
+      try {
+        dropPendingUser(sid);
+      } catch {
+        /* pending 清理不阻断已提交的结果 */
+      }
+      if (wid === activeWorkspaceId.value && sid === activeSessionId.value && sessionStore.isCurrent(epoch, signal)) {
+        await loadSessionMessages(sid, { epoch, signal });
+        await refreshBudget({ epoch, signal });
+      } else {
+        sessionStore.discardStale(`deleteTurn(${sid.slice(-6)})`);
+      }
+      return { ok: true, metadataWarning: res.data.metadataWarning ?? null };
+    } catch (err) {
+      console.error('[workspaceStore] deleteTurn failed:', err);
+      return { ok: false, code: 'DELETE_TURN_ERROR', message: '整轮删除失败，请刷新后重试' };
+    }
+  }
+
+  // 迁移期兼容入口：新 UI 不再调用，后端仅保留给旧前端。
   async function deleteMessage(messageId: string): Promise<{ ok: boolean; message?: string; code?: string }> {
     if (!activeWorkspaceId.value || !activeSessionId.value) return { ok: false, message: '会话不存在' };
     if (!messageId) return { ok: false, message: '消息不存在' };
@@ -1342,6 +1384,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     clearTimelineCaches,
     blockContentsCache,
     healSessionHistory,
+    deleteTurn,
     deleteMessage,
     truncateHistory,
     branchFromMessage,

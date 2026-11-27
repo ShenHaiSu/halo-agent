@@ -22,7 +22,12 @@ export type HistoryErrorCode =
   | 'REPLAY_TARGET_CHANGED'
   | 'IMAGE_MISSING'
   | 'TRUNCATE_ERROR'
-  | 'BRANCH_ERROR';
+  | 'BRANCH_ERROR'
+  | 'MESSAGE_NOT_FOUND'
+  | 'BACKUP_FAILED'
+  | 'DELETE_COMMIT_FAILED'
+  | 'DELETE_COMMIT_UNKNOWN'
+  | 'TURN_DELETE_UNSUPPORTED';
 
 const HISTORY_ERROR_MESSAGES: Record<string, string> = {
   ANCHOR_NOT_FOUND: '历史已变化，未找到对应消息，请刷新后重试',
@@ -43,6 +48,11 @@ const HISTORY_ERROR_MESSAGES: Record<string, string> = {
   IMAGE_MISSING: '部分图片已缺失，仅重放可用内容',
   TRUNCATE_ERROR: '截断失败',
   BRANCH_ERROR: '分支失败',
+  MESSAGE_NOT_FOUND: '消息不存在或已变化，请刷新后重试',
+  BACKUP_FAILED: '删除前备份失败，未删除任何数据，请检查磁盘或权限',
+  DELETE_COMMIT_FAILED: '整轮删除提交失败，已回滚，请刷新后重试',
+  DELETE_COMMIT_UNKNOWN: '提交状态不确定，请勿重复删除，请刷新对账',
+  TURN_DELETE_UNSUPPORTED: '当前宿主不支持整轮删除，请升级后重试',
 };
 
 export function historyErrorMessage(code?: string | null, fallback = '历史操作失败'): string {
