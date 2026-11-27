@@ -322,5 +322,10 @@ export type {
   TimelineToolResult,
   TimelineTagUpdated,
   WorkspaceInfo,
+  WorkspaceRemovalCommandResult,
+  WorkspaceRemovalMode,
+  WorkspaceRemovalOutcome,
+  WorkspaceRemovalResultDto,
+  WorkspaceResourceStatus,
 } from './protocol/types';
 export type { BridgeError } from './protocol/errors';

@@ -143,9 +143,6 @@ export function useSessionList() {
     const ws = await workspaceStore.browseAndAddWorkspace();
     if (ws) message.success(`成功绑定工作路径: ${ws.name}`);
   }
-  async function handleRemoveWorkspace(workspaceId: string): Promise<void> {
-    if (await workspaceStore.removeWorkspace(workspaceId)) message.success('已从列表移除该工作区');
-  }
   // —— 工作区别名内联编辑（与会话改名同构：editing + draft 两个 ref）——
   const editingWorkspaceId = ref<string | null>(null);
   const editingWorkspaceDraft = ref('');
@@ -346,7 +343,6 @@ export function useSessionList() {
     handleOpenWorkspaceExplorer,
     handleOpenActiveWorkspaceFolder,
     handleAddNewWorkspace,
-    handleRemoveWorkspace,
     editingWorkspaceId,
     editingWorkspaceDraft,
     startWorkspaceRename,

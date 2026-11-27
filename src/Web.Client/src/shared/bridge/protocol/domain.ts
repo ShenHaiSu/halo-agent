@@ -477,6 +477,36 @@ export interface DeleteSessionCommandResult {
   warnings: string[];
 }
 
+/** 工作区移除模式：解绑保留物理数据，彻底删除只清两个明确根目录。 */
+export type WorkspaceRemovalMode = 'unbind' | 'purge';
+export type WorkspaceRemovalOutcome = 'completed' | 'completedWithWarnings' | 'failed' | 'notFound';
+export type WorkspaceResourceStatus = 'notRequested' | 'deleted' | 'retained' | 'failed';
+
+export interface WorkspaceRemovalResultDto {
+  outcome: WorkspaceRemovalOutcome;
+  mode: WorkspaceRemovalMode;
+  errorCode?: string | null;
+  workspaceUnbound: boolean;
+  sessionData: WorkspaceResourceStatus;
+  haloAgent: WorkspaceResourceStatus;
+  haloAgentReason?: string | null;
+  failedPaths: string[];
+  warnings: string[];
+}
+
+/** Store 层命令结果：与 DTO 同构，前端只按 workspaceUnbound 决定是否移除本地项。 */
+export interface WorkspaceRemovalCommandResult {
+  outcome: WorkspaceRemovalOutcome;
+  mode: WorkspaceRemovalMode;
+  workspaceUnbound: boolean;
+  sessionData: WorkspaceResourceStatus;
+  haloAgent: WorkspaceResourceStatus;
+  haloAgentReason?: string | null;
+  failedPaths: string[];
+  warnings: string[];
+  errorCode?: string | null;
+}
+
 export type SkillMemoryKind = 'skill' | 'memory';
 export type SkillMemoryScope = 'global' | 'project';
 export interface HistoryHealResultDto {

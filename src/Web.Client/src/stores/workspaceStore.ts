@@ -17,7 +17,13 @@ import type {
   HistoryBranchResult,
 } from '@shared/bridge/hostBridge';
 import { historyErrorMessage } from '@shared/bridge/protocol/errors';
-import type { DeleteSessionCommandResult, SessionDeletionOutcome } from '@shared/bridge/protocol/domain';
+import type {
+  DeleteSessionCommandResult,
+  SessionDeletionOutcome,
+  WorkspaceRemovalCommandResult,
+  WorkspaceRemovalMode,
+  WorkspaceRemovalOutcome,
+} from '@shared/bridge/protocol/domain';
 import { useConfigStore } from '@/stores/configStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { isBadTime } from '@shared/utils/timeFormat';
@@ -239,13 +245,45 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return null;
   }
 
-  async function removeWorkspace(workspaceId: string): Promise<boolean> {
+  /**
+   * 双模式移除：只有后端确认 workspaceUnbound 才修改本地列表与 active。
+   * 目标 ID 由调用方捕获传入，响应到达时不读当前 active 猜目标。
+   */
+  async function removeWorkspaceV2(workspaceId: string, mode: WorkspaceRemovalMode): Promise<WorkspaceRemovalCommandResult> {
+    const wid = (workspaceId || '').trim();
+    const failure = (outcome: WorkspaceRemovalOutcome, errorCode?: string | null): WorkspaceRemovalCommandResult => ({
+      outcome,
+      mode,
+      workspaceUnbound: false,
+      sessionData: 'notRequested',
+      haloAgent: 'notRequested',
+      failedPaths: [],
+      warnings: [],
+      errorCode,
+    });
+    if (!wid) return failure('failed', 'INVALID_WORKSPACE_ID');
+
     try {
       const bridge = getHostBridge();
-      const res = await bridge.removeWorkspace(workspaceId);
-      if (res.ok && res.data) {
-        workspaces.value = workspaces.value.filter((w) => w.id !== workspaceId);
-        if (activeWorkspaceId.value === workspaceId) {
+      const res = await bridge.removeWorkspaceV2(wid, mode);
+      if (!res.ok || !res.data) return failure('failed', res.code ?? 'WORKSPACE_REMOVAL_ERROR');
+
+      const data = res.data;
+      const result: WorkspaceRemovalCommandResult = {
+        outcome: data.outcome,
+        mode: data.mode ?? mode,
+        workspaceUnbound: data.workspaceUnbound === true,
+        sessionData: data.sessionData ?? 'notRequested',
+        haloAgent: data.haloAgent ?? 'notRequested',
+        haloAgentReason: data.haloAgentReason ?? null,
+        failedPaths: data.failedPaths ?? [],
+        warnings: data.warnings ?? [],
+        errorCode: data.errorCode ?? null,
+      };
+
+      if (result.workspaceUnbound) {
+        workspaces.value = workspaces.value.filter((w) => w.id !== wid);
+        if (activeWorkspaceId.value === wid) {
           activeWorkspaceId.value = workspaces.value[0]?.id || '';
           activeSessionId.value = '';
           if (activeWorkspaceId.value) {
@@ -259,12 +297,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
         persistLastActive();
-        return true;
       }
+      return result;
     } catch (err) {
-      console.error('[workspaceStore] removeWorkspace failed:', err);
+      console.error('[workspaceStore] removeWorkspaceV2 failed:', err);
+      return failure('failed', 'WORKSPACE_REMOVAL_ERROR');
     }
-    return false;
+  }
+
+  /** 兼容旧调用方：新宿主上始终按安全解绑语义执行，不保留“默认彻底删除”。 */
+  async function removeWorkspace(workspaceId: string): Promise<boolean> {
+    const result = await removeWorkspaceV2(workspaceId, 'unbind');
+    return result.workspaceUnbound;
   }
 
   /**
@@ -1281,6 +1325,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     renameWorkspace,
     workspaceLabel,
     removeWorkspace,
+    removeWorkspaceV2,
     loadSessions,
     touchSessionTime,
     reconcileSessionTimes,

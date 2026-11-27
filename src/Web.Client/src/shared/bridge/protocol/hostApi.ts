@@ -23,6 +23,7 @@ import type {
   CompactionResultDto,
   ContextBudgetStatusDto,
   SessionDeletionResultDto,
+  WorkspaceRemovalResultDto,
   FirstRoundTexts,
   HistoryCapabilities,
   HistoryDeleteResultDto,
@@ -121,6 +122,8 @@ export interface HostBridgeApi {
   /** 设置工作区别名（纯前端视觉）；alias 传空串 = 清除别名。 */
   renameWorkspace: (workspaceId: string, alias?: string | null) => Promise<BridgeResponse<WorkspaceInfo>>;
   removeWorkspace: (workspaceId: string) => Promise<BridgeResponse<boolean>>;
+  /** 显式双模式移除；旧入口只解绑，Purge 必须走这里并做能力探测。 */
+  removeWorkspaceV2: (workspaceId: string, mode: 'unbind' | 'purge') => Promise<BridgeResponse<WorkspaceRemovalResultDto>>;
   browseWorkspaceFolder: (initialPath?: string) => Promise<BridgeResponse<string | null>>;
   getSessions: (workspaceId: string) => Promise<BridgeResponse<SessionMetadata[]>>;
   createSession: (workspaceId: string, title?: string, providerId?: string, modelId?: string) => Promise<BridgeResponse<SessionMetadata>>;

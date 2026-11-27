@@ -84,8 +84,39 @@ export function mockWorkspaceMethods(s: MockState): Partial<HostBridgeApi> {
     },
     async removeWorkspace(workspaceId: string) {
       s.mockWorkspaces = s.mockWorkspaces.filter((w) => w.id !== workspaceId);
-      delete s.mockSessions[workspaceId];
       return { ok: true, data: true };
+    },
+    async removeWorkspaceV2(workspaceId: string, mode: 'unbind' | 'purge') {
+      const target = s.mockWorkspaces.find((w) => w.id === workspaceId);
+      if (!target) {
+        return {
+          ok: true,
+          data: {
+            outcome: 'notFound',
+            mode,
+            workspaceUnbound: false,
+            sessionData: 'notRequested',
+            haloAgent: 'notRequested',
+            failedPaths: [],
+            warnings: [],
+          },
+        };
+      }
+      s.mockWorkspaces = s.mockWorkspaces.filter((w) => w.id !== workspaceId);
+      if (mode === 'purge') delete s.mockSessions[workspaceId];
+      return {
+        ok: true,
+        data: {
+          outcome: 'completed',
+          mode,
+          workspaceUnbound: true,
+          sessionData: mode === 'purge' ? 'deleted' : 'notRequested',
+          haloAgent: mode === 'purge' ? 'deleted' : 'retained',
+          haloAgentReason: mode === 'purge' ? 'EMPTY' : 'VALID_ENTRIES',
+          failedPaths: [],
+          warnings: [],
+        },
+      };
     },
     async renameWorkspace(workspaceId: string, alias?: string | null) {
       const ws = s.mockWorkspaces.find((w) => w.id === workspaceId);

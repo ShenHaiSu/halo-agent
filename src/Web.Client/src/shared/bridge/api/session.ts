@@ -11,6 +11,7 @@ import type {
   HistoryTruncateResultDto,
   HostBridgeApi,
   SessionDeletionResultDto,
+  WorkspaceRemovalResultDto,
   SessionGoalDto,
   SessionMetadata,
   SubRuntimeInfo,
@@ -32,6 +33,7 @@ export function createSessionApi(
   | 'addWorkspace'
   | 'renameWorkspace'
   | 'removeWorkspace'
+  | 'removeWorkspaceV2'
   | 'browseWorkspaceFolder'
   | 'getSessions'
   | 'createSession'
@@ -78,6 +80,16 @@ export function createSessionApi(
     },
     async removeWorkspace(workspaceId: string) {
       return normalizeBridgePayload<BridgeResponse<boolean>>(await t.call('removeWorkspace', workspaceId));
+    },
+    async removeWorkspaceV2(workspaceId: string, mode: 'unbind' | 'purge') {
+      if (!t.supports('removeWorkspaceV2')) {
+        return {
+          ok: false,
+          code: 'WORKSPACE_REMOVAL_UNSUPPORTED',
+          message: '当前宿主不支持工作区双模式移除，请升级后重试',
+        };
+      }
+      return normalizeBridgePayload<BridgeResponse<WorkspaceRemovalResultDto>>(await t.call('removeWorkspaceV2', workspaceId ?? '', mode));
     },
     async browseWorkspaceFolder(initialPath?: string) {
       return normalizeBridgePayload<BridgeResponse<string | null>>(await t.call('browseWorkspaceFolder', initialPath ?? ''));
