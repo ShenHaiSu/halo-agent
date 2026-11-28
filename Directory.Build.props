@@ -8,7 +8,7 @@
     <LangVersion>10.0</LangVersion>
 
     <!-- 版本单源：与 build/installer.iss #MyAppVersion、CI git tag 对齐（E6） -->
-    <VersionPrefix>0.6.4</VersionPrefix>
+    <VersionPrefix>0.6.5</VersionPrefix>
 
     <!-- H7 SelfContained 对齐：与发布（self-contained true）一致。
          Release 直接自包含；Debug 保持框架依赖以保内环速度。 -->

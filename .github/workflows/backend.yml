@@ -50,7 +50,7 @@ jobs:
         run: |
           $tag = ""
           try { $tag = (git describe --tags --abbrev=0 2>$null) } catch { $tag = "" }
-          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.4" }
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "v0.6.5" }
           $ver = $tag.TrimStart("v")
           echo "MYAPPVERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           echo "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
