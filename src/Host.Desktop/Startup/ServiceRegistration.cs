@@ -49,6 +49,14 @@ public static class ServiceRegistration
             sp.GetRequiredService<StoragePathManager>(),
             sp.GetRequiredService<HaloHttpClientFactory>()
         ));
+        p.AddSingleton(sp => new ModelCatalogIgnoreStore(
+            sp.GetRequiredService<StoragePathManager>()
+        ));
+        p.AddSingleton(sp => new ModelCatalog.ProviderModelCatalogService(
+            sp.GetRequiredService<ProviderConfigService>(),
+            sp.GetRequiredService<HaloHttpClientFactory>(),
+            sp.GetRequiredService<ModelCatalogIgnoreStore>()
+        ));
         p.AddSingleton(sp => new PromptConfigService(sp.GetRequiredService<StoragePathManager>()));
         p.AddSingleton(sp => new AgentConfigService(sp.GetRequiredService<StoragePathManager>()));
     }

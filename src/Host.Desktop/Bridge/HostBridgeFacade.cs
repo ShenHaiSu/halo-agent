@@ -5,6 +5,7 @@ using Host.Desktop.Infrastructure.Network;
 using Host.Desktop.Infrastructure.Storage;
 using Host.Desktop.LlmGateway;
 using Host.Desktop.LlmGateway.Models;
+using Host.Desktop.ModelCatalog;
 using Host.Desktop.Services;
 using Host.Desktop.Tools;
 
@@ -17,6 +18,8 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
     private readonly StoragePathManager _storageManager;
     private readonly HaloHttpClientFactory _httpClientFactory;
     private readonly ProviderConfigService _providerConfigService;
+    private ModelCatalogIgnoreStore? _modelCatalogIgnoreStore;
+    private ProviderModelCatalogService? _modelCatalogService;
     private readonly PromptConfigService _promptConfigService;
     private readonly AgentConfigService _agentConfigService;
     private readonly ILlmGatewayClient _llmGatewayClient;
@@ -83,7 +86,9 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         SkillMemoryService? skillMemoryService = null,
         SubAgentCoordinator? subCoordinator = null,
         ToolRegistry? toolRegistry = null,
-        SessionOperationCoordinator? sessionOperationCoordinator = null
+        SessionOperationCoordinator? sessionOperationCoordinator = null,
+        ModelCatalogIgnoreStore? modelCatalogIgnoreStore = null,
+        ProviderModelCatalogService? modelCatalogService = null
     )
     {
         _mainForm = mainForm ?? Application.OpenForms.Cast<Form>().FirstOrDefault();
@@ -91,6 +96,8 @@ public sealed partial class HostBridgeFacade : IHostBridgeFacade
         _gpuDisabled = gpuDisabled;
         _httpClientFactory = httpClientFactory ?? new HaloHttpClientFactory();
         _providerConfigService = providerConfigService!;
+        _modelCatalogIgnoreStore = modelCatalogIgnoreStore;
+        _modelCatalogService = modelCatalogService;
         _promptConfigService = promptConfigService ?? new PromptConfigService(_storageManager);
         _agentConfigService = agentConfigService ?? new AgentConfigService(_storageManager);
         _llmGatewayClient =

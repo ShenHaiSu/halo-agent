@@ -144,6 +144,24 @@ public sealed partial class HostBridgeFacade
         try
         {
             var saved = _providerConfigService.DeleteProvider(providerId);
+            try
+            {
+                if (_modelCatalogIgnoreStore != null)
+                {
+                    _modelCatalogIgnoreStore.RemoveProvider(providerId);
+                }
+                else if (_storageManager != null)
+                {
+                    var ignoreStore = new Infrastructure.Config.ModelCatalogIgnoreStore(
+                        _storageManager
+                    );
+                    ignoreStore.RemoveProvider(providerId);
+                }
+            }
+            catch (Exception ex)
+            {
+                HaloLogger.App.Warn($"DeleteProvider 清理模型忽视表失败：{ex.Message}");
+            }
             JsEventDispatcher.Publish("config:providers-changed", saved);
             return Task.FromResult(
                 BridgeResponse<ProvidersConfigDocument>.Success(saved, "服务商已删除")
