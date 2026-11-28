@@ -84,21 +84,20 @@
             <PieChart class="w-3.5 h-3.5" />
             存储分布：<span class="font-mono break-all">{{ breakdown.rootPath }}</span>
           </div>
-          <div v-for="item in breakdown.items" :key="item.name" class="flex items-center gap-2">
-            <span class="w-20 shrink-0 whitespace-nowrap text-[11px] font-mono text-secondary">{{ item.name }}</span>
-            <n-progress
-              type="line"
-              :percentage="breakdownPercent(item.sizeBytes)"
-              :height="10"
-              :show-indicator="false"
-              class="min-w-12 flex-1"
-            />
-            <span
-              :data-testid="`breakdown-value-${item.name}`"
-              class="shrink-0 whitespace-nowrap text-right text-[11px] font-mono tabular-nums"
-            >
-              {{ formatBytes(item.sizeBytes) }} / {{ item.fileCount }} 个
-            </span>
+          <div class="grid items-center gap-x-2" style="grid-template-columns: 5rem minmax(3rem, 1fr) auto">
+            <template v-for="item in breakdown.items" :key="item.name">
+              <span class="truncate whitespace-nowrap text-[11px] font-mono text-secondary">{{ item.name }}</span>
+              <n-progress
+                type="line"
+                :percentage="breakdownPercent(item.sizeBytes)"
+                :height="10"
+                :show-indicator="false"
+                class="min-w-12"
+              />
+              <span :data-testid="`breakdown-value-${item.name}`" class="whitespace-nowrap text-right text-[11px] font-mono tabular-nums">
+                {{ formatBytes(item.sizeBytes) }} / {{ item.fileCount }} 个
+              </span>
+            </template>
           </div>
           <div class="text-[11px] text-secondary font-mono">合计：{{ formatBytes(breakdown.totalBytes) }}</div>
           <div v-if="databaseDetails.length > 0" class="space-y-1.5 border-t border-subtle pt-2" data-testid="storage-database-details">
