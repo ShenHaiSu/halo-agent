@@ -86,6 +86,10 @@ export const useConfigStore = defineStore('config', () => {
           haloEventBus.on('storage:changed', () => {
             refreshNetworkSettings();
             refreshProvidersConfig();
+          }),
+          // 宿主侧 Provider 落盘（含目录导入）统一广播，前端订阅后换真数，避免重启才生效
+          haloEventBus.on('config:providers-changed', () => {
+            void refreshProvidersConfig();
           })
         );
       }
