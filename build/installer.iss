@@ -11,7 +11,7 @@
 #endif
 #define MyAppName "Halo Agent"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.6.5"
+  #define MyAppVersion "0.6.6"
 #endif
 #define MyAppPublisher "Halo-Agent"
 #define MyAppExeName "Host.Desktop.exe"
