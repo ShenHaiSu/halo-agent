@@ -18,6 +18,7 @@ import type {
   ProxyConnectivityTestResult,
   SystemProxySnapshot,
 } from './providers';
+import type { FetchProviderModelsResult, ImportDiscoveredModelsRequest } from './modelCatalog';
 import type { UnifiedLlmRequestDto } from './llm';
 import type {
   AgentConfigDocument,
@@ -103,6 +104,12 @@ export interface HostBridgeApi {
     sessionId?: string,
     workspacePath?: string
   ) => Promise<BridgeResponse<ProviderEndpointPreviewDto>>;
+  /** 供应商模型目录：拉取上游快照（只读，不落盘）。 */
+  fetchProviderModels: (providerId: string) => Promise<BridgeResponse<FetchProviderModelsResult>>;
+  /** 供应商模型目录：批量引入（写通路，后续阶段启用）。 */
+  importDiscoveredModels: (req: ImportDiscoveredModelsRequest | string) => Promise<BridgeResponse<ProvidersConfigDocument>>;
+  /** 供应商模型目录：批量忽视/取消忽视（写通路，后续阶段启用）。 */
+  setDiscoveredModelsIgnored: (providerId: string, modelIds: string[], ignored: boolean) => Promise<BridgeResponse<boolean>>;
 
   // Stage 03
   startSessionRun: (request: UnifiedLlmRequestDto | string) => Promise<BridgeResponse<string>>;

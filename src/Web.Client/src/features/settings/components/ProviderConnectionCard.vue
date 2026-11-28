@@ -48,6 +48,13 @@
             {{ preview?.respEndpointUrl || respEndpoint }}
           </span>
         </div>
+        <div class="flex items-center justify-between gap-2 text-secondary min-w-0">
+          <span class="shrink-0 mr-2">Models 端点 (GET):</span>
+          <span class="text-primary select-all min-w-0 flex-1 text-right truncate" data-testid="preview-models-endpoint">
+            {{ preview?.modelsEndpointUrl || modelsEndpoint }}
+          </span>
+          <n-button size="tiny" secondary data-testid="goto-fetch-btn" @click="emit('goto-fetch')">去拉取 →</n-button>
+        </div>
       </div>
       <div class="space-y-3">
         <div class="space-y-1" data-testid="provider-apikey-block">
@@ -136,12 +143,14 @@ const props = defineProps<{
   proxySummary: string;
   chatEndpoint: string;
   respEndpoint: string;
+  modelsEndpoint: string;
 }>();
 const emit = defineEmits<{
   change: [next: ProviderConfig];
   'update:api-key': [v: string];
   preview: [];
   'proxy-change': [mode: ProviderProxyMode];
+  'goto-fetch': [];
 }>();
 function patch(fn: (p: ProviderConfig) => void): void {
   const next = JSON.parse(JSON.stringify(props.provider)) as ProviderConfig;

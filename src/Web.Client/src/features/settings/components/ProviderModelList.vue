@@ -1,12 +1,29 @@
 <template>
-  <n-card size="small" title="模型列表与协议预算配置 (Models)">
+  <n-card size="small" title="模型列表与协议预算配置 (Models)" data-testid="provider-model-list-card">
     <template #header-extra>
-      <n-button size="tiny" type="primary" secondary data-testid="add-model-btn" @click="emit('add-model')">
-        <template #icon>
-          <Plus class="w-3.5 h-3.5" />
-        </template>
-        添加模型
-      </n-button>
+      <n-space :size="8" :wrap="false">
+        <n-tag v-if="(newCount ?? 0) > 0" type="info" size="small" :bordered="false">新增 {{ newCount }}</n-tag>
+        <n-tag v-if="(ignoredCount ?? 0) > 0" type="default" size="small" :bordered="false">已忽视 {{ ignoredCount }}</n-tag>
+        <n-button
+          size="tiny"
+          secondary
+          data-testid="fetch-models-btn"
+          :disabled="fetchDisabled"
+          :title="fetchTip"
+          @click="emit('fetch-models')"
+        >
+          <template #icon>
+            <RefreshCw class="w-3.5 h-3.5" />
+          </template>
+          拉取供应商模型
+        </n-button>
+        <n-button size="tiny" type="primary" secondary data-testid="add-model-btn" @click="emit('add-model')">
+          <template #icon>
+            <Plus class="w-3.5 h-3.5" />
+          </template>
+          添加模型
+        </n-button>
+      </n-space>
     </template>
     <div class="space-y-2.5">
       <div
@@ -218,7 +235,7 @@
   </n-card>
 </template>
 <script setup lang="ts">
-import { Plus, Trash2, CheckCircle2, ChevronDown } from 'lucide-vue-next';
+import { Plus, RefreshCw, Trash2, CheckCircle2, ChevronDown } from 'lucide-vue-next';
 import type { ModelConfig } from '@shared/bridge/hostBridge';
 import {
   CONTEXT_PRESETS,
@@ -238,10 +255,15 @@ const props = defineProps<{
   expandedIndex: number | null;
   chatEndpoint: string;
   respEndpoint: string;
+  newCount?: number;
+  ignoredCount?: number;
+  fetchDisabled?: boolean;
+  fetchTip?: string;
 }>();
 const emit = defineEmits<{
   toggle: [idx: number];
   'add-model': [];
+  'fetch-models': [];
   'remove-model': [idx: number];
   'set-active': [modelId: string];
   preset: [idx: number, field: 'maxContextTokens' | 'maxOutputTokens', value: number];

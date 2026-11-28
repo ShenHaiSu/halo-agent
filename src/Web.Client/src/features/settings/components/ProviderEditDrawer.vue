@@ -7,10 +7,12 @@
       :proxy-summary="proxySummary"
       :chat-endpoint="chatEndpoint"
       :resp-endpoint="respEndpoint"
+      :models-endpoint="modelsEndpoint"
       @update:api-key="emit('update:api-key', $event)"
       @preview="emit('preview')"
       @proxy-change="emit('proxy-change', $event)"
       @change="emit('change', $event)"
+      @goto-fetch="emit('goto-fetch')"
     />
     <ProviderHeadersCard
       :provider="provider"
@@ -30,8 +32,13 @@
       :expanded-index="expandedIndex"
       :chat-endpoint="chatEndpoint"
       :resp-endpoint="respEndpoint"
+      :new-count="newCount"
+      :ignored-count="ignoredCount"
+      :fetch-disabled="fetchDisabled"
+      :fetch-tip="fetchTip"
       @toggle="emit('model-toggle', $event)"
       @add-model="emit('model-add')"
+      @fetch-models="emit('fetch-models')"
       @remove-model="emit('model-remove', $event)"
       @set-active="emit('model-set-active', $event)"
       @preset="(idx, field, value) => emit('model-preset', idx, field, value)"
@@ -101,6 +108,7 @@ defineProps<{
   proxySummary: string;
   chatEndpoint: string;
   respEndpoint: string;
+  modelsEndpoint: string;
   activeProviderId: string;
   activeModelId: string;
   expandedIndex: number | null;
@@ -108,18 +116,24 @@ defineProps<{
   testing: boolean;
   saving: boolean;
   testResult: ProxyConnectivityTestResult | null;
+  newCount: number;
+  ignoredCount: number;
+  fetchDisabled: boolean;
+  fetchTip: string;
 }>();
 const emit = defineEmits<{
   'update:api-key': [v: string];
   change: [next: ProviderConfig];
   preview: [];
   'proxy-change': [mode: ProviderProxyMode];
+  'goto-fetch': [];
   'add-header': [];
   'add-opencode-header': [];
   'remove-header': [idx: number];
   'insert-var': [token: string];
   'model-toggle': [idx: number];
   'model-add': [];
+  'fetch-models': [];
   'model-remove': [idx: number];
   'model-set-active': [modelId: string];
   'model-preset': [idx: number, field: 'maxContextTokens' | 'maxOutputTokens', value: number];

@@ -1,14 +1,17 @@
 /** need21-F02: 桥接归一化（旧 client.ts normalize* + payload 归一原样迁移，行为不变）。 */
 import type { BridgeResponse } from '../protocol/types';
 import type {
+  AgentConfigDocument,
+  CatalogModelState,
+  FetchProviderModelsResult,
   GlobalNetworkSettings,
   GlobalProxyMode,
   LlmProtocolType,
+  PromptConfigDocument,
   ProviderProxyMode,
   ProvidersConfigDocument,
 } from '../protocol/types';
 import { normalizeVisionFlag } from '../protocol/types';
-import type { AgentConfigDocument, PromptConfigDocument } from '../protocol/types';
 
 export function normalizeGlobalProxyMode(raw: unknown): GlobalProxyMode {
   if (raw === 1 || String(raw).toLowerCase() === 'custom') return 'Custom';
@@ -60,6 +63,28 @@ export function normalizeProvidersDocDto(res: BridgeResponse<ProvidersConfigDocu
           })
         : [],
     }));
+  }
+  return res;
+}
+
+/** 目录快照归一：id 修整去空、非法状态回退新增、按 id 排序。 */
+export function normalizeCatalogDto(res: BridgeResponse<FetchProviderModelsResult>): BridgeResponse<FetchProviderModelsResult> {
+  if (res.data && Array.isArray(res.data.models)) {
+    const cleaned = [];
+    for (const raw of res.data.models) {
+      const id = String(raw?.id ?? '').trim();
+      if (!id) continue;
+      const state: CatalogModelState = raw?.state === 'existing' || raw?.state === 'ignored' ? raw.state : 'new';
+      cleaned.push({
+        id,
+        ownedBy: typeof raw?.ownedBy === 'string' ? raw.ownedBy : null,
+        created: typeof raw?.created === 'number' && raw.created > 0 ? raw.created : null,
+        state,
+        existsEnabled: raw?.existsEnabled === true,
+      });
+    }
+    cleaned.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    res.data.models = cleaned;
   }
   return res;
 }

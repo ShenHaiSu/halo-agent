@@ -3,11 +3,13 @@ import type { BridgeTransport } from '../transport/transport';
 import type { HostBridgeApi } from '../protocol/types';
 import { createAgentApi } from './agent';
 import { createConfigApi } from './config';
+import { createModelCatalogApi } from './modelCatalog';
 import { createSessionApi } from './session';
 import { createSystemApi } from './system';
 
 export { createAgentApi, startAgentTurn, type StartAgentTurnParams } from './agent';
 export { createConfigApi } from './config';
+export { createModelCatalogApi } from './modelCatalog';
 export { createSessionApi } from './session';
 export { createSystemApi } from './system';
 
@@ -16,6 +18,7 @@ export function createHostBridgeApi(t: BridgeTransport): HostBridgeApi {
   return {
     ...createSystemApi(t),
     ...createConfigApi(t),
+    ...createModelCatalogApi(t),
     ...createAgentApi(t),
     ...createSessionApi(t),
   };

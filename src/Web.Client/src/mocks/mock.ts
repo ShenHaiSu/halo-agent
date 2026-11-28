@@ -35,6 +35,7 @@ export function shouldShowMockBanner(): boolean {
 
 import type { HostBridgeApi } from '@shared/bridge/protocol/types';
 import { createMockState } from './mockState';
+import { mockModelCatalogMethods } from './mockModelCatalog';
 import { mockSystemMethods } from './mockSystem';
 import { mockWorkspaceMethods } from './mockWorkspace';
 
@@ -43,6 +44,7 @@ export function createBrowserMockBridge(): HostBridgeApi {
   const s = createMockState();
   const bridge = {
     ...mockSystemMethods(s),
+    ...mockModelCatalogMethods(s),
     ...mockWorkspaceMethods(s),
   } as HostBridgeApi;
   s.self = bridge;

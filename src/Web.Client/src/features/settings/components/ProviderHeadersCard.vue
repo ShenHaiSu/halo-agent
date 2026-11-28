@@ -1,5 +1,5 @@
 <template>
-  <n-card size="small" title="自定义请求头与预设变量引擎">
+  <n-card size="small" title="自定义请求头与预设变量引擎" data-testid="provider-headers-card">
     <template #header-extra>
       <div class="flex items-center gap-2">
         <span class="text-xs text-secondary">启用自定义请求头</span>

@@ -1,5 +1,6 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useMessage } from 'naive-ui';
+import { supportsHostBridgeMethod } from '@shared/bridge/hostBridge';
 import { useConfigStore } from '@/stores/configStore';
 import type {
   ModelConfig,
@@ -28,6 +29,14 @@ export function useProviders() {
   const versionPrefix = computed(() => versionPrefixOf(editingProvider.value?.baseUrl || ''));
   const computedChatEndpoint = computed(() => `${versionPrefix.value}/chat/completions`);
   const computedRespEndpoint = computed(() => `${versionPrefix.value}/responses`);
+  const computedModelsEndpoint = computed(() => `${versionPrefix.value}/models`);
+  const catalogSupported = computed(() => {
+    try {
+      return supportsHostBridgeMethod('fetchProviderModels');
+    } catch {
+      return false;
+    }
+  });
   function snapshot(id: string): void {
     const target = providers.value.find((p) => p.id === id);
     if (!target) return;
@@ -106,7 +115,7 @@ export function useProviders() {
     const p = editingProvider.value;
     if (!p) return;
     p.models.push({
-      id: `model-${p.models.length + 1}`,
+      id: '',
       displayName: '',
       protocol: 'chat',
       maxContextTokens: 128000,
@@ -187,6 +196,10 @@ export function useProviders() {
     }
     const payload = JSON.parse(JSON.stringify(p)) as ProviderConfig;
     if (apiKeyInput.value.trim()) payload.apiKey = apiKeyInput.value.trim();
+    if (payload.models.some((mdl) => !mdl.id.trim())) {
+      message.warning('存在未填写模型 ID 的行');
+      return;
+    }
     for (const mdl of payload.models) clampVisionForSave(mdl);
     const res = await configStore.upsertProvider(payload);
     if (res.ok) {
@@ -260,6 +273,8 @@ export function useProviders() {
     expandedModelIndex,
     computedChatEndpoint,
     computedRespEndpoint,
+    computedModelsEndpoint,
+    catalogSupported,
     selectProvider,
     refreshEndpointPreview,
     handleProviderProxyModeChange,
